@@ -75,7 +75,7 @@ jobs:
 
     steps:
       - name: Download floci-az image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: floci-az-image
           path: /tmp
