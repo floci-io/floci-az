@@ -39,7 +39,7 @@ jobs:
       - name: Build JVM artifact
         run: ./mvnw clean package -DskipTests -q
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jvm-artifact
           path: target/quarkus-app/
@@ -63,7 +63,7 @@ jobs:
       - name: Build native executable
         run: ./mvnw clean package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-march=x86-64-v2"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-amd64
           path: |
@@ -91,7 +91,7 @@ jobs:
       - name: Build native executable
         run: ./mvnw clean package -Dnative -DskipTests -B
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-arm64
           path: |

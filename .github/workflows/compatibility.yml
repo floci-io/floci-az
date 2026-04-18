@@ -54,7 +54,7 @@ jobs:
         run: gzip /tmp/floci-az-image.tar
 
       - name: Upload floci-az image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: floci-az-image
           path: /tmp/floci-az-image.tar.gz
