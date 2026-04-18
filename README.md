@@ -1,8 +1,8 @@
 <p align="center">
   <a href="https://github.com/floci-io/floci-az/releases/latest"><img src="https://img.shields.io/github/v/release/floci-io/floci-az?label=latest%20release&color=blue" alt="Latest Release"></a>
   <a href="https://github.com/floci-io/floci-az/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/floci-io/floci-az/release.yml?label=build" alt="Build Status"></a>
-  <a href="https://hub.docker.com/r/floci-io/floci-az"><img src="https://img.shields.io/docker/pulls/floci-io/floci-az?label=docker%20pulls" alt="Docker Pulls"></a>
-  <a href="https://hub.docker.com/r/floci-io/floci-az"><img src="https://img.shields.io/docker/image-size/floci-io/floci-az/latest?label=image%20size" alt="Docker Image Size"></a>
+  <a href="https://hub.docker.com/r/floci-io/floci-az"><img src="https://img.shields.io/docker/pulls/floci/floci-az?label=docker%20pulls" alt="Docker Pulls"></a>
+  <a href="https://hub.docker.com/r/floci-io/floci-az"><img src="https://img.shields.io/docker/image-size/floci/floci-az/latest?label=image%20size" alt="Docker Image Size"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
 </p>
 
@@ -298,19 +298,19 @@ make test-node-compat
 
 All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 
-| Variable | Default | Description |
-|---|---|---|
-| `QUARKUS_HTTP_PORT` | `4577` | Port exposed by the API |
-| `FLOCI_AZ_STORAGE_MODE` | `memory` | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
-| `FLOCI_AZ_STORAGE_PATH` | `~/.floci-az/data` | Directory for persisted state |
-| `FLOCI_AZ_AUTH_MODE` | `dev` | `dev` — accept any credentials · `strict` — validate HMAC-SHA256 |
-| `FLOCI_AZ_SERVICES_BLOB_ENABLED` | `true` | Enable or disable Blob Storage |
-| `FLOCI_AZ_SERVICES_QUEUE_ENABLED` | `true` | Enable or disable Queue Storage |
-| `FLOCI_AZ_SERVICES_TABLE_ENABLED` | `true` | Enable or disable Table Storage |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED` | `true` | Enable or disable Azure Functions |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Directory where deployed function ZIPs are extracted |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | `true` — fresh container per invocation; `false` — warm-container pool |
+| Variable                                      | Default | Description |
+|-----------------------------------------------|---|---|
+| `FLOCI_AZ_PORT`                               | `4577` | Port exposed by the API |
+| `FLOCI_AZ_STORAGE_MODE`                       | `memory` | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
+| `FLOCI_AZ_STORAGE_PATH`                       | `~/.floci-az/data` | Directory for persisted state |
+| `FLOCI_AZ_AUTH_MODE`                          | `dev` | `dev` — accept any credentials · `strict` — validate HMAC-SHA256 |
+| `FLOCI_AZ_SERVICES_BLOB_ENABLED`              | `true` | Enable or disable Blob Storage |
+| `FLOCI_AZ_SERVICES_QUEUE_ENABLED`             | `true` | Enable or disable Queue Storage |
+| `FLOCI_AZ_SERVICES_TABLE_ENABLED`             | `true` | Enable or disable Table Storage |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`         | `true` | Enable or disable Azure Functions |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_DOCKER_HOST`     | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH`       | `~/.floci-az/functions` | Directory where deployed function ZIPs are extracted |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL`       | `false` | `true` — fresh container per invocation; `false` — warm-container pool |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_IDLE_TIMEOUT_MS` | `300000` | Evict warm containers idle longer than this (ms) |
 
 ### Per-service storage override

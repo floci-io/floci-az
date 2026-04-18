@@ -1,6 +1,10 @@
-target/
-.git/
-.github/
-compatibility-tests/
-data/
-*.md
+*
+!docker/entrypoint.sh
+!pom.xml
+!src/**
+!target/*.so
+!target/*.properties
+!target/*-runner
+!target/*-runner.jar
+!target/lib/*
+!target/quarkus-app/*
