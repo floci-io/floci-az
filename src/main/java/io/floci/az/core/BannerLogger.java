@@ -17,29 +17,6 @@ public class BannerLogger {
 
     void onStart(@Observes StartupEvent ev) {
         String globalMode = config.storage().mode();
-
-        LOGGER.info("""
-                  ______ _      ____   _____ _____           _____  _______
-                 |  ____| |    / __ \ / ____|_   _|         / ____| |___  /
-                 | |__  | |   | |  | | |      | |          / /__\ \    / /
-                 |  __| | |   | |  | | |      | |         / /____\ \  / /
-                 | |    | |___| |__| | |____ _| |_       / /      \ \/ /____
-                 |_|    |______\____/ \_____|_____|     /_/        \_\______|
-                """+
-                " Local Azure Emulator - floci.io\n" +
-                " Port    : " + config.port() + "\n" +
-                " Auth    : " + config.auth().mode() + "\n" +
-                " Storage : " + globalMode + "\n" +
-                " Services:\n" +
-                serviceStatus("blob",      config.services().blob().enabled(),
-                        config.storage().services().blob().mode().orElse(globalMode)) +
-                serviceStatus("queue",     config.services().queue().enabled(),
-                        config.storage().services().queue().mode().orElse(globalMode)) +
-                serviceStatus("table",     config.services().table().enabled(),
-                        config.storage().services().table().mode().orElse(globalMode)) +
-                serviceStatusDocker("functions", config.services().functions().enabled(),
-                        config.services().functions().dockerHost())
-        );
     }
 
     private static String serviceStatus(String name, boolean enabled, String storageMode) {
