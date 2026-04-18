@@ -38,7 +38,7 @@ jobs:
       - name: Build JVM artifact
         run: ./mvnw clean package -DskipTests -q
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
         uses: docker/build-push-action@v7
