@@ -1,0 +1,45 @@
+quarkus:
+  http:
+    port: ${floci-az.port}
+    host: 0.0.0.0
+
+floci-az:
+  port: 4577
+  storage:
+    # Global default — applies to every service unless overridden below.
+    # Supported modes: memory, persistent, hybrid, wal
+    mode: memory
+    path: ${user.home}/.floci-az/data
+    wal:
+      compaction-interval-ms: 30000
+    hybrid:
+      flush-interval-ms: 5000
+    services:
+      blob:
+        # mode: wal          # uncomment to override for blob only
+        flush-interval-ms: 5000
+      queue:
+        # mode: memory
+        flush-interval-ms: 5000
+      table:
+        # mode: persistent
+        flush-interval-ms: 5000
+
+  services:
+    blob:
+      enabled: true
+    queue:
+      enabled: true
+    table:
+      enabled: true
+    functions:
+      enabled: true
+      docker-host: unix:///var/run/docker.sock
+      code-path: ${user.home}/.floci-az/functions
+      ephemeral: false
+      idle-timeout-ms: 300000
+
+  auth:
+    # dev: accept any credentials without signature validation
+    # strict: validate HMAC-SHA256 signatures
+    mode: dev

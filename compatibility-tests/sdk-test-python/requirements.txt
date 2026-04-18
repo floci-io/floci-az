@@ -1,0 +1,4 @@
+pytest==8.3.3
+azure-storage-blob==12.23.1
+azure-storage-queue==12.12.0
+azure-data-tables==12.6.0

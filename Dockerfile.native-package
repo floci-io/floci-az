@@ -1,0 +1,26 @@
+FROM registry.access.redhat.com/ubi9-minimal:9.7
+
+ARG VERSION=latest
+
+ENV FLOCI_AZ_VERSION=${VERSION}
+ENV FLOCI_AZ_PERSISTENCE_PATH=/app/data
+
+WORKDIR /app
+
+RUN mkdir -p /app/data \
+    && chown -R 1001:root /app \
+    && chmod -R g+rwX /app
+
+VOLUME /app/data
+
+COPY --chown=1001:root target/*.properties target/*.so /app/
+COPY --chown=1001:root target/*-runner /app/application
+
+EXPOSE 4577
+
+HEALTHCHECK --interval=5s --timeout=3s --retries=10 \
+    CMD curl -f http://localhost:4577/health || exit 1
+
+USER 1001
+
+CMD ["./application", "-Dquarkus.http.host=0.0.0.0"]
