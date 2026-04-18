@@ -41,7 +41,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.jvm-package
@@ -103,7 +103,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: compatibility-tests/${{ matrix.test }}
           load: true

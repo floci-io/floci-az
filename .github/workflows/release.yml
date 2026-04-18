@@ -127,7 +127,7 @@ jobs:
           path: target/quarkus-app/
 
       - name: Build and push JVM image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.jvm-package
@@ -178,7 +178,7 @@ jobs:
           chmod +x target/*-runner
 
       - name: Build and push amd64 native image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.native-package
@@ -195,7 +195,7 @@ jobs:
           chmod +x target/*-runner
 
       - name: Build and push arm64 native image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.native-package
