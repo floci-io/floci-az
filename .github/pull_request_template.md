@@ -9,9 +9,9 @@
 - [ ] Breaking change (`feat!:` or `fix!:`)
 - [ ] Docs / chore
 
-## AWS Compatibility
+## Azure Compatibility
 
-<!-- For new actions: which SDK version and AWS CLI version were used to verify the wire protocol? -->
+<!-- For new actions: which SDK version and Azure CLI version were used to verify the wire protocol? -->
 <!-- For bug fixes: what was the incorrect behavior? -->
 
 ## Checklist
