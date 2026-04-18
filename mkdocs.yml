@@ -1,0 +1,73 @@
+site_name: Floci-AZ
+site_description: Fast, free, open-source local Azure emulator
+site_url: https://floci.io/floci-az/
+repo_url: https://github.com/floci-io/floci-az
+repo_name: floci-io/floci-az
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/floci.png
+  favicon: assets/floci.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+extra_css:
+  - assets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.inlinehilite
+  - tables
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quick Start: getting-started/quick-start.md
+    - Installation: getting-started/installation.md
+    - Azure CLI & SDK Setup: getting-started/azure-setup.md
+  - Configuration:
+    - Docker Compose: configuration/docker-compose.md
+    - Ports Reference: configuration/ports.md
+    - application.yml Reference: configuration/application-yml.md
+    - Storage Modes: configuration/storage.md
+  - Services:
+    - Overview: services/index.md
+    - Blob Storage: services/blob.md
+    - Queue Storage: services/queue.md
+    - Table Storage: services/table.md
+    - Azure Functions: services/functions.md
+  - Contributing: contributing.md

@@ -12,22 +12,22 @@
 
 ---
 
-> The companion to [floci](https://github.com/floci-io/floci) — floci emulates AWS, floci-az emulates Azure Storage.
+> The companion to [floci](https://github.com/floci-io/floci) — floci emulates AWS, floci-az emulates Azure.
 
 ## Why floci-az?
 
-| | floci-az | Azurite |
-|---|---|---|
-| Auth token required | No | No |
-| Startup time | **fast** | Moderate |
-| Native binary | ✅ | ❌ |
-| License | **MIT** | MIT |
-| Blob Storage | ✅ | ✅ |
-| Queue Storage | ✅ | ✅ |
-| Table Storage | ✅ | ✅ |
-| Azure Functions | ✅ | ❌ |
-| Per-service storage modes | ✅ | ❌ |
-| WAL / hybrid persistence | ✅ | ❌ |
+| | floci-az | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
+|---|---|---|---|
+| Blob Storage | ✅ | ✅ | ❌ |
+| Queue Storage | ✅ | ✅ | ❌ |
+| Table Storage | ✅ | ✅ | ❌ |
+| Azure Functions | ✅ | ❌ | ✅ |
+| Startup time | **fast** | Moderate | Fast |
+| Native binary | ✅ | ❌ | ✅ |
+| Unified port (4577) | ✅ | ❌ | ❌ |
+| Per-service storage modes | ✅ | ❌ | ❌ |
+| WAL / hybrid persistence | ✅ | ❌ | ❌ |
+| License | **MIT** | MIT | MIT |
 
 ## Architecture Overview
 
@@ -117,6 +117,54 @@ docker run -d --name floci-az \
 All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are not validated.
 
 > **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
+
+## CLI Usage (`azfloci`)
+
+The `azfloci` tool is a companion Python CLI that acts as a transparent proxy for the official Azure CLI (`az`). It dynamically injects the correct connection strings and disables SSL verification so you can use standard `az` commands against the local emulator.
+
+### Setup
+
+```bash
+# Optional: alias azfloci as az for a seamless experience
+alias az='python3 /path/to/floci-az/azfloci/azfloci.py'
+
+# Initialize or get connection string info
+az setup
+```
+
+### Examples
+
+When using `azfloci`, you don't need to pass `--connection-string` or set environment variables manually.
+
+#### Blob Storage
+```bash
+# Create a container
+az storage container create --name my-container
+
+# Upload a blob
+az storage blob upload --container-name my-container --name hello.txt --file hello.txt
+
+# List blobs
+az storage blob list --container-name my-container --output table
+```
+
+#### Queue Storage
+```bash
+# Create a queue
+az storage queue create --name my-queue
+
+# Send a message
+az storage message put --queue-name my-queue --content "Hello from CLI"
+```
+
+#### Table Storage
+```bash
+# Create a table
+az storage table create --name MyTable
+```
+
+> [!NOTE]
+> `azfloci` automatically detects the `--account-name` argument (defaulting to `devstoreaccount1`) and constructs the appropriate local endpoint.
 
 ## SDK Integration
 
