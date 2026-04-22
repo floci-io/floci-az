@@ -5,11 +5,13 @@ quarkus:
 
 floci-az:
   port: 4577
+  base-url: http://localhost:4577
   storage:
     # Global default — applies to every service unless overridden below.
     # Supported modes: memory, persistent, hybrid, wal
     mode: memory
     path: ${user.home}/.floci-az/data
+    host-persistent-path: ${user.home}/.floci-az/data
     wal:
       compaction-interval-ms: 30000
     hybrid:
@@ -25,6 +27,11 @@ floci-az:
         # mode: persistent
         flush-interval-ms: 5000
 
+  docker:
+    docker-host: unix:///var/run/docker.sock
+    log-max-size: "10m"
+    log-max-file: "3"
+
   services:
     blob:
       enabled: true
@@ -34,7 +41,6 @@ floci-az:
       enabled: true
     functions:
       enabled: true
-      docker-host: unix:///var/run/docker.sock
       code-path: ${user.home}/.floci-az/functions
       ephemeral: false
       idle-timeout-ms: 300000

@@ -9,9 +9,16 @@ import java.util.Map;
 public class HealthController {
 
     @GET
-    @Path("health")
+    @Path("{path:(health|_floci/health)}")
     public Response health() {
-        return Response.ok(Map.of("status", "UP")).build();
+        String version = System.getenv("FLOCI_AZ_VERSION");
+        if (version == null) version = "dev";
+        
+        return Response.ok(Map.of(
+            "status", "UP",
+            "version", version,
+            "edition", "floci-az-always-free"
+        )).build();
     }
 
     @GET

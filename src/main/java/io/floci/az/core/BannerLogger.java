@@ -16,7 +16,29 @@ public class BannerLogger {
     EmulatorConfig config;
 
     void onStart(@Observes StartupEvent ev) {
-        String globalMode = config.storage().mode();
+        LOGGER.info("=== Azure Local Emulator Starting ===");
+        LOGGER.infof("Storage mode: %s", config.storage().mode());
+        
+        StringBuilder sb = new StringBuilder("\nEnabled Services:\n");
+        if (config.services().blob().enabled()) {
+            sb.append(serviceStatus("blob", true, getStorageMode("blob")));
+        }
+        if (config.services().queue().enabled()) {
+            sb.append(serviceStatus("queue", true, getStorageMode("queue")));
+        }
+        if (config.services().table().enabled()) {
+            sb.append(serviceStatus("table", true, getStorageMode("table")));
+        }
+        if (config.services().functions().enabled()) {
+            sb.append(serviceStatusDocker("functions", true, config.docker().dockerHost()));
+        }
+        LOGGER.info(sb.toString());
+        LOGGER.info("=== Azure Local Emulator Ready ===");
+    }
+
+    private String getStorageMode(String service) {
+        // Simple logic to determine storage mode for a service
+        return config.storage().mode();
     }
 
     private static String serviceStatus(String name, boolean enabled, String storageMode) {

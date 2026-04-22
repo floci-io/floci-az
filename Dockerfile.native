@@ -28,7 +28,7 @@ VOLUME /app/data
 EXPOSE 4577
 
 HEALTHCHECK --interval=5s --timeout=3s --retries=10 \
-    CMD bash -c 'echo -e "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" > /dev/tcp/localhost/4577' || exit 1
+    CMD bash -c 'echo -e "GET /_floci/health HTTP/1.0\r\nHost: localhost\r\n\r\n" > /dev/tcp/localhost/4577' || exit 1
 
 ARG VERSION=latest
 ENV FLOCI_AZ_VERSION=${VERSION}

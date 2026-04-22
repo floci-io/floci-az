@@ -19,7 +19,7 @@ COPY --chown=1001:root target/quarkus-app quarkus-app/
 EXPOSE 4577
 
 HEALTHCHECK --interval=5s --timeout=3s --retries=10 \
-    CMD wget -q --spider http://localhost:4577/health || exit 1
+    CMD wget -q --spider http://localhost:4577/_floci/health || exit 1
 
 USER 1001
 

@@ -2,6 +2,7 @@ package io.floci.az.config;
 
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
+import java.util.List;
 import java.util.Optional;
 
 @ConfigMapping(prefix = "floci-az")
@@ -10,11 +11,30 @@ public interface EmulatorConfig {
     @WithDefault("4577")
     int port();
 
+    @WithDefault("http://localhost:4577")
+    String baseUrl();
+
+    /**
+     * When set, overrides the hostname in base-url for URLs returned in API responses.
+     */
+    Optional<String> hostname();
+
+    /**
+     * Returns the effective base URL, taking hostname into account.
+     */
+    default String effectiveBaseUrl() {
+        return hostname()
+                .map(h -> baseUrl().replaceFirst("://[^:/]+(:\\d+)?", "://" + h + "$1"))
+                .orElse(baseUrl());
+    }
+
     StorageConfig storage();
 
     ServicesConfig services();
 
     AuthConfig auth();
+
+    DockerConfig docker();
 
     interface StorageConfig {
         /** Supported modes: memory, persistent, hybrid, wal */
@@ -23,6 +43,10 @@ public interface EmulatorConfig {
 
         @WithDefault("${user.home}/.floci-az/data")
         String path();
+
+        /** The path on the host machine where data is stored. Useful for Docker-in-Docker. */
+        @WithDefault("${floci-az.storage.path}")
+        String hostPersistentPath();
 
         WalConfig wal();
 
@@ -87,9 +111,6 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
-        @WithDefault("unix:///var/run/docker.sock")
-        String dockerHost();
-
         @WithDefault("${user.home}/.floci-az/functions")
         String codePath();
 
@@ -100,5 +121,37 @@ public interface EmulatorConfig {
         /** Evict warm containers idle longer than this (ms). */
         @WithDefault("300000")
         long idleTimeoutMs();
+    }
+
+    /**
+     * Configuration for Docker container management shared across all services.
+     */
+    interface DockerConfig {
+
+        /** Maximum size of each container log file before rotation. */
+        @WithDefault("10m")
+        String logMaxSize();
+
+        /** Maximum number of rotated log files to retain per container. */
+        @WithDefault("3")
+        String logMaxFile();
+
+        /** Unix socket or TCP URL for the Docker daemon. */
+        @WithDefault("unix:///var/run/docker.sock")
+        String dockerHost();
+
+        /** Path to a directory containing Docker's config.json. */
+        Optional<String> dockerConfigPath();
+
+        /** Explicit credentials for private Docker registries. */
+        @WithDefault("")
+        List<RegistryCredential> registryCredentials();
+
+        interface RegistryCredential {
+            /** Registry hostname (e.g. myregistry.example.com). */
+            String server();
+            String username();
+            String password();
+        }
     }
 }
