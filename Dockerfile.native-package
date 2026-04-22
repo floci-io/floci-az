@@ -3,7 +3,8 @@ FROM registry.access.redhat.com/ubi9-minimal:9.7
 ARG VERSION=latest
 
 ENV FLOCI_AZ_VERSION=${VERSION}
-ENV FLOCI_AZ_PERSISTENCE_PATH=/app/data
+ENV FLOCI_AZ_STORAGE_PATH=/app/data
+ENV FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH=/app/data/functions
 
 WORKDIR /app
 
