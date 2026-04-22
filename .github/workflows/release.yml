@@ -183,7 +183,7 @@ jobs:
           context: .
           file: Dockerfile.native-package
           platforms: linux/amd64
-          push: false
+          push: true
           tags: floci/floci-az:${{ steps.version.outputs.version }}-amd64
           build-args: VERSION=${{ steps.version.outputs.version }}
 
@@ -200,7 +200,7 @@ jobs:
           context: .
           file: Dockerfile.native-package
           platforms: linux/arm64
-          push: false
+          push: true
           tags: floci/floci-az:${{ steps.version.outputs.version }}-arm64
           build-args: VERSION=${{ steps.version.outputs.version }}
 
