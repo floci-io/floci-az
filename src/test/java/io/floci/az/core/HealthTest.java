@@ -19,6 +19,16 @@ public class HealthTest {
     }
 
     @Test
+    public void testFlociHealthEndpoint() {
+        given()
+          .when().get("/_floci/health")
+          .then()
+             .statusCode(200)
+             .body("status", is("UP"))
+             .body("edition", is("floci-az-always-free"));
+    }
+
+    @Test
     public void testReadyEndpoint() {
         given()
           .when().get("/ready")

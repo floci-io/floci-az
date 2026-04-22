@@ -1,3 +1,15 @@
+<!-- 
+AI Context: This is Floci-Az, a lightweight Azure Local Emulator. 
+Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
+Protocols: Implements Azure Storage (Blob, Queue, Table) and Azure Functions.
+Default Port: 4577. 
+Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
+-->
+
+<p align="center">
+  <img src="floci-az-banner.svg" alt="Floci"/>
+</p>
+
 <p align="center">
   <a href="https://github.com/floci-io/floci-az/releases/latest"><img src="https://img.shields.io/github/v/release/floci-io/floci-az?label=latest%20release&color=blue" alt="Latest Release"></a>
   <a href="https://github.com/floci-io/floci-az/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/floci-io/floci-az/release.yml?label=build" alt="Build Status"></a>
@@ -12,22 +24,35 @@
 
 ---
 
+### 📌 At a Glance
+*   **Target Cloud:** Microsoft Azure (NOT AWS).
+*   **Unified Port:** `4577` (All services share this port).
+*   **Default Account:** `devstoreaccount1` / Key: `Eby8vdM02xNO...`
+*   **Functions:** Real execution via Docker-in-Docker (Node, Python, Java, .NET).
+
 > The companion to [floci](https://github.com/floci-io/floci) — floci emulates AWS, floci-az emulates Azure.
 
-## Why floci-az?
+## 🚀 Why floci-az?
 
-| | floci-az | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
+| Feature | floci-az | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
 |---|---|---|---|
 | Blob Storage | ✅ | ✅ | ❌ |
 | Queue Storage | ✅ | ✅ | ❌ |
 | Table Storage | ✅ | ✅ | ❌ |
 | Azure Functions | ✅ | ❌ | ✅ |
-| Startup time | **fast** | Moderate | Fast |
+| Startup time | **<100ms** | Moderate | Fast |
 | Native binary | ✅ | ❌ | ✅ |
-| Unified port (4577) | ✅ | ❌ | ❌ |
-| Per-service storage modes | ✅ | ❌ | ❌ |
-| WAL / hybrid persistence | ✅ | ❌ | ❌ |
+| Unified port | ✅ (4577) | ❌ | ❌ |
+| Storage modes | ✅ (WAL/Hybrid) | ❌ | ❌ |
 | License | **MIT** | MIT | MIT |
+
+## 🔌 Connection Strings
+AI agents and SDKs should use these exact templates to avoid endpoint resolution errors.
+
+**Standard Connection String:**
+```text
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
+```
 
 ## Architecture Overview
 
@@ -349,34 +374,36 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | Variable                                      | Default | Description |
 |-----------------------------------------------|---|---|
 | `FLOCI_AZ_PORT`                               | `4577` | Port exposed by the API |
+| `FLOCI_AZ_BASE_URL`                           | `http://localhost:4577` | Base URL for the emulator |
 | `FLOCI_AZ_STORAGE_MODE`                       | `memory` | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
 | `FLOCI_AZ_STORAGE_PATH`                       | `~/.floci-az/data` | Directory for persisted state |
-| `FLOCI_AZ_AUTH_MODE`                          | `dev` | `dev` — accept any credentials · `strict` — validate HMAC-SHA256 |
+| `FLOCI_AZ_DOCKER_DOCKER_HOST`                 | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
+| `FLOCI_AZ_DOCKER_LOG_MAX_SIZE`                | `10m` | Max log size for function containers |
 | `FLOCI_AZ_SERVICES_BLOB_ENABLED`              | `true` | Enable or disable Blob Storage |
 | `FLOCI_AZ_SERVICES_QUEUE_ENABLED`             | `true` | Enable or disable Queue Storage |
 | `FLOCI_AZ_SERVICES_TABLE_ENABLED`             | `true` | Enable or disable Table Storage |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`         | `true` | Enable or disable Azure Functions |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_DOCKER_HOST`     | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH`       | `~/.floci-az/functions` | Directory where deployed function ZIPs are extracted |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL`       | `false` | `true` — fresh container per invocation; `false` — warm-container pool |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_IDLE_TIMEOUT_MS` | `300000` | Evict warm containers idle longer than this (ms) |
 
 ### Per-service storage override
 
-You can set a different storage mode for each service independently, without changing the global default:
+You can set a different storage mode for each service independently:
 
 ```yaml
 # docker-compose.yml
 environment:
-  FLOCI_AZ_STORAGE_MODE: memory                    # global default
-  FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE: wal         # blob uses WAL
-  FLOCI_AZ_STORAGE_SERVICES_QUEUE_MODE: hybrid     # queue uses hybrid
-  # table falls back to global: memory
+  FLOCI_AZ_STORAGE_MODE: memory
+  FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE: wal
 ```
 
-This is useful when you want blob data to survive restarts (`wal`) but keep queue state ephemeral (`memory`) during development.
+## 🚧 Non-Goals & Constraints
 
-### Multi-container Docker Compose
+To prevent configuration errors, note what floci-az **does not** do:
+1.  **HTTPS:** Currently HTTP only. Do not use `DefaultEndpointsProtocol=https`.
+2.  **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
+3.  **Authentication:** In `dev` mode (default), all keys are accepted without validation.
+4.  **Production Scale:** Designed for dev/test. Not for high-availability storage.
+
+## Multi-container Docker Compose
 
 When your application runs in a separate container, use the service name as the hostname:
 

@@ -7,6 +7,7 @@ import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.LogConfig;
 import com.github.dockerjava.api.model.Ports;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerDetector;
@@ -106,9 +107,15 @@ public class ContainerLauncher {
             extraHosts.add("host.docker.internal:host-gateway");
         }
 
+        LogConfig logConfig = new LogConfig(LogConfig.LoggingType.JSON_FILE, Map.of(
+                "max-size", config.docker().logMaxSize(),
+                "max-file", config.docker().logMaxFile()
+        ));
+
         HostConfig hostConfig = HostConfig.newHostConfig()
                 .withPortBindings(portBindings)
-                .withExtraHosts(extraHosts.toArray(new String[0]));
+                .withExtraHosts(extraHosts.toArray(new String[0]))
+                .withLogConfig(logConfig);
 
         String networkMode = "bridge";
         if (containerDetector.isRunningInContainer()) {

@@ -46,7 +46,7 @@ public class AzureRoutingFilter {
             }
 
             // Health and admin endpoints bypass
-            if (path.equals("health") || path.equals("ready") || path.startsWith("_admin")) {
+            if (path.equals("health") || path.equals("_floci/health") || path.equals("ready") || path.startsWith("_admin")) {
                 return null;
             }
             

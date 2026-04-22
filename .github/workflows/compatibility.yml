@@ -89,6 +89,8 @@ jobs:
       - name: Start floci-az
         run: |
           docker run -d --name floci-az --network compat-net \
+            -u root \
+            -v /var/run/docker.sock:/var/run/docker.sock \
             -p 4577:4577 \
             floci-az:test
 

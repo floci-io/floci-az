@@ -3,7 +3,8 @@ FROM eclipse-temurin:25-jre-alpine
 ARG VERSION=latest
 
 ENV FLOCI_AZ_VERSION=${VERSION}
-ENV FLOCI_AZ_PERSISTENCE_PATH=/app/data
+ENV FLOCI_AZ_STORAGE_PATH=/app/data
+ENV FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH=/app/data/functions
 
 WORKDIR /app
 
@@ -19,7 +20,7 @@ COPY --chown=1001:root target/quarkus-app quarkus-app/
 EXPOSE 4577
 
 HEALTHCHECK --interval=5s --timeout=3s --retries=10 \
-    CMD wget -q --spider http://localhost:4577/health || exit 1
+    CMD wget -q --spider http://localhost:4577/_floci/health || exit 1
 
 USER 1001
 

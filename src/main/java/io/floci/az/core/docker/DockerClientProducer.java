@@ -31,13 +31,15 @@ public class DockerClientProducer {
     @Produces
     @ApplicationScoped
     public DockerClient dockerClient() {
-        String dockerHost = config.services().functions().dockerHost();
+        String dockerHost = config.docker().dockerHost();
         LOG.infov("Creating DockerClient for host: {0}", dockerHost);
 
-        DefaultDockerClientConfig clientConfig = DefaultDockerClientConfig
-                .createDefaultConfigBuilder()
-                .withDockerHost(dockerHost)
-                .build();
+        DefaultDockerClientConfig.Builder configBuilder = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                .withDockerHost(dockerHost);
+
+        config.docker().dockerConfigPath().ifPresent(configBuilder::withDockerConfig);
+
+        DefaultDockerClientConfig clientConfig = configBuilder.build();
 
         ApacheDockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(clientConfig.getDockerHost())

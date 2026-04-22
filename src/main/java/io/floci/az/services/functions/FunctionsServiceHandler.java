@@ -3,6 +3,7 @@ package io.floci.az.services.functions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
@@ -38,17 +39,20 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
     private final FunctionCodeStore codeStore;
     private final FunctionsExecutorService executor;
     private final WarmPool warmPool;
+    private final EmulatorConfig config;
     private final ObjectMapper mapper;
 
     @Inject
     public FunctionsServiceHandler(StorageFactory storageFactory,
                                    FunctionCodeStore codeStore,
                                    FunctionsExecutorService executor,
-                                   WarmPool warmPool) {
+                                   WarmPool warmPool,
+                                   EmulatorConfig config) {
         this.store     = storageFactory.create("functions");
         this.codeStore = codeStore;
         this.executor  = executor;
         this.warmPool  = warmPool;
+        this.config    = config;
         this.mapper    = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -323,7 +327,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
     }
 
     private FunctionResponse toFunctionResponse(FunctionDefinition def, String accountName) {
-        String invokeUrl = "http://localhost:" + "4577" + "/" + accountName
+        String invokeUrl = config.effectiveBaseUrl() + "/" + accountName
                 + "-functions/api/" + def.appName() + "/" + def.funcName();
         return new FunctionResponse(
                 def.funcName(), def.appName(), def.runtime(), def.handler(),
