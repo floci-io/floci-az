@@ -2,6 +2,11 @@ quarkus:
   http:
     port: ${floci-az.port}
     host: 0.0.0.0
+  native:
+    additional-build-args: >-
+      --initialize-at-run-time=org.apache.hc.client5.http.impl.auth.NTLMEngineImpl,
+      --initialize-at-run-time=com.github.dockerjava.transport.NamedPipeSocket$Kernel32,
+      --initialize-at-run-time=com.github.dockerjava.core.util.CertificateUtils
 
 floci-az:
   port: 4577
