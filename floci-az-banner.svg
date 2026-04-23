@@ -73,7 +73,7 @@
     <text x="640" y="446"
           font-family="'Segoe UI', Helvetica, Arial, sans-serif"
           font-size="21" font-weight="300" font-style="italic"
-          fill="#38bdf8" text-anchor="middle" letter-spacing="0.5">Light, fluffy, and always free — Azure Local Emulator
+          fill="#38bdf8" text-anchor="middle" letter-spacing="0.5">Light, fluffy, and always free — Local Azure Emulator
     </text>
 
     <!-- Stats row -->

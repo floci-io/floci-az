@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Creates and destroys Docker containers for Azure Functions execution.
@@ -66,6 +67,7 @@ public class ContainerLauncher {
     private final ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final HttpClient httpClient;
+    private volatile String cachedNetworkMode;
 
     @Inject
     public ContainerLauncher(DockerClient dockerClient,
@@ -117,23 +119,7 @@ public class ContainerLauncher {
                 .withExtraHosts(extraHosts.toArray(new String[0]))
                 .withLogConfig(logConfig);
 
-        String networkMode = "bridge";
-        if (containerDetector.isRunningInContainer()) {
-            try {
-                // Discover which network floci-az is running on
-                String selfContainerId = System.getenv("HOSTNAME"); // Standard Docker way to get self ID
-                if (selfContainerId != null) {
-                    var selfInspect = dockerClient.inspectContainerCmd(selfContainerId).exec();
-                    var networks = selfInspect.getNetworkSettings().getNetworks();
-                    if (!networks.isEmpty()) {
-                        networkMode = networks.keySet().iterator().next();
-                        LOG.infov("Detected floci-az network: {0}. Joining function container to it.", networkMode);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.warnv("Failed to detect self network, falling back to bridge: {0}", e.getMessage());
-            }
-        }
+        String networkMode = resolveNetworkMode();
 
         CreateContainerResponse created = dockerClient.createContainerCmd(image)
                 .withName(containerName)
@@ -194,6 +180,26 @@ public class ContainerLauncher {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    private String resolveNetworkMode() {
+        if (!containerDetector.isRunningInContainer()) return "bridge";
+        if (cachedNetworkMode != null) return cachedNetworkMode;
+        try {
+            String selfContainerId = System.getenv("HOSTNAME");
+            if (selfContainerId != null) {
+                var networks = dockerClient.inspectContainerCmd(selfContainerId).exec()
+                        .getNetworkSettings().getNetworks();
+                if (!networks.isEmpty()) {
+                    cachedNetworkMode = networks.keySet().iterator().next();
+                    LOG.infov("Detected floci-az network: {0}", cachedNetworkMode);
+                    return cachedNetworkMode;
+                }
+            }
+        } catch (Exception e) {
+            LOG.warnv("Failed to detect self network, falling back to bridge: {0}", e.getMessage());
+        }
+        return "bridge";
+    }
+
     private String resolveImage(String runtime) {
         String image = RUNTIME_IMAGES.get(runtime != null ? runtime.toLowerCase() : "node");
         if (image == null) {
@@ -210,9 +216,10 @@ public class ContainerLauncher {
         } catch (NotFoundException e) {
             LOG.infov("Pulling image: {0}", image);
             try {
-                dockerClient.pullImageCmd(image)
+                boolean pulled = dockerClient.pullImageCmd(image)
                         .exec(new PullImageResultCallback())
-                        .awaitCompletion();
+                        .awaitCompletion(10, TimeUnit.MINUTES);
+                if (!pulled) throw new RuntimeException("Timed out pulling image: " + image);
                 LOG.infov("Pulled image: {0}", image);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();

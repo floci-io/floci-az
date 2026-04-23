@@ -5,4 +5,4 @@
  | |    | |___| |__| | |____ _| |_        / /   \ \ /____| 
  |_|    |______\____/ \_____|_____|      /_/     \_\       
 
-              Azure Local Emulator (Always Free)
+              Local Azure Emulator (Always Free)
