@@ -1,5 +1,5 @@
 <!-- 
-AI Context: This is Floci-Az, a lightweight Azure Local Emulator. 
+AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
 Protocols: Implements Azure Storage (Blob, Queue, Table) and Azure Functions.
 Default Port: 4577. 

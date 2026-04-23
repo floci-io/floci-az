@@ -243,7 +243,11 @@ public class QueueServiceHandler implements AzureServiceHandler {
     private boolean isVisible(StoredObject so, Instant now) {
         String visibleAt = so.metadata().get("_visibleAt");
         if (visibleAt == null) return true;
-        return Instant.ofEpochSecond(Long.parseLong(visibleAt)).isBefore(now);
+        try {
+            return Instant.ofEpochSecond(Long.parseLong(visibleAt)).isBefore(now);
+        } catch (NumberFormatException e) {
+            return true;
+        }
     }
 
     private Response deleteMessage(AzureRequest request, String queueName, String messageId, String popReceipt) {

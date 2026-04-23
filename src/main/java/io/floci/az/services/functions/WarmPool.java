@@ -151,7 +151,7 @@ public class WarmPool {
                 });
             }
 
-            if (!toEvict.isEmpty() && pool.get(key) == q) {
+            if (!toEvict.isEmpty()) {
                 LOG.infov("Evicting {0} idle container(s) for: {1}", toEvict.size(), key);
                 toEvict.forEach(this::stopQuietly);
             }
