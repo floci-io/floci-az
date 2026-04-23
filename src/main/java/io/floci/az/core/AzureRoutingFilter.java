@@ -39,7 +39,6 @@ public class AzureRoutingFilter {
     public Uni<Response> filter(ContainerRequestContext requestContext) {
         return Uni.createFrom().item(() -> {
             String path = requestContext.getUriInfo().getPath();
-            LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
             if (path.startsWith("/")) {
                 path = path.substring(1);
@@ -49,6 +48,8 @@ public class AzureRoutingFilter {
             if (path.equals("health") || path.equals("_floci/health") || path.equals("ready") || path.startsWith("_admin")) {
                 return null;
             }
+
+            LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
             
             // Identity bypass
             if (path.contains("oauth2/v2.0/token")) {
