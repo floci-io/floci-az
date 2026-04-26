@@ -1,4 +1,5 @@
 *
+!native/**
 !docker/entrypoint.sh
 !pom.xml
 !src/**
