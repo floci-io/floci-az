@@ -29,4 +29,4 @@ ENV FLOCI_AZ_VERSION=${VERSION}
 ENV FLOCI_AZ_STORAGE_PATH=/app/data
 ENV FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH=/app/data/functions
 
-ENTRYPOINT ["java", "-Dquarkus.http.host=0.0.0.0", "-jar", "quarkus-app/quarkus-run.jar"]
+ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-Dquarkus.http.host=0.0.0.0", "-jar", "quarkus-app/quarkus-run.jar"]
