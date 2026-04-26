@@ -36,6 +36,13 @@ floci-az:
         # mode: persistent
         flush-interval-ms: 5000
 
+  dns:
+    # When floci-az runs inside Docker, an embedded DNS server is started on port 53
+    # and injected into every Azure Functions container as their resolver. It resolves
+    # *.hostname (above) and any extra suffixes to floci-az's Docker network IP.
+    # extra-suffixes:
+    #   - myapp.internal
+
   docker:
     docker-host: unix:///var/run/docker.sock
     log-max-size: "10m"

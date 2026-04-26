@@ -43,7 +43,7 @@ public class DockerClientProducer {
 
         ApacheDockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(clientConfig.getDockerHost())
-                .maxConnections(20)
+                .maxConnections(100)
                 .connectionTimeout(Duration.ofSeconds(30))
                 .responseTimeout(Duration.ofMinutes(5))
                 .build();

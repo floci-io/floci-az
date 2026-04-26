@@ -1,4 +1,4 @@
-.PHONY: build run stop test test-python test-java-compat test-node-compat clean
+.PHONY: build run stop test test-python test-java-compat test-node-compat compat-docker clean
 
 MVN        = ./mvnw
 PORT       = 4577
@@ -39,6 +39,27 @@ test-node-compat:
 	@cd $(NODE_DIR) && \
 	if [ ! -d node_modules ]; then npm install --silent; fi && \
 	npm test
+
+# Run all compatibility tests in Docker containers against the running floci-az.
+# Requires: docker compose up -d
+compat-docker:
+	@echo "==> Building test images..."
+	@docker build -q -t floci-az-compat-node   -f $(NODE_DIR)/Dockerfile   $(NODE_DIR)/
+	@docker build -q -t floci-az-compat-python -f $(PYTHON_DIR)/Dockerfile $(PYTHON_DIR)/
+	@docker build -q -t floci-az-compat-java   -f $(JAVA_DIR)/Dockerfile   $(JAVA_DIR)/
+	@echo "==> Node.js SDK tests"
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		floci-az-compat-node
+	@echo "==> Python SDK tests"
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		floci-az-compat-python
+	@echo "==> Java SDK tests"
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		floci-az-compat-java
 
 test: build
 	$(MVN) test

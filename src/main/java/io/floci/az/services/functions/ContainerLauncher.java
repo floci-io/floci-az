@@ -10,6 +10,7 @@ import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.LogConfig;
 import com.github.dockerjava.api.model.Ports;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.dns.EmbeddedDnsServer;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.DockerHostResolver;
 import io.floci.az.services.functions.FunctionModels.FunctionDefinition;
@@ -65,6 +66,7 @@ public class ContainerLauncher {
     private final DockerClient dockerClient;
     private final DockerHostResolver hostResolver;
     private final ContainerDetector containerDetector;
+    private final EmbeddedDnsServer embeddedDnsServer;
     private final EmulatorConfig config;
     private final HttpClient httpClient;
     private volatile String cachedNetworkMode;
@@ -73,12 +75,14 @@ public class ContainerLauncher {
     public ContainerLauncher(DockerClient dockerClient,
                              DockerHostResolver hostResolver,
                              ContainerDetector containerDetector,
+                             EmbeddedDnsServer embeddedDnsServer,
                              EmulatorConfig config) {
-        this.dockerClient = dockerClient;
-        this.hostResolver = hostResolver;
+        this.dockerClient    = dockerClient;
+        this.hostResolver    = hostResolver;
         this.containerDetector = containerDetector;
-        this.config       = config;
-        this.httpClient   = HttpClient.newBuilder()
+        this.embeddedDnsServer = embeddedDnsServer;
+        this.config          = config;
+        this.httpClient      = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
     }
@@ -105,7 +109,10 @@ public class ContainerLauncher {
         portBindings.bind(exposed, Ports.Binding.bindPort(0));
 
         List<String> extraHosts = new ArrayList<>();
-        if (hostResolver.isLinuxHost() && !hostResolver.resolve().equals("host.docker.internal")) {
+        if (hostResolver.isLinuxHost()) {
+            // On native Linux Docker, host.docker.internal is not auto-injected into
+            // containers (unlike Docker Desktop on macOS/Windows). Adding host-gateway
+            // makes it resolvable from inside function containers on all Linux setups.
             extraHosts.add("host.docker.internal:host-gateway");
         }
 
@@ -118,6 +125,11 @@ public class ContainerLauncher {
                 .withPortBindings(portBindings)
                 .withExtraHosts(extraHosts.toArray(new String[0]))
                 .withLogConfig(logConfig);
+
+        embeddedDnsServer.getServerIp().ifPresent(dnsIp -> {
+            hostConfig.withDns(dnsIp);
+            LOG.debugv("Injecting embedded DNS server {0} into function container {1}", dnsIp, containerName);
+        });
 
         String networkMode = resolveNetworkMode();
 

@@ -19,6 +19,8 @@ public interface EmulatorConfig {
      */
     Optional<String> hostname();
 
+    DnsConfig dns();
+
     /**
      * Returns the effective base URL, taking hostname into account.
      */
@@ -99,6 +101,15 @@ public interface EmulatorConfig {
     interface TableServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface DnsConfig {
+        /**
+         * Additional hostname suffixes resolved to floci-az's container IP by the
+         * embedded DNS server. Used when function containers need to reach floci-az
+         * via a custom domain name (e.g. "myhost.internal").
+         */
+        Optional<List<String>> extraSuffixes();
     }
 
     interface AuthConfig {
