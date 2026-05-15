@@ -1,9 +1,9 @@
 name: Edge
 
-# Builds and publishes the JVM image from the tip of main as the `edge` Docker tag.
+# Builds and publishes the native image from the tip of main as the `edge` Docker tag.
 # Runs on a weekly schedule (every Monday 00:00 UTC) and can be triggered manually.
 #
-# Published tag: hectorvent/floci-az:edge
+# Published tag: floci/floci-az:edge
 #
 # Required secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 
@@ -23,7 +23,7 @@ jobs:
   build-and-push-edge:
     name: Build and push edge image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:

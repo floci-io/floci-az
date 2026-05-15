@@ -69,6 +69,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig blob();
         ServiceStorageConfig queue();
         ServiceStorageConfig table();
+        ServiceStorageConfig appConfig();
     }
 
     interface ServiceStorageConfig {
@@ -90,10 +91,11 @@ public interface EmulatorConfig {
     }
 
     interface ServicesConfig {
-        BlobServiceConfig  blob();
-        QueueServiceConfig queue();
-        TableServiceConfig table();
-        FunctionsConfig    functions();
+        BlobServiceConfig      blob();
+        QueueServiceConfig     queue();
+        TableServiceConfig     table();
+        FunctionsConfig        functions();
+        AppConfigServiceConfig appConfig();
     }
 
     interface BlobServiceConfig {
@@ -124,6 +126,11 @@ public interface EmulatorConfig {
         /** dev: accept any credentials. strict: validate HMAC-SHA256 signatures. */
         @WithDefault("dev")
         String mode();
+    }
+
+    interface AppConfigServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface FunctionsConfig {

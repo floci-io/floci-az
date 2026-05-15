@@ -84,7 +84,7 @@ host.json
 ## Warm Container Pool
 
 By default, floci-az keeps function containers warm after first use (LIFO pool, one per function).
-Containers are evicted after `idle-timeout-ms` of inactivity (default 5 minutes).
+Containers are evicted after `FLOCI_AZ_SERVICES_FUNCTIONS_CONTAINER_IDLE_TIMEOUT_SECONDS` seconds of inactivity (default 300 s / 5 minutes).
 
 To disable warm reuse and get a fresh container per invocation:
 

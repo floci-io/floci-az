@@ -8,7 +8,7 @@
 
 ---
 
-Floci-AZ is a fast, free, and open-source local Azure service emulator — providing Blob Storage, Queues, Tables, and Azure Functions in a single native binary.
+Floci-AZ is a fast, free, and open-source local Azure service emulator — providing Blob Storage, Queues, Tables, Azure Functions, and App Configuration in a single native binary.
 
 ## Why floci-az?
 
@@ -18,7 +18,8 @@ Floci-AZ is a fast, free, and open-source local Azure service emulator — provi
 | Queue Storage | ✅ | ✅ | ❌ |
 | Table Storage | ✅ | ✅ | ❌ |
 | Azure Functions | ✅ | ❌ | ✅ |
-| Startup time | **fast** | Moderate | Fast |
+| App Configuration | ✅ | ❌ | ❌ |
+| Startup time | **<100ms** (native image) | Moderate | Fast |
 | Native binary | ✅ | ❌ | ✅ |
 | Unified port (4577) | ✅ | ❌ | ❌ |
 | Per-service storage modes | ✅ | ❌ | ❌ |
@@ -39,13 +40,15 @@ flowchart LR
             B["Queue Storage\n/{account}-queue/"]
             C["Table Storage\n/{account}-table/"]
             D["Azure Functions\n/{account}-functions/"]
+            E["App Configuration\n/{account}-appconfig/"]
         end
 
         Router --> A
         Router --> B
         Router --> C
         Router --> D
-        A & B & C --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
+        Router --> E
+        A & B & C & E --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|"spawn / proxy"| Docker["🐳 Docker\n(function containers)"]
     end
 
@@ -60,6 +63,7 @@ flowchart LR
 | **Queue Storage** | `/{account}-queue/` | Create/delete queues, send/receive/peek/delete messages, visibility timeout |
 | **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
+| **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots (frozen KV sets), revisions, locks, ETags |
 
 ## Quick Start
 

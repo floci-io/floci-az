@@ -40,6 +40,9 @@ floci-az:
       table:
         # mode: persistent
         flush-interval-ms: 5000
+      app-config:
+        # mode: persistent
+        flush-interval-ms: 5000
 
   dns:
     # When floci-az runs inside Docker, an embedded DNS server starts on UDP/53
@@ -64,11 +67,13 @@ floci-az:
     functions:
       enabled: true
       # Directory where extracted function code is stored on the host.
-      code-path: /app/data/functions
+      code-path: ~/.floci-az/functions
       # ephemeral: true  →  fresh container per invocation (no warm reuse)
       ephemeral: false
-      # Evict warm containers idle longer than this (ms)
-      idle-timeout-ms: 300000
+      # Evict warm containers idle longer than this (seconds); 0 disables eviction
+      container-idle-timeout-seconds: 300
+    app-config:
+      enabled: true
 ```
 
 ## Key Environment Variables
@@ -82,7 +87,9 @@ floci-az:
 | `FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE` | _(global)_ | Per-service blob mode |
 | `FLOCI_AZ_STORAGE_SERVICES_QUEUE_MODE` | _(global)_ | Per-service queue mode |
 | `FLOCI_AZ_STORAGE_SERVICES_TABLE_MODE` | _(global)_ | Per-service table mode |
+| `FLOCI_AZ_STORAGE_SERVICES_APP_CONFIG_MODE` | _(global)_ | Per-service App Configuration mode |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | Fresh container per invocation |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_IDLE_TIMEOUT_MS` | `300000` | Warm-pool idle eviction timeout |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `/app/data/functions` | Function code directory |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_CONTAINER_IDLE_TIMEOUT_SECONDS` | `300` | Evict warm containers idle longer than this (seconds); `0` disables eviction |
+| `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable/disable App Configuration |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |

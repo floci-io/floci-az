@@ -32,6 +32,9 @@ public class BannerLogger {
         if (config.services().functions().enabled()) {
             sb.append(serviceStatusDocker("functions", true, config.docker().dockerHost()));
         }
+        if (config.services().appConfig().enabled()) {
+            sb.append(serviceStatus("appconfig", true, getStorageMode("appconfig")));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
@@ -40,8 +43,9 @@ public class BannerLogger {
         return switch (service) {
             case "blob"  -> config.storage().services().blob().mode().orElse(config.storage().mode());
             case "queue" -> config.storage().services().queue().mode().orElse(config.storage().mode());
-            case "table" -> config.storage().services().table().mode().orElse(config.storage().mode());
-            default      -> config.storage().mode();
+            case "table"     -> config.storage().services().table().mode().orElse(config.storage().mode());
+            case "appconfig" -> config.storage().services().appConfig().mode().orElse(config.storage().mode());
+            default          -> config.storage().mode();
         };
     }
 

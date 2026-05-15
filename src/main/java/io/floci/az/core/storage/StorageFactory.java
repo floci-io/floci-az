@@ -91,10 +91,11 @@ public class StorageFactory {
 
     private Optional<ServiceStorageConfig> serviceConfig(String serviceName) {
         return switch (serviceName) {
-            case "blob"  -> Optional.of(config.storage().services().blob());
-            case "queue" -> Optional.of(config.storage().services().queue());
-            case "table" -> Optional.of(config.storage().services().table());
-            default      -> Optional.empty();
+            case "blob"      -> Optional.of(config.storage().services().blob());
+            case "queue"     -> Optional.of(config.storage().services().queue());
+            case "table"     -> Optional.of(config.storage().services().table());
+            case "appconfig" -> Optional.of(config.storage().services().appConfig());
+            default          -> Optional.empty();
         };
     }
 }
