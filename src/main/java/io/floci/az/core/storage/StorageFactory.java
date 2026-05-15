@@ -40,8 +40,7 @@ public class StorageFactory {
     public StorageBackend<String, StoredObject> create(String serviceName) {
         String mode           = resolveMode(serviceName);
         long flushIntervalMs  = resolveFlushInterval(serviceName);
-        Path basePath         = Path.of(config.storage().path()
-                .replace("${user.home}", System.getProperty("user.home")));
+        Path basePath         = Path.of(config.storage().persistentPath());
         Path filePath         = basePath.resolve(serviceName + ".json");
 
         LOG.infov("Creating [{0}] storage backend: {1}", mode, serviceName);

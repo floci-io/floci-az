@@ -13,8 +13,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 
 /**
- * CDI producer for the shared DockerClient singleton.
- * The client is created eagerly but only connects to the Docker daemon on first use.
+ * CDI producer for the DockerClient singleton bean.
  */
 @ApplicationScoped
 public class DockerClientProducer {
@@ -28,18 +27,67 @@ public class DockerClientProducer {
         this.config = config;
     }
 
+    /**
+     * Normalizes a Docker host value by prepending {@code tcp://} when no recognized
+     * URI scheme ({@code tcp://}, {@code unix://}, {@code npipe://}) is present.
+     */
+    static String normalizeDockerHost(String dockerHost) {
+        if (dockerHost == null) {
+            return null;
+        }
+        if (dockerHost.isEmpty()) {
+            return dockerHost;
+        }
+        String lower = dockerHost.toLowerCase();
+        if (lower.startsWith("tcp://") || lower.startsWith("unix://") || lower.startsWith("npipe://")) {
+            return dockerHost;
+        }
+        String normalized = "tcp://" + dockerHost;
+        LOG.infov("Docker host value ''{0}'' has no URI scheme; normalizing to ''{1}''", dockerHost, normalized);
+        return normalized;
+    }
+
+    /**
+     * Resolves the effective Docker host. Prefers {@code DOCKER_HOST} env var over the
+     * configured default (unix socket), and normalizes bare host:port values to tcp://.
+     */
+    static String resolveEffectiveDockerHost(String configuredHost, String dockerHostEnv) {
+        String normalizedEnvHost = normalizeDockerHost(dockerHostEnv);
+        if ("unix:///var/run/docker.sock".equals(configuredHost)
+                && normalizedEnvHost != null && !normalizedEnvHost.isBlank()) {
+            return normalizedEnvHost;
+        }
+        return normalizeDockerHost(configuredHost);
+    }
+
+    private static DefaultDockerClientConfig.Builder createDockerConfigBuilder() {
+        try {
+            return DefaultDockerClientConfig.createDefaultConfigBuilder();
+        } catch (IllegalArgumentException e) {
+            // DOCKER_HOST env var is set without a URI scheme (e.g. "10.37.124.101:2375").
+            // docker-java calls URI.create() on it immediately, which throws before our
+            // withDockerHost() override can take effect. Fall back to a fresh builder.
+            LOG.warnv("Could not initialize Docker config from environment "
+                    + "(DOCKER_HOST env var may be missing a URI scheme): {0}. "
+                    + "Using configured host.", e.getMessage());
+            return new DefaultDockerClientConfig.Builder();
+        }
+    }
+
     @Produces
     @ApplicationScoped
     public DockerClient dockerClient() {
-        String dockerHost = config.docker().dockerHost();
+        String dockerHost = resolveEffectiveDockerHost(
+                config.docker().dockerHost(), System.getenv("DOCKER_HOST"));
         LOG.infov("Creating DockerClient for host: {0}", dockerHost);
 
-        DefaultDockerClientConfig.Builder configBuilder = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withDockerHost(dockerHost);
-
-        config.docker().dockerConfigPath().ifPresent(configBuilder::withDockerConfig);
-
-        DefaultDockerClientConfig clientConfig = configBuilder.build();
+        DefaultDockerClientConfig.Builder builder = createDockerConfigBuilder();
+        builder.withDockerHost(dockerHost);
+        config.docker().dockerConfigPath().ifPresent(path -> {
+            LOG.infov("Using Docker config path: {0}", path);
+            builder.withDockerConfig(path);
+        });
+        DefaultDockerClientConfig clientConfig = builder.build();
 
         ApacheDockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(clientConfig.getDockerHost())

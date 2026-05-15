@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -17,10 +18,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
- * Write-through JSON file storage. Atomic writes via temp-file rename.
- * Loads all data into memory on startup for fast reads.
+ * JSON file-backed persistent storage.
+ * Write-through on every put/delete.
+ * Uses atomic writes (temp file + rename) for safety.
  */
 public class PersistentStorage<K, V> implements StorageBackend<K, V> {
 
@@ -28,16 +31,16 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
 
     private final ConcurrentHashMap<K, V> store = new ConcurrentHashMap<>();
     private final Path filePath;
-    private final ObjectMapper mapper;
-    private final TypeReference<Map<K, V>> typeRef;
+    private final ObjectMapper objectMapper;
+    private final TypeReference<Map<K, V>> typeReference;
 
-    public PersistentStorage(Path filePath, TypeReference<Map<K, V>> typeRef) {
+    public PersistentStorage(Path filePath, TypeReference<Map<K, V>> typeReference) {
         this.filePath = filePath;
-        this.typeRef = typeRef;
-        this.mapper = new ObjectMapper();
-        this.mapper.registerModule(new JavaTimeModule());
-        this.mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        this.mapper.enable(SerializationFeature.INDENT_OUTPUT);
+        this.typeReference = typeReference;
+        this.objectMapper = new ObjectMapper();
+        this.objectMapper.registerModule(new JavaTimeModule());
+        this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     @Override
@@ -62,7 +65,7 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
         return store.entrySet().stream()
                 .filter(e -> keyFilter.test(e.getKey()))
                 .map(Map.Entry::getValue)
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     @Override
@@ -77,9 +80,12 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
 
     @Override
     public void load() {
-        if (!Files.exists(filePath)) return;
+        if (!Files.exists(filePath)) {
+            LOG.debugv("No persistent file found at {0}, starting with empty store", filePath);
+            return;
+        }
         try {
-            Map<K, V> data = mapper.readValue(filePath.toFile(), typeRef);
+            Map<K, V> data = objectMapper.readValue(filePath.toFile(), typeReference);
             store.clear();
             store.putAll(data);
             LOG.infov("Loaded {0} entries from {1}", store.size(), filePath);
@@ -97,9 +103,9 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
     private synchronized void persistToDisk() {
         try {
             Files.createDirectories(filePath.getParent());
-            Path tmp = filePath.resolveSibling(filePath.getFileName() + ".tmp");
-            mapper.writeValue(tmp.toFile(), store);
-            Files.move(tmp, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Path tempFile = filePath.resolveSibling(filePath.getFileName() + ".tmp");
+            objectMapper.writeValue(tempFile.toFile(), store);
+            Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             LOG.errorv(e, "Failed to persist data to {0}", filePath);
         }

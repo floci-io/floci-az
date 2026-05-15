@@ -22,7 +22,6 @@ import java.util.Locale;
  *   5. {@code /proc/self/mountinfo} containing overlay paths (cgroup v2 / Podman)
  *   6. Windows: {@code CONTAINER} or {@code DOTNET_RUNNING_IN_CONTAINER} env var
  *
- * NOTE: Kept identical to aws-local's ContainerDetector — both will move to a shared lib.
  */
 @ApplicationScoped
 public class ContainerDetector {
@@ -31,8 +30,12 @@ public class ContainerDetector {
 
     private static final String DOCKER_ENV_MARKER = "/.dockerenv";
     private static final String PODMAN_ENV_MARKER = "/run/.containerenv";
-    private static final String CGROUP_V1_FILE    = "/proc/1/cgroup";
-    private static final String MOUNTINFO_FILE    = "/proc/self/mountinfo";
+    private static final String CGROUP_V1_FILE = "/proc/1/cgroup";
+    private static final String MOUNTINFO_FILE = "/proc/self/mountinfo";
+    private static final String[] CGROUP_MARKERS = {"docker", "kubepods", "libpod", "moby",
+            "containerd", "cri-containerd"};
+    private static final String[] MOUNTINFO_MARKERS = {"/docker/", "/libpod-", "/moby/",
+            "/containerd/", "/cri-containerd-"};
 
     private volatile Boolean cachedResult;
 
@@ -85,24 +88,47 @@ public class ContainerDetector {
     }
 
     private boolean hasCgroupV1Markers() {
-        return fileContainsAny(CGROUP_V1_FILE,
-                "docker", "kubepods", "libpod", "moby", "containerd", "cri-containerd");
+        return fileContainsAny(CGROUP_V1_FILE, CGROUP_MARKERS);
     }
 
     private boolean hasMountInfoMarkers() {
-        return fileContainsAny(MOUNTINFO_FILE,
-                "/docker/", "/libpod-", "/moby/", "/containerd/", "/cri-containerd-");
+        if (!fileExists(MOUNTINFO_FILE)) {
+            return false;
+        }
+        try {
+            String content = readFileContent(Path.of(MOUNTINFO_FILE));
+            return content.lines()
+                    .anyMatch(line -> isRootMountInfoLine(line) && containsAny(line, MOUNTINFO_MARKERS));
+        } catch (IOException e) {
+            LOG.debugv("Could not read {0}: {1}", MOUNTINFO_FILE, e.getMessage());
+        }
+        return false;
     }
 
     private boolean fileContainsAny(String filePath, String... markers) {
-        if (!fileExists(filePath)) return false;
+        if (!fileExists(filePath)) {
+            return false;
+        }
         try {
-            String lower = readFileContent(Path.of(filePath)).toLowerCase(Locale.ROOT);
-            for (String marker : markers) {
-                if (lower.contains(marker.toLowerCase(Locale.ROOT))) return true;
-            }
+            String content = readFileContent(Path.of(filePath));
+            return containsAny(content, markers);
         } catch (IOException e) {
             LOG.debugv("Could not read {0}: {1}", filePath, e.getMessage());
+        }
+        return false;
+    }
+
+    private boolean isRootMountInfoLine(String line) {
+        String[] fields = line.split(" ");
+        return fields.length > 4 && "/".equals(fields[4]);
+    }
+
+    private boolean containsAny(String content, String... markers) {
+        String lower = content.toLowerCase(Locale.ROOT);
+        for (String marker : markers) {
+            if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
         }
         return false;
     }

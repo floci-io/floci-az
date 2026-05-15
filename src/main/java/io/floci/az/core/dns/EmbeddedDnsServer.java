@@ -2,6 +2,7 @@ package io.floci.az.core.dns;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerDetector;
+import io.quarkus.runtime.Startup;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.datagram.DatagramSocket;
@@ -34,18 +35,25 @@ import java.util.Optional;
  * Only starts when floci-az detects it is running inside Docker. No-op on the host.
  */
 @ApplicationScoped
+@Startup
 public class EmbeddedDnsServer {
 
     private static final Logger LOG = Logger.getLogger(EmbeddedDnsServer.class);
     private static final int DNS_PORT = 53;
     private static final int TTL = 60;
     private static final String FALLBACK_UPSTREAM = "127.0.0.11";
+    public static final String DEFAULT_SUFFIX = "localhost.floci.io";
+
+    // Well-known wildcard DNS domain that always resolves to floci-az's IP.
+    // Covers "localhost.floci.io" itself and "*.localhost.floci.io".
+    static final List<String> BUILTIN_SUFFIXES = List.of(DEFAULT_SUFFIX);
 
     private volatile String serverIp;
     private final List<String> suffixes = new ArrayList<>();
     private String upstreamDns;
 
     EmbeddedDnsServer(List<String> suffixes) {
+        this.suffixes.addAll(BUILTIN_SUFFIXES);
         this.suffixes.addAll(suffixes);
     }
 
@@ -58,6 +66,7 @@ public class EmbeddedDnsServer {
             String myIp = InetAddress.getLocalHost().getHostAddress();
             upstreamDns = readUpstreamDns();
 
+            suffixes.addAll(BUILTIN_SUFFIXES);
             config.hostname().ifPresent(suffixes::add);
             config.dns().extraSuffixes().ifPresent(suffixes::addAll);
 

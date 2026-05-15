@@ -11,6 +11,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -19,20 +20,25 @@ import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
- * WAL storage: in-memory reads with append-only binary WAL for durability.
- * Periodic compaction writes a full JSON snapshot and truncates the WAL.
+ * Write-Ahead Log storage: in-memory reads with append-only binary WAL for durability.
+ * Periodic compaction writes a full snapshot and truncates the WAL.
+ * On startup: load snapshot, then replay WAL entries after snapshot.
  *
  * Binary WAL entry format:
- *   PUT:    [0x01] [4-byte key len] [key CBOR] [4-byte value len] [value CBOR]
- *   DELETE: [0x02] [4-byte key len] [key CBOR]
+ *   PUT:    [0x01] [4-byte key length] [key bytes] [4-byte value length] [value bytes]
+ *   DELETE: [0x02] [4-byte key length] [key bytes]
+ *
+ * Key and value bytes are serialized via Jackson CBOR (compact binary format).
+ * Snapshot files use indented JSON for debuggability.
  */
 public class WalStorage<K, V> implements StorageBackend<K, V> {
 
     private static final Logger LOG = Logger.getLogger(WalStorage.class);
 
-    static final byte OP_PUT    = 0x01;
+    static final byte OP_PUT = 0x01;
     static final byte OP_DELETE = 0x02;
 
     private final ConcurrentHashMap<K, V> store = new ConcurrentHashMap<>();
@@ -40,16 +46,16 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     private final Path walPath;
     private final ObjectMapper snapshotMapper;
     private final ObjectMapper walMapper;
-    private final TypeReference<Map<K, V>> typeRef;
+    private final TypeReference<Map<K, V>> typeReference;
     private final ReentrantReadWriteLock compactionLock = new ReentrantReadWriteLock();
     private final ScheduledExecutorService scheduler;
     private volatile DataOutputStream walWriter;
 
-    public WalStorage(Path snapshotPath, Path walPath, TypeReference<Map<K, V>> typeRef,
+    public WalStorage(Path snapshotPath, Path walPath, TypeReference<Map<K, V>> typeReference,
                       long compactionIntervalMs) {
         this.snapshotPath = snapshotPath;
         this.walPath = walPath;
-        this.typeRef = typeRef;
+        this.typeReference = typeReference;
 
         this.snapshotMapper = new ObjectMapper();
         this.snapshotMapper.registerModule(new JavaTimeModule());
@@ -101,7 +107,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         return store.entrySet().stream()
                 .filter(e -> keyFilter.test(e.getKey()))
                 .map(Map.Entry::getValue)
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     @Override
@@ -118,7 +124,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     public void load() {
         if (Files.exists(snapshotPath)) {
             try {
-                Map<K, V> data = snapshotMapper.readValue(snapshotPath.toFile(), typeRef);
+                Map<K, V> data = snapshotMapper.readValue(snapshotPath.toFile(), typeReference);
                 store.clear();
                 store.putAll(data);
                 LOG.infov("Loaded {0} entries from snapshot {1}", store.size(), snapshotPath);
@@ -154,7 +160,9 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     public void shutdown() {
         scheduler.shutdown();
         try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) scheduler.shutdownNow();
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
         } catch (InterruptedException e) {
             scheduler.shutdownNow();
             Thread.currentThread().interrupt();
@@ -235,7 +243,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
                     if (valueBytes.length < valueLen) break;
                     K key = (K) walMapper.readValue(keyBytes, Object.class);
                     V value = walMapper.readValue(valueBytes,
-                            walMapper.constructType(typeRef.getType()).getContentType());
+                            walMapper.constructType(typeReference.getType()).getContentType());
                     store.put(key, value);
                     replayed++;
                 } else if (op == OP_DELETE) {

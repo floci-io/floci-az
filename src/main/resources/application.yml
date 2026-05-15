@@ -19,8 +19,8 @@ floci-az:
     # Global default — applies to every service unless overridden below.
     # Supported modes: memory, persistent, hybrid, wal
     mode: memory
-    path: ${user.home}/.floci-az/data
-    host-persistent-path: ${user.home}/.floci-az/data
+    persistent-path: ./data
+    host-persistent-path: ./data
     wal:
       compaction-interval-ms: 30000
     hybrid:
@@ -59,7 +59,7 @@ floci-az:
       enabled: true
       code-path: ${user.home}/.floci-az/functions
       ephemeral: false
-      idle-timeout-ms: 300000
+      container-idle-timeout-seconds: 300
 
   auth:
     # dev: accept any credentials without signature validation
