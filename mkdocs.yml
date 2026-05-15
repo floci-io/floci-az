@@ -72,3 +72,4 @@ nav:
     - Azure Functions: services/functions.md
     - App Configuration: services/app-config.md
   - Contributing: contributing.md
+  - Changelog: changelog.md
