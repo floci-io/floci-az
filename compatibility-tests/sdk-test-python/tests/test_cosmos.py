@@ -176,6 +176,38 @@ def test_query_count(cosmos_client):
     cosmos_client.delete_database(db_id)
 
 
+def test_pagination_by_page(cosmos_client):
+    """x-ms-max-item-count is respected; x-ms-continuation lets SDK iterate pages."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    total = 10
+    for i in range(total):
+        container.create_item({"id": f"item-{i:02d}", "category": "page-test", "rank": i})
+
+    PAGE = 3
+    all_ids = []
+    page_count = 0
+    pager = container.query_items(
+        "SELECT * FROM c",
+        enable_cross_partition_query=True,
+        max_item_count=PAGE,
+    ).by_page()
+
+    for page in pager:
+        items = list(page)
+        assert len(items) <= PAGE, f"Page {page_count} has {len(items)} items, expected <= {PAGE}"
+        all_ids.extend(item["id"] for item in items)
+        page_count += 1
+
+    assert page_count >= 2, "Expected at least 2 pages"
+    assert len(all_ids) == total
+    assert set(all_ids) == {f"item-{i:02d}" for i in range(total)}
+
+    cosmos_client.delete_database(db_id)
+
+
 def test_database_cascade_delete(cosmos_client):
     db_id = db_name()
     db = cosmos_client.create_database(db_id)

@@ -543,7 +543,27 @@ public class CosmosHandler implements AzureServiceHandler {
                 .stream().map(this::parseData).collect(Collectors.toList());
 
         CosmosQueryEngine.QueryResult result = queryEngine.execute(sql, params, allDocs);
-        return queryResponse(result, collRid(req.accountName(), dbId, collId));
+
+        // ---- Pagination ----
+        // x-ms-max-item-count: requested page size (-1 = unlimited)
+        // x-ms-continuation : opaque token encoding the next-page skip offset
+        int maxItemCount = parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count"));
+        int skip         = decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"));
+
+        List<Object> allItems  = result.items();
+        List<Object> pageItems = skip > 0 ? allItems.subList(Math.min(skip, allItems.size()), allItems.size())
+                                          : new ArrayList<>(allItems);
+
+        String nextToken = null;
+        if (maxItemCount > 0 && pageItems.size() > maxItemCount) {
+            nextToken  = encodeContinuationToken(skip + maxItemCount);
+            pageItems  = pageItems.subList(0, maxItemCount);
+        }
+
+        return queryResponse(
+                new CosmosQueryEngine.QueryResult(pageItems, pageItems.size()),
+                collRid(req.accountName(), dbId, collId),
+                nextToken);
     }
 
     // -----------------------------------------------------------------------
@@ -658,19 +678,73 @@ public class CosmosHandler implements AzureServiceHandler {
     }
 
     private Response queryResponse(CosmosQueryEngine.QueryResult result, String rid) {
+        return queryResponse(result, rid, null);
+    }
+
+    /**
+     * Builds a Cosmos DB query response, optionally including a continuation token.
+     *
+     * @param continuationToken base64-encoded next-page offset, or {@code null} when this
+     *                          is the last (or only) page.  The SDK passes the token back
+     *                          verbatim in {@code x-ms-continuation} on the next request.
+     */
+    private Response queryResponse(CosmosQueryEngine.QueryResult result, String rid,
+                                   String continuationToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("_rid",      rid);
         body.put("_count",    result.count());
         body.put("Documents", result.items());
         try {
-            return Response.ok(MAPPER.writeValueAsString(body), "application/json")
+            Response.ResponseBuilder rb = Response.ok(MAPPER.writeValueAsString(body), "application/json")
                     .header("x-ms-request-charge", "1")
                     .header("x-ms-item-count",     String.valueOf(result.count()))
                     .header("x-ms-activity-id",    UUID.randomUUID().toString())
-                    .header("x-ms-version",        "2018-12-31")
-                    .build();
+                    .header("x-ms-version",        "2018-12-31");
+            if (continuationToken != null) {
+                rb = rb.header("x-ms-continuation", continuationToken);
+            }
+            return rb.build();
         } catch (JsonProcessingException e) {
             return Response.serverError().build();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pagination helpers
+    // -----------------------------------------------------------------------
+
+    /** Parses {@code x-ms-max-item-count} header; returns -1 if absent or invalid. */
+    private int parseMaxItemCount(String header) {
+        if (header == null || header.isBlank()) return -1;
+        try { return Integer.parseInt(header.trim()); }
+        catch (NumberFormatException e) { return -1; }
+    }
+
+    /**
+     * Decodes our opaque continuation token back to a skip offset.
+     * Token format: base64( {"skip": N} ).
+     */
+    private int decodeContinuationToken(String token) {
+        if (token == null || token.isBlank()) return 0;
+        try {
+            String json = new String(Base64.getDecoder().decode(token), StandardCharsets.UTF_8);
+            Map<?, ?> map = MAPPER.readValue(json, Map.class);
+            return ((Number) map.get("skip")).intValue();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Encodes a skip offset into an opaque continuation token.
+     * Token format: base64( {"skip": N} ).
+     */
+    private String encodeContinuationToken(int skip) {
+        try {
+            String json = MAPPER.writeValueAsString(Map.of("skip", skip));
+            return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            return null;
         }
     }
 

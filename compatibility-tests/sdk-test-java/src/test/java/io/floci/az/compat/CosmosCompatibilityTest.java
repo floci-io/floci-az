@@ -6,6 +6,8 @@ import com.azure.cosmos.CosmosDatabase;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.*;
 import com.azure.cosmos.util.CosmosPagedIterable;
+import com.azure.core.util.paging.ContinuablePage;
+import com.azure.cosmos.models.FeedResponse;
 import org.junit.jupiter.api.*;
 
 import java.util.*;
@@ -274,6 +276,46 @@ class CosmosCompatibilityTest {
         List<String> after = client.readAllDatabases().stream()
             .map(CosmosDatabaseProperties::getId).toList();
         assertFalse(after.contains(id));
+    }
+
+    @Test
+    @DisplayName("pagination: x-ms-max-item-count splits results into pages")
+    @SuppressWarnings("unchecked")
+    void pagination() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        int total = 10;
+        for (int i = 0; i < total; i++) {
+            container.createItem(doc(String.format("item-%02d", i), "page-test", "rank", i));
+        }
+
+        int pageSize = 3;
+        List<String> allIds = new ArrayList<>();
+        int pageCount = 0;
+
+        Iterable<FeedResponse<Map>> pages = container
+                .queryItems("SELECT * FROM c", new CosmosQueryRequestOptions(), Map.class)
+                .iterableByPage(pageSize);
+
+        for (FeedResponse<Map> page : pages) {
+            List<Map> items = page.getResults();
+            assertTrue(items.size() <= pageSize,
+                    "Page " + pageCount + " has " + items.size() + " items, expected <= " + pageSize);
+            items.forEach(item -> allIds.add((String) item.get("id")));
+            pageCount++;
+        }
+
+        assertTrue(pageCount >= 2, "Expected at least 2 pages, got " + pageCount);
+        assertEquals(total, allIds.size());
+        for (int i = 0; i < total; i++) {
+            assertTrue(allIds.contains(String.format("item-%02d", i)));
+        }
+
+        db.delete();
     }
 
     // --- Error cases ---

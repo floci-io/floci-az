@@ -225,6 +225,38 @@ test("database delete cascades to containers and documents", async () => {
   expect(after.map((d) => d.id)).not.toContain(id);
 });
 
+test("pagination: x-ms-max-item-count splits results into pages", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  const total = 10;
+  for (let i = 0; i < total; i++) {
+    await container.items.create({ id: `item-${String(i).padStart(2, "0")}`, category: "page-test", rank: i });
+  }
+
+  const PAGE = 3;
+  const allIds: string[] = [];
+  let pageCount = 0;
+  const iterator = container.items.query("SELECT * FROM c", { maxItemCount: PAGE });
+
+  while (iterator.hasMoreResults()) {
+    const page = await iterator.fetchNext();
+    expect(page.resources.length).toBeLessThanOrEqual(PAGE);
+    allIds.push(...page.resources.map((r: any) => r.id));
+    pageCount++;
+  }
+
+  expect(pageCount).toBeGreaterThanOrEqual(2);
+  expect(allIds).toHaveLength(total);
+  expect(new Set(allIds).size).toBe(total);
+
+  await database.delete();
+});
+
 // --- Error cases ---
 
 test("read missing document → 404", async () => {
