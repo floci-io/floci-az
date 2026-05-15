@@ -38,20 +38,24 @@ public final class EmulatorConfig {
         ACCOUNT, DEV_KEY, BASE, ACCOUNT);
 
     /**
-     * Builds a CosmosClient pointing at the floci-az emulator.
+     * Builds a CosmosClient pointing at the floci-az emulator over HTTPS (port 4578).
      *
-     * NOTE: The Azure Cosmos DB Java SDK (azure-cosmos) always enforces TLS in
-     * gateway mode — even when the endpoint URL is http://.  CosmosClientBuilder
-     * exposes neither addPolicy() nor httpClient(), so there is no supported way
-     * to bypass the internal Netty SSL handler without adding HTTPS to the emulator.
-     *
-     * floci-az currently runs on plain HTTP (port 4577).  Until TLS support is
-     * added, CosmosCompatibilityTest is @Disabled.
+     * The azure-cosmos Java SDK always enforces TLS in gateway mode, so the emulator
+     * must expose an HTTPS endpoint.  We disable certificate validation so the
+     * self-signed cert is accepted without importing it into a trust store.
      */
     static CosmosClient buildCosmosClient() {
-        String endpoint = BASE + "/" + ACCOUNT + "-cosmos";
+        // The Java Cosmos SDK (gateway mode) constructs request URLs from the
+        // scheme+host+port of the endpoint, ignoring the path component.
+        // floci-az normally uses path-based routing (/devstoreaccount1-cosmos/…),
+        // but that is incompatible with the Java SDK's URL-building logic.
+        //
+        // Instead we point the SDK at the bare HTTPS root (https://localhost:4578)
+        // and handle root-level Cosmos paths (/dbs, /colls, /) in the routing
+        // filter on the server side, mapping them to the default account.
+        String httpsBase = BASE.replace("http://", "https://").replace(":4577", ":4578");
         return new CosmosClientBuilder()
-                .endpoint(endpoint)
+                .endpoint(httpsBase)   // e.g. https://localhost:4578
                 .key(COSMOS_KEY)
                 .gatewayMode()
                 .endpointDiscoveryEnabled(false)

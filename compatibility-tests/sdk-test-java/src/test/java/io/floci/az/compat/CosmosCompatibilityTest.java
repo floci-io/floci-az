@@ -7,7 +7,6 @@ import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.*;
 import com.azure.cosmos.util.CosmosPagedIterable;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.Disabled;
 
 import java.util.*;
 
@@ -16,16 +15,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Cosmos DB SDK compatibility tests.
  *
- * <p>DISABLED: The azure-cosmos Java SDK enforces TLS in gateway mode regardless
- * of the endpoint URL scheme.  CosmosClientBuilder does not expose httpClient()
- * or addPolicy(), so there is no supported way to bypass the internal Netty SSL
- * handler.  floci-az currently serves plain HTTP; these tests can be enabled
- * once TLS support is added to the emulator.</p>
- *
- * <p>Protocol coverage for Cosmos DB is provided by the Python and Node.js suites,
- * which both pass against the HTTP endpoint.</p>
+ * <p>The azure-cosmos Java SDK enforces TLS in gateway mode regardless of the
+ * endpoint URL scheme.  floci-az exposes HTTPS on port 4578 (with a self-signed
+ * certificate); certificate validation is disabled via the SDK system property
+ * {@code COSMOS.EMULATOR_SERVER_CERTIFICATE_VALIDATION_DISABLED=true}.</p>
  */
-@Disabled("azure-cosmos Java SDK requires HTTPS; floci-az runs HTTP only — enable after TLS support is added")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Cosmos DB Compatibility")
 class CosmosCompatibilityTest {

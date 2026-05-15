@@ -11,8 +11,14 @@ public interface EmulatorConfig {
     @WithDefault("4577")
     int port();
 
+    @WithDefault("4578")
+    int sslPort();
+
     @WithDefault("http://localhost:4577")
     String baseUrl();
+
+    @WithDefault("https://localhost:4578")
+    String baseUrlHttps();
 
     /**
      * When set, overrides the hostname in base-url for URLs returned in API responses.

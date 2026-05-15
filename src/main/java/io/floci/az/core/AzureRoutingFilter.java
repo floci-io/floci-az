@@ -35,6 +35,22 @@ public class AzureRoutingFilter {
     @Context
     HttpHeaders httpHeaders;
 
+    /**
+     * Cosmos DB top-level path segments that are used by the Java SDK when it
+     * constructs URLs from just the {@code scheme://host:port} part of the
+     * configured endpoint (discarding the path component).
+     *
+     * <p>When the Java Cosmos SDK receives an endpoint such as
+     * {@code https://localhost:4578} it sends requests like {@code GET /dbs} or
+     * {@code POST /dbs/mydb/colls/items/docs} rather than the path-prefixed
+     * form {@code /devstoreaccount1-cosmos/dbs} that the Python and Node SDKs
+     * produce.  We intercept these root-level Cosmos paths here and re-route
+     * them to the Cosmos handler with the default account name.</p>
+     */
+    private static final java.util.Set<String> COSMOS_ROOT_SEGMENTS = java.util.Set.of(
+        "dbs", "colls", "docs", "pkranges", "offers", "sprocs", "triggers", "udfs"
+    );
+
     @ServerRequestFilter(preMatching = true)
     public Uni<Response> filter(ContainerRequestContext requestContext) {
         return Uni.createFrom().item(() -> {
@@ -50,15 +66,48 @@ public class AzureRoutingFilter {
             }
 
             LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
-            
+
             // Identity bypass
             if (path.contains("oauth2/v2.0/token")) {
                 return null;
             }
 
             String[] parts = path.split("/", 2);
+
+            // ---------------------------------------------------------------
+            // Java Cosmos SDK compatibility: the SDK ignores the path component
+            // of the configured endpoint and sends requests to the server root.
+            // Route empty paths (DatabaseAccount GET) and known Cosmos segments
+            // (dbs, colls, docs, …) to the Cosmos handler using the default
+            // account so the Java SDK can operate without path-based routing.
+            // ---------------------------------------------------------------
+            String firstSegment = (parts.length > 0) ? parts[0] : "";
+            if (firstSegment.isEmpty() || COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
+                String defaultAccount = "devstoreaccount1";
+                String resourcePath   = path; // e.g. "" | "dbs" | "dbs/mydb/colls/items"
+                LOGGER.infof("Java-SDK cosmos root route: %s %s → account=%s resourcePath=%s",
+                    requestContext.getMethod(), path, defaultAccount, resourcePath);
+
+                Map<String, String> queryParams = new HashMap<>();
+                requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+                AzureRequest azureRequest = new AzureRequest(
+                    requestContext.getMethod(), defaultAccount, "cosmos",
+                    resourcePath, httpHeaders, requestContext.getEntityStream(),
+                    queryParams, null);
+                AuthContext authContext = authPipeline.resolve(azureRequest);
+                azureRequest = new AzureRequest(
+                    requestContext.getMethod(), defaultAccount, "cosmos",
+                    resourcePath, httpHeaders, requestContext.getEntityStream(),
+                    queryParams, authContext);
+                Optional<AzureServiceHandler> handler = serviceRegistry.resolve("cosmos");
+                if (handler.isPresent()) {
+                    LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
+                    return handler.get().handle(azureRequest);
+                }
+            }
+
             if (parts.length < 1 || parts[0].isEmpty()) {
-                return null; 
+                return null;
             }
 
             String accountName = parts[0];

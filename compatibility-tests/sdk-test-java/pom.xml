@@ -70,6 +70,23 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    <systemPropertyVariables>
+                        <!--
+                          Force Netty to use the JDK SSL provider instead of the native OpenSSL
+                          engine (io.netty.tcnative).  The native engine bypasses javax.net.ssl.*
+                          system properties; the JDK provider respects them.
+                        -->
+                        <io.netty.handler.ssl.noOpenSsl>true</io.netty.handler.ssl.noOpenSsl>
+                        <!--
+                          Point the JDK trust store at the emulator's self-signed P12 so that
+                          the Cosmos SDK (via Netty JDK SSL) accepts the HTTPS certificate.
+                          The path navigates from this module's basedir up to the main project
+                          resources where the cert is kept.
+                        -->
+                        <javax.net.ssl.trustStore>${project.basedir}/../../src/main/resources/certs/floci-az.p12</javax.net.ssl.trustStore>
+                        <javax.net.ssl.trustStorePassword>floci-az</javax.net.ssl.trustStorePassword>
+                        <javax.net.ssl.trustStoreType>PKCS12</javax.net.ssl.trustStoreType>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

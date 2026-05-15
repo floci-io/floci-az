@@ -5,7 +5,14 @@ quarkus:
       format: "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] %s%e%n"
   http:
     port: ${floci-az.port}
+    ssl-port: ${floci-az.ssl-port}
+    insecure-requests: enabled   # keep plain HTTP on 4577 — nothing changes for existing clients
     host: 0.0.0.0
+    ssl:
+      certificate:
+        key-store-file: certs/floci-az.p12
+        key-store-password: floci-az
+        key-store-file-type: PKCS12
   native:
     additional-build-args: >-
       --initialize-at-run-time=org.apache.hc.client5.http.impl.auth.NTLMEngineImpl,
@@ -14,7 +21,9 @@ quarkus:
 
 floci-az:
   port: 4577
+  ssl-port: 4578
   base-url: http://localhost:4577
+  base-url-https: https://localhost:4578
   storage:
     # Global default — applies to every service unless overridden below.
     # Supported modes: memory, persistent, hybrid, wal
