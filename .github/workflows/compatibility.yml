@@ -8,8 +8,7 @@ on:
       - '.mvn/**'
       - 'mvnw'
       - 'mvnw.cmd'
-      - 'Dockerfile'
-      - 'Dockerfile.jvm-package'
+      - 'docker/Dockerfile.jvm-package'
       - 'docker-compose.yml'
       - 'compatibility-tests/**'
       - '.github/workflows/compatibility.yml'
@@ -44,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.jvm-package
+          file: docker/Dockerfile.jvm-package
           tags: floci-az:test
           outputs: type=docker,dest=/tmp/floci-az-image.tar
           cache-from: type=gha,scope=floci-az
@@ -89,7 +88,6 @@ jobs:
       - name: Start floci-az
         run: |
           docker run -d --name floci-az --network compat-net \
-            -u root \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -p 4577:4577 \
             floci-az:test

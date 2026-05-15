@@ -43,12 +43,20 @@ public interface EmulatorConfig {
         @WithDefault("memory")
         String mode();
 
-        @WithDefault("${user.home}/.floci-az/data")
-        String path();
+        @WithDefault("./data")
+        String persistentPath();
 
         /** The path on the host machine where data is stored. Useful for Docker-in-Docker. */
-        @WithDefault("${floci-az.storage.path}")
+        @WithDefault("${floci-az.storage.persistent-path}")
         String hostPersistentPath();
+
+        /**
+         * When {@code true}, named volumes are removed immediately after a child container stops
+         * on resource delete. In {@code memory} storage mode volumes are always removed regardless
+         * of this flag. Defaults to {@code false} to match real Azure behaviour (data survives delete).
+         */
+        @WithDefault("false")
+        boolean pruneVolumesOnDelete();
 
         WalConfig wal();
 
@@ -129,9 +137,12 @@ public interface EmulatorConfig {
         @WithDefault("false")
         boolean ephemeral();
 
-        /** Evict warm containers idle longer than this (ms). */
-        @WithDefault("300000")
-        long idleTimeoutMs();
+        /** Evict warm containers idle longer than this (seconds). 0 disables eviction. */
+        @WithDefault("300")
+        int containerIdleTimeoutSeconds();
+
+        /** Overrides the hostname that function containers use to reach floci-az. */
+        Optional<String> dockerHostOverride();
     }
 
     /**

@@ -2,7 +2,7 @@ services:
   floci-az:
     build:
       context: .
-      dockerfile: Dockerfile.native
+      dockerfile: docker/Dockerfile
     ports:
       - "4577:4577"
     volumes:
@@ -10,13 +10,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     tty: true
     environment:
-      FLOCI_AZ_STORAGE_PATH: /app/data
       FLOCI_AZ_STORAGE_MODE: memory
-    healthcheck:
-      test: ["CMD", "bash", "-c", "echo -e 'GET /_floci/health HTTP/1.0\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/4577"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
     networks:
       floci_az_default:
         aliases:
