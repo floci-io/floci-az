@@ -74,6 +74,9 @@ public class AzureRoutingFilter {
             } else if (accountName.endsWith("-functions")) {
                 serviceType = "functions";
                 accountName = accountName.substring(0, accountName.length() - 10);
+            } else if (accountName.endsWith("-appconfig")) {
+                serviceType = "appconfig";
+                accountName = accountName.substring(0, accountName.length() - 10);
             } else {
                 serviceType = resolveServiceType(requestContext, resourcePath);
             }

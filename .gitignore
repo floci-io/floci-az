@@ -29,3 +29,5 @@ test-results.xml
 
 *.log
 
+# MkDocs build output
+site/

@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table) and Azure Functions.
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, and App Configuration.
 Default Port: 4577. 
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 -->
@@ -19,7 +19,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage and Functions. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
+  A free, open-source local Azure emulator — Storage, Functions, and App Configuration. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
 ---
@@ -34,17 +34,18 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 
 ## 🚀 Why floci-az?
 
-| Feature | floci-az | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
-|---|---|---|---|
-| Blob Storage | ✅ | ✅ | ❌ |
-| Queue Storage | ✅ | ✅ | ❌ |
-| Table Storage | ✅ | ✅ | ❌ |
-| Azure Functions | ✅ | ❌ | ✅ |
-| Startup time | **<100ms** | Moderate | Fast |
-| Native binary | ✅ | ❌ | ✅ |
-| Unified port | ✅ (4577) | ❌ | ❌ |
-| Storage modes | ✅ (WAL/Hybrid) | ❌ | ❌ |
-| License | **MIT** | MIT | MIT |
+| Feature | floci-az                 | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
+|---|--------------------------|---|---|
+| Blob Storage | ✅                        | ✅ | ❌ |
+| Queue Storage | ✅                        | ✅ | ❌ |
+| Table Storage | ✅                        | ✅ | ❌ |
+| Azure Functions | ✅                        | ❌ | ✅ |
+| App Configuration | ✅                        | ❌ | ❌ |
+| Native binary | ✅                        | ❌ | ✅ |
+| Unified port | ✅ (4577)                 | ❌ | ❌ |
+| Storage modes | ✅ (persistent/WAL/Hybrid) | ❌ | ❌ |
+| Startup time | **<100ms** (native image) | Moderate | Fast |
+| License | **MIT**                  | MIT | MIT |
 
 ## 🔌 Connection Strings
 AI agents and SDKs should use these exact templates to avoid endpoint resolution errors.
@@ -68,13 +69,15 @@ flowchart LR
             B["Queue Storage\n/{account}-queue/"]
             C["Table Storage\n/{account}-table/"]
             D["Azure Functions\n/{account}-functions/"]
+            E["App Configuration\n/{account}-appconfig/"]
         end
 
         Router --> A
         Router --> B
         Router --> C
         Router --> D
-        A & B & C --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
+        Router --> E
+        A & B & C & E --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|"spawn / proxy"| Docker["🐳 Docker\n(function containers)"]
     end
 
@@ -89,6 +92,7 @@ flowchart LR
 | **Queue Storage** | `/{account}-queue/` | Create/delete queues, send/receive/peek/delete messages, visibility timeout |
 | **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
+| **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
 
 ## Persistence & Storage Modes
 
@@ -201,6 +205,7 @@ floci-az uses path-style routing:
 | Queue | `http://localhost:4577/{accountName}-queue` |
 | Table | `http://localhost:4577/{accountName}-table` |
 | Functions | `http://localhost:4577/{accountName}-functions` |
+| App Configuration | `http://localhost:4577/{accountName}-appconfig` |
 
 The standard development storage connection string works out of the box:
 
@@ -347,8 +352,9 @@ Supported runtimes: `node`, `python`, `java`, `dotnet`.
 | Module | Language | SDK | Tests |
 |---|---|---|---:|
 | `sdk-test-python` | Python 3 | azure-storage-blob / queue / data-tables | 17 |
-| `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + Functions management API | 32 |
+| `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API | 68 |
 | `sdk-test-node` | Node.js | @azure/storage-blob / storage-queue / data-tables | 16 |
+| `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1 | 36 |
 
 Run all compatibility tests against a running container:
 
@@ -356,13 +362,14 @@ Run all compatibility tests against a running container:
 make test-python
 make test-java-compat
 make test-node-compat
+make test-appconfig
 ```
 
 ## Image Tags
 
 | Tag | Description |
 |---|---|
-| `latest` | Native image — sub-second startup **(recommended)** |
+| `latest` | Native image — **<100ms** startup **(recommended)** |
 | `latest-jvm` | JVM image |
 | `x.y.z` / `x.y.z-jvm` | Pinned releases |
 | `edge` | Weekly build from main |
@@ -376,13 +383,14 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_PORT`                               | `4577` | Port exposed by the API |
 | `FLOCI_AZ_BASE_URL`                           | `http://localhost:4577` | Base URL for the emulator |
 | `FLOCI_AZ_STORAGE_MODE`                       | `memory` | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
-| `FLOCI_AZ_STORAGE_PATH`                       | `~/.floci-az/data` | Directory for persisted state |
+| `FLOCI_AZ_STORAGE_PATH`                       | `/app/data` | Directory for persisted state |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST`                 | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
 | `FLOCI_AZ_DOCKER_LOG_MAX_SIZE`                | `10m` | Max log size for function containers |
 | `FLOCI_AZ_SERVICES_BLOB_ENABLED`              | `true` | Enable or disable Blob Storage |
 | `FLOCI_AZ_SERVICES_QUEUE_ENABLED`             | `true` | Enable or disable Queue Storage |
 | `FLOCI_AZ_SERVICES_TABLE_ENABLED`             | `true` | Enable or disable Table Storage |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`         | `true` | Enable or disable Azure Functions |
+| `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED`        | `true` | Enable or disable App Configuration |
 
 ### Per-service storage override
 
@@ -424,6 +432,7 @@ services:
       AZURE_QUEUE_ENDPOINT: http://floci-az:4577/devstoreaccount1-queue
       AZURE_TABLE_ENDPOINT: http://floci-az:4577/devstoreaccount1-table
       AZURE_FUNCTIONS_ENDPOINT: http://floci-az:4577/devstoreaccount1-functions
+      AZURE_APPCONFIG_ENDPOINT: https://floci-az:4577/devstoreaccount1-appconfig  # https required by App Config SDK (use ForceHttp transport in your client)
     depends_on:
       floci-az:
         condition: service_healthy

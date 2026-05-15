@@ -70,4 +70,5 @@ nav:
     - Queue Storage: services/queue.md
     - Table Storage: services/table.md
     - Azure Functions: services/functions.md
+    - App Configuration: services/app-config.md
   - Contributing: contributing.md

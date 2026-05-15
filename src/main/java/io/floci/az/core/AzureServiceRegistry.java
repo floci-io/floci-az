@@ -28,8 +28,9 @@ public class AzureServiceRegistry {
             case "blob"      -> config.services().blob().enabled();
             case "queue"     -> config.services().queue().enabled();
             case "table"     -> config.services().table().enabled();
-            case "functions" -> config.services().functions().enabled();
-            default          -> true;
+            case "functions"  -> config.services().functions().enabled();
+            case "appconfig"  -> config.services().appConfig().enabled();
+            default           -> true;
         };
     }
 

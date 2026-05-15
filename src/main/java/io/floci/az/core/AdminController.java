@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.services.appconfig.AppConfigHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
@@ -15,6 +16,7 @@ import java.util.List;
 @Produces(MediaType.APPLICATION_JSON)
 public class AdminController {
 
+    @Inject AppConfigHandler         appConfigHandler;
     @Inject BlobServiceHandler       blobHandler;
     @Inject QueueServiceHandler      queueHandler;
     @Inject TableServiceHandler      tableHandler;
@@ -35,6 +37,7 @@ public class AdminController {
     @POST
     @Path("/reset")
     public Response reset() {
+        appConfigHandler.clearAll();
         blobHandler.clearAll();
         queueHandler.clearAll();
         tableHandler.clearAll();
