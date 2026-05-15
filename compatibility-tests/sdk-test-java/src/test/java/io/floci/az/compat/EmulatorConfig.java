@@ -4,6 +4,8 @@ import com.azure.core.http.HttpPipelineCallContext;
 import com.azure.core.http.HttpPipelineNextPolicy;
 import com.azure.core.http.HttpResponse;
 import com.azure.core.http.policy.HttpPipelinePolicy;
+import com.azure.cosmos.CosmosClient;
+import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import reactor.core.publisher.Mono;
@@ -20,6 +22,9 @@ public final class EmulatorConfig {
     private static final String BASE =
         System.getenv().getOrDefault("FLOCI_AZ_ENDPOINT", "http://localhost:4577");
 
+    static final String COSMOS_KEY =
+        "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
+
     static final String BLOB_CONN = String.format(
         "DefaultEndpointsProtocol=http;AccountName=%s;AccountKey=%s;BlobEndpoint=%s/%s;",
         ACCOUNT, DEV_KEY, BASE, ACCOUNT);
@@ -31,6 +36,27 @@ public final class EmulatorConfig {
     static final String TABLE_CONN = String.format(
         "DefaultEndpointsProtocol=http;AccountName=%s;AccountKey=%s;TableEndpoint=%s/%s-table;",
         ACCOUNT, DEV_KEY, BASE, ACCOUNT);
+
+    /**
+     * Builds a CosmosClient pointing at the floci-az emulator.
+     *
+     * NOTE: The Azure Cosmos DB Java SDK (azure-cosmos) always enforces TLS in
+     * gateway mode — even when the endpoint URL is http://.  CosmosClientBuilder
+     * exposes neither addPolicy() nor httpClient(), so there is no supported way
+     * to bypass the internal Netty SSL handler without adding HTTPS to the emulator.
+     *
+     * floci-az currently runs on plain HTTP (port 4577).  Until TLS support is
+     * added, CosmosCompatibilityTest is @Disabled.
+     */
+    static CosmosClient buildCosmosClient() {
+        String endpoint = BASE + "/" + ACCOUNT + "-cosmos";
+        return new CosmosClientBuilder()
+                .endpoint(endpoint)
+                .key(COSMOS_KEY)
+                .gatewayMode()
+                .endpointDiscoveryEnabled(false)
+                .buildClient();
+    }
 
     /**
      * Builds a ConfigurationClient pointing at the floci-az emulator.

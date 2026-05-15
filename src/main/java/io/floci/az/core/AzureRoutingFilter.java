@@ -77,6 +77,9 @@ public class AzureRoutingFilter {
             } else if (accountName.endsWith("-appconfig")) {
                 serviceType = "appconfig";
                 accountName = accountName.substring(0, accountName.length() - 10);
+            } else if (accountName.endsWith("-cosmos")) {
+                serviceType = "cosmos";
+                accountName = accountName.substring(0, accountName.length() - 7);
             } else {
                 serviceType = resolveServiceType(requestContext, resourcePath);
             }

@@ -70,6 +70,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig queue();
         ServiceStorageConfig table();
         ServiceStorageConfig appConfig();
+        ServiceStorageConfig cosmos();
     }
 
     interface ServiceStorageConfig {
@@ -96,6 +97,7 @@ public interface EmulatorConfig {
         TableServiceConfig     table();
         FunctionsConfig        functions();
         AppConfigServiceConfig appConfig();
+        CosmosServiceConfig    cosmos();
     }
 
     interface BlobServiceConfig {
@@ -129,6 +131,11 @@ public interface EmulatorConfig {
     }
 
     interface AppConfigServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CosmosServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

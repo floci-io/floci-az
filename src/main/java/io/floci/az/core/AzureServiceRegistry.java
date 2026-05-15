@@ -30,6 +30,7 @@ public class AzureServiceRegistry {
             case "table"     -> config.services().table().enabled();
             case "functions"  -> config.services().functions().enabled();
             case "appconfig"  -> config.services().appConfig().enabled();
+            case "cosmos"     -> config.services().cosmos().enabled();
             default           -> true;
         };
     }
