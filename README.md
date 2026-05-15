@@ -41,6 +41,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 | Table Storage | ✅                        | ✅ | ❌ |
 | Azure Functions | ✅                        | ❌ | ✅ |
 | App Configuration | ✅                        | ❌ | ❌ |
+| Cosmos DB (SQL API) | ✅                    | ❌ | ❌ |
 | Native binary | ✅                        | ❌ | ✅ |
 | Unified port | ✅ (4577)                 | ❌ | ❌ |
 | Storage modes | ✅ (persistent/WAL/Hybrid) | ❌ | ❌ |
@@ -93,6 +94,7 @@ flowchart LR
 | **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
 | **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
+| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | Databases, containers, documents CRUD; SQL queries with WHERE/ORDER BY/OFFSET/LIMIT |
 
 ## Persistence & Storage Modes
 
@@ -206,6 +208,7 @@ floci-az uses path-style routing:
 | Table | `http://localhost:4577/{accountName}-table` |
 | Functions | `http://localhost:4577/{accountName}-functions` |
 | App Configuration | `http://localhost:4577/{accountName}-appconfig` |
+| Cosmos DB | `http://localhost:4577/{accountName}-cosmos` |
 
 The standard development storage connection string works out of the box:
 
@@ -391,6 +394,7 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_SERVICES_TABLE_ENABLED`             | `true` | Enable or disable Table Storage |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`         | `true` | Enable or disable Azure Functions |
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED`        | `true` | Enable or disable App Configuration |
+| `FLOCI_AZ_SERVICES_COSMOS_ENABLED`            | `true` | Enable or disable Cosmos DB |
 
 ### Per-service storage override
 

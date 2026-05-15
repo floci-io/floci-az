@@ -37,6 +37,8 @@ floci-az:
         flush-interval-ms: 5000
       app-config:
         flush-interval-ms: 5000
+      cosmos:
+        flush-interval-ms: 5000
 
   dns:
     # When floci-az runs inside Docker, an embedded DNS server is started on port 53
@@ -63,6 +65,8 @@ floci-az:
       ephemeral: false
       container-idle-timeout-seconds: 300
     app-config:
+      enabled: true
+    cosmos:
       enabled: true
 
   auth:
