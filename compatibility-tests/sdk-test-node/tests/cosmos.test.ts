@@ -294,6 +294,36 @@ test("GROUP BY with COUNT(1) groups and aggregates correctly", async () => {
   await database.delete();
 });
 
+test("PATCH applies partial updates (add, set, replace, remove, incr)", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  await container.items.create({
+    id: "patch-1", category: "misc",
+    name: "Original", counter: 10, status: "draft", removable: true,
+  });
+
+  const { resource } = await container.item("patch-1", "misc").patch([
+    { op: "add",     path: "/newField", value: "added"  },
+    { op: "set",     path: "/name",     value: "Patched" },
+    { op: "replace", path: "/status",   value: "active"  },
+    { op: "remove",  path: "/removable"                  },
+    { op: "incr",    path: "/counter",  value: 5         },
+  ]);
+
+  expect(resource!.newField).toBe("added");
+  expect(resource!.name).toBe("Patched");
+  expect(resource!.status).toBe("active");
+  expect(resource!.removable).toBeUndefined();
+  expect(resource!.counter).toBe(15);
+
+  await database.delete();
+});
+
 test("pagination: x-ms-max-item-count splits results into pages", async () => {
   const id = dbName();
   const { database } = await client.databases.create({ id });

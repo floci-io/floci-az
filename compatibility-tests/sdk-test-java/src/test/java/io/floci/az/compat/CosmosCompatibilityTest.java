@@ -5,6 +5,7 @@ import com.azure.cosmos.CosmosContainer;
 import com.azure.cosmos.CosmosDatabase;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.*;
+import com.azure.cosmos.models.CosmosPatchOperations;
 import com.azure.cosmos.util.CosmosPagedIterable;
 import com.azure.core.util.paging.ContinuablePage;
 import com.azure.cosmos.models.FeedResponse;
@@ -356,6 +357,39 @@ class CosmosCompatibilityTest {
         Map<String, Integer> counts = new HashMap<>();
         results.forEach(r -> counts.put((String) r.get("category"), ((Number) r.get("count")).intValue()));
         assertEquals(Map.of("food", 3, "books", 2), counts);
+
+        db.delete();
+    }
+
+    @Test
+    @DisplayName("PATCH applies partial updates (add, set, replace, remove, incr)")
+    @SuppressWarnings("unchecked")
+    void patchDocument() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        container.createItem(doc("patch-1", "misc",
+                "name", "Original", "counter", 10, "status", "draft", "removable", true));
+
+        CosmosPatchOperations ops = CosmosPatchOperations.create()
+                .add("/newField", "added")
+                .set("/name", "Patched")
+                .replace("/status", "active")
+                .remove("/removable")
+                .increment("/counter", 5L);
+
+        Map<String, Object> patched = container
+                .patchItem("patch-1", new PartitionKey("misc"), ops, Map.class)
+                .getItem();
+
+        assertEquals("added",   patched.get("newField"));
+        assertEquals("Patched", patched.get("name"));
+        assertEquals("active",  patched.get("status"));
+        assertFalse(patched.containsKey("removable"));
+        assertEquals(15, ((Number) patched.get("counter")).intValue());
 
         db.delete();
     }

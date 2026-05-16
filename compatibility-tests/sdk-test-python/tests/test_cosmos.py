@@ -239,6 +239,39 @@ def test_group_by(cosmos_client):
     cosmos_client.delete_database(db_id)
 
 
+def test_patch_document(cosmos_client):
+    """PATCH applies partial updates (add, set, replace, remove, incr) to a document."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    container.create_item({
+        "id": "patch-1", "category": "misc",
+        "name": "Original", "counter": 10, "status": "draft", "removable": True
+    })
+
+    container.patch_item(
+        item="patch-1",
+        partition_key="misc",
+        patch_operations=[
+            {"op": "add",     "path": "/newField", "value": "added"},
+            {"op": "set",     "path": "/name",     "value": "Patched"},
+            {"op": "replace", "path": "/status",   "value": "active"},
+            {"op": "remove",  "path": "/removable"},
+            {"op": "incr",    "path": "/counter",  "value": 5},
+        ],
+    )
+
+    result = container.read_item("patch-1", partition_key="misc")
+    assert result["newField"] == "added"
+    assert result["name"] == "Patched"
+    assert result["status"] == "active"
+    assert "removable" not in result
+    assert result["counter"] == 15
+
+    cosmos_client.delete_database(db_id)
+
+
 def test_pagination_by_page(cosmos_client):
     """x-ms-max-item-count is respected; x-ms-continuation lets SDK iterate pages."""
     db_id = db_name()

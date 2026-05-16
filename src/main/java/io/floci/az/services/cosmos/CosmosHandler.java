@@ -129,6 +129,7 @@ public class CosmosHandler implements AzureServiceHandler {
         if (segs.length == 6) return switch (m) {
             case "GET"    -> getDocument(req, dbId, collId, docId);
             case "PUT"    -> replaceDocument(req, dbId, collId, docId);
+            case "PATCH"  -> patchDocument(req, dbId, collId, docId);
             case "DELETE" -> deleteDocument(req, dbId, collId, docId);
             default       -> notImplemented();
         };
@@ -517,6 +518,136 @@ public class CosmosHandler implements AzureServiceHandler {
         return cosmosResponse(body, Response.Status.OK, etag);
     }
 
+    /**
+     * PATCH /dbs/{db}/colls/{coll}/docs/{id}
+     *
+     * <p>Applies a list of partial-update operations to a stored document.
+     * The request body must be {@code {"operations": [...]}}, where each
+     * entry has at least {@code "op"} and {@code "path"} fields.</p>
+     *
+     * <p>Supported operations: {@code add}, {@code set}, {@code replace},
+     * {@code remove}, {@code incr}, {@code move}.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Response patchDocument(AzureRequest req, String dbId, String collId, String docId) {
+        StoredObject obj = findDoc(req, dbId, collId, docId);
+        if (obj == null) return notFound(docId);
+
+        Map<String, Object> doc = parseData(obj);
+
+        // The Cosmos DB PATCH body can arrive in two forms:
+        //   1. {"operations": [...]}  — Java / Python SDKs
+        //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
+        List<Map<String, Object>> operations = parsePatchBody(req);
+
+        for (Map<String, Object> op : operations) {
+            String opType = op.get("op") instanceof String s ? s.toLowerCase() : "";
+            String path   = op.get("path") instanceof String p ? p : null;
+            Object value  = op.get("value");
+
+            if (path == null) {
+                LOG.warnf("PATCH op '%s' missing 'path' — skipping", opType);
+                continue;
+            }
+
+            switch (opType) {
+                case "add", "set", "replace" -> patchSet(doc, path, value);
+                case "remove"                -> patchRemove(doc, path);
+                case "incr"                  -> patchIncr(doc, path, value);
+                case "move"                  -> {
+                    String from = op.get("from") instanceof String f ? f : null;
+                    if (from != null) {
+                        Object moved = patchGet(doc, from);
+                        patchRemove(doc, from);
+                        patchSet(doc, path, moved);
+                    }
+                }
+                default -> LOG.warnf("Unknown PATCH op '%s' — skipping", opType);
+            }
+        }
+
+        Instant now  = Instant.now();
+        String  etag = newEtag();
+        doc.put("_etag", quoted(etag));
+        doc.put("_ts",   now.getEpochSecond());
+
+        store.put(obj.key(), stored(obj.key(), doc, now, etag));
+        return cosmosResponse(doc, Response.Status.OK, etag,
+                "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    /** Set (or create) the field at {@code /a/b/…} to {@code value}. */
+    private void patchSet(Map<String, Object> doc, String path, Object value) {
+        String[] parts = patchPathParts(path);
+        Map<String, Object> target = patchNavigate(doc, parts, true);
+        if (target != null) target.put(parts[parts.length - 1], value);
+    }
+
+    /** Remove the field at {@code /a/b/…}. */
+    private void patchRemove(Map<String, Object> doc, String path) {
+        String[] parts = patchPathParts(path);
+        if (parts.length == 1) { doc.remove(parts[0]); return; }
+        Map<String, Object> target = patchNavigate(doc, parts, false);
+        if (target != null) target.remove(parts[parts.length - 1]);
+    }
+
+    /** Increment the numeric field at {@code path} by {@code delta}. */
+    private void patchIncr(Map<String, Object> doc, String path, Object delta) {
+        String[] parts = patchPathParts(path);
+        Map<String, Object> target = patchNavigate(doc, parts, true);
+        if (target == null) return;
+        String key     = parts[parts.length - 1];
+        double current = toDouble(target.getOrDefault(key, 0));
+        double result  = current + toDouble(delta);
+        target.put(key, isWholeNum(result) ? (long) result : result);
+    }
+
+    /** Read the field at {@code path} (used by {@code move}). */
+    private Object patchGet(Map<String, Object> doc, String path) {
+        String[] parts = patchPathParts(path);
+        Map<String, Object> target = patchNavigate(doc, parts, false);
+        return target != null ? target.get(parts[parts.length - 1]) : null;
+    }
+
+    /** Split a JSON-Pointer-style path ({@code /a/b/c}) into segments. */
+    private String[] patchPathParts(String path) {
+        if (path.startsWith("/")) path = path.substring(1);
+        return path.split("/");
+    }
+
+    /**
+     * Navigate to the parent map of the last segment.
+     *
+     * @param create when {@code true}, missing intermediate maps are created.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> patchNavigate(Map<String, Object> doc, String[] parts, boolean create) {
+        Map<String, Object> current = doc;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = current.get(parts[i]);
+            if (next instanceof Map<?, ?> m) {
+                current = (Map<String, Object>) m;
+            } else if (create) {
+                Map<String, Object> child = new LinkedHashMap<>();
+                current.put(parts[i], child);
+                current = child;
+            } else {
+                return null;
+            }
+        }
+        return current;
+    }
+
+    private double toDouble(Object val) {
+        if (val instanceof Number n) return n.doubleValue();
+        try { return Double.parseDouble(String.valueOf(val)); }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    private boolean isWholeNum(double d) {
+        return !Double.isInfinite(d) && !Double.isNaN(d) && d == Math.floor(d);
+    }
+
     private Response deleteDocument(AzureRequest req, String dbId, String collId, String docId) {
         StoredObject obj = findDoc(req, dbId, collId, docId);
         if (obj == null) return notFound(docId);
@@ -827,6 +958,33 @@ public class CosmosHandler implements AzureServiceHandler {
             return MAPPER.readValue(req.bodyStream(), new TypeReference<>() {});
         } catch (IOException e) {
             return new LinkedHashMap<>();
+        }
+    }
+
+    /**
+     * Parse the PATCH request body, accepting two forms:
+     * <ul>
+     *   <li>{@code {"operations": [...]}} — Java and Python SDKs</li>
+     *   <li>{@code [{op, path, value}, …]} — Node SDK (sends the array directly)</li>
+     * </ul>
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> parsePatchBody(AzureRequest req) {
+        try {
+            byte[] raw = req.bodyStream().readAllBytes();
+            String trimmed = new String(raw, StandardCharsets.UTF_8).trim();
+            if (trimmed.startsWith("[")) {
+                // Node SDK: raw operations array
+                return MAPPER.readValue(trimmed, new TypeReference<>() {});
+            } else {
+                // Java/Python SDK: {"operations": [...]}
+                Map<String, Object> body = MAPPER.readValue(trimmed, new TypeReference<>() {});
+                return body.get("operations") instanceof List<?> l
+                        ? (List<Map<String, Object>>) l : List.of();
+            }
+        } catch (IOException e) {
+            LOG.warnf("Failed to parse PATCH body: %s", e.getMessage());
+            return List.of();
         }
     }
 
