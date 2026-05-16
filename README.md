@@ -19,7 +19,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage, Functions, and App Configuration. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
+  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, and App Configuration. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
 ---
@@ -128,10 +128,10 @@ flowchart LR
 |---|---|---|
 | **Blob Storage** | `/{account}/` | Create/delete containers, upload/download/delete blobs, list blobs |
 | **Queue Storage** | `/{account}-queue/` | Create/delete queues, send/receive/peek/delete messages, visibility timeout |
-| **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
+| **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
 | **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
-| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | Databases, containers, documents CRUD; SQL queries with WHERE/ORDER BY/OFFSET/LIMIT |
+| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | Databases, containers, documents CRUD; SQL queries (WHERE / ORDER BY / OFFSET / LIMIT / aggregates / GROUP BY / DISTINCT / string functions); PATCH; transactional batch |
 
 ## Persistence & Storage Modes
 
@@ -385,15 +385,96 @@ GET|POST  $BASE/api/{app}/{fn}[?query...]                # invoke HTTP trigger
 
 Supported runtimes: `node`, `python`, `java`, `dotnet`.
 
+## Table Storage — Supported Operations
+
+All standard Azure Data Tables SDK operations are supported. Below is a full reference.
+
+### Entity operations
+
+| Operation | Method | Path |
+|---|---|---|
+| Insert entity | `POST` | `/{account}-table/{Table}` |
+| Get entity | `GET` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Replace entity (PUT) | `PUT` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Merge entity (PATCH) | `MERGE` / `PATCH` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Delete entity | `DELETE` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| List / query entities | `GET` | `/{account}-table/{Table}` |
+| Entity Group Transaction | `POST` | `/{account}-table/$batch` |
+
+### OData query parameters
+
+| Parameter | Description | Example |
+|---|---|---|
+| `$filter` | Server-side filter expression | `PartitionKey eq 'p1' and Score gt 10` |
+| `$select` | Project only the specified fields | `$select=Name,Score` |
+| `$top` | Maximum entities to return per page (≤ 1000) | `$top=50` |
+| `NextPartitionKey` / `NextRowKey` | Resume from a continuation token | Set automatically by SDKs |
+
+**Supported `$filter` operators:** `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`
+
+**Supported `$filter` functions:** `startswith(prop, 'val')`, `endswith(prop, 'val')`, `substringof('val', prop)`
+
+**Supported value types in filters:** string literals, integers, doubles, booleans, `null`, `datetime'...'`, `guid'...'`
+
+**Typed property annotations** (`Edm.Int64`, `Edm.Int32`, `Edm.Double`, `Edm.DateTime`, `Edm.Guid`, `Edm.Boolean`) are stored and returned transparently and are used for correct type coercion in filter comparisons.
+
+### ETag / optimistic concurrency
+
+`If-Match` is honoured on `PUT`, `MERGE`, `PATCH`, and `DELETE`:
+
+- `If-Match: *` — succeed only if the entity exists
+- `If-Match: "etag-value"` — succeed only if the stored ETag matches; returns **412 Precondition Failed** otherwise
+
+### `Prefer` header on insert
+
+| Header value | Response |
+|---|---|
+| `Prefer: return-no-content` | `204 No Content` + `ETag` header |
+| `Prefer: return-content` or absent | `201 Created` + entity body + `ETag` header |
+
+### Entity Group Transactions (`$batch`)
+
+Atomic execution of multiple operations against a single partition key. The request uses the standard Azure `multipart/mixed` format; the emulator executes all operations and rolls back on any failure.
+
+```python
+# Python
+table.submit_transaction([
+    ("create",  {"PartitionKey": "p1", "RowKey": "r1", "value": "hello"}),
+    ("upsert",  {"PartitionKey": "p1", "RowKey": "r2", "value": "world"}),
+    ("delete",  {"PartitionKey": "p1", "RowKey": "r3"}),
+])
+```
+
+```typescript
+// Node.js / TypeScript
+await table.submitTransaction([
+  ["create", { partitionKey: "p1", rowKey: "r1", value: "hello" }],
+  ["upsert", { partitionKey: "p1", rowKey: "r2", value: "world" }],
+  ["delete", { partitionKey: "p1", rowKey: "r3" }],
+]);
+```
+
+```java
+// Java
+table.submitTransaction(List.of(
+    new TableTransactionAction(TableTransactionActionType.CREATE,
+        new TableEntity("p1", "r1").addProperty("value", "hello")),
+    new TableTransactionAction(TableTransactionActionType.UPSERT_REPLACE,
+        new TableEntity("p1", "r2").addProperty("value", "world")),
+    new TableTransactionAction(TableTransactionActionType.DELETE,
+        new TableEntity("p1", "r3"))
+));
+```
+
 ## Compatibility Testing
 
 > For full validation against real Azure SDK workflows, see the [compatibility-tests](./compatibility-tests/) directory.
 
 | Module | Language | SDK | Tests |
 |---|---|---|---:|
-| `sdk-test-python` | Python 3 | azure-storage-blob / queue / data-tables | 17 |
-| `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API | 68 |
-| `sdk-test-node` | Node.js | @azure/storage-blob / storage-queue / data-tables | 16 |
+| `sdk-test-python` | Python 3 | azure-storage-blob / queue / data-tables / cosmos | 42 |
+| `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API | 92 |
+| `sdk-test-node` | Node.js | @azure/storage-blob / storage-queue / data-tables / cosmos | 41 |
 | `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1 | 36 |
 
 Run all compatibility tests against a running container:
