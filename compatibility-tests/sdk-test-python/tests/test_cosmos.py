@@ -324,6 +324,47 @@ def test_patch_document(cosmos_client):
     cosmos_client.delete_database(db_id)
 
 
+def test_transactional_batch(cosmos_client):
+    """Transactional batch executes Create/Read/Replace/Delete/Upsert atomically."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    # Batch 1: Create × 2 + Upsert
+    r1 = container.execute_item_batch(
+        batch_operations=[
+            ("create", ({"id": "b1", "category": "test", "v": 1},), {}),
+            ("create", ({"id": "b2", "category": "test", "v": 2},), {}),
+            ("upsert", ({"id": "b3", "category": "test", "v": 3},), {}),
+        ],
+        partition_key="test",
+    )
+    assert r1[0]["statusCode"] == 201
+    assert r1[1]["statusCode"] == 201
+    assert r1[2]["statusCode"] in (200, 201)  # upsert of new doc → 201
+
+    assert container.read_item("b1", partition_key="test")["v"] == 1
+
+    # Batch 2: Read + Replace + Delete
+    r2 = container.execute_item_batch(
+        batch_operations=[
+            ("read",    ("b1",),                                                  {}),
+            ("replace", ("b2", {"id": "b2", "category": "test", "v": 99}),       {}),
+            ("delete",  ("b3",),                                                  {}),
+        ],
+        partition_key="test",
+    )
+    assert r2[0]["statusCode"] == 200   # read
+    assert r2[1]["statusCode"] == 200   # replace
+    assert r2[2]["statusCode"] == 204   # delete
+
+    assert container.read_item("b2", partition_key="test")["v"] == 99
+    with pytest.raises(CosmosResourceNotFoundError):
+        container.read_item("b3", partition_key="test")
+
+    cosmos_client.delete_database(db_id)
+
+
 def test_pagination_by_page(cosmos_client):
     """x-ms-max-item-count is respected; x-ms-continuation lets SDK iterate pages."""
     db_id = db_name()

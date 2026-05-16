@@ -5,6 +5,8 @@ import com.azure.cosmos.CosmosContainer;
 import com.azure.cosmos.CosmosDatabase;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.*;
+import com.azure.cosmos.models.CosmosBatch;
+import com.azure.cosmos.models.CosmosBatchResponse;
 import com.azure.cosmos.models.CosmosPatchOperations;
 import com.azure.cosmos.util.CosmosPagedIterable;
 import com.azure.core.util.paging.ContinuablePage;
@@ -444,6 +446,53 @@ class CosmosCompatibilityTest {
         assertEquals("active",  patched.get("status"));
         assertFalse(patched.containsKey("removable"));
         assertEquals(15, ((Number) patched.get("counter")).intValue());
+
+        db.delete();
+    }
+
+    @Test
+    @DisplayName("transactional batch: Create/Read/Replace/Delete/Upsert")
+    @SuppressWarnings("unchecked")
+    void transactionalBatch() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        // Batch 1: Create × 2 + Upsert
+        CosmosBatch batch1 = CosmosBatch.createCosmosBatch(new PartitionKey("test"));
+        batch1.createItemOperation(doc("b1", "test", "v", 1));
+        batch1.createItemOperation(doc("b2", "test", "v", 2));
+        batch1.upsertItemOperation(doc("b3", "test", "v", 3));
+
+        CosmosBatchResponse r1 = container.executeCosmosBatch(batch1);
+        assertEquals(200, r1.getStatusCode());
+        assertEquals(201, r1.getResults().get(0).getStatusCode());
+        assertEquals(201, r1.getResults().get(1).getStatusCode());
+        assertTrue(r1.getResults().get(2).getStatusCode() >= 200);
+
+        assertEquals(1, ((Number) container
+                .readItem("b1", new PartitionKey("test"), Map.class)
+                .getItem().get("v")).intValue());
+
+        // Batch 2: Read + Replace + Delete
+        CosmosBatch batch2 = CosmosBatch.createCosmosBatch(new PartitionKey("test"));
+        batch2.readItemOperation("b1");
+        batch2.replaceItemOperation("b2", doc("b2", "test", "v", 99));
+        batch2.deleteItemOperation("b3");
+
+        CosmosBatchResponse r2 = container.executeCosmosBatch(batch2);
+        assertEquals(200, r2.getStatusCode());
+        assertEquals(200, r2.getResults().get(0).getStatusCode());  // read
+        assertEquals(200, r2.getResults().get(1).getStatusCode());  // replace
+        assertEquals(204, r2.getResults().get(2).getStatusCode());  // delete
+
+        assertEquals(99, ((Number) container
+                .readItem("b2", new PartitionKey("test"), Map.class)
+                .getItem().get("v")).intValue());
+        assertThrows(CosmosException.class,
+                () -> container.readItem("b3", new PartitionKey("test"), Map.class));
 
         db.delete();
     }

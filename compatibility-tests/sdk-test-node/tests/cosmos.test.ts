@@ -367,6 +367,45 @@ test("PATCH applies partial updates (add, set, replace, remove, incr)", async ()
   await database.delete();
 });
 
+test("transactional batch: Create/Read/Replace/Delete/Upsert", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  // Batch 1: Create × 2 + Upsert
+  const r1 = await container.items.batch([
+    { operationType: "Create", resourceBody: { id: "b1", category: "test", v: 1 } },
+    { operationType: "Create", resourceBody: { id: "b2", category: "test", v: 2 } },
+    { operationType: "Upsert", resourceBody: { id: "b3", category: "test", v: 3 } },
+  ], "test");
+
+  expect(r1.result![0].statusCode).toBe(201);
+  expect(r1.result![1].statusCode).toBe(201);
+  expect(r1.result![2].statusCode).toBeGreaterThanOrEqual(200);
+
+  // Batch 2: Read + Replace + Delete
+  const r2 = await container.items.batch([
+    { operationType: "Read",    id: "b1" },
+    { operationType: "Replace", id: "b2", resourceBody: { id: "b2", category: "test", v: 99 } },
+    { operationType: "Delete",  id: "b3" },
+  ], "test");
+
+  expect(r2.result![0].statusCode).toBe(200);   // read
+  expect(r2.result![1].statusCode).toBe(200);   // replace
+  expect(r2.result![2].statusCode).toBe(204);   // delete
+
+  const { resource: b2 } = await container.item("b2", "test").read();
+  expect(b2!.v).toBe(99);
+
+  const { resource: gone } = await container.item("b3", "test").read();
+  expect(gone).toBeUndefined();
+
+  await database.delete();
+});
+
 test("pagination: x-ms-max-item-count splits results into pages", async () => {
   const id = dbName();
   const { database } = await client.databases.create({ id });

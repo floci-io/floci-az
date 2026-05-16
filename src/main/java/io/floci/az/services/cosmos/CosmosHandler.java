@@ -116,12 +116,15 @@ public class CosmosHandler implements AzureServiceHandler {
                 req.headers().getHeaderString("x-ms-cosmos-is-query-plan-request"));
         boolean query = "True".equalsIgnoreCase(req.headers().getHeaderString("x-ms-documentdb-isquery"))
                 || "application/query+json".equalsIgnoreCase(req.headers().getHeaderString("Content-Type"));
+        // Transactional batch — all three SDKs use x-ms-cosmos-is-batch-request: true
+        boolean batch = "true".equalsIgnoreCase(req.headers().getHeaderString("x-ms-cosmos-is-batch-request"));
 
         if (segs.length == 5) return switch (m) {
             case "GET"  -> listDocuments(req, dbId, collId);
-            case "POST" -> planRequest    ? getQueryPlan(req, dbId, collId)
-                         : query          ? queryDocuments(req, dbId, collId)
-                         :                  createDocument(req, dbId, collId);
+            case "POST" -> planRequest ? getQueryPlan(req, dbId, collId)
+                         : batch       ? executeBatch(req, dbId, collId)
+                         : query       ? queryDocuments(req, dbId, collId)
+                         :               createDocument(req, dbId, collId);
             default     -> notImplemented();
         };
 
@@ -653,6 +656,175 @@ public class CosmosHandler implements AzureServiceHandler {
         if (obj == null) return notFound(docId);
         store.delete(obj.key());
         return Response.noContent().build();
+    }
+
+    // -----------------------------------------------------------------------
+    // Transactional Batch  (POST /dbs/{db}/colls/{coll}/docs  x-ms-cosmos-is-batch-request: true)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Execute a transactional batch request.
+     *
+     * <p>The request body is a JSON array of operation objects, each with at minimum
+     * {@code "operationType"} and, depending on the type, {@code "id"} and/or
+     * {@code "resourceBody"}.</p>
+     *
+     * <p>The response is a JSON array of result objects, one per operation, each
+     * containing {@code "statusCode"}, {@code "requestCharge"}, and optionally
+     * {@code "eTag"} and {@code "resourceBody"}.</p>
+     *
+     * <p>Supported operation types: {@code Create}, {@code Upsert}, {@code Read},
+     * {@code Replace}, {@code Delete}.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private Response executeBatch(AzureRequest req, String dbId, String collId) {
+        Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
+        if (collFound.isEmpty()) return notFound(collId);
+
+        String pk    = extractPartitionKeyValue(req);
+        String pkEnc = encodeKey(pk);
+
+        List<Map<String, Object>> operations;
+        try {
+            byte[] raw = req.bodyStream().readAllBytes();
+            operations = MAPPER.readValue(raw, new TypeReference<>() {});
+        } catch (IOException e) {
+            return errorResponse(400, "BadRequest", "Invalid batch request body.");
+        }
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (Map<String, Object> op : operations) {
+            String opType = op.get("operationType") instanceof String t ? t : "";
+            String docId  = op.get("id") instanceof String s ? s : null;
+            Map<String, Object> body = op.get("resourceBody") instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m : null;
+
+            results.add(switch (opType) {
+                case "Create"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, false);
+                case "Upsert"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, true);
+                case "Read"    -> batchRead(req.accountName(), dbId, collId, pkEnc, docId);
+                case "Replace" -> batchReplace(req.accountName(), dbId, collId, pkEnc, docId, body);
+                case "Delete"  -> batchDelete(req.accountName(), dbId, collId, pkEnc, docId);
+                default        -> batchResultError(400);
+            });
+        }
+
+        try {
+            return Response.ok(MAPPER.writeValueAsString(results), "application/json")
+                    .header("x-ms-request-charge",  String.valueOf(results.size()))
+                    .header("x-ms-session-token",   "0:0#1")
+                    .header("x-ms-activity-id",     UUID.randomUUID().toString())
+                    .header("x-ms-version",         "2018-12-31")
+                    .build();
+        } catch (JsonProcessingException e) {
+            return Response.serverError().build();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> batchCreate(String account, String dbId, String collId,
+            String pk, String pkEnc, Map<String, Object> body, boolean upsert) {
+        if (body == null) return batchResultError(400);
+
+        body = new LinkedHashMap<>(body);
+        String id = body.containsKey("id") ? String.valueOf(body.get("id")) : UUID.randomUUID().toString();
+        body.put("id", id);
+
+        String key     = docKey(account, dbId, collId, pkEnc, id);
+        boolean existed = store.get(key).isPresent();
+        if (!upsert && existed) return batchResultError(409);
+
+        Instant now  = Instant.now();
+        String  rid  = newRid(12);
+        String  etag = newEtag();
+
+        body.put("_rid",         rid);
+        body.put("_self",        "dbs/" + dbId + "/colls/" + collId + "/docs/" + id);
+        body.put("_etag",        quoted(etag));
+        body.put("_ts",          now.getEpochSecond());
+        body.put("_attachments", "attachments/");
+
+        store.put(key, stored(key, body, now, etag));
+        return batchResultOk(upsert && existed ? 200 : 201, etag, body);
+    }
+
+    private Map<String, Object> batchRead(String account, String dbId, String collId,
+            String pkEnc, String docId) {
+        if (docId == null) return batchResultError(400);
+
+        String key = docKey(account, dbId, collId, pkEnc, docId);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) {
+            // Fallback scan for cases where PK is unknown/encoded differently
+            String prefix = account + K_DOC + dbId + "|" + collId + "|";
+            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
+                    .stream().findFirst();
+        }
+        if (found.isEmpty()) return batchResultError(404);
+
+        Map<String, Object> doc = parseData(found.get());
+        return batchResultOk(200, found.get().etag(), doc);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> batchReplace(String account, String dbId, String collId,
+            String pkEnc, String docId, Map<String, Object> body) {
+        if (docId == null || body == null) return batchResultError(400);
+
+        String key = docKey(account, dbId, collId, pkEnc, docId);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) return batchResultError(404);
+
+        body = new LinkedHashMap<>(body);
+        body.put("id", docId);
+        Map<String, Object> old = parseData(found.get());
+
+        Instant now  = Instant.now();
+        String  etag = newEtag();
+
+        body.put("_rid",         old.getOrDefault("_rid", newRid(12)));
+        body.put("_self",        "dbs/" + dbId + "/colls/" + collId + "/docs/" + docId);
+        body.put("_etag",        quoted(etag));
+        body.put("_ts",          now.getEpochSecond());
+        body.put("_attachments", "attachments/");
+
+        store.put(key, stored(key, body, now, etag));
+        return batchResultOk(200, etag, body);
+    }
+
+    private Map<String, Object> batchDelete(String account, String dbId, String collId,
+            String pkEnc, String docId) {
+        if (docId == null) return batchResultError(400);
+
+        String key = docKey(account, dbId, collId, pkEnc, docId);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) {
+            String prefix = account + K_DOC + dbId + "|" + collId + "|";
+            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
+                    .stream().findFirst();
+        }
+        if (found.isEmpty()) return batchResultError(404);
+
+        store.delete(found.get().key());
+        return batchResultOk(204, null, null);
+    }
+
+    private Map<String, Object> batchResultOk(int statusCode, String etag, Map<String, Object> resourceBody) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("statusCode",    statusCode);
+        r.put("subStatusCode", 0);
+        r.put("requestCharge", 1.0);
+        if (etag != null)          r.put("eTag",         quoted(etag));
+        if (resourceBody != null)  r.put("resourceBody", resourceBody);
+        return r;
+    }
+
+    private Map<String, Object> batchResultError(int statusCode) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("statusCode",    statusCode);
+        r.put("subStatusCode", 0);
+        r.put("requestCharge", 1.0);
+        return r;
     }
 
     // -----------------------------------------------------------------------
