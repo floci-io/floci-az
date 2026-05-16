@@ -294,6 +294,49 @@ test("GROUP BY with COUNT(1) groups and aggregates correctly", async () => {
   await database.delete();
 });
 
+test("string functions LOWER/UPPER/LENGTH/CONCAT in WHERE and SELECT", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  await container.items.create({ id: "item-1", category: "Electronics", name: "Laptop Pro", first: "John", last: "Doe" });
+  await container.items.create({ id: "item-2", category: "books",       name: "Guide",      first: "Jane", last: "Smith" });
+
+  // WHERE LOWER
+  const { resources: r1 } = await container.items
+    .query("SELECT * FROM c WHERE LOWER(c.category) = 'electronics'").fetchAll();
+  expect(r1).toHaveLength(1);
+  expect(r1[0].id).toBe("item-1");
+
+  // WHERE UPPER
+  const { resources: r2 } = await container.items
+    .query("SELECT * FROM c WHERE UPPER(c.category) = 'BOOKS'").fetchAll();
+  expect(r2).toHaveLength(1);
+  expect(r2[0].id).toBe("item-2");
+
+  // WHERE LENGTH  ("Laptop Pro"=10 > 5; "Guide"=5 is NOT > 5)
+  const { resources: r3 } = await container.items
+    .query("SELECT * FROM c WHERE LENGTH(c.name) > 5").fetchAll();
+  expect(r3).toHaveLength(1);
+  expect(r3[0].id).toBe("item-1");
+
+  // SELECT LOWER + LENGTH
+  const { resources: r4 } = await container.items
+    .query("SELECT LOWER(c.category) AS cat, LENGTH(c.name) AS nlen FROM c WHERE c.id = 'item-1'").fetchAll();
+  expect(r4[0].cat).toBe("electronics");
+  expect(r4[0].nlen).toBe(10);
+
+  // SELECT CONCAT
+  const { resources: r5 } = await container.items
+    .query("SELECT CONCAT(c.first, ' ', c.last) AS full_name FROM c WHERE c.id = 'item-1'").fetchAll();
+  expect(r5[0].full_name).toBe("John Doe");
+
+  await database.delete();
+});
+
 test("PATCH applies partial updates (add, set, replace, remove, incr)", async () => {
   const id = dbName();
   const { database } = await client.databases.create({ id });

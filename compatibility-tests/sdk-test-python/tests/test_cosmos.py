@@ -239,6 +239,58 @@ def test_group_by(cosmos_client):
     cosmos_client.delete_database(db_id)
 
 
+def test_string_functions(cosmos_client):
+    """LOWER/UPPER/LENGTH in WHERE; LOWER/LENGTH/CONCAT in SELECT projection."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    container.create_item({"id": "item-1", "category": "Electronics",
+                           "name": "Laptop Pro", "first": "John", "last": "Doe"})
+    container.create_item({"id": "item-2", "category": "books",
+                           "name": "Guide", "first": "Jane", "last": "Smith"})
+
+    # WHERE with LOWER
+    r1 = list(container.query_items(
+        "SELECT * FROM c WHERE LOWER(c.category) = 'electronics'",
+        enable_cross_partition_query=True,
+    ))
+    assert len(r1) == 1 and r1[0]["id"] == "item-1"
+
+    # WHERE with UPPER
+    r2 = list(container.query_items(
+        "SELECT * FROM c WHERE UPPER(c.category) = 'BOOKS'",
+        enable_cross_partition_query=True,
+    ))
+    assert len(r2) == 1 and r2[0]["id"] == "item-2"
+
+    # WHERE with LENGTH  ("Laptop Pro"=10 > 5; "Guide"=5 is NOT > 5)
+    r3 = list(container.query_items(
+        "SELECT * FROM c WHERE LENGTH(c.name) > 5",
+        enable_cross_partition_query=True,
+    ))
+    assert len(r3) == 1 and r3[0]["id"] == "item-1"
+
+    # SELECT with LOWER and LENGTH
+    r4 = list(container.query_items(
+        "SELECT LOWER(c.category) AS cat, LENGTH(c.name) AS nlen FROM c WHERE c.id = 'item-1'",
+        enable_cross_partition_query=True,
+    ))
+    assert len(r4) == 1
+    assert r4[0]["cat"] == "electronics"
+    assert r4[0]["nlen"] == 10
+
+    # SELECT with CONCAT
+    r5 = list(container.query_items(
+        "SELECT CONCAT(c.first, ' ', c.last) AS full_name FROM c WHERE c.id = 'item-1'",
+        enable_cross_partition_query=True,
+    ))
+    assert len(r5) == 1
+    assert r5[0]["full_name"] == "John Doe"
+
+    cosmos_client.delete_database(db_id)
+
+
 def test_patch_document(cosmos_client):
     """PATCH applies partial updates (add, set, replace, remove, incr) to a document."""
     db_id = db_name()

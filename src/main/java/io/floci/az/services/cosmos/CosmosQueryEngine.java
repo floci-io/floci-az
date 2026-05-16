@@ -210,11 +210,12 @@ public class CosmosQueryEngine {
                         aggregateField = aggM.group(2).trim();
                         // selectFields stays null — result is a bare scalar
                     } else if (!"*".equals(selectClause)) {
-                        selectFields = Arrays.stream(selectClause.split(","))
+                        selectFields = splitTopLevel(selectClause, ',').stream()
                                 .map(String::trim).filter(s -> !s.isEmpty()).toList();
                     }
                 } else if (!"*".equals(selectClause)) {
-                    selectFields = Arrays.stream(selectClause.split(","))
+                    // Use splitTopLevel so CONCAT(a, b, c) is not split on its inner commas
+                    selectFields = splitTopLevel(selectClause, ',').stream()
                             .map(String::trim).filter(s -> !s.isEmpty()).toList();
                 }
             }
@@ -336,12 +337,12 @@ public class CosmosQueryEngine {
             return compareValues(val, low) >= 0 && compareValues(val, high) <= 0;
         }
 
-        // field OP literal
+        // expr OP expr  (supports function calls on either side, e.g. LOWER(c.x) = 'foo')
         m = Pattern.compile("(.+?)\\s*(=|!=|<>|>=|<=|>|<)\\s*(.+)").matcher(pred);
         if (m.matches()) {
-            Object docVal = resolve(doc, m.group(1).trim());
-            Object lit    = parseLiteral(m.group(3).trim());
-            return compare(docVal, m.group(2).trim(), lit);
+            Object lhs = resolveExpr(doc, m.group(1).trim());
+            Object rhs = resolveExpr(doc, m.group(3).trim());
+            return compare(lhs, m.group(2).trim(), rhs);
         }
 
         return false;
@@ -379,10 +380,25 @@ public class CosmosQueryEngine {
     private Map<String, Object> projectDoc(Map<String, Object> doc, List<String> fields) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (String field : fields) {
-            // "c.name" → key "name"; "c.address.city" → nested key "address.city"
-            String key = field.contains(".") ? field.substring(field.indexOf('.') + 1) : field;
-            Object val = resolve(doc, field);
-            setNested(result, key, val);
+            // Detect optional "expr AS alias" clause (depth-aware, handles parens/strings).
+            int asIdx = findTopLevelKeyword(field, "AS");
+            String expr, alias;
+            if (asIdx >= 0) {
+                expr  = field.substring(0, asIdx).trim();
+                alias = field.substring(asIdx + 2).trim();
+            } else {
+                expr = field;
+                // Plain field path: use the leaf segment as alias.
+                // Function call without AS: use the function name as alias.
+                if (expr.contains("(")) {
+                    Matcher fm = Pattern.compile("(?i)(\\w+)\\s*\\(").matcher(expr);
+                    alias = fm.find() ? fm.group(1).toLowerCase() : expr;
+                } else {
+                    alias = expr.contains(".") ? expr.substring(expr.indexOf('.') + 1) : expr;
+                }
+            }
+            Object val = resolveExpr(doc, expr);
+            setNested(result, alias, val);
         }
         return result;
     }
@@ -584,6 +600,136 @@ public class CosmosQueryEngine {
         }
         result.add(s.substring(start));
         return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Expression evaluation (field path, literal, or function call)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Evaluate any SQL expression against a document.
+     * Handles:
+     * <ul>
+     *   <li>String literals: {@code 'hello'} or {@code "hello"}</li>
+     *   <li>Null / boolean literals: {@code null}, {@code true}, {@code false}</li>
+     *   <li>Numeric literals: {@code 42}, {@code 3.14}</li>
+     *   <li>Function calls: {@code LOWER(c.name)}, {@code CONCAT(c.a, ' ', c.b)}</li>
+     *   <li>Field paths: {@code c.name}, {@code c.addr.city}</li>
+     * </ul>
+     */
+    Object resolveExpr(Map<String, Object> doc, String expr) {
+        expr = expr.trim();
+        if (expr.isEmpty()) return null;
+
+        // String literal
+        if ((expr.startsWith("'") && expr.endsWith("'"))
+                || (expr.startsWith("\"") && expr.endsWith("\""))) {
+            return expr.substring(1, expr.length() - 1);
+        }
+
+        // null / boolean keyword literals
+        if ("null".equalsIgnoreCase(expr))  return null;
+        if ("true".equalsIgnoreCase(expr))  return Boolean.TRUE;
+        if ("false".equalsIgnoreCase(expr)) return Boolean.FALSE;
+
+        // Numeric literal
+        if (expr.matches("-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?")) {
+            try { return Long.parseLong(expr); }   catch (NumberFormatException ignored) {}
+            try { return Double.parseDouble(expr); } catch (NumberFormatException ignored) {}
+        }
+
+        // Function call: NAME(args…) — find the first '(' outside any string literal
+        int parenIdx = -1;
+        boolean inStr = false;
+        char strCh = 0;
+        for (int i = 0; i < expr.length(); i++) {
+            char c = expr.charAt(i);
+            if (inStr) { if (c == strCh) inStr = false; continue; }
+            if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
+            if (c == '(') { parenIdx = i; break; }
+        }
+        if (parenIdx > 0 && expr.endsWith(")")) {
+            String fname   = expr.substring(0, parenIdx).trim().toUpperCase();
+            String argsStr = expr.substring(parenIdx + 1, expr.length() - 1);
+            List<String> argExprs = splitTopLevel(argsStr, ',');
+            return applyStringFunction(fname, argExprs, doc);
+        }
+
+        // Field path (default)
+        return resolve(doc, expr);
+    }
+
+    /**
+     * Evaluate a named Cosmos DB scalar function.
+     * Supported: LOWER, UPPER, LENGTH, CONCAT, SUBSTRING, TRIM, LTRIM, RTRIM,
+     *            REPLACE, REVERSE, INDEX_OF, LEFT, RIGHT, TOSTRING.
+     */
+    private Object applyStringFunction(String fname, List<String> argExprs, Map<String, Object> doc) {
+        // Helper to resolve a single argument expression
+        Object a0 = argExprs.isEmpty()  ? null : resolveExpr(doc, argExprs.get(0).trim());
+        Object a1 = argExprs.size() < 2 ? null : resolveExpr(doc, argExprs.get(1).trim());
+        Object a2 = argExprs.size() < 3 ? null : resolveExpr(doc, argExprs.get(2).trim());
+
+        return switch (fname) {
+            case "LOWER"     -> a0 instanceof String s ? s.toLowerCase()           : a0;
+            case "UPPER"     -> a0 instanceof String s ? s.toUpperCase()           : a0;
+            case "LENGTH"    -> a0 instanceof String s ? (long) s.length()         : null;
+            case "TRIM"      -> a0 instanceof String s ? s.trim()                  : a0;
+            case "LTRIM"     -> a0 instanceof String s ? s.stripLeading()          : a0;
+            case "RTRIM"     -> a0 instanceof String s ? s.stripTrailing()         : a0;
+            case "REVERSE"   -> a0 instanceof String s ? new StringBuilder(s).reverse().toString() : a0;
+            case "TOSTRING"  -> a0 == null ? null : String.valueOf(a0);
+
+            case "CONCAT" -> {
+                StringBuilder sb = new StringBuilder();
+                for (String arg : argExprs) {
+                    Object v = resolveExpr(doc, arg.trim());
+                    if (v != null) sb.append(v);
+                }
+                yield sb.toString();
+            }
+
+            case "SUBSTRING" -> {
+                if (!(a0 instanceof String s) || !(a1 instanceof Number startN)) yield null;
+                int start = startN.intValue();
+                if (a2 instanceof Number lenN) {
+                    int end = Math.min(start + lenN.intValue(), s.length());
+                    yield start < s.length() ? s.substring(start, Math.max(start, end)) : "";
+                }
+                yield start < s.length() ? s.substring(start) : "";
+            }
+
+            case "REPLACE" -> {
+                if (!(a0 instanceof String s) || !(a1 instanceof String srch)
+                        || !(a2 instanceof String repl)) yield a0;
+                yield s.replace(srch, repl);
+            }
+
+            case "INDEX_OF" -> {
+                if (!(a0 instanceof String s) || !(a1 instanceof String srch)) yield -1L;
+                yield (long) s.indexOf(srch);
+            }
+
+            case "LEFT" -> {
+                if (!(a0 instanceof String s) || !(a1 instanceof Number n)) yield a0;
+                yield s.substring(0, Math.min(n.intValue(), s.length()));
+            }
+
+            case "RIGHT" -> {
+                if (!(a0 instanceof String s) || !(a1 instanceof Number n)) yield a0;
+                int from = Math.max(0, s.length() - n.intValue());
+                yield s.substring(from);
+            }
+
+            case "STRINGEQUALS" -> {
+                if (a0 == null || a1 == null) yield a0 == null && a1 == null;
+                boolean ci = Boolean.TRUE.equals(a2);
+                yield a0 instanceof String s0 && a1 instanceof String s1
+                        ? (ci ? s0.equalsIgnoreCase(s1) : s0.equals(s1)) : a0.equals(a1);
+            }
+
+            default -> null;
+        };
     }
 
     // Return the minimum value ≥ 0 among the candidates, or the last candidate (fallback).

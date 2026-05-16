@@ -362,6 +362,60 @@ class CosmosCompatibilityTest {
     }
 
     @Test
+    @DisplayName("string functions LOWER/UPPER/LENGTH/CONCAT in WHERE and SELECT")
+    @SuppressWarnings("unchecked")
+    void stringFunctions() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        container.createItem(doc("item-1", "Electronics",
+                "name", "Laptop Pro", "first", "John", "last", "Doe"));
+        container.createItem(doc("item-2", "books",
+                "name", "Guide", "first", "Jane", "last", "Smith"));
+
+        CosmosQueryRequestOptions opts = new CosmosQueryRequestOptions();
+
+        // WHERE with LOWER
+        List<Map> r1 = container.queryItems(
+                "SELECT * FROM c WHERE LOWER(c.category) = 'electronics'", opts, Map.class)
+                .stream().toList();
+        assertEquals(1, r1.size());
+        assertEquals("item-1", r1.get(0).get("id"));
+
+        // WHERE with UPPER
+        List<Map> r2 = container.queryItems(
+                "SELECT * FROM c WHERE UPPER(c.category) = 'BOOKS'", opts, Map.class)
+                .stream().toList();
+        assertEquals(1, r2.size());
+        assertEquals("item-2", r2.get(0).get("id"));
+
+        // WHERE with LENGTH  ("Laptop Pro"=10 > 5; "Guide"=5 is NOT > 5)
+        List<Map> r3 = container.queryItems(
+                "SELECT * FROM c WHERE LENGTH(c.name) > 5", opts, Map.class)
+                .stream().toList();
+        assertEquals(1, r3.size());
+        assertEquals("item-1", r3.get(0).get("id"));
+
+        // SELECT LOWER + LENGTH
+        List<Map> r4 = container.queryItems(
+                "SELECT LOWER(c.category) AS cat, LENGTH(c.name) AS nlen FROM c WHERE c.id = 'item-1'",
+                opts, Map.class).stream().toList();
+        assertEquals("electronics", r4.get(0).get("cat"));
+        assertEquals(10, ((Number) r4.get(0).get("nlen")).intValue());
+
+        // SELECT CONCAT
+        List<Map> r5 = container.queryItems(
+                "SELECT CONCAT(c.first, ' ', c.last) AS full_name FROM c WHERE c.id = 'item-1'",
+                opts, Map.class).stream().toList();
+        assertEquals("John Doe", r5.get(0).get("full_name"));
+
+        db.delete();
+    }
+
+    @Test
     @DisplayName("PATCH applies partial updates (add, set, replace, remove, incr)")
     @SuppressWarnings("unchecked")
     void patchDocument() {
