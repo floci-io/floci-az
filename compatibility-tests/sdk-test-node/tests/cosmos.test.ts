@@ -225,6 +225,75 @@ test("database delete cascades to containers and documents", async () => {
   expect(after.map((d) => d.id)).not.toContain(id);
 });
 
+test("aggregate SUM/AVG/MIN/MAX return correct scalar values", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  const prices = [10, 20, 30, 40]; // sum=100, avg=25, min=10, max=40
+  for (let i = 0; i < prices.length; i++) {
+    await container.items.create({ id: `item-${i}`, category: "agg", price: prices[i] });
+  }
+
+  const scalar = async (sql: string) => {
+    const { resources } = await container.items.query(sql).fetchAll();
+    return resources[0];
+  };
+
+  expect(await scalar("SELECT VALUE SUM(c.price) FROM c")).toBe(100);
+  expect(await scalar("SELECT VALUE AVG(c.price) FROM c")).toBe(25);
+  expect(await scalar("SELECT VALUE MIN(c.price) FROM c")).toBe(10);
+  expect(await scalar("SELECT VALUE MAX(c.price) FROM c")).toBe(40);
+
+  await database.delete();
+});
+
+test("SELECT DISTINCT returns unique documents", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  for (let i = 0; i < 3; i++) await container.items.create({ id: `food-${i}`, category: "food" });
+  for (let i = 0; i < 2; i++) await container.items.create({ id: `book-${i}`, category: "books" });
+
+  const { resources } = await container.items
+    .query("SELECT DISTINCT c.category FROM c")
+    .fetchAll();
+
+  const categories = resources.map((r: any) => r.category).sort();
+  expect(categories).toEqual(["books", "food"]);
+
+  await database.delete();
+});
+
+test("GROUP BY with COUNT(1) groups and aggregates correctly", async () => {
+  const id = dbName();
+  const { database } = await client.databases.create({ id });
+  const { container } = await database.containers.create({
+    id: "items",
+    partitionKey: { paths: ["/category"] },
+  });
+
+  for (let i = 0; i < 3; i++) await container.items.create({ id: `food-${i}`, category: "food" });
+  for (let i = 0; i < 2; i++) await container.items.create({ id: `book-${i}`, category: "books" });
+
+  const { resources } = await container.items
+    .query("SELECT c.category, COUNT(1) as count FROM c GROUP BY c.category")
+    .fetchAll();
+
+  const counts: Record<string, number> = {};
+  resources.forEach((r: any) => { counts[r.category] = r.count; });
+  expect(counts).toEqual({ food: 3, books: 2 });
+
+  await database.delete();
+});
+
 test("pagination: x-ms-max-item-count splits results into pages", async () => {
   const id = dbName();
   const { database } = await client.databases.create({ id });

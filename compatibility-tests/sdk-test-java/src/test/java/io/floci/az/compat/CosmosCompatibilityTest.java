@@ -11,6 +11,7 @@ import com.azure.cosmos.models.FeedResponse;
 import org.junit.jupiter.api.*;
 
 import java.util.*;
+import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -276,6 +277,87 @@ class CosmosCompatibilityTest {
         List<String> after = client.readAllDatabases().stream()
             .map(CosmosDatabaseProperties::getId).toList();
         assertFalse(after.contains(id));
+    }
+
+    @Test
+    @DisplayName("aggregate SUM/AVG/MIN/MAX return correct scalar values")
+    void aggregateSumAvgMinMax() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        int[] prices = {10, 20, 30, 40}; // sum=100, avg=25, min=10, max=40
+        for (int i = 0; i < prices.length; i++) {
+            container.createItem(doc("item-" + i, "agg", "price", prices[i]));
+        }
+
+        Object sum = container.queryItems("SELECT VALUE SUM(c.price) FROM c",
+                new CosmosQueryRequestOptions(), Object.class).iterator().next();
+        assertEquals(100, ((Number) sum).intValue());
+
+        Object avg = container.queryItems("SELECT VALUE AVG(c.price) FROM c",
+                new CosmosQueryRequestOptions(), Object.class).iterator().next();
+        assertEquals(25.0, ((Number) avg).doubleValue(), 0.001);
+
+        Object min = container.queryItems("SELECT VALUE MIN(c.price) FROM c",
+                new CosmosQueryRequestOptions(), Object.class).iterator().next();
+        assertEquals(10, ((Number) min).intValue());
+
+        Object max = container.queryItems("SELECT VALUE MAX(c.price) FROM c",
+                new CosmosQueryRequestOptions(), Object.class).iterator().next();
+        assertEquals(40, ((Number) max).intValue());
+
+        db.delete();
+    }
+
+    @Test
+    @DisplayName("SELECT DISTINCT returns unique projected documents")
+    @SuppressWarnings("unchecked")
+    void selectDistinct() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        for (int i = 0; i < 3; i++) container.createItem(doc("food-" + i, "food"));
+        for (int i = 0; i < 2; i++) container.createItem(doc("book-" + i, "books"));
+
+        List<Map> results = container.queryItems(
+                "SELECT DISTINCT c.category FROM c",
+                new CosmosQueryRequestOptions(), Map.class).stream().toList();
+
+        List<String> categories = results.stream()
+                .map(r -> (String) r.get("category")).sorted().toList();
+        assertEquals(List.of("books", "food"), categories);
+
+        db.delete();
+    }
+
+    @Test
+    @DisplayName("GROUP BY with COUNT(1) groups and aggregates correctly")
+    @SuppressWarnings("unchecked")
+    void groupByCount() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+
+        for (int i = 0; i < 3; i++) container.createItem(doc("food-" + i, "food"));
+        for (int i = 0; i < 2; i++) container.createItem(doc("book-" + i, "books"));
+
+        List<Map> results = container.queryItems(
+                "SELECT c.category, COUNT(1) as count FROM c GROUP BY c.category",
+                new CosmosQueryRequestOptions(), Map.class).stream().toList();
+
+        Map<String, Integer> counts = new HashMap<>();
+        results.forEach(r -> counts.put((String) r.get("category"), ((Number) r.get("count")).intValue()));
+        assertEquals(Map.of("food", 3, "books", 2), counts);
+
+        db.delete();
     }
 
     @Test

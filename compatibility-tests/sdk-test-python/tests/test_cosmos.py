@@ -176,6 +176,69 @@ def test_query_count(cosmos_client):
     cosmos_client.delete_database(db_id)
 
 
+def test_aggregate_sum_avg_min_max(cosmos_client):
+    """SELECT VALUE SUM/AVG/MIN/MAX(c.field) returns the correct scalar."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    prices = [10, 20, 30, 40]   # sum=100, avg=25, min=10, max=40
+    for i, price in enumerate(prices):
+        container.create_item({"id": f"item-{i}", "category": "agg", "price": price})
+
+    def scalar(sql):
+        return list(container.query_items(sql, enable_cross_partition_query=True))[0]
+
+    assert scalar("SELECT VALUE SUM(c.price) FROM c") == 100
+    assert scalar("SELECT VALUE AVG(c.price) FROM c") == 25.0
+    assert scalar("SELECT VALUE MIN(c.price) FROM c") == 10
+    assert scalar("SELECT VALUE MAX(c.price) FROM c") == 40
+
+    cosmos_client.delete_database(db_id)
+
+
+def test_distinct(cosmos_client):
+    """SELECT DISTINCT returns unique projected documents."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    for i in range(3):
+        container.create_item({"id": f"food-{i}", "category": "food"})
+    for i in range(2):
+        container.create_item({"id": f"book-{i}", "category": "books"})
+
+    results = list(container.query_items(
+        "SELECT DISTINCT c.category FROM c",
+        enable_cross_partition_query=True,
+    ))
+    categories = sorted(r["category"] for r in results)
+    assert categories == ["books", "food"]
+
+    cosmos_client.delete_database(db_id)
+
+
+def test_group_by(cosmos_client):
+    """GROUP BY groups documents and COUNT(1) aggregates per group."""
+    db_id = db_name()
+    db = cosmos_client.create_database(db_id)
+    container = db.create_container("items", partition_key=PartitionKey(path="/category"))
+
+    for i in range(3):
+        container.create_item({"id": f"food-{i}", "category": "food"})
+    for i in range(2):
+        container.create_item({"id": f"book-{i}", "category": "books"})
+
+    results = list(container.query_items(
+        "SELECT c.category, COUNT(1) as count FROM c GROUP BY c.category",
+        enable_cross_partition_query=True,
+    ))
+    counts = {r["category"]: r["count"] for r in results}
+    assert counts == {"food": 3, "books": 2}
+
+    cosmos_client.delete_database(db_id)
+
+
 def test_pagination_by_page(cosmos_client):
     """x-ms-max-item-count is respected; x-ms-continuation lets SDK iterate pages."""
     db_id = db_name()

@@ -1,5 +1,8 @@
 package io.floci.az.services.cosmos;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.*;
 import java.util.regex.*;
 import java.util.stream.*;
@@ -10,6 +13,9 @@ import java.util.stream.*;
  * Supported:
  *   SELECT * / SELECT c.field1, c.field2 / SELECT VALUE c.field
  *   SELECT TOP n / SELECT VALUE COUNT(1)
+ *   SELECT VALUE SUM/AVG/MIN/MAX(c.field) — scalar aggregates
+ *   SELECT DISTINCT c.field — deduplicated projection
+ *   SELECT c.field, COUNT(1) as alias FROM c GROUP BY c.field
  *   WHERE with =, !=, <>, >, >=, <, <=, IN, BETWEEN, NOT, AND, OR, parentheses
  *   WHERE functions: IS_DEFINED, IS_NULL, IS_STRING, IS_NUMBER, IS_BOOL, IS_ARRAY, IS_OBJECT
  *                    CONTAINS, STARTSWITH, ENDSWITH, ARRAY_CONTAINS
@@ -19,7 +25,12 @@ import java.util.stream.*;
  */
 public class CosmosQueryEngine {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     public record OrderByField(String path, boolean asc) {}
+
+    /** Parsed components of a SELECT aggregate expression in the SELECT list. */
+    record AggregateExpr(String type, String field, String alias) {}
 
     public record ParsedQuery(
             boolean countQuery,
@@ -29,7 +40,11 @@ public class CosmosQueryEngine {
             List<OrderByField> orderBy,
             int top,                     // -1 = none
             int offset,
-            int limit                    // -1 = none
+            int limit,                   // -1 = none
+            String aggregateType,        // "SUM","AVG","MIN","MAX" — scalar aggregate without GROUP BY
+            String aggregateField,       // field path for the aggregate (already alias-stripped)
+            boolean distinct,            // SELECT DISTINCT
+            List<String> groupBy         // GROUP BY field expressions (empty = no GROUP BY)
     ) {}
 
     public record QueryResult(List<Object> items, int count) {}
@@ -47,8 +62,21 @@ public class CosmosQueryEngine {
                 .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
                 .collect(Collectors.toCollection(ArrayList::new));
 
+        // COUNT(1) / COUNT(*) — scalar
         if (q.countQuery()) {
             return new QueryResult(List.of((long) filtered.size()), 1);
+        }
+
+        // SUM / AVG / MIN / MAX without GROUP BY — scalar aggregate
+        if (q.aggregateType() != null && q.groupBy().isEmpty()) {
+            Object value = computeAggregate(q.aggregateType(), q.aggregateField(), filtered);
+            return new QueryResult(List.of(value != null ? value : 0L), 1);
+        }
+
+        // GROUP BY — group and aggregate
+        if (!q.groupBy().isEmpty()) {
+            List<Object> grouped = applyGroupBy(filtered, q);
+            return new QueryResult(grouped, grouped.size());
         }
 
         if (!q.orderBy().isEmpty()) {
@@ -77,6 +105,11 @@ public class CosmosQueryEngine {
                     .collect(Collectors.toCollection(ArrayList::new));
         }
 
+        // DISTINCT — deduplicate results after projection
+        if (q.distinct()) {
+            results = applyDistinct(results);
+        }
+
         return new QueryResult(results, results.size());
     }
 
@@ -86,8 +119,6 @@ public class CosmosQueryEngine {
 
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
-
-        boolean countQuery = upper.contains("COUNT(1)") || upper.contains("COUNT(*)");
 
         // TOP
         int top = -1;
@@ -102,20 +133,21 @@ public class CosmosQueryEngine {
             limit  = Integer.parseInt(olM.group(2));
         }
 
-        // Locate primary clause boundaries (all positions in the uppercased string)
-        int fromIdx   = indexOfKeyword(upper, "FROM",     0);
-        int whereIdx  = fromIdx   >= 0 ? indexOfKeyword(upper, "WHERE",    fromIdx)   : -1;
-        int orderIdx  = indexOfKeyword(upper, "ORDER BY", whereIdx >= 0 ? whereIdx : Math.max(fromIdx, 0));
-        int offsetIdx = indexOfKeyword(upper, "OFFSET",   orderIdx >= 0 ? orderIdx : Math.max(whereIdx, Math.max(fromIdx, 0)));
+        // Locate all clause keyword positions
+        int fromIdx    = indexOfKeyword(upper, "FROM",     0);
+        int whereIdx   = fromIdx >= 0 ? indexOfKeyword(upper, "WHERE",    fromIdx) : -1;
+        int groupByIdx = fromIdx >= 0 ? indexOfKeyword(upper, "GROUP BY", fromIdx) : -1;
+        int orderIdx   = indexOfKeyword(upper, "ORDER BY", Math.max(fromIdx, 0));
+        int offsetIdx  = indexOfKeyword(upper, "OFFSET",   Math.max(Math.max(orderIdx, groupByIdx), 0));
 
-        // WHERE clause text
+        // WHERE clause text — ends at the first of: GROUP BY, ORDER BY, OFFSET, or end
         String where = null;
         if (whereIdx >= 0) {
-            int end = firstNonNeg(orderIdx, offsetIdx, sql.length());
+            int end = minPositive(groupByIdx, orderIdx, offsetIdx, sql.length());
             where = sql.substring(whereIdx + 6, end).trim();
         }
 
-        // ORDER BY fields
+        // ORDER BY fields — ends at OFFSET or end
         List<OrderByField> orderBy = new ArrayList<>();
         if (orderIdx >= 0) {
             int end = offsetIdx >= 0 ? offsetIdx : sql.length();
@@ -129,9 +161,29 @@ public class CosmosQueryEngine {
             }
         }
 
-        // SELECT fields
-        boolean selectValue = false;
+        // GROUP BY fields — ends at ORDER BY, OFFSET, or end
+        List<String> groupBy = new ArrayList<>();
+        if (groupByIdx >= 0) {
+            int end = minPositive(orderIdx, offsetIdx, sql.length());
+            String groupClause = sql.substring(groupByIdx + 8, end).trim();
+            for (String g : splitTopLevel(groupClause, ',')) {
+                String g2 = g.trim();
+                if (!g2.isEmpty()) groupBy.add(g2);
+            }
+        }
+
+        // COUNT query: only true when there is no GROUP BY
+        // (inside GROUP BY, COUNT is a per-group aggregate, not a top-level scalar)
+        boolean countQuery = groupBy.isEmpty()
+                && (upper.contains("COUNT(1)") || upper.contains("COUNT(*)"));
+
+        // SELECT clause
+        boolean selectValue   = false;
+        boolean distinct      = false;
         List<String> selectFields = null;
+        String aggregateType  = null;
+        String aggregateField = null;
+
         if (!countQuery) {
             int selectKw  = indexOfKeyword(upper, "SELECT", 0);
             int selectEnd = fromIdx >= 0 ? fromIdx : sql.length();
@@ -139,20 +191,37 @@ public class CosmosQueryEngine {
                 String selectClause = sql.substring(selectKw + 6, selectEnd).trim();
                 // Strip TOP n
                 selectClause = selectClause.replaceFirst("(?i)^TOP\\s+\\d+\\s+", "");
+
+                // DISTINCT
+                if (selectClause.toUpperCase().startsWith("DISTINCT ")) {
+                    distinct = true;
+                    selectClause = selectClause.substring(9).trim();
+                }
+
+                // VALUE — scalar expression
                 if (selectClause.toUpperCase().startsWith("VALUE ")) {
                     selectValue = true;
                     selectClause = selectClause.substring(6).trim();
-                }
-                if (!"*".equals(selectClause)) {
+
+                    // SUM / AVG / MIN / MAX scalar aggregate
+                    Matcher aggM = Pattern.compile("(?i)(SUM|AVG|MIN|MAX)\\s*\\(([^)]+)\\)").matcher(selectClause);
+                    if (aggM.matches()) {
+                        aggregateType  = aggM.group(1).toUpperCase();
+                        aggregateField = aggM.group(2).trim();
+                        // selectFields stays null — result is a bare scalar
+                    } else if (!"*".equals(selectClause)) {
+                        selectFields = Arrays.stream(selectClause.split(","))
+                                .map(String::trim).filter(s -> !s.isEmpty()).toList();
+                    }
+                } else if (!"*".equals(selectClause)) {
                     selectFields = Arrays.stream(selectClause.split(","))
-                            .map(String::trim)
-                            .filter(s -> !s.isEmpty())
-                            .toList();
+                            .map(String::trim).filter(s -> !s.isEmpty()).toList();
                 }
             }
         }
 
-        return new ParsedQuery(countQuery, selectValue, selectFields, where, orderBy, top, offset, limit);
+        return new ParsedQuery(countQuery, selectValue, selectFields, where, orderBy, top, offset, limit,
+                aggregateType, aggregateField, distinct, groupBy);
     }
 
     // -----------------------------------------------------------------------
@@ -517,9 +586,134 @@ public class CosmosQueryEngine {
         return result;
     }
 
-    // Return the first value ≥ 0 among the candidates, or fallback.
-    private int firstNonNeg(int... candidates) {
-        for (int c : candidates) if (c >= 0) return c;
-        return candidates[candidates.length - 1];
+    // Return the minimum value ≥ 0 among the candidates, or the last candidate (fallback).
+    private int minPositive(int... candidates) {
+        int min = Integer.MAX_VALUE;
+        for (int c : candidates) if (c >= 0) min = Math.min(min, c);
+        return min == Integer.MAX_VALUE ? candidates[candidates.length - 1] : min;
+    }
+
+    // -----------------------------------------------------------------------
+    // Aggregate helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Compute a scalar aggregate over a list of documents.
+     * Supported types: COUNT, SUM, AVG, MIN, MAX.
+     */
+    private Object computeAggregate(String type, String field, List<Map<String, Object>> docs) {
+        if ("COUNT".equals(type)) {
+            return (long) docs.size();
+        }
+
+        List<Double> values = docs.stream()
+                .map(doc -> resolve(doc, field))
+                .filter(v -> v instanceof Number)
+                .map(v -> ((Number) v).doubleValue())
+                .toList();
+
+        if (values.isEmpty()) return null;
+
+        return switch (type) {
+            case "SUM" -> {
+                double sum = values.stream().mapToDouble(Double::doubleValue).sum();
+                yield isWholeNumber(sum) ? (long) sum : sum;
+            }
+            case "AVG" -> values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+            case "MIN" -> {
+                double min = values.stream().mapToDouble(Double::doubleValue).min().getAsDouble();
+                yield isWholeNumber(min) ? (long) min : min;
+            }
+            case "MAX" -> {
+                double max = values.stream().mapToDouble(Double::doubleValue).max().getAsDouble();
+                yield isWholeNumber(max) ? (long) max : max;
+            }
+            default -> null;
+        };
+    }
+
+    private boolean isWholeNumber(double d) {
+        return !Double.isInfinite(d) && !Double.isNaN(d) && d == Math.floor(d);
+    }
+
+    /**
+     * Parse a SELECT expression like {@code COUNT(1) as alias} or {@code SUM(c.price) as total}.
+     * Returns {@code null} when the expression is not an aggregate.
+     */
+    private AggregateExpr parseAggregateExpr(String expr) {
+        Matcher m = Pattern.compile(
+                "(?i)(COUNT|SUM|AVG|MIN|MAX)\\s*\\(([^)]+)\\)(?:\\s+[Aa][Ss]\\s+(\\S+))?")
+                .matcher(expr.trim());
+        if (m.matches()) {
+            String type  = m.group(1).toUpperCase();
+            String field = m.group(2).trim();
+            String alias = m.group(3) != null ? m.group(3) : type.toLowerCase();
+            return new AggregateExpr(type, field, alias);
+        }
+        return null;
+    }
+
+    /**
+     * Apply GROUP BY: group documents, compute per-group aggregates from the SELECT list,
+     * and return one result document per group.
+     */
+    private List<Object> applyGroupBy(List<Map<String, Object>> docs, ParsedQuery q) {
+        // Partition documents into groups keyed by the GROUP BY field values
+        Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
+        for (Map<String, Object> doc : docs) {
+            StringBuilder key = new StringBuilder();
+            for (String gbField : q.groupBy()) {
+                Object val = resolve(doc, gbField);
+                key.append(val == null ? "\0null\0" : val).append('');
+            }
+            groups.computeIfAbsent(key.toString(), k -> new ArrayList<>()).add(doc);
+        }
+
+        List<Object> results = new ArrayList<>();
+        for (List<Map<String, Object>> group : groups.values()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+
+            // Add the GROUP BY field values using the leaf key name
+            for (String gbField : q.groupBy()) {
+                Object val = resolve(group.get(0), gbField);
+                String key = gbField.contains(".")
+                        ? gbField.substring(gbField.lastIndexOf('.') + 1)
+                        : gbField;
+                row.put(key, val);
+            }
+
+            // Process each SELECT expression; aggregate ones are computed per group
+            if (q.selectFields() != null) {
+                for (String expr : q.selectFields()) {
+                    AggregateExpr agg = parseAggregateExpr(expr);
+                    if (agg != null) {
+                        Object val = computeAggregate(agg.type(), agg.field(), group);
+                        row.put(agg.alias(), val != null ? val : 0L);
+                    }
+                    // Non-aggregate select fields are already added via the GROUP BY loop above
+                }
+            }
+
+            results.add(row);
+        }
+        return results;
+    }
+
+    /**
+     * Deduplicate a projected result list by serialising each item to JSON and
+     * using that as a uniqueness key (matches Cosmos DB DISTINCT semantics).
+     */
+    private List<Object> applyDistinct(List<Object> items) {
+        List<Object> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Object item : items) {
+            try {
+                String key = MAPPER.writeValueAsString(item);
+                if (seen.add(key)) result.add(item);
+            } catch (JsonProcessingException e) {
+                result.add(item); // fallback: keep item even if serialisation fails
+            }
+        }
+        return result;
     }
 }
