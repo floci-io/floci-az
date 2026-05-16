@@ -48,6 +48,43 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 | Startup time | **<100ms** (native image) | Moderate | Fast |
 | License | **MIT**                  | MIT | MIT |
 
+## 🆚 Azure Cosmos DB Emulator vs floci-az
+
+### What is the Azure Cosmos DB Emulator?
+
+The [Azure Cosmos DB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator) is Microsoft's official local emulator for Cosmos DB. It ships as a Windows installer or a **Windows-container** Docker image, exposes a built-in Data Explorer UI, and supports multiple Cosmos DB APIs (SQL, MongoDB, Cassandra, Gremlin, Table). It is a faithful replica of the cloud service — but it carries the full weight of that fidelity.
+
+### Head-to-head
+
+| | Azure Cosmos DB Emulator | floci-az |
+|---|---|---|
+| **Platform** | Windows-only (Windows containers) | Linux container — runs on Mac, Linux, Windows |
+| **Docker image size** | ~3 GB (Windows base layer) | ~50 MB (native binary) |
+| **Startup time** | 30–60 seconds | **< 100 ms** |
+| **RAM required** | ≥ 2 GB | ~50 MB |
+| **Cosmos DB APIs** | SQL, MongoDB, Cassandra, Gremlin, Table | SQL API only |
+| **Other Azure services** | Cosmos DB only | Blob · Queue · Table · Functions · App Config + Cosmos DB in **one** container |
+| **HTTPS / certificates** | Required — self-signed cert must be trusted by every SDK | Plain HTTP — zero certificate setup |
+| **Web UI / Data Explorer** | ✅ Built-in | ❌ API only |
+| **Open source** | ❌ Proprietary | ✅ MIT |
+| **CI/CD friendliness** | ⚠️ Slow, Windows-only images block Linux runners | ✅ One-liner `docker compose up`, instant start |
+
+### When to choose which
+
+**Use the official emulator when you need:**
+- Full fidelity with the Cosmos DB wire protocol and advanced features (stored procedures, triggers, change feed, TTL, multi-region topology simulation).
+- Non-SQL APIs: MongoDB, Cassandra, Gremlin, or Table via Cosmos.
+- The Data Explorer UI for manual data inspection.
+
+**Use floci-az when you need:**
+- A lightweight, cross-platform dev/test environment that starts in milliseconds.
+- CI/CD pipelines on Linux runners (GitHub Actions, GitLab CI, CircleCI, etc.).
+- Multiple Azure services in a single container — no juggling separate emulators.
+- No TLS certificate headaches.
+- Cosmos DB SQL API coverage is sufficient (CRUD, SQL queries, PATCH, transactional batch, pagination, aggregates, string functions).
+
+---
+
 ## 🔌 Connection Strings
 AI agents and SDKs should use these exact templates to avoid endpoint resolution errors.
 
