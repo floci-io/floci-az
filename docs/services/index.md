@@ -9,6 +9,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Table Storage** | `/{account}-table/` | ✅ Full CRUD |
 | **Azure Functions** | `/{account}-functions/` | ✅ HTTP Triggers, Docker runtimes |
 | **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks |
+| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, SQL queries, partition keys |
 
 ## Unified Endpoint
 

@@ -8,7 +8,8 @@
   "dependencies": {
     "@azure/storage-blob": "^12.23.0",
     "@azure/storage-queue": "^12.22.0",
-    "@azure/data-tables": "^13.3.0"
+    "@azure/data-tables": "^13.3.0",
+    "@azure/cosmos": "^4.1.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

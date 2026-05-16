@@ -11,8 +11,14 @@ public interface EmulatorConfig {
     @WithDefault("4577")
     int port();
 
+    @WithDefault("4578")
+    int sslPort();
+
     @WithDefault("http://localhost:4577")
     String baseUrl();
+
+    @WithDefault("https://localhost:4578")
+    String baseUrlHttps();
 
     /**
      * When set, overrides the hostname in base-url for URLs returned in API responses.
@@ -70,6 +76,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig queue();
         ServiceStorageConfig table();
         ServiceStorageConfig appConfig();
+        ServiceStorageConfig cosmos();
     }
 
     interface ServiceStorageConfig {
@@ -96,6 +103,7 @@ public interface EmulatorConfig {
         TableServiceConfig     table();
         FunctionsConfig        functions();
         AppConfigServiceConfig appConfig();
+        CosmosServiceConfig    cosmos();
     }
 
     interface BlobServiceConfig {
@@ -129,6 +137,11 @@ public interface EmulatorConfig {
     }
 
     interface AppConfigServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CosmosServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

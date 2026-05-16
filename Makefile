@@ -1,4 +1,4 @@
-.PHONY: build run stop test test-python test-java-compat test-node-compat test-appconfig compat-docker clean
+.PHONY: build run stop test test-python test-java-compat test-node-compat test-appconfig test-cosmos compat-docker clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -46,6 +46,18 @@ test-appconfig:
 	@cd $(APPCONFIG_DIR) && \
 	if [ ! -d venv ]; then python3 -m venv venv && ./venv/bin/pip install -q -r requirements.txt; fi && \
 	./venv/bin/pytest tests/ -v
+
+test-cosmos:
+	@echo "==> Cosmos DB compatibility tests (Python)"
+	@cd $(PYTHON_DIR) && \
+	if [ ! -d venv ]; then python3 -m venv venv && ./venv/bin/pip install -q -r requirements.txt; fi && \
+	./venv/bin/pytest tests/test_cosmos.py -v
+	@echo "==> Cosmos DB compatibility tests (Java)"
+	@cd $(JAVA_DIR) && mvn test -Dtest=CosmosCompatibilityTest -q
+	@echo "==> Cosmos DB compatibility tests (Node)"
+	@cd $(NODE_DIR) && \
+	if [ ! -d node_modules ]; then npm install --silent; fi && \
+	npx jest cosmos.test --testTimeout=30000
 
 # Run all compatibility tests in Docker containers against the running floci-az.
 # Requires: docker compose up -d
