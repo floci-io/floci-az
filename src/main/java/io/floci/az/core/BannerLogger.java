@@ -35,6 +35,17 @@ public class BannerLogger {
         if (config.services().appConfig().enabled()) {
             sb.append(serviceStatus("appconfig", true, getStorageMode("appconfig")));
         }
+        if (config.services().keyVault().enabled()) {
+            sb.append(serviceStatus("keyvault", true, getStorageMode("keyvault")));
+        }
+        if (config.services().eventHub().enabled()) {
+            String amqpInfo = "amqp:" + config.services().eventHub().amqpPort()
+                    + "  ns:" + config.services().eventHub().defaultNamespace();
+            if (config.services().eventHub().kafkaEnabled()) {
+                amqpInfo += "  kafka:" + config.services().eventHub().kafkaPort();
+            }
+            sb.append(serviceStatusDocker("eventhub", true, amqpInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
@@ -45,6 +56,7 @@ public class BannerLogger {
             case "queue" -> config.storage().services().queue().mode().orElse(config.storage().mode());
             case "table"     -> config.storage().services().table().mode().orElse(config.storage().mode());
             case "appconfig" -> config.storage().services().appConfig().mode().orElse(config.storage().mode());
+            case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **event-hubs:** Multi-namespace support — each Event Hubs namespace gets its own isolated Artemis container with dynamically allocated ports, analogous to how the AWS emulator creates one PostgreSQL container per RDS instance; default namespace starts automatically from config
+- **event-hubs:** Namespace management REST API — `GET/PUT/DELETE /{account}-eventhub/namespaces[/{ns}]`; `GET /{account}-eventhub/namespaces/{ns}/connection` returns AMQP/AMQPS ports; `GET /{account}-eventhub/namespaces/{ns}/tls-cert` returns TLS PEM
+- **event-hubs:** `EventHubNamespaceManager` (`@ApplicationScoped`) manages the namespace lifecycle map; `ArtemisManager` removed — its logic is now namespaced in `EventHubNamespaceManager`
+- **event-hubs:** Azure Event Hubs emulation — AMQP 1.0 via Apache ActiveMQ Artemis sidecar (port 5672); TLS AMQP via port 5671 for uamqp/Python SDK; Kafka-compatible access via Redpanda sidecar (port 9093, opt-in with `kafkaEnabled: true`); namespace and event hub entities declared via `entities` config; `$Default` consumer group created automatically
+- **event-hubs:** ANYCAST + exclusive divert topology provisioned at startup via Artemis Jolokia API — durable queues per consumer group ensure messages persist before a receiver connects
+- **event-hubs:** `ArtemisConfigGenerator` generates `broker.xml` per namespace; `ArtemisTlsGenerator` generates self-signed RSA-2048 cert + PKCS12 keystore per namespace for TLS AMQP
+- **event-hubs:** 6 Python (`uamqp`) compatibility tests covering send/receive, consumer groups, partitions, and high-throughput delivery
+- **docker:** `ContainerSpec`, `ContainerBuilder`, `ContainerLifecycleManager`, `ImageCacheService`, `PortAllocator` ported from floci — shared container infrastructure for sidecar-based services
+
 ## [0.2.0] - 2026-05-15
 
 
 ### Added
 
+- **key-vault:** Azure Key Vault Secrets service — CRUD, versioning (immutable versions with latest pointer), soft-delete lifecycle (delete → recover or purge), properties update (`content_type`, `tags`, `enabled`, `nbf`, `exp`), list secrets/versions/deleted, backup ([#16](https://github.com/floci-io/floci-az/pull/16))
+- **key-vault:** 24 Python (`azure-keyvault-secrets 4.11.0`) compatibility tests covering secrets CRUD, versioning, soft-delete, enabled attribute, and backup ([#16](https://github.com/floci-io/floci-az/pull/16))
 - **app-config:** Azure App Configuration service — key-values, labels, feature flags, snapshots (frozen KV sets), revisions, ETags, and optimistic-concurrency locks ([#15](https://github.com/floci-io/floci-az/pull/15))
 - **app-config:** Snapshot lifecycle — `PUT /snapshots/{name}` captures a frozen set of key-values; `GET /operations?snapshot={name}` returns the LRO result; `GET /kv?snapshot={name}` reads from the frozen set; supports `key` and `key_label` composition modes ([#15](https://github.com/floci-io/floci-az/pull/15))
 - **app-config:** 36 Python (`azure-appconfiguration 1.7.1`) and 36 Java compatibility tests covering KV, labels, feature flags, ETags, locks, and snapshots ([#15](https://github.com/floci-io/floci-az/pull/15))

@@ -30,6 +30,8 @@ public class AzureServiceRegistry {
             case "table"     -> config.services().table().enabled();
             case "functions"  -> config.services().functions().enabled();
             case "appconfig"  -> config.services().appConfig().enabled();
+            case "keyvault"   -> config.services().keyVault().enabled();
+            case "eventhub"   -> config.services().eventHub().enabled();
             default           -> true;
         };
     }

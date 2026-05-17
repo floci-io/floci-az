@@ -1,0 +1,4 @@
+azure-keyvault-secrets>=4.7.0
+azure-identity>=1.15.0
+azure-core>=1.30.0
+pytest>=7.0.0

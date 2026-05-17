@@ -1,15 +1,19 @@
 package io.floci.az.compat;
 
+import com.azure.core.credential.AccessToken;
 import com.azure.core.http.HttpPipelineCallContext;
 import com.azure.core.http.HttpPipelineNextPolicy;
 import com.azure.core.http.HttpResponse;
 import com.azure.core.http.policy.HttpPipelinePolicy;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
+import com.azure.security.keyvault.secrets.SecretClient;
+import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import reactor.core.publisher.Mono;
 
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.time.OffsetDateTime;
 
 public final class EmulatorConfig {
 
@@ -68,6 +72,17 @@ public final class EmulatorConfig {
             }
             return next.process();
         }
+    }
+
+    static SecretClient buildKeyVaultClient() {
+        String httpsBase = BASE.replace("http://", "https://");
+        String vaultUrl = httpsBase + "/" + ACCOUNT + "-keyvault";
+        return new SecretClientBuilder()
+                .vaultUrl(vaultUrl)
+                .credential(req -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
+                .addPolicy(new ForceHttpPolicy())
+                .disableChallengeResourceVerification()
+                .buildClient();
     }
 
     private EmulatorConfig() {}

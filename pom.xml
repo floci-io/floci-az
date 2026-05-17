@@ -92,6 +92,17 @@
             <artifactId>commons-compress</artifactId>
             <version>1.28.0</version>
         </dependency>
+        <!-- BouncyCastle for self-signed TLS cert generation (Artemis AMQP TLS) -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.84</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.84</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
