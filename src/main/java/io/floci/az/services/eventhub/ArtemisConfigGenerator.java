@@ -146,8 +146,15 @@ public class ArtemisConfigGenerator {
         // uamqp lowercases the hostname portion of AMQP URIs, so we must match that
         String entityAddr = "amqp://" + hostname.toLowerCase(java.util.Locale.US) + "/" + namespace + "/" + entity;
 
+        // An explicit (non-durable) queue at the entity address lets the sender link attach.
+        // The exclusive diverts below intercept all messages before they reach this queue,
+        // so messages flow only to the per-consumer-group durable queues.
         addresses.startAttr("address", "name", entityAddr)
-                   .selfClose("anycast")
+                   .start("anycast")
+                     .startAttr("queue", "name", entityAddr)
+                       .elem("durable", false)
+                     .end("queue")
+                   .end("anycast")
                  .end("address");
 
         for (String cg : consumerGroups) {
