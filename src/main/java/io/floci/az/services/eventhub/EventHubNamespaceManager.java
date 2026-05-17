@@ -117,9 +117,14 @@ public class EventHubNamespaceManager {
         waitForPort(amqpEndpoint, "AMQP");
         EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
         waitForPort(amqpsEndpoint, "AMQPS");
+
+        // Topology is pre-configured in broker.xml; Jolokia setup runs in background
+        // to handle any dynamic additions (e.g. consumer groups created after startup).
         EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
-        waitForJolokia(jolokiaEndpoint);
-        setupAmqpTopology(jolokiaEndpoint, namespaceName, entities, amqpHostnames);
+        Thread.ofVirtual().name("jolokia-setup-" + namespaceName).start(() -> {
+            waitForJolokia(jolokiaEndpoint);
+            setupAmqpTopology(jolokiaEndpoint, namespaceName, entities, amqpHostnames);
+        });
 
         NamespaceState state = new NamespaceState(
                 containerId, amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem());
@@ -215,7 +220,7 @@ public class EventHubNamespaceManager {
         for (String hostname : hostnames) {
             for (Map.Entry<String, List<String>> entry : entities.entrySet()) {
                 String entityName = entry.getKey();
-                String entityAddr = "amqp://" + hostname + "/" + namespace + "/" + entityName;
+                String entityAddr = "amqp://" + hostname.toLowerCase(java.util.Locale.US) + "/" + namespace + "/" + entityName;
 
                 jolokiaExec(http, baseUrl, auth, mbean,
                         "createAddress(java.lang.String,java.lang.String)",
