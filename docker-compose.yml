@@ -11,6 +11,7 @@ services:
     tty: true
     environment:
       FLOCI_AZ_STORAGE_MODE: memory
+      FLOCI_AZ_SERVICES_DOCKER_NETWORK: floci_az_default
     networks:
       floci_az_default:
         aliases:

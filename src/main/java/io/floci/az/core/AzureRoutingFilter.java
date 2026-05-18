@@ -129,6 +129,12 @@ public class AzureRoutingFilter {
             } else if (accountName.endsWith("-cosmos")) {
                 serviceType = "cosmos";
                 accountName = accountName.substring(0, accountName.length() - 7);
+            } else if (accountName.endsWith("-keyvault")) {
+                serviceType = "keyvault";
+                accountName = accountName.substring(0, accountName.length() - 9);
+            } else if (accountName.endsWith("-eventhub")) {
+                serviceType = "eventhub";
+                accountName = accountName.substring(0, accountName.length() - 9);
             } else {
                 serviceType = resolveServiceType(requestContext, resourcePath);
             }

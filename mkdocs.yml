@@ -71,5 +71,7 @@ nav:
     - Table Storage: services/table.md
     - Azure Functions: services/functions.md
     - App Configuration: services/app-config.md
+    - Key Vault: services/key-vault.md
+    - Event Hubs: services/event-hub.md
   - Contributing: contributing.md
   - Changelog: changelog.md
