@@ -35,10 +35,12 @@ class CosmosCassandraEngineCompatibilityTest {
         String host = (String) engineInfo.get("host");
         int port = ((Number) engineInfo.get("port")).intValue();
 
-        // Retry connection up to 60s — ScyllaDB takes longer to boot
+        // Retry connection up to 3 minutes — ScyllaDB (6.x) takes ~90s to become fully ready
         Exception lastException = null;
-        long deadline = System.currentTimeMillis() + 60_000;
+        long deadline = System.currentTimeMillis() + 180_000;
+        int attempt = 0;
         while (System.currentTimeMillis() < deadline) {
+            attempt++;
             try {
                 CqlSession candidate = CqlSession.builder()
                         .addContactPoint(new InetSocketAddress(host, port))
@@ -48,9 +50,13 @@ class CosmosCassandraEngineCompatibilityTest {
                 candidate.execute("SELECT release_version FROM system.local");
                 session = candidate;
                 lastException = null;
+                System.out.printf("[cassandra] Connected after %d attempts%n", attempt);
                 break;
             } catch (Exception e) {
                 lastException = e;
+                long remaining = (deadline - System.currentTimeMillis()) / 1000;
+                System.out.printf("[cassandra] attempt %d failed (%ds remaining): %s%n",
+                        attempt, remaining, e.getClass().getSimpleName());
                 if (session != null) {
                     try { session.close(); } catch (Exception ignored) {}
                     session = null;
@@ -59,7 +65,7 @@ class CosmosCassandraEngineCompatibilityTest {
             }
         }
         if (lastException != null) {
-            assumeTrue(false, "Cassandra/ScyllaDB not ready after 60s: " + lastException.getMessage());
+            assumeTrue(false, "Cassandra/ScyllaDB not ready after 3 minutes: " + lastException.getMessage());
         }
 
         // Create keyspace and table for all tests

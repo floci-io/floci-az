@@ -87,7 +87,7 @@ floci-az:
         default-api: nosql
         nosql:
           enabled: false
-          # image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+          # Embedded
         mongodb:
           enabled: false
           # image: mongo:7
@@ -96,13 +96,13 @@ floci-az:
           # image: citusdata/citus:12
         cassandra:
           enabled: false
-          # image: scylladb/scylla
+          # image: scylladb/scylla:6.2
         gremlin:
           enabled: false
           # image: tinkerpop/gremlin-server
         table:
           enabled: false
-          # image: mcr.microsoft.com/azure-storage/azurite
+          # Embedded
     key-vault:
       enabled: true
     event-hub:

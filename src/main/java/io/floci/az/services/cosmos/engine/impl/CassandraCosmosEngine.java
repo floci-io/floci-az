@@ -8,7 +8,9 @@ import java.util.List;
 @ApplicationScoped
 public class CassandraCosmosEngine implements CosmosEngineProvider {
 
-    private static final String DEFAULT_IMAGE = "scylladb/scylla";
+    // Pin to a specific tag to avoid pulling "latest" on every fresh install.
+    // Override with FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_IMAGE if needed.
+    private static final String DEFAULT_IMAGE = "scylladb/scylla:6.2";
     private static final int DEFAULT_PORT = 9042; // CQL native transport port
 
     @Override
