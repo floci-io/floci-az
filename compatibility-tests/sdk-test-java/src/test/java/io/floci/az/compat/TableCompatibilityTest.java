@@ -25,6 +25,7 @@ class TableCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = new TableServiceClientBuilder()
             .connectionString(EmulatorConfig.TABLE_CONN)
             .buildClient();

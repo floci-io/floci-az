@@ -21,6 +21,7 @@ class QueueCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = new QueueServiceClientBuilder()
             .connectionString(EmulatorConfig.QUEUE_CONN)
             .buildClient();

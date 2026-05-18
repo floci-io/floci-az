@@ -22,6 +22,7 @@ class BlobCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = new BlobServiceClientBuilder()
             .connectionString(EmulatorConfig.BLOB_CONN)
             .buildClient();

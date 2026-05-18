@@ -38,6 +38,7 @@ class CosmosCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = EmulatorConfig.buildCosmosClient();
     }
 

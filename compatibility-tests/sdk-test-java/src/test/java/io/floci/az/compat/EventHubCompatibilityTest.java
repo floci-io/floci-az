@@ -33,6 +33,7 @@ class EventHubCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         factory = EmulatorConfig.buildAmqpConnectionFactory();
     }
 

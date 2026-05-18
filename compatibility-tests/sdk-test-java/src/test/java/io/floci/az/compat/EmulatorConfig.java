@@ -14,15 +14,18 @@ import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.qpid.jms.JmsConnectionFactory;
+import org.junit.jupiter.api.Assumptions;
 import reactor.core.publisher.Mono;
 
 import jakarta.jms.ConnectionFactory;
+import java.net.ConnectException;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
@@ -153,10 +156,56 @@ public final class EmulatorConfig {
                 .buildClient();
     }
 
+    // ── Emulator reachability ─────────────────────────────────────────────────
+
+    /**
+     * Returns true if the emulator's HTTP health endpoint responds within 2 seconds.
+     * Used by {@link #assumeEmulatorRunning()} to skip test classes gracefully when
+     * the emulator is not started.
+     */
+    public static boolean isEmulatorReachable() {
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(2))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(BASE + "/health"))
+                    .timeout(Duration.ofSeconds(2))
+                    .GET()
+                    .build();
+            client.send(req, BodyHandlers.discarding());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Skips the entire test class when the emulator is not reachable.
+     * Call as the first statement in {@code @BeforeAll} so no test methods run
+     * (and no timeout-induced failures accumulate) when floci-az is not started.
+     *
+     * <pre>
+     *   &#64;BeforeAll void setup() {
+     *       EmulatorConfig.assumeEmulatorRunning();
+     *       // ... build clients ...
+     *   }
+     * </pre>
+     */
+    public static void assumeEmulatorRunning() {
+        Assumptions.assumeTrue(
+                isEmulatorReachable(),
+                "floci-az emulator is not running at " + BASE + " — skipping. Start with: make run");
+    }
+
     /**
      * Hits the floci-az control-plane endpoint to trigger on-demand engine startup.
-     * Returns the parsed JSON response as a Map, or null if the engine is not enabled (503).
-     * Throws RuntimeException on unexpected errors.
+     * Returns the parsed JSON response as a Map, or {@code null} when:
+     * <ul>
+     *   <li>The engine is not enabled (HTTP 503)</li>
+     *   <li>The emulator is not running (ConnectException)</li>
+     * </ul>
+     * Callers use {@code assumeTrue(result != null)} to skip gracefully in both cases.
      */
     public static Map<String, Object> triggerCosmosEngine(String serviceTypeSuffix) {
         String url = BASE + "/devstoreaccount1-" + serviceTypeSuffix + "/connect";
@@ -168,7 +217,7 @@ public final class EmulatorConfig {
                     .build();
             java.net.http.HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
             if (response.statusCode() == 503) {
-                return null;
+                return null;  // engine not enabled
             }
             if (response.statusCode() != 200) {
                 throw new RuntimeException("Unexpected status " + response.statusCode()
@@ -176,9 +225,17 @@ public final class EmulatorConfig {
             }
             ObjectMapper mapper = new ObjectMapper();
             return mapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        } catch (ConnectException e) {
+            return null;  // emulator not running — skip gracefully
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
+            // java.net.http may wrap ConnectException inside an IOException
+            Throwable cause = e.getCause();
+            while (cause != null) {
+                if (cause instanceof ConnectException) return null;
+                cause = cause.getCause();
+            }
             throw new RuntimeException("Failed to call " + url, e);
         }
     }
