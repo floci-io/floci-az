@@ -27,7 +27,8 @@ stop:
 test-python:
 	@echo "==> Python SDK compatibility tests (all services)"
 	@cd $(PYTHON_DIR) && \
-	if [ ! -d venv ]; then python3 -m venv venv && ./venv/bin/pip install -q -r requirements.txt; fi && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
 	./venv/bin/pytest tests/ -v
 
 test-java-compat:
@@ -43,13 +44,15 @@ test-node-compat:
 test-appconfig:
 	@echo "==> App Configuration SDK compatibility tests"
 	@cd $(APPCONFIG_DIR) && \
-	if [ ! -d venv ]; then python3 -m venv venv && ./venv/bin/pip install -q -r requirements.txt; fi && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
 	./venv/bin/pytest tests/ -v
 
 test-cosmos:
 	@echo "==> Cosmos DB compatibility tests (Python)"
 	@cd $(PYTHON_DIR) && \
-	if [ ! -d venv ]; then python3 -m venv venv && ./venv/bin/pip install -q -r requirements.txt; fi && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
 	./venv/bin/pytest tests/test_cosmos.py -v
 	@echo "==> Cosmos DB compatibility tests (Java)"
 	@cd $(JAVA_DIR) && mvn test -Dtest=CosmosCompatibilityTest -q

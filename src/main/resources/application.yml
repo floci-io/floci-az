@@ -5,9 +5,9 @@ quarkus:
       format: "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] %s%e%n"
   http:
     port: ${floci-az.port}
-    ssl-port: ${floci-az.ssl-port}
-    insecure-requests: enabled   # keep plain HTTP on 4577 — nothing changes for existing clients
     host: 0.0.0.0
+    ssl-port: ${floci-az.ssl-port}
+    insecure-requests: enabled   # keep plain HTTP on 4577 alongside HTTPS on 4578
     ssl:
       certificate:
         key-store-file: certs/floci-az.p12
@@ -22,6 +22,9 @@ quarkus:
 floci-az:
   port: 4577
   ssl-port: 4578
+  tls:
+    enabled: false    # set to true to enable HTTPS (both HTTP+HTTPS on same port via proxy)
+    self-signed: true  # auto-generate self-signed cert
   base-url: http://localhost:4577
   base-url-https: https://localhost:4578
   storage:

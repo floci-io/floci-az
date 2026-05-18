@@ -36,6 +36,8 @@ public interface EmulatorConfig {
                 .orElse(baseUrl());
     }
 
+    TlsConfig tls();
+
     StorageConfig storage();
 
     ServicesConfig services();
@@ -209,6 +211,22 @@ public interface EmulatorConfig {
 
         /** Overrides the hostname that function containers use to reach floci-az. */
         Optional<String> dockerHostOverride();
+    }
+
+    interface TlsConfig {
+        /** Enable TLS/HTTPS. When true, both HTTP and HTTPS are served on the same public port. */
+        @WithDefault("false")
+        boolean enabled();
+
+        /** Path to PEM certificate file. */
+        Optional<String> certPath();
+
+        /** Path to PEM private key file. */
+        Optional<String> keyPath();
+
+        /** Auto-generate a self-signed certificate when no cert-path/key-path provided. */
+        @WithDefault("true")
+        boolean selfSigned();
     }
 
     /**

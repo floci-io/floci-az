@@ -25,72 +25,120 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for E
 ---
 
 ### 📌 At a Glance
-*   **Target Cloud:** Microsoft Azure (NOT AWS).
-*   **Unified Port:** `4577` (All services share this port).
-*   **Default Account:** `devstoreaccount1` / Key: `Eby8vdM02xNO...`
-*   **Functions:** Real execution via Docker-in-Docker (Node, Python, Java, .NET).
+
+* **Target Cloud:** Microsoft Azure (NOT AWS).
+* **Unified Port:** `4577` (All services share this port).
+* **Default Account:** `devstoreaccount1` / Key: `Eby8vdM02xNO...`
+* **Functions:** Real execution via Docker-in-Docker (Node, Python, Java, .NET).
 
 > The companion to [floci](https://github.com/floci-io/floci) — floci emulates AWS, floci-az emulates Azure.
 
 ## 🚀 Why floci-az?
 
-| Feature | floci-az                 | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
-|---|--------------------------|---|---|
-| Blob Storage | ✅                        | ✅ | ❌ |
-| Queue Storage | ✅                        | ✅ | ❌ |
-| Table Storage | ✅                        | ✅ | ❌ |
-| Azure Functions | ✅                        | ❌ | ✅ |
-| App Configuration | ✅                        | ❌ | ❌ |
-| Cosmos DB (SQL API) | ✅                    | ❌ | ❌ |
-| Key Vault         | ✅                        | ❌ | ❌ |
-| Event Hubs        | ✅                        | ❌ | ❌ |
-| Native binary | ✅                        | ❌ | ✅ |
-| Unified port | ✅ (4577)                 | ❌ | ❌ |
-| Storage modes | ✅ (persistent/WAL/Hybrid) | ❌ | ❌ |
-| Startup time | **<100ms** (native image) | Moderate | Fast |
-| License | **MIT**                  | MIT | MIT |
+| Feature             | floci-az                  | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
+|---------------------|---------------------------|---------------------------------------------|-----------------------------------------------------------------------------|
+| Blob Storage        | ✅                         | ✅                                           | ❌                                                                           |
+| Queue Storage       | ✅                         | ✅                                           | ❌                                                                           |
+| Table Storage       | ✅                         | ✅                                           | ❌                                                                           |
+| Azure Functions     | ✅                         | ❌                                           | ✅                                                                           |
+| App Configuration   | ✅                         | ❌                                           | ❌                                                                           |
+| Cosmos DB (SQL API) | ✅                         | ❌                                           | ❌                                                                           |
+| Key Vault           | ✅                         | ❌                                           | ❌                                                                           |
+| Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
+| Native binary       | ✅                         | ❌                                           | ✅                                                                           |
+| Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
+| Storage modes       | ✅ (persistent/WAL/Hybrid) | ❌                                           | ❌                                                                           |
+| Startup time        | **<100ms** (native image) | Moderate                                    | Fast                                                                        |
+| License             | **MIT**                   | MIT                                         | MIT                                                                         |
 
 ## 🆚 Azure Cosmos DB Emulator vs floci-az
 
 ### What is the Azure Cosmos DB Emulator?
 
-The [Azure Cosmos DB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator) is Microsoft's official local emulator for Cosmos DB. It ships as a Windows installer or a **Windows-container** Docker image, exposes a built-in Data Explorer UI, and supports multiple Cosmos DB APIs (SQL, MongoDB, Cassandra, Gremlin, Table). It is a faithful replica of the cloud service — but it carries the full weight of that fidelity.
+The [Azure Cosmos DB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator) is Microsoft's official local
+emulator for Cosmos DB. It ships as a Windows installer or a **Windows-container** Docker image, exposes a built-in Data
+Explorer UI, and supports multiple Cosmos DB APIs (SQL, MongoDB, Cassandra, Gremlin, Table). It is a faithful replica of
+the cloud service — but it carries the full weight of that fidelity.
 
 ### Head-to-head
 
-| | Azure Cosmos DB Emulator | floci-az |
-|---|---|---|
-| **Platform** | Windows-only (Windows containers) | Linux container — runs on Mac, Linux, Windows |
-| **Docker image size** | ~3 GB (Windows base layer) | ~50 MB (native binary) |
-| **Startup time** | 30–60 seconds | **< 100 ms** |
-| **RAM required** | ≥ 2 GB | ~50 MB |
-| **Cosmos DB APIs** | SQL, MongoDB, Cassandra, Gremlin, Table | SQL API only |
-| **Other Azure services** | Cosmos DB only | Blob · Queue · Table · Functions · App Config + Cosmos DB in **one** container |
-| **HTTPS / certificates** | Required — self-signed cert must be trusted by every SDK | Plain HTTP — zero certificate setup |
-| **Web UI / Data Explorer** | ✅ Built-in | ❌ API only |
-| **Open source** | ❌ Proprietary | ✅ MIT |
-| **CI/CD friendliness** | ⚠️ Slow, Windows-only images block Linux runners | ✅ One-liner `docker compose up`, instant start |
+| Feature                          | Azure Cosmos DB Emulator                                 | floci-az                                                                                 |
+|----------------------------------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
+| **Platform**                     | Windows-first (Windows containers historically required) | Linux-native containers — runs on Mac, Linux, and Windows                                |
+| **Docker image size**            | Heavy (~GBs depending on version/base image)             | Lightweight modular engines (~50 MB to a few hundred MB depending on selected APIs)      |
+| **Startup time**                 | Slow startup (tens of seconds)                           | On-demand startup — only starts the required Cosmos API engine                           |
+| **RAM required**                 | High memory usage (commonly ≥ 2 GB)                      | Minimal footprint — only active engines consume resources                                |
+| **Cosmos DB APIs**               | SQL (NoSQL), MongoDB, Cassandra, Gremlin, Table          | SQL (NoSQL), MongoDB, PostgreSQL, Cassandra, Gremlin, Table                              |
+| **Cosmos API implementation**    | Microsoft proprietary emulator                           | API-specific compatibility engines                                                       |
+| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | Azure Cosmos DB Emulator Linux vNext                                                     |
+| **MongoDB API provider**         | Native Cosmos Emulator                                   | MongoDB Community Server                                                                 |
+| **PostgreSQL API provider**      | Native Cosmos Emulator                                   | PostgreSQL + Citus                                                                       |
+| **Cassandra API provider**       | Native Cosmos Emulator                                   | ScyllaDB (default) or Apache Cassandra                                                   |
+| **Gremlin API provider**         | Native Cosmos Emulator                                   | Apache TinkerPop Gremlin Server                                                          |
+| **Table API provider**           | Native Cosmos Emulator                                   | Azurite                                                                                  |
+| **Other Azure services**         | Cosmos DB only                                           | Blob · Queue · Table · Functions · App Config · Cosmos DB in a unified local Azure stack |
+| **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Most services: plain HTTP on `4577`, zero cert setup. **Cosmos DB Java SDK only:** HTTPS on `4578` with a bundled self-signed cert — no import required, works out of the box |
+| **Web UI / Data Explorer**       | ✅ Built-in                                               | ❌ API-focused local development environment                                              |
+| **Open source**                  | ❌ Proprietary                                            | ✅ MIT                                                                                    |
+| **CI/CD friendliness**           | ⚠️ Heavy images and slower pipelines                     | ✅ Fast startup and Linux-friendly containers                                             |
+| **Startup model**                | Starts the full emulator stack                           | Starts only the requested Cosmos API engine                                              |
+| **Container strategy**           | Monolithic emulator                                      | Modular provider-based architecture                                                      |
+| **Cloud abstraction philosophy** | Cosmos-specific emulator                                 | Unified cloud abstraction through floci                                                  |
+| **Primary goal**                 | Official local Cosmos emulator                           | Lightweight Azure-compatible local development and integration testing                   |
+| **Behavioral parity**            | Higher Azure-specific behavior parity                    | High protocol/API compatibility, not full Azure infrastructure emulation                 |
+| **RU/s and global distribution** | Partial simulation                                       | ❌ Not fully emulated                                                                     |
+| **Multi-region replication**     | Partial support                                          | ❌ Not emulated                                                                           |
+| **Consistency semantics**        | Azure-oriented                                           | Best-effort compatibility depending on engine                                            |
+| **Recommended usage**            | Full local Cosmos-focused workflows                      | Fast local development, testing, CI/CD, and lightweight Azure integration workflows      |
+
+> floci-az does not aim to fully reproduce Azure Cosmos DB internals or cloud infrastructure behavior.
+>
+> The goal is to provide high protocol and SDK compatibility through API-specific local engines optimized for:
+>
+> - local development
+> - integration testing
+> - CI/CD pipelines
+> - lightweight developer environments
+>
+> Each Cosmos API is backed by the engine that most closely matches its protocol and driver behavior.
+>
+> Exact Azure features such as:
+>
+> - RU/s throughput semantics
+> - global distribution
+> - multi-region replication
+> - autoscaling
+> - exact consistency guarantees
+> - Azure internal infrastructure behavior
+>
+> are intentionally considered out of scope.
 
 ### When to choose which
 
 **Use the official emulator when you need:**
-- Full fidelity with the Cosmos DB wire protocol and advanced features (stored procedures, triggers, change feed, TTL, multi-region topology simulation).
+
+- Full fidelity with the Cosmos DB wire protocol and advanced features (stored procedures, triggers, change feed, TTL,
+  multi-region topology simulation).
 - Non-SQL APIs: MongoDB, Cassandra, Gremlin, or Table via Cosmos.
 - The Data Explorer UI for manual data inspection.
 
 **Use floci-az when you need:**
+
 - A lightweight, cross-platform dev/test environment that starts in milliseconds.
 - CI/CD pipelines on Linux runners (GitHub Actions, GitLab CI, CircleCI, etc.).
 - Multiple Azure services in a single container — no juggling separate emulators.
 - No TLS certificate headaches.
-- Cosmos DB SQL API coverage is sufficient (CRUD, SQL queries, PATCH, transactional batch, pagination, aggregates, string functions).
+- Cosmos DB SQL API coverage is sufficient (CRUD, SQL queries, PATCH, transactional batch, pagination, aggregates,
+  string functions).
 
 ---
 
 ## 🔌 Connection Strings
+
 AI agents and SDKs should use these exact templates to avoid endpoint resolution errors.
 
 **Standard Connection String:**
+
 ```text
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
 ```
@@ -122,39 +170,41 @@ flowchart LR
         Router --> F
         Router --> G
         A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
-        D -->|"spawn / proxy"| Docker["🐳 Docker\n(function containers)"]
-        G -->|"manages"| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
+        D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
+        G -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
     end
 
-    Client -->|"HTTP :4577\nAzure wire protocol"| Router
+    Client -->|" HTTP :4577\nAzure wire protocol "| Router
 ```
 
 ## Supported Services
 
-| Service | Routing | Notable operations |
-|---|---|---|
-| **Blob Storage** | `/{account}/` | Create/delete containers, upload/download/delete blobs, list blobs |
-| **Queue Storage** | `/{account}-queue/` | Create/delete queues, send/receive/peek/delete messages, visibility timeout |
-| **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
-| **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
-| **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
-| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | Databases, containers, documents CRUD; SQL queries (WHERE / ORDER BY / OFFSET / LIMIT / aggregates / GROUP BY / DISTINCT / string functions); PATCH; transactional batch |
-| **Key Vault** | `/{account}-keyvault/` | Secrets CRUD, versioning, soft-delete, properties update |
-| **Event Hubs** | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |
+| Service                 | Routing                      | Notable operations                                                                                                                                                                                                    |
+|-------------------------|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Blob Storage**        | `/{account}/`                | Create/delete containers, upload/download/delete blobs, list blobs                                                                                                                                                    |
+| **Queue Storage**       | `/{account}-queue/`          | Create/delete queues, send/receive/peek/delete messages, visibility timeout                                                                                                                                           |
+| **Table Storage**       | `/{account}-table/`          | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
+| **Azure Functions**     | `/{account}-functions/`      | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool                                                                                                                            |
+| **App Configuration**   | `/{account}-appconfig/`      | Key-values, labels, feature flags, snapshots, revisions, locks, ETags                                                                                                                                                 |
+| **Cosmos DB (SQL API)** | `/{account}-cosmos/`         | Databases, containers, documents CRUD; SQL queries (WHERE / ORDER BY / OFFSET / LIMIT / aggregates / GROUP BY / DISTINCT / string functions); PATCH; transactional batch                                              |
+| **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
+| **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
 
 ## Persistence & Storage Modes
 
-floci-az features the same flexible storage architecture as floci. Configure the storage mode globally via `FLOCI_AZ_STORAGE_MODE` or override it per service.
+floci-az features the same flexible storage architecture as floci. Configure the storage mode globally via
+`FLOCI_AZ_STORAGE_MODE` or override it per service.
 
-| Mode | Behavior | Best for... | Durability |
-|:---:|---|---|:---:|
-| **`memory`** **(Default)** | Entirely in-RAM. Data is lost when the container stops. | Speed, ephemeral testing, CI pipelines. | ❌ None |
-| **`persistent`** | Data is loaded at startup and flushed to disk on graceful shutdown. | Simple local dev with state preservation. | ⚠️ Medium |
-| **`hybrid`** | In-memory performance with periodic async flushing (every 5s). | The perfect balance of speed and safety. | ✅ Good |
-| **`wal`** | Write-Ahead Log. Every mutation is logged to disk before responding. | Maximum durability for critical state. | 💎 Highest |
+|            Mode            | Behavior                                                             | Best for...                               | Durability |
+|:--------------------------:|----------------------------------------------------------------------|-------------------------------------------|:----------:|
+| **`memory`** **(Default)** | Entirely in-RAM. Data is lost when the container stops.              | Speed, ephemeral testing, CI pipelines.   |   ❌ None   |
+|      **`persistent`**      | Data is loaded at startup and flushed to disk on graceful shutdown.  | Simple local dev with state preservation. | ⚠️ Medium  |
+|        **`hybrid`**        | In-memory performance with periodic async flushing (every 5s).       | The perfect balance of speed and safety.  |   ✅ Good   |
+|         **`wal`**          | Write-Ahead Log. Every mutation is logged to disk before responding. | Maximum durability for critical state.    | 💎 Highest |
 
 > [!TIP]
-> Use **`hybrid`** for a "it just works" experience that survives container restarts. For ephemeral integration tests where state doesn't matter, keep the default **`memory`** mode for maximum performance.
+> Use **`hybrid`** for a "it just works" experience that survives container restarts. For ephemeral integration tests
+> where state doesn't matter, keep the default **`memory`** mode for maximum performance.
 
 ## Quick Start
 
@@ -191,13 +241,17 @@ docker run -d --name floci-az \
   floci/floci-az:latest
 ```
 
-All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are not validated.
+All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are
+not validated.
 
-> **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
+> **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount
+`/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
 
 ## CLI Usage (`azfloci`)
 
-The `azfloci` tool is a companion Python CLI that acts as a transparent proxy for the official Azure CLI (`az`). It dynamically injects the correct connection strings and disables SSL verification so you can use standard `az` commands against the local emulator.
+The `azfloci` tool is a companion Python CLI that acts as a transparent proxy for the official Azure CLI (`az`). It
+dynamically injects the correct connection strings and disables SSL verification so you can use standard `az` commands
+against the local emulator.
 
 ### Setup
 
@@ -214,6 +268,7 @@ az setup
 When using `azfloci`, you don't need to pass `--connection-string` or set environment variables manually.
 
 #### Blob Storage
+
 ```bash
 # Create a container
 az storage container create --name my-container
@@ -226,6 +281,7 @@ az storage blob list --container-name my-container --output table
 ```
 
 #### Queue Storage
+
 ```bash
 # Create a queue
 az storage queue create --name my-queue
@@ -235,28 +291,30 @@ az storage message put --queue-name my-queue --content "Hello from CLI"
 ```
 
 #### Table Storage
+
 ```bash
 # Create a table
 az storage table create --name MyTable
 ```
 
 > [!NOTE]
-> `azfloci` automatically detects the `--account-name` argument (defaulting to `devstoreaccount1`) and constructs the appropriate local endpoint.
+> `azfloci` automatically detects the `--account-name` argument (defaulting to `devstoreaccount1`) and constructs the
+> appropriate local endpoint.
 
 ## SDK Integration
 
 floci-az uses path-style routing:
 
-| Service | Endpoint |
-|---|---|
-| Blob | `http://localhost:4577/{accountName}` |
-| Queue | `http://localhost:4577/{accountName}-queue` |
-| Table | `http://localhost:4577/{accountName}-table` |
-| Functions | `http://localhost:4577/{accountName}-functions` |
-| App Configuration | `http://localhost:4577/{accountName}-appconfig` |
-| Cosmos DB | `http://localhost:4577/{accountName}-cosmos` |
-| Key Vault | `http://localhost:4577/{accountName}-keyvault` |
-| Event Hubs | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` |
+| Service           | Endpoint                                              | Notes |
+|-------------------|-------------------------------------------------------|-------|
+| Blob              | `http://localhost:4577/{accountName}`                 | |
+| Queue             | `http://localhost:4577/{accountName}-queue`           | |
+| Table             | `http://localhost:4577/{accountName}-table`           | |
+| Functions         | `http://localhost:4577/{accountName}-functions`       | |
+| App Configuration | `http://localhost:4577/{accountName}-appconfig`       | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
+| Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** use `https://localhost:4578` — the SDK enforces TLS; bundled cert requires no import |
+| Key Vault         | `http://localhost:4577/{accountName}-keyvault`        | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
+| Event Hubs        | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` | |
 
 The standard development storage connection string works out of the box:
 
@@ -323,31 +381,35 @@ print(entity["Value"])
 ```java
 // Java (Azure SDK for Java)
 BlobServiceClient client = new BlobServiceClientBuilder()
-    .connectionString(
-        "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
-        "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
-        "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
-    .buildClient();
+                .connectionString(
+                        "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
+                        "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
+                        "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
+                .buildClient();
 
-client.createBlobContainer("my-container");
+client.
+
+createBlobContainer("my-container");
 
 BlobClient blob = client.getBlobContainerClient("my-container").getBlobClient("hello.txt");
-blob.upload(new ByteArrayInputStream("Hello from floci-az!".getBytes()), 20);
+blob.
+
+upload(new ByteArrayInputStream("Hello from floci-az!".getBytes()),20);
 
 BlobDownloadResponse response = blob.downloadWithResponse(/* ... */);
 ```
 
 ```typescript
 // Node.js / TypeScript (Azure SDK)
-import { BlobServiceClient } from "@azure/storage-blob";
+import {BlobServiceClient} from "@azure/storage-blob";
 
 const CONN =
-  "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
-  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
-  "BlobEndpoint=http://localhost:4577/devstoreaccount1;";
+    "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
+    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
+    "BlobEndpoint=http://localhost:4577/devstoreaccount1;";
 
 const client = BlobServiceClient.fromConnectionString(CONN);
-const { containerClient } = await client.createContainer("my-container");
+const {containerClient} = await client.createContainer("my-container");
 
 const blob = containerClient.getBlockBlobClient("hello.txt");
 await blob.upload(Buffer.from("Hello from floci-az!"), 20);
@@ -358,7 +420,8 @@ console.log(downloaded.toString());
 
 ### Azure Functions
 
-Functions are managed via a REST management API and invoked over HTTP. The emulator spawns a real Azure Functions runtime container (node, python, java, or dotnet) on first invoke and keeps it warm for subsequent calls.
+Functions are managed via a REST management API and invoked over HTTP. The emulator spawns a real Azure Functions
+runtime container (node, python, java, or dotnet) on first invoke and keeps it warm for subsequent calls.
 
 ```bash
 BASE="http://localhost:4577/devstoreaccount1-functions"
@@ -402,24 +465,24 @@ All standard Azure Data Tables SDK operations are supported. Below is a full ref
 
 ### Entity operations
 
-| Operation | Method | Path |
-|---|---|---|
-| Insert entity | `POST` | `/{account}-table/{Table}` |
-| Get entity | `GET` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
-| Replace entity (PUT) | `PUT` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
-| Merge entity (PATCH) | `MERGE` / `PATCH` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
-| Delete entity | `DELETE` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
-| List / query entities | `GET` | `/{account}-table/{Table}` |
-| Entity Group Transaction | `POST` | `/{account}-table/$batch` |
+| Operation                | Method            | Path                                                      |
+|--------------------------|-------------------|-----------------------------------------------------------|
+| Insert entity            | `POST`            | `/{account}-table/{Table}`                                |
+| Get entity               | `GET`             | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Replace entity (PUT)     | `PUT`             | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Merge entity (PATCH)     | `MERGE` / `PATCH` | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| Delete entity            | `DELETE`          | `/{account}-table/{Table}(PartitionKey='pk',RowKey='rk')` |
+| List / query entities    | `GET`             | `/{account}-table/{Table}`                                |
+| Entity Group Transaction | `POST`            | `/{account}-table/$batch`                                 |
 
 ### OData query parameters
 
-| Parameter | Description | Example |
-|---|---|---|
-| `$filter` | Server-side filter expression | `PartitionKey eq 'p1' and Score gt 10` |
-| `$select` | Project only the specified fields | `$select=Name,Score` |
-| `$top` | Maximum entities to return per page (≤ 1000) | `$top=50` |
-| `NextPartitionKey` / `NextRowKey` | Resume from a continuation token | Set automatically by SDKs |
+| Parameter                         | Description                                  | Example                                |
+|-----------------------------------|----------------------------------------------|----------------------------------------|
+| `$filter`                         | Server-side filter expression                | `PartitionKey eq 'p1' and Score gt 10` |
+| `$select`                         | Project only the specified fields            | `$select=Name,Score`                   |
+| `$top`                            | Maximum entities to return per page (≤ 1000) | `$top=50`                              |
+| `NextPartitionKey` / `NextRowKey` | Resume from a continuation token             | Set automatically by SDKs              |
 
 **Supported `$filter` operators:** `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`
 
@@ -427,7 +490,8 @@ All standard Azure Data Tables SDK operations are supported. Below is a full ref
 
 **Supported value types in filters:** string literals, integers, doubles, booleans, `null`, `datetime'...'`, `guid'...'`
 
-**Typed property annotations** (`Edm.Int64`, `Edm.Int32`, `Edm.Double`, `Edm.DateTime`, `Edm.Guid`, `Edm.Boolean`) are stored and returned transparently and are used for correct type coercion in filter comparisons.
+**Typed property annotations** (`Edm.Int64`, `Edm.Int32`, `Edm.Double`, `Edm.DateTime`, `Edm.Guid`, `Edm.Boolean`) are
+stored and returned transparently and are used for correct type coercion in filter comparisons.
 
 ### ETag / optimistic concurrency
 
@@ -438,57 +502,66 @@ All standard Azure Data Tables SDK operations are supported. Below is a full ref
 
 ### `Prefer` header on insert
 
-| Header value | Response |
-|---|---|
-| `Prefer: return-no-content` | `204 No Content` + `ETag` header |
+| Header value                       | Response                                    |
+|------------------------------------|---------------------------------------------|
+| `Prefer: return-no-content`        | `204 No Content` + `ETag` header            |
 | `Prefer: return-content` or absent | `201 Created` + entity body + `ETag` header |
 
 ### Entity Group Transactions (`$batch`)
 
-Atomic execution of multiple operations against a single partition key. The request uses the standard Azure `multipart/mixed` format; the emulator executes all operations and rolls back on any failure.
+Atomic execution of multiple operations against a single partition key. The request uses the standard Azure
+`multipart/mixed` format; the emulator executes all operations and rolls back on any failure.
 
 ```python
 # Python
 table.submit_transaction([
-    ("create",  {"PartitionKey": "p1", "RowKey": "r1", "value": "hello"}),
-    ("upsert",  {"PartitionKey": "p1", "RowKey": "r2", "value": "world"}),
-    ("delete",  {"PartitionKey": "p1", "RowKey": "r3"}),
+    ("create", {"PartitionKey": "p1", "RowKey": "r1", "value": "hello"}),
+    ("upsert", {"PartitionKey": "p1", "RowKey": "r2", "value": "world"}),
+    ("delete", {"PartitionKey": "p1", "RowKey": "r3"}),
 ])
 ```
 
 ```typescript
 // Node.js / TypeScript
 await table.submitTransaction([
-  ["create", { partitionKey: "p1", rowKey: "r1", value: "hello" }],
-  ["upsert", { partitionKey: "p1", rowKey: "r2", value: "world" }],
-  ["delete", { partitionKey: "p1", rowKey: "r3" }],
+    ["create", {partitionKey: "p1", rowKey: "r1", value: "hello"}],
+    ["upsert", {partitionKey: "p1", rowKey: "r2", value: "world"}],
+    ["delete", {partitionKey: "p1", rowKey: "r3"}],
 ]);
 ```
 
 ```java
 // Java
 table.submitTransaction(List.of(
-    new TableTransactionAction(TableTransactionActionType.CREATE,
-        new TableEntity("p1", "r1").addProperty("value", "hello")),
-    new TableTransactionAction(TableTransactionActionType.UPSERT_REPLACE,
-        new TableEntity("p1", "r2").addProperty("value", "world")),
-    new TableTransactionAction(TableTransactionActionType.DELETE,
+                                new TableTransactionAction(TableTransactionActionType.CREATE,
+        new TableEntity("p1", "r1").
+
+addProperty("value","hello")),
+        new
+
+TableTransactionAction(TableTransactionActionType.UPSERT_REPLACE,
+        new TableEntity("p1", "r2").
+
+addProperty("value","world")),
+        new
+
+TableTransactionAction(TableTransactionActionType.DELETE,
         new TableEntity("p1", "r3"))
-));
+        ));
 ```
 
 ## Compatibility Testing
 
 > For full validation against real Azure SDK workflows, see the [compatibility-tests](./compatibility-tests/) directory.
 
-| Module | Language | SDK | Tests |
-|---|---|---|---:|
-| `sdk-test-python` | Python 3 | azure-storage-blob / queue / data-tables / cosmos | 42 |
-| `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API | 92 |
-| `sdk-test-node` | Node.js | @azure/storage-blob / storage-queue / data-tables / cosmos | 41 |
-| `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1 | 36 |
-| `sdk-test-keyvault` | Python 3 | azure-keyvault-secrets 4.11.0 | 24 |
-| `sdk-test-eventhub` | Python 3 | azure-eventhub 5.11.0 | 7 |
+| Module               | Language | SDK                                                                            | Tests |
+|----------------------|----------|--------------------------------------------------------------------------------|------:|
+| `sdk-test-python`    | Python 3 | azure-storage-blob / queue / data-tables / cosmos                              |    42 |
+| `sdk-test-java`      | Java 21  | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API |    92 |
+| `sdk-test-node`      | Node.js  | @azure/storage-blob / storage-queue / data-tables / cosmos                     |    41 |
+| `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1                                                   |    36 |
+| `sdk-test-keyvault`  | Python 3 | azure-keyvault-secrets 4.11.0                                                  |    24 |
+| `sdk-test-eventhub`  | Python 3 | azure-eventhub 5.11.0                                                          |     7 |
 
 Run all compatibility tests against a running container:
 
@@ -503,31 +576,31 @@ make test-eventhub
 
 ## Image Tags
 
-| Tag | Description |
-|---|---|
-| `latest` | Native image — **<100ms** startup **(recommended)** |
-| `latest-jvm` | JVM image |
-| `x.y.z` / `x.y.z-jvm` | Pinned releases |
-| `edge` | Weekly build from main |
+| Tag                   | Description                                         |
+|-----------------------|-----------------------------------------------------|
+| `latest`              | Native image — **<100ms** startup **(recommended)** |
+| `latest-jvm`          | JVM image                                           |
+| `x.y.z` / `x.y.z-jvm` | Pinned releases                                     |
+| `edge`                | Weekly build from main                              |
 
 ## Configuration
 
 All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 
-| Variable                                      | Default | Description |
-|-----------------------------------------------|---|---|
-| `FLOCI_AZ_PORT`                               | `4577` | Port exposed by the API |
-| `FLOCI_AZ_BASE_URL`                           | `http://localhost:4577` | Base URL for the emulator |
-| `FLOCI_AZ_STORAGE_MODE`                       | `memory` | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
-| `FLOCI_AZ_STORAGE_PATH`                       | `/app/data` | Directory for persisted state |
-| `FLOCI_AZ_DOCKER_DOCKER_HOST`                 | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers |
-| `FLOCI_AZ_DOCKER_LOG_MAX_SIZE`                | `10m` | Max log size for function containers |
-| `FLOCI_AZ_SERVICES_BLOB_ENABLED`              | `true` | Enable or disable Blob Storage |
-| `FLOCI_AZ_SERVICES_QUEUE_ENABLED`             | `true` | Enable or disable Queue Storage |
-| `FLOCI_AZ_SERVICES_TABLE_ENABLED`             | `true` | Enable or disable Table Storage |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`         | `true` | Enable or disable Azure Functions |
-| `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED`        | `true` | Enable or disable App Configuration |
-| `FLOCI_AZ_SERVICES_COSMOS_ENABLED`            | `true` | Enable or disable Cosmos DB |
+| Variable                               | Default                       | Description                                                     |
+|----------------------------------------|-------------------------------|-----------------------------------------------------------------|
+| `FLOCI_AZ_PORT`                        | `4577`                        | Port exposed by the API                                         |
+| `FLOCI_AZ_BASE_URL`                    | `http://localhost:4577`       | Base URL for the emulator                                       |
+| `FLOCI_AZ_STORAGE_MODE`                | `memory`                      | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
+| `FLOCI_AZ_STORAGE_PATH`                | `/app/data`                   | Directory for persisted state                                   |
+| `FLOCI_AZ_DOCKER_DOCKER_HOST`          | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers                 |
+| `FLOCI_AZ_DOCKER_LOG_MAX_SIZE`         | `10m`                         | Max log size for function containers                            |
+| `FLOCI_AZ_SERVICES_BLOB_ENABLED`       | `true`                        | Enable or disable Blob Storage                                  |
+| `FLOCI_AZ_SERVICES_QUEUE_ENABLED`      | `true`                        | Enable or disable Queue Storage                                 |
+| `FLOCI_AZ_SERVICES_TABLE_ENABLED`      | `true`                        | Enable or disable Table Storage                                 |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`  | `true`                        | Enable or disable Azure Functions                               |
+| `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true`                        | Enable or disable App Configuration                             |
+| `FLOCI_AZ_SERVICES_COSMOS_ENABLED`     | `true`                        | Enable or disable Cosmos DB                                     |
 
 ### Per-service storage override
 
@@ -543,10 +616,12 @@ environment:
 ## 🚧 Non-Goals & Constraints
 
 To prevent configuration errors, note what floci-az **does not** do:
-1.  **HTTPS:** Currently HTTP only. Do not use `DefaultEndpointsProtocol=https`.
-2.  **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
-3.  **Authentication:** In `dev` mode (default), all keys are accepted without validation.
-4.  **Production Scale:** Designed for dev/test. Not for high-availability storage.
+
+1. **HTTPS (most services):** Blob, Queue, Table, Functions, App Configuration, and Key Vault run on plain HTTP on port `4577`. Do not use `DefaultEndpointsProtocol=https` for those services. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
+2. **HTTPS (Cosmos DB Java SDK only):** The Azure Cosmos DB Java SDK enforces TLS in gateway mode and cannot connect over plain HTTP. floci-az exposes HTTPS on port `4578` with a bundled self-signed certificate (`CN=localhost`, valid 100 years). No certificate import or trust-store configuration is required — point the Java SDK at `https://localhost:4578` and it works out of the box.
+3. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
+4. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
+5. **Production Scale:** Designed for dev/test. Not for high-availability storage.
 
 ## Multi-container Docker Compose
 
