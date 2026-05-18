@@ -38,7 +38,7 @@ test-java-compat:
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests"
 	@cd $(NODE_DIR) && \
-	if [ ! -d node_modules ]; then npm install --silent; fi && \
+	npm install --silent && \
 	npm test
 
 test-appconfig:
