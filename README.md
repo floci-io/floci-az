@@ -602,6 +602,52 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true`                        | Enable or disable App Configuration                             |
 | `FLOCI_AZ_SERVICES_COSMOS_ENABLED`     | `true`                        | Enable or disable Cosmos DB                                     |
 
+### Cosmos DB multi-API engines
+
+Each Cosmos DB API is backed by a dedicated Docker engine that starts **on-demand** (the first time a request is received). All engines are **disabled by default** — enable only the APIs your application uses.
+
+| Variable                                              | Default | Engine image                                                  | Native port |
+|-------------------------------------------------------|---------|---------------------------------------------------------------|-------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | `mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview` | `8081` |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED`    | `false` | `mongo:7`                                                     | `27017`     |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`                                             | `5432`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla`                                             | `9042`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED`    | `false` | `tinkerpop/gremlin-server`                                    | `8182`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | `mcr.microsoft.com/azure-storage/azurite`                     | `10002`     |
+
+You can also override the Docker image or host port for any engine:
+
+| Variable                                              | Description                       |
+|-------------------------------------------------------|-----------------------------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_IMAGE`      | Override the MongoDB image        |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_PORT`       | Override the MongoDB host port    |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_STARTUP`            | `on-demand` (default) or `eager`  |
+
+**docker-compose.yml example — enable MongoDB and PostgreSQL:**
+
+```yaml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+      - "4578:4578"
+      - "27017:27017"   # MongoDB (Cosmos MongoDB API)
+      - "5432:5432"     # PostgreSQL (Cosmos PostgreSQL API)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED: "true"
+      FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED: "true"
+```
+
+**How it works:** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
+
+```bash
+curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
+# → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
+```
+
 ### Per-service storage override
 
 You can set a different storage mode for each service independently:

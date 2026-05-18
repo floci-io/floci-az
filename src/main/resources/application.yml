@@ -86,22 +86,22 @@ floci-az:
         startup: on-demand
         default-api: nosql
         nosql:
-          enabled: true
+          enabled: false
           # image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
         mongodb:
-          enabled: true
+          enabled: false
           # image: mongo:7
         postgresql:
-          enabled: true
+          enabled: false
           # image: citusdata/citus
         cassandra:
-          enabled: true
+          enabled: false
           # image: scylladb/scylla
         gremlin:
-          enabled: true
+          enabled: false
           # image: tinkerpop/gremlin-server
         table:
-          enabled: true
+          enabled: false
           # image: mcr.microsoft.com/azure-storage/azurite
     key-vault:
       enabled: true

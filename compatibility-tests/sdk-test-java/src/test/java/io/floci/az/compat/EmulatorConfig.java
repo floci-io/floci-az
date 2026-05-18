@@ -11,13 +11,20 @@ import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.qpid.jms.JmsConnectionFactory;
 import reactor.core.publisher.Mono;
 
 import jakarta.jms.ConnectionFactory;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 public final class EmulatorConfig {
 
@@ -144,6 +151,36 @@ public final class EmulatorConfig {
                 .addPolicy(new ForceHttpPolicy())
                 .disableChallengeResourceVerification()
                 .buildClient();
+    }
+
+    /**
+     * Hits the floci-az control-plane endpoint to trigger on-demand engine startup.
+     * Returns the parsed JSON response as a Map, or null if the engine is not enabled (503).
+     * Throws RuntimeException on unexpected errors.
+     */
+    public static Map<String, Object> triggerCosmosEngine(String serviceTypeSuffix) {
+        String url = BASE + "/devstoreaccount1-" + serviceTypeSuffix + "/connect";
+        try {
+            HttpClient httpClient = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
+            java.net.http.HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+            if (response.statusCode() == 503) {
+                return null;
+            }
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Unexpected status " + response.statusCode()
+                        + " from " + url + ": " + response.body());
+            }
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readValue(response.body(), new TypeReference<Map<String, Object>>() {});
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to call " + url, e);
+        }
     }
 
     private EmulatorConfig() {}
