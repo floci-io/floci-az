@@ -118,8 +118,7 @@ the cloud service — but it carries the full weight of that fidelity.
 **Use the official emulator when you need:**
 
 - Full fidelity with the Cosmos DB wire protocol and advanced features (stored procedures, triggers, change feed, TTL,
-  multi-region topology simulation).
-- Non-SQL APIs: MongoDB, Cassandra, Gremlin, or Table via Cosmos.
+  RU/s governance, and multi-region topology simulation).
 - The Data Explorer UI for manual data inspection.
 
 **Use floci-az when you need:**
@@ -563,6 +562,7 @@ TableTransactionAction(TableTransactionActionType.DELETE,
 | `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1                                                   |    36 |
 | `sdk-test-keyvault`  | Python 3 | azure-keyvault-secrets 4.11.0                                                  |    24 |
 | `sdk-test-eventhub`  | Python 3 | azure-eventhub 5.11.0                                                          |     7 |
+| Cosmos engines       | Java 21  | DataStax CQL · MongoDB driver · PostgreSQL JDBC · Gremlin driver (Docker)      |    36 |
 
 Run all compatibility tests against a running container:
 
@@ -573,6 +573,7 @@ make test-node-compat
 make test-appconfig
 make test-keyvault
 make test-eventhub
+make test-cosmos-all    # Cosmos engine tests: MongoDB · PostgreSQL · Cassandra · Gremlin · Table · NoSQL (requires Docker)
 ```
 
 ## Image Tags
@@ -607,17 +608,16 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 
 All engines are **disabled by default** — enable only the APIs your application uses.
 
-Five APIs are **Docker-backed** (they launch a sidecar container on first request).
-The **Table API** is **embedded** (in-process, no Docker required).
+Four APIs are **Docker-backed** (MongoDB, PostgreSQL, Cassandra, Gremlin) — they launch a sidecar container on first
+request. Two APIs are **embedded** (NoSQL and Table) — in-process, no Docker pull, instant startup.
 
 #### Docker-backed engines
 
 | Variable                                              | Default | Engine image                                                  | Native port |
 |-------------------------------------------------------|---------|---------------------------------------------------------------|-------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-memory (embedded, no Docker) | — |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED`    | `false` | `mongo:7`                                                     | `27017`     |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`                                             | `5432`      |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla`                                             | `9042`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla:6.2`                                         | `9042`      |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED`    | `false` | `tinkerpop/gremlin-server`                                    | `8182`      |
 
 You can override the Docker image or host port for any Docker-backed engine:
@@ -655,16 +655,20 @@ curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
 
 #### Embedded engines — NoSQL and Table API (no Docker)
 
-| Variable                                              | Default | Backend                      |
-|-------------------------------------------------------|---------|------------------------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory (ConcurrentHashMap) |
+Both engines run entirely inside floci-az — no Docker pull, no container boot time. Data lives in memory; restarting
+floci-az clears it.
 
-The **Cosmos DB for Table** engine runs entirely inside floci-az — no Docker pull, no container boot time.
-Table and entity data lives in memory; restarting floci-az clears it.
+| Variable                                              | Default | Backend                                            |
+|-------------------------------------------------------|---------|----------------------------------------------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-process SQL engine — full Cosmos DB SQL dialect |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory OData engine (ConcurrentHashMap)         |
 
-Supported operations: create/delete table · insert/get/replace/merge/delete entity · OData `$filter` · `$top` · `$select`.
+**NoSQL engine** — activating this endpoint enables the same embedded SQL engine already powering
+`/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4578` as the connection URL
+(Java SDK requires TLS; the bundled self-signed cert requires no import).
 
-OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
+**Table engine** — supported operations: create/delete table · insert/get/replace/merge/delete entity ·
+OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
 
 ```bash
 # Enable the Table engine

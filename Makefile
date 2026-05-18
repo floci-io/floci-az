@@ -30,6 +30,7 @@ stop:
 		rm $(PID_FILE); \
 	fi
 	@kill $$(lsof -ti :$(PORT) -P 2>/dev/null) 2>/dev/null || true
+	@until ! lsof -ti :$(PORT) -P > /dev/null 2>&1; do sleep 1; done
 	@echo "Emulator stopped."
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
@@ -138,7 +139,7 @@ test-cosmos-table:
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-cosmos-nosql:
-	@echo "==> Cosmos NoSQL VNext engine test"
+	@echo "==> Cosmos NoSQL engine test (embedded)"
 	$(MAKE) run-cosmos-nosql
 	cd $(JAVA_DIR) && mvn test -Dtest=CosmosNoSqlEngineCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
