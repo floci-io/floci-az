@@ -9,8 +9,10 @@ import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
+import org.apache.qpid.jms.JmsConnectionFactory;
 import reactor.core.publisher.Mono;
 
+import jakarta.jms.ConnectionFactory;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.OffsetDateTime;
@@ -72,6 +74,35 @@ public final class EmulatorConfig {
             }
             return next.process();
         }
+    }
+
+    // ── Event Hubs / AMQP ────────────────────────────────────────────────────
+
+    static final String EVENTHUB_HOST =
+        System.getenv().getOrDefault("EVENTHUB_HOST", "localhost");
+    static final int EVENTHUB_AMQP_PORT =
+        Integer.parseInt(System.getenv().getOrDefault("EVENTHUB_AMQP_PORT", "5672"));
+    static final String EVENTHUB_NAMESPACE =
+        System.getenv().getOrDefault("EVENTHUB_NAMESPACE", "emulatorNs1");
+    static final String EVENTHUB_NAME =
+        System.getenv().getOrDefault("EVENTHUB_NAME", "eh1");
+
+    /**
+     * Returns the AMQP entity address that Artemis has pre-configured as an ANYCAST address.
+     * The hostname portion must be lowercase because ArtemisConfigGenerator lowercases it
+     * when building the broker.xml addresses.
+     */
+    static String amqpEntityAddress() {
+        return "amqp://" + EVENTHUB_HOST.toLowerCase() + "/" + EVENTHUB_NAMESPACE + "/" + EVENTHUB_NAME;
+    }
+
+    static String amqpCgAddress(String consumerGroup) {
+        return amqpEntityAddress() + "/" + consumerGroup;
+    }
+
+    /** Creates a plain-AMQP JMS connection factory pointing at the Artemis sidecar. */
+    static ConnectionFactory buildAmqpConnectionFactory() {
+        return new JmsConnectionFactory("amqp://" + EVENTHUB_HOST + ":" + EVENTHUB_AMQP_PORT);
     }
 
     static SecretClient buildKeyVaultClient() {
