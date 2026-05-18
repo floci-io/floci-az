@@ -115,6 +115,17 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    <!--
+                      Engine tests require Docker + a specially configured emulator instance.
+                      They are excluded from the default 'mvn test' run and executed instead
+                      via dedicated Makefile targets (make test-cosmos-all, etc.) that start
+                      the emulator with each engine enabled, run the test, then stop it.
+                      The '-Dtest=CosmosXxxEngineCompatibilityTest' flag used by those targets
+                      overrides this exclusion automatically.
+                    -->
+                    <excludes>
+                        <exclude>**/*EngineCompatibilityTest.java</exclude>
+                    </excludes>
                     <systemPropertyVariables>
                         <!--
                           Force Netty to use the JDK SSL provider instead of the native OpenSSL
