@@ -26,47 +26,41 @@ run:
 
 stop:
 	@if [ -f $(PID_FILE) ]; then \
-		kill $$(cat $(PID_FILE)) && rm $(PID_FILE); \
-		echo "Emulator stopped."; \
-	else \
-		echo "No emulator running."; \
+		kill $$(cat $(PID_FILE)) 2>/dev/null || true; \
+		rm $(PID_FILE); \
 	fi
+	@kill $$(lsof -ti :$(PORT) -P 2>/dev/null) 2>/dev/null || true
+	@echo "Emulator stopped."
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
 
 run-cosmos-mongo:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.mongodb.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (MongoDB engine enabled)"
 
 run-cosmos-postgresql:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.postgresql.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (PostgreSQL engine enabled)"
 
 run-cosmos-cassandra:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.cassandra.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (Cassandra engine enabled)"
 
 run-cosmos-gremlin:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.gremlin.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (Gremlin engine enabled)"
 
 run-cosmos-table:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.table.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (Table engine enabled)"
 
 run-cosmos-nosql:
-	FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true \
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.nosql.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (NoSQL engine enabled)"
 

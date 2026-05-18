@@ -115,8 +115,18 @@ public class CosmosLifecycleManager {
                                               CosmosEngineProvider provider,
                                               EmulatorConfig.CosmosApiConfig apiConfig) {
         CosmosEngine engine = provider.engine();
-        String image = apiConfig.image().orElse(engine.defaultImage());
-        int hostPort = apiConfig.port().orElse(engine.defaultPort());
+
+        // Embedded (in-process) engines — no Docker required.
+        if (engine.isEmbedded()) {
+            int port = apiConfig.port().orElse(config.port());
+            CosmosConnectionInfo connInfo = engine.buildConnectionInfo("localhost", port);
+            running.put(api, new RunningEngine(null, connInfo));
+            LOG.infof("Cosmos engine %s ready (embedded, no Docker) at localhost:%d", api, port);
+            return connInfo;
+        }
+
+        String image    = apiConfig.image().orElse(engine.defaultImage());
+        int hostPort    = apiConfig.port().orElse(engine.defaultPort());
 
         LOG.infof("Starting Cosmos engine %s with image=%s port=%d", api, image, hostPort);
 
@@ -160,10 +170,15 @@ public class CosmosLifecycleManager {
     @PreDestroy
     void shutdown() {
         for (Map.Entry<CosmosApi, RunningEngine> entry : running.entrySet()) {
+            String containerId = entry.getValue().containerId();
+            if (containerId == null) {
+                // Embedded engine — nothing to stop
+                LOG.debugf("Cosmos engine %s (embedded) — no container to stop", entry.getKey());
+                continue;
+            }
             try {
-                LOG.infof("Stopping Cosmos engine %s (container %s)",
-                    entry.getKey(), entry.getValue().containerId());
-                containerManager.stopAndRemove(entry.getValue().containerId(), null);
+                LOG.infof("Stopping Cosmos engine %s (container %s)", entry.getKey(), containerId);
+                containerManager.stopAndRemove(containerId, null);
             } catch (Exception e) {
                 LOG.warnf(e, "Error stopping Cosmos engine %s", entry.getKey());
             }

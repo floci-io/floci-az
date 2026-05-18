@@ -1,7 +1,5 @@
 package io.floci.az.compat;
 
-import com.azure.core.http.policy.HttpLogDetailLevel;
-import com.azure.core.http.policy.HttpLogOptions;
 import com.azure.data.tables.TableClient;
 import com.azure.data.tables.TableServiceClient;
 import com.azure.data.tables.TableServiceClientBuilder;
@@ -19,49 +17,34 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * Compatibility tests for the Cosmos Table engine (cosmos-table).
  *
- * <p>This tests the Cosmos Table API backed by an Azurite sidecar, which is distinct from
- * the {@link TableCompatibilityTest} that tests Azure Table Storage via the blob/queue path.
- * Tests are skipped automatically when the Table engine is not enabled in floci-az config.
- * They require Docker and FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true.
+ * <p>This tests the in-memory Cosmos Table API built into floci-az — no Docker or Azurite
+ * is required.  Tests are skipped when the Table engine is not enabled in floci-az config.
+ * Enable it with {@code FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true}.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Cosmos Table Engine Compatibility")
 class CosmosTableEngineCompatibilityTest {
 
     private TableServiceClient tableServiceClient;
-    private TableClient tableClient;
+    private TableClient        tableClient;
     private static final String TABLE_NAME = "EngineTestTable";
 
     @BeforeAll
-    void setup() throws InterruptedException {
+    void setup() {
         Map<String, Object> engineInfo = EmulatorConfig.triggerCosmosEngine("cosmos-table");
         assumeTrue(engineInfo != null, "Table engine not enabled — skipping tests");
 
         String connectionString = (String) engineInfo.get("connectionString");
         assertNotNull(connectionString, "connectionString must not be null in engine response");
 
-        // Retry connection up to 30s — container may still be starting
-        Exception lastException = null;
-        long deadline = System.currentTimeMillis() + 30_000;
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                TableServiceClient candidate = new TableServiceClientBuilder()
-                        .connectionString(connectionString)
-                        .buildClient();
-                // Smoke test — list tables
-                candidate.listTables().stream().findFirst(); // may return empty, that's fine
-                tableServiceClient = candidate;
-                lastException = null;
-                break;
-            } catch (Exception e) {
-                lastException = e;
-                tableServiceClient = null;
-                Thread.sleep(2_000);
-            }
-        }
-        if (lastException != null) {
-            assumeTrue(false, "Table engine not ready after 30s: " + lastException.getMessage());
-        }
+        // The Table engine is in-memory — no container boot delay.
+        // A single connection attempt is sufficient.
+        tableServiceClient = new TableServiceClientBuilder()
+                .connectionString(connectionString)
+                .buildClient();
+
+        // Smoke test — list tables (may return empty, that's fine)
+        tableServiceClient.listTables().stream().findFirst();
 
         tableServiceClient.createTableIfNotExists(TABLE_NAME);
         tableClient = tableServiceClient.getTableClient(TABLE_NAME);
@@ -70,9 +53,7 @@ class CosmosTableEngineCompatibilityTest {
     @AfterAll
     void teardown() {
         if (tableServiceClient != null) {
-            try {
-                tableServiceClient.deleteTable(TABLE_NAME);
-            } catch (Exception ignored) {}
+            try { tableServiceClient.deleteTable(TABLE_NAME); } catch (Exception ignored) {}
         }
     }
 

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.*;
 
 import java.sql.*;
 import java.util.Map;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -30,21 +31,31 @@ class CosmosPostgresEngineCompatibilityTest {
         int port = ((Number) engineInfo.get("port")).intValue();
         String jdbcUrl = "jdbc:postgresql://" + host + ":" + port + "/citus";
 
-        // Retry connection up to 30s — container may still be starting
+        // DriverManager.getConnection() can block indefinitely even with connectTimeout
+        // because the JDBC timeout only applies to the TCP handshake, not the PG auth phase.
+        // We wrap each attempt in a Future with a hard 8s wall-clock timeout.
         Exception lastException = null;
-        long deadline = System.currentTimeMillis() + 30_000;
+        long deadline = System.currentTimeMillis() + 90_000;
         while (System.currentTimeMillis() < deadline) {
+            ExecutorService ex = Executors.newSingleThreadExecutor();
+            Future<Connection> future = ex.submit(
+                    () -> DriverManager.getConnection(jdbcUrl, "citus", "mypassword"));
             try {
-                connection = DriverManager.getConnection(jdbcUrl, "citus", "mypassword");
+                connection = future.get(8, TimeUnit.SECONDS);
                 lastException = null;
                 break;
-            } catch (Exception e) {
-                lastException = e;
-                Thread.sleep(2_000);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                lastException = new Exception("Connection attempt timed out after 8s");
+            } catch (ExecutionException e) {
+                lastException = (Exception) e.getCause();
+            } finally {
+                ex.shutdownNow();
             }
+            Thread.sleep(3_000);
         }
         if (lastException != null) {
-            assumeTrue(false, "PostgreSQL not ready after 30s: " + lastException.getMessage());
+            assumeTrue(false, "PostgreSQL not ready after 90s: " + lastException.getMessage());
         }
 
         // Create the test table once for all tests

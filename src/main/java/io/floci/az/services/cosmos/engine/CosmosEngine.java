@@ -28,4 +28,11 @@ public interface CosmosEngine {
      * The host is always "localhost" in single-node dev mode.
      */
     CosmosConnectionInfo buildConnectionInfo(String host, int port);
+
+    /**
+     * Returns true for engines that run in-process (no Docker container).
+     * Embedded engines skip Docker lifecycle management and handle data-plane
+     * requests directly via their own handler.
+     */
+    default boolean isEmbedded() { return false; }
 }

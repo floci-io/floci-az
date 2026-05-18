@@ -75,7 +75,7 @@ the cloud service — but it carries the full weight of that fidelity.
 | **PostgreSQL API provider**      | Native Cosmos Emulator                                   | PostgreSQL + Citus                                                                       |
 | **Cassandra API provider**       | Native Cosmos Emulator                                   | ScyllaDB (default) or Apache Cassandra                                                   |
 | **Gremlin API provider**         | Native Cosmos Emulator                                   | Apache TinkerPop Gremlin Server                                                          |
-| **Table API provider**           | Native Cosmos Emulator                                   | Azurite                                                                                  |
+| **Table API provider**           | Native Cosmos Emulator                                   | In-memory (embedded, no Docker)                                                          |
 | **Other Azure services**         | Cosmos DB only                                           | Blob · Queue · Table · Functions · App Config · Cosmos DB in a unified local Azure stack |
 | **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Most services: plain HTTP on `4577`, zero cert setup. **Cosmos DB Java SDK only:** HTTPS on `4578` with a bundled self-signed cert — no import required, works out of the box |
 | **Web UI / Data Explorer**       | ✅ Built-in                                               | ❌ API-focused local development environment                                              |
@@ -604,7 +604,12 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 
 ### Cosmos DB multi-API engines
 
-Each Cosmos DB API is backed by a dedicated Docker engine that starts **on-demand** (the first time a request is received). All engines are **disabled by default** — enable only the APIs your application uses.
+All engines are **disabled by default** — enable only the APIs your application uses.
+
+Five APIs are **Docker-backed** (they launch a sidecar container on first request).
+The **Table API** is **embedded** (in-process, no Docker required).
+
+#### Docker-backed engines
 
 | Variable                                              | Default | Engine image                                                  | Native port |
 |-------------------------------------------------------|---------|---------------------------------------------------------------|-------------|
@@ -613,9 +618,8 @@ Each Cosmos DB API is backed by a dedicated Docker engine that starts **on-deman
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`                                             | `5432`      |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla`                                             | `9042`      |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED`    | `false` | `tinkerpop/gremlin-server`                                    | `8182`      |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | `mcr.microsoft.com/azure-storage/azurite`                     | `10002`     |
 
-You can also override the Docker image or host port for any engine:
+You can override the Docker image or host port for any Docker-backed engine:
 
 | Variable                                              | Description                       |
 |-------------------------------------------------------|-----------------------------------|
@@ -641,11 +645,48 @@ services:
       FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED: "true"
 ```
 
-**How it works:** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
+**How it works (Docker-backed):** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
 
 ```bash
 curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
 # → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
+```
+
+#### Embedded engine — Table API (no Docker)
+
+| Variable                                              | Default | Backend                      |
+|-------------------------------------------------------|---------|------------------------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory (ConcurrentHashMap) |
+
+The **Cosmos DB for Table** engine runs entirely inside floci-az — no Docker pull, no container boot time.
+Table and entity data lives in memory; restarting floci-az clears it.
+
+Supported operations: create/delete table · insert/get/replace/merge/delete entity · OData `$filter` · `$top` · `$select`.
+
+OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
+
+```bash
+# Enable the Table engine
+export FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true
+
+# Trigger engine activation and retrieve connection string
+curl http://localhost:4577/devstoreaccount1-cosmos-table/connect
+# → {"api":"TABLE","status":"running","connectionString":"DefaultEndpointsProtocol=http;...","notes":"..."}
+```
+
+Use the returned `connectionString` with any Azure Data Tables SDK:
+
+```java
+// Java
+TableServiceClient client = new TableServiceClientBuilder()
+    .connectionString(connectionString)
+    .buildClient();
+```
+
+```python
+# Python
+from azure.data.tables import TableServiceClient
+client = TableServiceClient.from_connection_string(connectionString)
 ```
 
 ### Per-service storage override

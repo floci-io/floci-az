@@ -126,20 +126,10 @@ public class AzureRoutingFilter {
         String accountName = parts[0];
         String resourcePath = parts.length > 1 ? parts[1] : "";
 
+        // NOTE: longer/more-specific suffixes must be checked before shorter ones that are
+        // a suffix of them (e.g. "-cosmos-table" before "-table", "-cosmos-mongo" before "-cosmos").
         String serviceType = "blob";
-        if (accountName.endsWith("-queue")) {
-            serviceType = "queue";
-            accountName = accountName.substring(0, accountName.length() - 6);
-        } else if (accountName.endsWith("-table")) {
-            serviceType = "table";
-            accountName = accountName.substring(0, accountName.length() - 6);
-        } else if (accountName.endsWith("-functions")) {
-            serviceType = "functions";
-            accountName = accountName.substring(0, accountName.length() - 10);
-        } else if (accountName.endsWith("-appconfig")) {
-            serviceType = "appconfig";
-            accountName = accountName.substring(0, accountName.length() - 10);
-        } else if (accountName.endsWith("-cosmos-mongo")) {
+        if (accountName.endsWith("-cosmos-mongo")) {
             serviceType = "cosmos-mongo";
             accountName = accountName.substring(0, accountName.length() - 13);
         } else if (accountName.endsWith("-cosmos-table")) {
@@ -160,6 +150,18 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-cosmos")) {
             serviceType = "cosmos";
             accountName = accountName.substring(0, accountName.length() - 7);
+        } else if (accountName.endsWith("-queue")) {
+            serviceType = "queue";
+            accountName = accountName.substring(0, accountName.length() - 6);
+        } else if (accountName.endsWith("-table")) {
+            serviceType = "table";
+            accountName = accountName.substring(0, accountName.length() - 6);
+        } else if (accountName.endsWith("-functions")) {
+            serviceType = "functions";
+            accountName = accountName.substring(0, accountName.length() - 10);
+        } else if (accountName.endsWith("-appconfig")) {
+            serviceType = "appconfig";
+            accountName = accountName.substring(0, accountName.length() - 10);
         } else if (accountName.endsWith("-keyvault")) {
             serviceType = "keyvault";
             accountName = accountName.substring(0, accountName.length() - 9);

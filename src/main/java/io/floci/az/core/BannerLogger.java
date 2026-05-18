@@ -48,12 +48,19 @@ public class BannerLogger {
             for (CosmosApi api : CosmosApi.values()) {
                 EmulatorConfig.CosmosApiConfig apiCfg = resolveCosmosApiConfig(cosmosEngines, api);
                 if (apiCfg.enabled()) {
+                    boolean embedded = cosmosEngineRegistry.resolve(api)
+                            .map(p -> p.engine().isEmbedded()).orElse(false);
                     String image = apiCfg.image().orElseGet(() ->
                         cosmosEngineRegistry.resolve(api)
                             .map(p -> p.engine().defaultImage())
                             .orElse("?"));
-                    sb.append(String.format("     %-10s [enabled ] startup:%-10s image:%s\n",
-                        api.name().toLowerCase(), startupMode, image));
+                    if (embedded) {
+                        sb.append(String.format("     %-10s [enabled ] mode:embedded\n",
+                            api.name().toLowerCase()));
+                    } else {
+                        sb.append(String.format("     %-10s [enabled ] startup:%-10s image:%s\n",
+                            api.name().toLowerCase(), startupMode, image));
+                    }
                 }
             }
         }
