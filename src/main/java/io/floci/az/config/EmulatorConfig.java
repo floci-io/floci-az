@@ -2,6 +2,7 @@ package io.floci.az.config;
 
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
+import io.smallrye.config.WithName;
 import java.util.List;
 import java.util.Optional;
 
@@ -187,6 +188,37 @@ public interface EmulatorConfig {
     interface CosmosServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        @WithName("engines")
+        CosmosEngineConfig engines();
+    }
+
+    interface CosmosEngineConfig {
+        /** Startup mode: "on-demand" (default), "eager", or "disabled". */
+        @WithDefault("on-demand")
+        String startup();
+
+        @WithDefault("nosql")
+        String defaultApi();
+
+        CosmosApiConfig nosql();
+        CosmosApiConfig mongodb();
+        CosmosApiConfig postgresql();
+        CosmosApiConfig cassandra();
+        CosmosApiConfig gremlin();
+        CosmosApiConfig table();
+    }
+
+    interface CosmosApiConfig {
+        /** Whether this API engine is enabled. */
+        @WithDefault("false")
+        boolean enabled();
+
+        /** Docker image override (optional). */
+        Optional<String> image();
+
+        /** Host port override (optional). */
+        Optional<Integer> port();
     }
 
     interface KeyVaultConfig {

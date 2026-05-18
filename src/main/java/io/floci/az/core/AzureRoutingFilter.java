@@ -139,6 +139,24 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-appconfig")) {
             serviceType = "appconfig";
             accountName = accountName.substring(0, accountName.length() - 10);
+        } else if (accountName.endsWith("-cosmos-mongo")) {
+            serviceType = "cosmos-mongo";
+            accountName = accountName.substring(0, accountName.length() - 13);
+        } else if (accountName.endsWith("-cosmos-table")) {
+            serviceType = "cosmos-table";
+            accountName = accountName.substring(0, accountName.length() - 13);
+        } else if (accountName.endsWith("-cosmos-cassandra")) {
+            serviceType = "cosmos-cassandra";
+            accountName = accountName.substring(0, accountName.length() - 17);
+        } else if (accountName.endsWith("-cosmos-gremlin")) {
+            serviceType = "cosmos-gremlin";
+            accountName = accountName.substring(0, accountName.length() - 15);
+        } else if (accountName.endsWith("-cosmos-postgresql")) {
+            serviceType = "cosmos-postgresql";
+            accountName = accountName.substring(0, accountName.length() - 18);
+        } else if (accountName.endsWith("-cosmos-nosql")) {
+            serviceType = "cosmos-nosql";
+            accountName = accountName.substring(0, accountName.length() - 13);
         } else if (accountName.endsWith("-cosmos")) {
             serviceType = "cosmos";
             accountName = accountName.substring(0, accountName.length() - 7);
