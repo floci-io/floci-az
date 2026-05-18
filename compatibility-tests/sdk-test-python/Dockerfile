@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM --platform=linux/amd64 python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt pytest.ini ./
@@ -7,6 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY tests/ tests/
 
 ENV FLOCI_AZ_ENDPOINT=http://floci-az:4577
+ENV EVENTHUB_HOST=floci-az-artemis-emulatorNs1
+ENV EVENTHUB_AMQPS_PORT=5671
 
 RUN mkdir -p /results
 ENTRYPOINT ["pytest", "tests/", "-v", "--junit-xml=/results/junit.xml"]

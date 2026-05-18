@@ -70,6 +70,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig queue();
         ServiceStorageConfig table();
         ServiceStorageConfig appConfig();
+        ServiceStorageConfig keyVault();
     }
 
     interface ServiceStorageConfig {
@@ -96,6 +97,46 @@ public interface EmulatorConfig {
         TableServiceConfig     table();
         FunctionsConfig        functions();
         AppConfigServiceConfig appConfig();
+        KeyVaultConfig         keyVault();
+        EventHubConfig         eventHub();
+
+        /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
+        Optional<String> dockerNetwork();
+    }
+
+    interface EventHubConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        @WithDefault("emulatorNs1")
+        String defaultNamespace();
+
+        /** Comma-separated "name:partitions" pairs, e.g. "eh1:4,eh2:2". */
+        @WithDefault("eh1:4")
+        String entities();
+
+        @WithDefault("5672")
+        int amqpPort();
+
+        /** TLS AMQP port for uamqp / Python SDK clients that require TLS. */
+        @WithDefault("5671")
+        int amqpTlsPort();
+
+        @WithDefault("false")
+        boolean kafkaEnabled();
+
+        @WithDefault("9093")
+        int kafkaPort();
+
+        @WithDefault("apache/activemq-artemis:latest")
+        String artemisImage();
+
+        @WithDefault("redpandadata/redpanda:latest")
+        String redpandaImage();
+
+        /** Comma-separated consumer group names created on every event hub, e.g. "$Default,my-group". */
+        @WithDefault("$Default,my-consumer-group")
+        String consumerGroups();
     }
 
     interface BlobServiceConfig {
@@ -129,6 +170,11 @@ public interface EmulatorConfig {
     }
 
     interface AppConfigServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface KeyVaultConfig {
         @WithDefault("true")
         boolean enabled();
     }

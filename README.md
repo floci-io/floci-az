@@ -1,9 +1,9 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, and App Configuration.
-Default Port: 4577. 
-Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, and Event Hubs.
+Default Port: 4577. AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in).
+Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka.
 -->
 
 <p align="center">
@@ -19,7 +19,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage, Functions, and App Configuration. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
+  A free, open-source local Azure emulator — Storage, Functions, App Configuration, Key Vault, and Event Hubs. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
 ---
@@ -41,6 +41,8 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions.
 | Table Storage | ✅                        | ✅ | ❌ |
 | Azure Functions | ✅                        | ❌ | ✅ |
 | App Configuration | ✅                        | ❌ | ❌ |
+| Key Vault         | ✅                        | ❌ | ❌ |
+| Event Hubs        | ✅                        | ❌ | ❌ |
 | Native binary | ✅                        | ❌ | ✅ |
 | Unified port | ✅ (4577)                 | ❌ | ❌ |
 | Storage modes | ✅ (persistent/WAL/Hybrid) | ❌ | ❌ |
@@ -70,6 +72,8 @@ flowchart LR
             C["Table Storage\n/{account}-table/"]
             D["Azure Functions\n/{account}-functions/"]
             E["App Configuration\n/{account}-appconfig/"]
+            F["Key Vault\n/{account}-keyvault/"]
+            G["Event Hubs\nAMQP :5672 / Kafka :9093"]
         end
 
         Router --> A
@@ -77,8 +81,11 @@ flowchart LR
         Router --> C
         Router --> D
         Router --> E
-        A & B & C & E --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
+        Router --> F
+        Router --> G
+        A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|"spawn / proxy"| Docker["🐳 Docker\n(function containers)"]
+        G -->|"manages"| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
     end
 
     Client -->|"HTTP :4577\nAzure wire protocol"| Router
@@ -93,6 +100,8 @@ flowchart LR
 | **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
 | **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
+| **Key Vault** | `/{account}-keyvault/` | Secrets CRUD, versioning, soft-delete, properties update |
+| **Event Hubs** | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |
 
 ## Persistence & Storage Modes
 
@@ -206,6 +215,8 @@ floci-az uses path-style routing:
 | Table | `http://localhost:4577/{accountName}-table` |
 | Functions | `http://localhost:4577/{accountName}-functions` |
 | App Configuration | `http://localhost:4577/{accountName}-appconfig` |
+| Key Vault | `http://localhost:4577/{accountName}-keyvault` |
+| Event Hubs | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` |
 
 The standard development storage connection string works out of the box:
 
@@ -355,6 +366,8 @@ Supported runtimes: `node`, `python`, `java`, `dotnet`.
 | `sdk-test-java` | Java 21 | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API | 68 |
 | `sdk-test-node` | Node.js | @azure/storage-blob / storage-queue / data-tables | 16 |
 | `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1 | 36 |
+| `sdk-test-keyvault` | Python 3 | azure-keyvault-secrets 4.11.0 | 24 |
+| `sdk-test-eventhub` | Python 3 | azure-eventhub 5.11.0 | 7 |
 
 Run all compatibility tests against a running container:
 
@@ -363,6 +376,8 @@ make test-python
 make test-java-compat
 make test-node-compat
 make test-appconfig
+make test-keyvault
+make test-eventhub
 ```
 
 ## Image Tags
