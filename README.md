@@ -70,7 +70,7 @@ the cloud service — but it carries the full weight of that fidelity.
 | **RAM required**                 | High memory usage (commonly ≥ 2 GB)                      | Minimal footprint — only active engines consume resources                                |
 | **Cosmos DB APIs**               | SQL (NoSQL), MongoDB, Cassandra, Gremlin, Table          | SQL (NoSQL), MongoDB, PostgreSQL, Cassandra, Gremlin, Table                              |
 | **Cosmos API implementation**    | Microsoft proprietary emulator                           | API-specific compatibility engines                                                       |
-| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | 🟢 Azure Cosmos DB Emulator Linux vNext (official Microsoft image)                       |
+| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | 🟢 Embedded in-process engine — full SQL dialect, no Docker, instant startup            |
 | **MongoDB API provider**         | Native Cosmos Emulator                                   | 🟢 MongoDB Community Server — identical wire protocol (BSON + OP_MSG)                   |
 | **PostgreSQL API provider**      | Native Cosmos Emulator                                   | 🟢 Citus (the exact engine Azure runs) — standard JDBC driver, zero code changes        |
 | **Cassandra API provider**       | Native Cosmos Emulator                                   | 🟢 ScyllaDB — CQL-compatible, same DataStax driver                                      |
@@ -186,7 +186,8 @@ flowchart LR
 | **Table Storage**       | `/{account}-table/`          | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
 | **Azure Functions**     | `/{account}-functions/`      | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool                                                                                                                            |
 | **App Configuration**   | `/{account}-appconfig/`      | Key-values, labels, feature flags, snapshots, revisions, locks, ETags                                                                                                                                                 |
-| **Cosmos DB (SQL API)** | `/{account}-cosmos/`         | Databases, containers, documents CRUD; SQL queries (WHERE / ORDER BY / OFFSET / LIMIT / aggregates / GROUP BY / DISTINCT / string functions); PATCH; transactional batch                                              |
+| **Cosmos DB (NoSQL)** | `/{account}-cosmos/`         | Databases, containers, documents CRUD + full SQL queries — always-on, no Docker. PATCH; transactional batch. |
+| **Cosmos DB NoSQL (embedded)** | `/{account}-cosmos-nosql/` | Same embedded SQL engine as above, exposed as a named engine endpoint. Opt-in with `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true`; no Docker required. |
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
 
@@ -613,7 +614,7 @@ The **Table API** is **embedded** (in-process, no Docker required).
 
 | Variable                                              | Default | Engine image                                                  | Native port |
 |-------------------------------------------------------|---------|---------------------------------------------------------------|-------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | `mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview` | `8081` |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-memory (embedded, no Docker) | — |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED`    | `false` | `mongo:7`                                                     | `27017`     |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`                                             | `5432`      |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla`                                             | `9042`      |
@@ -652,7 +653,7 @@ curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
 # → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
 ```
 
-#### Embedded engine — Table API (no Docker)
+#### Embedded engines — NoSQL and Table API (no Docker)
 
 | Variable                                              | Default | Backend                      |
 |-------------------------------------------------------|---------|------------------------------|
@@ -789,19 +790,35 @@ bulk executor, certain graph-level operations) that TinkerPop Gremlin Server doe
 
 ---
 
-**🟢 NoSQL / SQL API — very high parity**
+**🟢 NoSQL / SQL API — very high parity (embedded engine)**
 
-floci-az uses the official **Azure Cosmos DB Linux Emulator (vNext preview)** released by
-Microsoft. This is the same codebase that powers the Azure Cosmos DB Emulator, repackaged
-for Linux containers.
+Both NoSQL endpoints are in-process — no Docker, instant startup:
 
-- **Client SDK**: `azure-cosmos` Java SDK, `@azure/cosmos` (Node.js), `azure-cosmos`
-  (Python) — point the endpoint at `https://localhost:4578`.
-- **Engine**: `mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview`
-  (official Microsoft image).
-- **Known gaps**: only a subset of indexing policies and throughput governance features are
-  emulated; check the [vNext release notes](https://aka.ms/cosmosdb-emulator-release-notes)
-  for the current feature list.
+| Endpoint | Use case | SQL queries | Docker |
+|---|---|---|---|
+| `{account}-cosmos` | CRUD + SQL, always-on | ✅ Full SQL dialect | No |
+| `{account}-cosmos-nosql` | Named engine endpoint, opt-in | ✅ Full SQL dialect | No |
+
+The **embedded NoSQL engine** implements the
+[Azure Cosmos DB SQL grammar](https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/query/overview)
+in-process:
+
+- `SELECT`, `WHERE`, `ORDER BY`, `GROUP BY`, `OFFSET LIMIT`, `SELECT TOP`, `SELECT DISTINCT`
+- Aggregates: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
+- Predicates: `=`, `!=`, `IN`, `BETWEEN`, `LIKE`, `NOT`, `AND`, `OR`, `IS_DEFINED`, `IS_NULL`,
+  `CONTAINS`, `STARTSWITH`, `ENDSWITH`, `STRINGEQUALS`, `REGEXMATCH`, `ARRAY_CONTAINS`
+- Conditional: `IIF(condition, trueVal, falseVal)`
+- String functions: `LOWER`, `UPPER`, `LENGTH`, `CONCAT`, `SUBSTRING`, `TRIM`, `REPLACE`,
+  `REVERSE`, `INDEX_OF`, `LEFT`, `RIGHT`, `TOSTRING`, `STRINGJOIN`, `STRINGSPLIT`
+- Math functions: `ABS`, `CEILING`, `FLOOR`, `ROUND`, `SQRT`, `POWER`, `LOG`, `LOG10`,
+  `EXP`, `SIGN`, `TRUNC`, `PI`, `RAND`
+- Array functions: `ARRAY_LENGTH`, `ARRAY_SLICE`, `ARRAY_CONCAT`
+- Type checks: `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`,
+  `IS_INTEGER`, `IS_PRIMITIVE`
+- Named parameters (`@name`)
+- **Client SDK**: `azure-cosmos` Java SDK — point to `https://localhost:4578`.
+- **Known gaps**: JOIN with nested arrays, full-text / vector search, geospatial,
+  multi-region and RU/s governance features.
 
 ---
 

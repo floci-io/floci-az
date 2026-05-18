@@ -140,7 +140,7 @@ test-cosmos-table:
 test-cosmos-nosql:
 	@echo "==> Cosmos NoSQL VNext engine test"
 	$(MAKE) run-cosmos-nosql
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosNoSqlVNextEngineCompatibilityTest; \
+	cd $(JAVA_DIR) && mvn test -Dtest=CosmosNoSqlEngineCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-cosmos-all:

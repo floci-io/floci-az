@@ -10,18 +10,31 @@ import java.util.stream.*;
 /**
  * In-process query engine for the Cosmos DB SQL dialect.
  *
- * Supported:
- *   SELECT * / SELECT c.field1, c.field2 / SELECT VALUE c.field
- *   SELECT TOP n / SELECT VALUE COUNT(1)
- *   SELECT VALUE SUM/AVG/MIN/MAX(c.field) — scalar aggregates
- *   SELECT DISTINCT c.field — deduplicated projection
- *   SELECT c.field, COUNT(1) as alias FROM c GROUP BY c.field
- *   WHERE with =, !=, <>, >, >=, <, <=, IN, BETWEEN, NOT, AND, OR, parentheses
- *   WHERE functions: IS_DEFINED, IS_NULL, IS_STRING, IS_NUMBER, IS_BOOL, IS_ARRAY, IS_OBJECT
- *                    CONTAINS, STARTSWITH, ENDSWITH, ARRAY_CONTAINS
- *   ORDER BY field [ASC|DESC], multiple fields
- *   OFFSET n LIMIT m
- *   Named parameters (@name)
+ * <p>Implements a substantial subset of the
+ * <a href="https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/query/overview">
+ * Azure Cosmos DB NoSQL SQL grammar</a>, sufficient for the vast majority of
+ * application queries:
+ *
+ * <ul>
+ *   <li>SELECT * / SELECT c.field1, c.field2 / SELECT VALUE c.field</li>
+ *   <li>SELECT TOP n</li>
+ *   <li>SELECT VALUE COUNT(1) / SUM / AVG / MIN / MAX — scalar aggregates</li>
+ *   <li>SELECT DISTINCT c.field</li>
+ *   <li>SELECT c.field, COUNT(1) AS alias FROM c GROUP BY c.field</li>
+ *   <li>WHERE with =, !=, &lt;&gt;, &gt;, &gt;=, &lt;, &lt;=, IN, BETWEEN, NOT, AND, OR, parentheses, LIKE</li>
+ *   <li>WHERE functions: IS_DEFINED, IS_NULL, IS_STRING, IS_NUMBER, IS_BOOL, IS_ARRAY, IS_OBJECT,
+ *       IS_INTEGER, IS_PRIMITIVE, CONTAINS, STARTSWITH, ENDSWITH, ARRAY_CONTAINS,
+ *       STRINGEQUALS, REGEXMATCH</li>
+ *   <li>IIF(condition, trueVal, falseVal) — conditional expression</li>
+ *   <li>ORDER BY field [ASC|DESC], multiple fields</li>
+ *   <li>OFFSET n LIMIT m</li>
+ *   <li>String functions: LOWER, UPPER, LENGTH, CONCAT, SUBSTRING, TRIM, LTRIM, RTRIM,
+ *       REPLACE, REVERSE, INDEX_OF, LEFT, RIGHT, TOSTRING, STRINGJOIN, STRINGSPLIT</li>
+ *   <li>Math functions: ABS, CEILING, FLOOR, ROUND, SQRT, POWER, LOG, LOG10, EXP,
+ *       SIGN, TRUNC, PI, RAND</li>
+ *   <li>Array functions: ARRAY_LENGTH, ARRAY_SLICE, ARRAY_CONCAT</li>
+ *   <li>Named parameters (@name)</li>
+ * </ul>
  */
 public class CosmosQueryEngine {
 
@@ -173,7 +186,6 @@ public class CosmosQueryEngine {
         }
 
         // COUNT query: only true when there is no GROUP BY
-        // (inside GROUP BY, COUNT is a per-group aggregate, not a top-level scalar)
         boolean countQuery = groupBy.isEmpty()
                 && (upper.contains("COUNT(1)") || upper.contains("COUNT(*)"));
 
@@ -208,13 +220,11 @@ public class CosmosQueryEngine {
                     if (aggM.matches()) {
                         aggregateType  = aggM.group(1).toUpperCase();
                         aggregateField = aggM.group(2).trim();
-                        // selectFields stays null — result is a bare scalar
                     } else if (!"*".equals(selectClause)) {
                         selectFields = splitTopLevel(selectClause, ',').stream()
                                 .map(String::trim).filter(s -> !s.isEmpty()).toList();
                     }
                 } else if (!"*".equals(selectClause)) {
-                    // Use splitTopLevel so CONCAT(a, b, c) is not split on its inner commas
                     selectFields = splitTopLevel(selectClause, ',').stream()
                             .map(String::trim).filter(s -> !s.isEmpty()).toList();
                 }
@@ -272,6 +282,20 @@ public class CosmosQueryEngine {
         m = Pattern.compile("(?i)IS_NULL\\s*\\(([^)]+)\\)").matcher(pred);
         if (m.matches()) return resolve(doc, m.group(1).trim()) == null;
 
+        // IS_INTEGER(c.field)
+        m = Pattern.compile("(?i)IS_INTEGER\\s*\\(([^)]+)\\)").matcher(pred);
+        if (m.matches()) {
+            Object val = resolve(doc, m.group(1).trim());
+            return val instanceof Long || val instanceof Integer;
+        }
+
+        // IS_PRIMITIVE(c.field)
+        m = Pattern.compile("(?i)IS_PRIMITIVE\\s*\\(([^)]+)\\)").matcher(pred);
+        if (m.matches()) {
+            Object val = resolve(doc, m.group(1).trim());
+            return val instanceof String || val instanceof Number || val instanceof Boolean || val == null;
+        }
+
         // IS_STRING / IS_NUMBER / IS_BOOL / IS_ARRAY / IS_OBJECT
         m = Pattern.compile("(?i)(IS_STRING|IS_NUMBER|IS_BOOL|IS_ARRAY|IS_OBJECT)\\s*\\(([^)]+)\\)").matcher(pred);
         if (m.matches()) {
@@ -296,22 +320,52 @@ public class CosmosQueryEngine {
             return ci ? s.toLowerCase().contains(srch.toLowerCase()) : s.contains(srch);
         }
 
-        // STARTSWITH(field, str)
-        m = Pattern.compile("(?i)STARTSWITH\\s*\\(([^,]+),\\s*(.+?)\\s*\\)").matcher(pred);
+        // STARTSWITH(field, str [, ignoreCase])
+        m = Pattern.compile("(?i)STARTSWITH\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*(true|false))?\\s*\\)").matcher(pred);
         if (m.matches()) {
             Object val = resolve(doc, m.group(1).trim());
-            return val instanceof String s && s.startsWith(stripQuotes(m.group(2).trim()));
+            String srch = stripQuotes(m.group(2).trim());
+            boolean ci  = "true".equalsIgnoreCase(m.group(3));
+            if (!(val instanceof String s)) return false;
+            return ci ? s.toLowerCase().startsWith(srch.toLowerCase()) : s.startsWith(srch);
         }
 
-        // ENDSWITH(field, str)
-        m = Pattern.compile("(?i)ENDSWITH\\s*\\(([^,]+),\\s*(.+?)\\s*\\)").matcher(pred);
+        // ENDSWITH(field, str [, ignoreCase])
+        m = Pattern.compile("(?i)ENDSWITH\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*(true|false))?\\s*\\)").matcher(pred);
         if (m.matches()) {
             Object val = resolve(doc, m.group(1).trim());
-            return val instanceof String s && s.endsWith(stripQuotes(m.group(2).trim()));
+            String srch = stripQuotes(m.group(2).trim());
+            boolean ci  = "true".equalsIgnoreCase(m.group(3));
+            if (!(val instanceof String s)) return false;
+            return ci ? s.toLowerCase().endsWith(srch.toLowerCase()) : s.endsWith(srch);
         }
 
-        // ARRAY_CONTAINS(field, value)
-        m = Pattern.compile("(?i)ARRAY_CONTAINS\\s*\\(([^,]+),\\s*(.+?)\\s*\\)").matcher(pred);
+        // STRINGEQUALS(field, str [, ignoreCase])
+        m = Pattern.compile("(?i)STRINGEQUALS\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*(true|false))?\\s*\\)").matcher(pred);
+        if (m.matches()) {
+            Object val  = resolve(doc, m.group(1).trim());
+            String srch = stripQuotes(m.group(2).trim());
+            boolean ci  = "true".equalsIgnoreCase(m.group(3));
+            if (!(val instanceof String s)) return false;
+            return ci ? s.equalsIgnoreCase(srch) : s.equals(srch);
+        }
+
+        // REGEXMATCH(field, regex [, flags])
+        m = Pattern.compile("(?i)REGEXMATCH\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*'([^']*)')?\\s*\\)").matcher(pred);
+        if (m.matches()) {
+            Object val   = resolve(doc, m.group(1).trim());
+            String regex = stripQuotes(m.group(2).trim());
+            String flags = m.group(3) != null ? m.group(3) : "";
+            if (!(val instanceof String s)) return false;
+            int pFlags = 0;
+            if (flags.contains("i")) pFlags |= Pattern.CASE_INSENSITIVE;
+            if (flags.contains("m")) pFlags |= Pattern.MULTILINE;
+            if (flags.contains("s")) pFlags |= Pattern.DOTALL;
+            return Pattern.compile(regex, pFlags).matcher(s).find();
+        }
+
+        // ARRAY_CONTAINS(field, value [, partial])
+        m = Pattern.compile("(?i)ARRAY_CONTAINS\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*(true|false))?\\s*\\)").matcher(pred);
         if (m.matches()) {
             Object arr  = resolve(doc, m.group(1).trim());
             Object srch = parseLiteral(m.group(2).trim());
@@ -337,7 +391,16 @@ public class CosmosQueryEngine {
             return compareValues(val, low) >= 0 && compareValues(val, high) <= 0;
         }
 
-        // expr OP expr  (supports function calls on either side, e.g. LOWER(c.x) = 'foo')
+        // field LIKE pattern
+        m = Pattern.compile("(?i)(.+?)\\s+LIKE\\s+(.+)").matcher(pred);
+        if (m.matches()) {
+            Object val = resolveExpr(doc, m.group(1).trim());
+            if (!(val instanceof String s)) return false;
+            String pattern = stripQuotes(m.group(2).trim());
+            return likeMatches(s, pattern);
+        }
+
+        // expr OP expr  (supports function calls on either side)
         m = Pattern.compile("(.+?)\\s*(=|!=|<>|>=|<=|>|<)\\s*(.+)").matcher(pred);
         if (m.matches()) {
             Object lhs = resolveExpr(doc, m.group(1).trim());
@@ -348,6 +411,19 @@ public class CosmosQueryEngine {
         return false;
     }
 
+    /** Convert a SQL LIKE pattern (% and _ wildcards) to a regex and match. */
+    private boolean likeMatches(String value, String pattern) {
+        StringBuilder sb = new StringBuilder("^");
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (c == '%') sb.append(".*");
+            else if (c == '_') sb.append('.');
+            else sb.append(Pattern.quote(String.valueOf(c)));
+        }
+        sb.append('$');
+        return Pattern.compile(sb.toString(), Pattern.CASE_INSENSITIVE).matcher(value).matches();
+    }
+
     // -----------------------------------------------------------------------
     // Field resolution
     // -----------------------------------------------------------------------
@@ -356,12 +432,10 @@ public class CosmosQueryEngine {
         // Strip FROM alias prefix: "c.field" → "field"
         if (path.contains(".")) {
             String[] parts = path.split("\\.", 2);
-            // If first part looks like an alias (1–10 chars, no special chars), strip it
             if (parts[0].matches("[a-zA-Z_][a-zA-Z0-9_]{0,9}")) {
                 path = parts[1];
             }
         }
-        // Navigate nested path
         Object current = doc;
         for (String seg : path.split("\\.")) {
             if (current instanceof Map<?, ?> map) {
@@ -380,7 +454,6 @@ public class CosmosQueryEngine {
     private Map<String, Object> projectDoc(Map<String, Object> doc, List<String> fields) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (String field : fields) {
-            // Detect optional "expr AS alias" clause (depth-aware, handles parens/strings).
             int asIdx = findTopLevelKeyword(field, "AS");
             String expr, alias;
             if (asIdx >= 0) {
@@ -388,8 +461,6 @@ public class CosmosQueryEngine {
                 alias = field.substring(asIdx + 2).trim();
             } else {
                 expr = field;
-                // Plain field path: use the leaf segment as alias.
-                // Function call without AS: use the function name as alias.
                 if (expr.contains("(")) {
                     Matcher fm = Pattern.compile("(?i)(\\w+)\\s*\\(").matcher(expr);
                     alias = fm.find() ? fm.group(1).toLowerCase() : expr;
@@ -440,7 +511,6 @@ public class CosmosQueryEngine {
         }
         if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
         if (a instanceof Boolean ba && b instanceof Boolean bb) return Boolean.compare(ba, bb);
-        // Cross-type: coerce numbers
         try {
             double da = Double.parseDouble(String.valueOf(a));
             double db = Double.parseDouble(String.valueOf(b));
@@ -495,7 +565,7 @@ public class CosmosQueryEngine {
     }
 
     private String toLiteral(Object value) {
-        if (value == null)          return "null";
+        if (value == null)             return "null";
         if (value instanceof String s) return "'" + s.replace("'", "\\'") + "'";
         if (value instanceof Boolean b) return b.toString();
         return String.valueOf(value);
@@ -527,7 +597,6 @@ public class CosmosQueryEngine {
     // String scanning helpers
     // -----------------------------------------------------------------------
 
-    /** Find the first occurrence of {@code keyword} (whole-word, case-insensitive) at depth 0. */
     int findTopLevelKeyword(String expr, String keyword) {
         int depth = 0;
         boolean inStr = false;
@@ -554,7 +623,6 @@ public class CosmosQueryEngine {
         return -1;
     }
 
-    /** Find the first occurrence of {@code keyword} (whole-word) in the already-uppercased SQL from {@code from}. */
     private int indexOfKeyword(String upperSql, String keyword, int from) {
         int idx = upperSql.indexOf(keyword, from);
         while (idx >= 0) {
@@ -567,7 +635,6 @@ public class CosmosQueryEngine {
         return -1;
     }
 
-    /** Return the index of the ')' that closes the '(' at {@code start}. */
     private int matchingCloseParen(String s, int start) {
         int depth = 0;
         for (int i = start; i < s.length(); i++) {
@@ -577,7 +644,6 @@ public class CosmosQueryEngine {
         return -1;
     }
 
-    /** Split {@code s} by {@code delim} ignoring delimiters inside parens or string literals. */
     List<String> splitTopLevel(String s, char delim) {
         List<String> result = new ArrayList<>();
         int depth = 0;
@@ -607,15 +673,8 @@ public class CosmosQueryEngine {
     // -----------------------------------------------------------------------
 
     /**
-     * Evaluate any SQL expression against a document.
-     * Handles:
-     * <ul>
-     *   <li>String literals: {@code 'hello'} or {@code "hello"}</li>
-     *   <li>Null / boolean literals: {@code null}, {@code true}, {@code false}</li>
-     *   <li>Numeric literals: {@code 42}, {@code 3.14}</li>
-     *   <li>Function calls: {@code LOWER(c.name)}, {@code CONCAT(c.a, ' ', c.b)}</li>
-     *   <li>Field paths: {@code c.name}, {@code c.addr.city}</li>
-     * </ul>
+     * Evaluate any SQL expression against a document:
+     * string/null/boolean/numeric literals, function calls, IIF, field paths.
      */
     Object resolveExpr(Map<String, Object> doc, String expr) {
         expr = expr.trim();
@@ -638,7 +697,7 @@ public class CosmosQueryEngine {
             try { return Double.parseDouble(expr); } catch (NumberFormatException ignored) {}
         }
 
-        // Function call: NAME(args…) — find the first '(' outside any string literal
+        // Function call: NAME(args…)
         int parenIdx = -1;
         boolean inStr = false;
         char strCh = 0;
@@ -651,8 +710,19 @@ public class CosmosQueryEngine {
         if (parenIdx > 0 && expr.endsWith(")")) {
             String fname   = expr.substring(0, parenIdx).trim().toUpperCase();
             String argsStr = expr.substring(parenIdx + 1, expr.length() - 1);
+
+            // IIF(condition, trueVal, falseVal) — special handling
+            if ("IIF".equals(fname)) {
+                List<String> parts = splitTopLevel(argsStr, ',');
+                if (parts.size() == 3) {
+                    boolean cond = evalExpr(doc, parts.get(0).trim());
+                    return resolveExpr(doc, cond ? parts.get(1).trim() : parts.get(2).trim());
+                }
+                return null;
+            }
+
             List<String> argExprs = splitTopLevel(argsStr, ',');
-            return applyStringFunction(fname, argExprs, doc);
+            return applyFunction(fname, argExprs, doc);
         }
 
         // Field path (default)
@@ -661,22 +731,21 @@ public class CosmosQueryEngine {
 
     /**
      * Evaluate a named Cosmos DB scalar function.
-     * Supported: LOWER, UPPER, LENGTH, CONCAT, SUBSTRING, TRIM, LTRIM, RTRIM,
-     *            REPLACE, REVERSE, INDEX_OF, LEFT, RIGHT, TOSTRING.
+     * Covers string, math, and array functions from the official SQL reference.
      */
-    private Object applyStringFunction(String fname, List<String> argExprs, Map<String, Object> doc) {
-        // Helper to resolve a single argument expression
+    private Object applyFunction(String fname, List<String> argExprs, Map<String, Object> doc) {
         Object a0 = argExprs.isEmpty()  ? null : resolveExpr(doc, argExprs.get(0).trim());
         Object a1 = argExprs.size() < 2 ? null : resolveExpr(doc, argExprs.get(1).trim());
         Object a2 = argExprs.size() < 3 ? null : resolveExpr(doc, argExprs.get(2).trim());
 
         return switch (fname) {
-            case "LOWER"     -> a0 instanceof String s ? s.toLowerCase()           : a0;
-            case "UPPER"     -> a0 instanceof String s ? s.toUpperCase()           : a0;
-            case "LENGTH"    -> a0 instanceof String s ? (long) s.length()         : null;
-            case "TRIM"      -> a0 instanceof String s ? s.trim()                  : a0;
-            case "LTRIM"     -> a0 instanceof String s ? s.stripLeading()          : a0;
-            case "RTRIM"     -> a0 instanceof String s ? s.stripTrailing()         : a0;
+            // ── String functions ──────────────────────────────────────────
+            case "LOWER"     -> a0 instanceof String s ? s.toLowerCase()  : a0;
+            case "UPPER"     -> a0 instanceof String s ? s.toUpperCase()  : a0;
+            case "LENGTH"    -> a0 instanceof String s ? (long) s.length(): null;
+            case "TRIM"      -> a0 instanceof String s ? s.trim()         : a0;
+            case "LTRIM"     -> a0 instanceof String s ? s.stripLeading() : a0;
+            case "RTRIM"     -> a0 instanceof String s ? s.stripTrailing(): a0;
             case "REVERSE"   -> a0 instanceof String s ? new StringBuilder(s).reverse().toString() : a0;
             case "TOSTRING"  -> a0 == null ? null : String.valueOf(a0);
 
@@ -728,11 +797,67 @@ public class CosmosQueryEngine {
                         ? (ci ? s0.equalsIgnoreCase(s1) : s0.equals(s1)) : a0.equals(a1);
             }
 
+            case "STRINGJOIN" -> {
+                // STRINGJOIN(separator, array)
+                if (!(a1 instanceof List<?> list)) yield null;
+                String sep = a0 instanceof String s ? s : "";
+                yield list.stream().map(String::valueOf)
+                        .collect(Collectors.joining(sep));
+            }
+
+            case "STRINGSPLIT" -> {
+                // STRINGSPLIT(str, separator)
+                if (!(a0 instanceof String s)) yield null;
+                String sep = a1 instanceof String sep2 ? sep2 : " ";
+                yield Arrays.asList(s.split(Pattern.quote(sep), -1));
+            }
+
+            // ── Math functions ────────────────────────────────────────────
+            case "ABS"   -> a0 instanceof Number n ? Math.abs(n.doubleValue())   : null;
+            case "CEILING" -> a0 instanceof Number n ? (long) Math.ceil(n.doubleValue())  : null;
+            case "FLOOR"   -> a0 instanceof Number n ? (long) Math.floor(n.doubleValue()) : null;
+            case "ROUND"   -> a0 instanceof Number n ? (long) Math.round(n.doubleValue()) : null;
+            case "TRUNC"   -> a0 instanceof Number n ? (long) n.longValue() : null;
+            case "SQRT"    -> a0 instanceof Number n ? Math.sqrt(n.doubleValue()) : null;
+            case "POWER"   -> (a0 instanceof Number b && a1 instanceof Number e)
+                    ? Math.pow(b.doubleValue(), e.doubleValue()) : null;
+            case "LOG"     -> a0 instanceof Number n
+                    ? (a1 instanceof Number base
+                        ? Math.log(n.doubleValue()) / Math.log(base.doubleValue())
+                        : Math.log(n.doubleValue()))
+                    : null;
+            case "LOG10"   -> a0 instanceof Number n ? Math.log10(n.doubleValue()) : null;
+            case "EXP"     -> a0 instanceof Number n ? Math.exp(n.doubleValue())   : null;
+            case "SIGN"    -> a0 instanceof Number n ? (long) (int) Math.signum(n.doubleValue()) : null;
+            case "PI"      -> Math.PI;
+            case "RAND"    -> Math.random();
+
+            // ── Array functions ───────────────────────────────────────────
+            case "ARRAY_LENGTH" -> a0 instanceof List<?> list ? (long) list.size() : null;
+
+            case "ARRAY_SLICE" -> {
+                if (!(a0 instanceof List<?> list) || !(a1 instanceof Number startN)) yield null;
+                int start = startN.intValue();
+                if (start < 0) start = Math.max(0, list.size() + start);
+                int end = a2 instanceof Number lenN
+                        ? Math.min(start + lenN.intValue(), list.size())
+                        : list.size();
+                yield start < list.size() ? new ArrayList<>(list.subList(start, Math.min(end, list.size()))) : List.of();
+            }
+
+            case "ARRAY_CONCAT" -> {
+                List<Object> result = new ArrayList<>();
+                for (String arg : argExprs) {
+                    Object v = resolveExpr(doc, arg.trim());
+                    if (v instanceof List<?> list) result.addAll((List<?>) list);
+                }
+                yield result;
+            }
+
             default -> null;
         };
     }
 
-    // Return the minimum value ≥ 0 among the candidates, or the last candidate (fallback).
     private int minPositive(int... candidates) {
         int min = Integer.MAX_VALUE;
         for (int c : candidates) if (c >= 0) min = Math.min(min, c);
@@ -743,14 +868,8 @@ public class CosmosQueryEngine {
     // Aggregate helpers
     // -----------------------------------------------------------------------
 
-    /**
-     * Compute a scalar aggregate over a list of documents.
-     * Supported types: COUNT, SUM, AVG, MIN, MAX.
-     */
     private Object computeAggregate(String type, String field, List<Map<String, Object>> docs) {
-        if ("COUNT".equals(type)) {
-            return (long) docs.size();
-        }
+        if ("COUNT".equals(type)) return (long) docs.size();
 
         List<Double> values = docs.stream()
                 .map(doc -> resolve(doc, field))
@@ -782,10 +901,6 @@ public class CosmosQueryEngine {
         return !Double.isInfinite(d) && !Double.isNaN(d) && d == Math.floor(d);
     }
 
-    /**
-     * Parse a SELECT expression like {@code COUNT(1) as alias} or {@code SUM(c.price) as total}.
-     * Returns {@code null} when the expression is not an aggregate.
-     */
     private AggregateExpr parseAggregateExpr(String expr) {
         Matcher m = Pattern.compile(
                 "(?i)(COUNT|SUM|AVG|MIN|MAX)\\s*\\(([^)]+)\\)(?:\\s+[Aa][Ss]\\s+(\\S+))?")
@@ -799,18 +914,13 @@ public class CosmosQueryEngine {
         return null;
     }
 
-    /**
-     * Apply GROUP BY: group documents, compute per-group aggregates from the SELECT list,
-     * and return one result document per group.
-     */
     private List<Object> applyGroupBy(List<Map<String, Object>> docs, ParsedQuery q) {
-        // Partition documents into groups keyed by the GROUP BY field values
         Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
         for (Map<String, Object> doc : docs) {
             StringBuilder key = new StringBuilder();
             for (String gbField : q.groupBy()) {
                 Object val = resolve(doc, gbField);
-                key.append(val == null ? "\0null\0" : val).append('');
+                key.append(val == null ? "\0null\0" : val).append(' ');
             }
             groups.computeIfAbsent(key.toString(), k -> new ArrayList<>()).add(doc);
         }
@@ -819,7 +929,6 @@ public class CosmosQueryEngine {
         for (List<Map<String, Object>> group : groups.values()) {
             Map<String, Object> row = new LinkedHashMap<>();
 
-            // Add the GROUP BY field values using the leaf key name
             for (String gbField : q.groupBy()) {
                 Object val = resolve(group.get(0), gbField);
                 String key = gbField.contains(".")
@@ -828,7 +937,6 @@ public class CosmosQueryEngine {
                 row.put(key, val);
             }
 
-            // Process each SELECT expression; aggregate ones are computed per group
             if (q.selectFields() != null) {
                 for (String expr : q.selectFields()) {
                     AggregateExpr agg = parseAggregateExpr(expr);
@@ -836,7 +944,6 @@ public class CosmosQueryEngine {
                         Object val = computeAggregate(agg.type(), agg.field(), group);
                         row.put(agg.alias(), val != null ? val : 0L);
                     }
-                    // Non-aggregate select fields are already added via the GROUP BY loop above
                 }
             }
 
@@ -845,10 +952,6 @@ public class CosmosQueryEngine {
         return results;
     }
 
-    /**
-     * Deduplicate a projected result list by serialising each item to JSON and
-     * using that as a uniqueness key (matches Cosmos DB DISTINCT semantics).
-     */
     private List<Object> applyDistinct(List<Object> items) {
         List<Object> result = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -857,7 +960,7 @@ public class CosmosQueryEngine {
                 String key = MAPPER.writeValueAsString(item);
                 if (seen.add(key)) result.add(item);
             } catch (JsonProcessingException e) {
-                result.add(item); // fallback: keep item even if serialisation fails
+                result.add(item);
             }
         }
         return result;

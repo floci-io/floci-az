@@ -2,6 +2,7 @@ package io.floci.az.services.cosmos.engine;
 
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.services.cosmos.CosmosHandler;
 import io.floci.az.services.cosmos.table.CosmosTableApiHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -38,6 +39,7 @@ public class CosmosEngineHandler implements AzureServiceHandler {
     @Inject CosmosLifecycleManager  lifecycleManager;
     @Inject CosmosEngineRegistry    registry;
     @Inject CosmosTableApiHandler   tableApiHandler;
+    @Inject CosmosHandler           cosmosHandler;
 
     @Override
     public String getServiceType() {
@@ -85,8 +87,14 @@ public class CosmosEngineHandler implements AzureServiceHandler {
             if (isControlPath(path)) {
                 return connectionInfoResponse(api, serviceType, connInfo.get());
             }
-            // Data path — delegate to the in-process handler
-            return tableApiHandler.handle(request);
+            // Data path — delegate to the appropriate in-process handler
+            return switch (api) {
+                case TABLE -> tableApiHandler.handle(request);
+                case NOSQL -> cosmosHandler.handle(request);
+                default    -> Response.status(501)
+                        .entity(Map.of("error", "Embedded handler not implemented for " + api))
+                        .build();
+            };
         }
 
         // ── Docker-backed engines ───────────────────────────────────────────
