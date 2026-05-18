@@ -8,7 +8,9 @@ import java.util.List;
 @ApplicationScoped
 public class PostgreSqlCosmosEngine implements CosmosEngineProvider {
 
-    private static final String DEFAULT_IMAGE = "citusdata/citus";
+    // Pin to a specific tag to avoid pulling "latest" on every fresh install.
+    // Override with FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_IMAGE if needed.
+    private static final String DEFAULT_IMAGE = "citusdata/citus:12";
     private static final int DEFAULT_PORT = 5432;
 
     @Override

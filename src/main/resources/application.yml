@@ -93,7 +93,7 @@ floci-az:
           # image: mongo:7
         postgresql:
           enabled: false
-          # image: citusdata/citus
+          # image: citusdata/citus:12
         cassandra:
           enabled: false
           # image: scylladb/scylla

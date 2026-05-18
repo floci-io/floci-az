@@ -70,12 +70,12 @@ the cloud service — but it carries the full weight of that fidelity.
 | **RAM required**                 | High memory usage (commonly ≥ 2 GB)                      | Minimal footprint — only active engines consume resources                                |
 | **Cosmos DB APIs**               | SQL (NoSQL), MongoDB, Cassandra, Gremlin, Table          | SQL (NoSQL), MongoDB, PostgreSQL, Cassandra, Gremlin, Table                              |
 | **Cosmos API implementation**    | Microsoft proprietary emulator                           | API-specific compatibility engines                                                       |
-| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | Azure Cosmos DB Emulator Linux vNext                                                     |
-| **MongoDB API provider**         | Native Cosmos Emulator                                   | MongoDB Community Server                                                                 |
-| **PostgreSQL API provider**      | Native Cosmos Emulator                                   | PostgreSQL + Citus                                                                       |
-| **Cassandra API provider**       | Native Cosmos Emulator                                   | ScyllaDB (default) or Apache Cassandra                                                   |
-| **Gremlin API provider**         | Native Cosmos Emulator                                   | Apache TinkerPop Gremlin Server                                                          |
-| **Table API provider**           | Native Cosmos Emulator                                   | In-memory (embedded, no Docker)                                                          |
+| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | 🟢 Azure Cosmos DB Emulator Linux vNext (official Microsoft image)                       |
+| **MongoDB API provider**         | Native Cosmos Emulator                                   | 🟢 MongoDB Community Server — identical wire protocol (BSON + OP_MSG)                   |
+| **PostgreSQL API provider**      | Native Cosmos Emulator                                   | 🟢 Citus (the exact engine Azure runs) — standard JDBC driver, zero code changes        |
+| **Cassandra API provider**       | Native Cosmos Emulator                                   | 🟢 ScyllaDB — CQL-compatible, same DataStax driver                                      |
+| **Gremlin API provider**         | Native Cosmos Emulator                                   | 🟡 Apache TinkerPop — standard traversals work; Cosmos extensions not emulated          |
+| **Table API provider**           | Native Cosmos Emulator                                   | 🟢 In-memory (embedded) — same `azure-data-tables` SDK, no Docker                       |
 | **Other Azure services**         | Cosmos DB only                                           | Blob · Queue · Table · Functions · App Config · Cosmos DB in a unified local Azure stack |
 | **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Most services: plain HTTP on `4577`, zero cert setup. **Cosmos DB Java SDK only:** HTTPS on `4578` with a bundled self-signed cert — no import required, works out of the box |
 | **Web UI / Data Explorer**       | ✅ Built-in                                               | ❌ API-focused local development environment                                              |
@@ -674,20 +674,136 @@ curl http://localhost:4577/devstoreaccount1-cosmos-table/connect
 # → {"api":"TABLE","status":"running","connectionString":"DefaultEndpointsProtocol=http;...","notes":"..."}
 ```
 
-Use the returned `connectionString` with any Azure Data Tables SDK:
+Use the `host` and `port` from the `/connect` response to build the endpoint, then connect
+with `AzureNamedKeyCredential` — the **official Cosmos DB for Table pattern**
+([quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java)):
 
 ```java
-// Java
+// Java — official Cosmos DB for Table SDK pattern
+String endpoint = "http://" + host + ":" + port + "/devstoreaccount1-cosmos-table";
+
 TableServiceClient client = new TableServiceClientBuilder()
-    .connectionString(connectionString)
+    .endpoint(endpoint)
+    .credential(new AzureNamedKeyCredential(
+        "devstoreaccount1",
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="))
     .buildClient();
 ```
 
 ```python
 # Python
 from azure.data.tables import TableServiceClient
-client = TableServiceClient.from_connection_string(connectionString)
+from azure.core.credentials import AzureNamedKeyCredential
+
+credential = AzureNamedKeyCredential("devstoreaccount1",
+    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==")
+client = TableServiceClient(
+    endpoint=f"http://{host}:{port}/devstoreaccount1-cosmos-table",
+    credential=credential)
 ```
+
+The `connectionString` field in the `/connect` response is also available for SDK clients
+that prefer the Azure Storage connection string format.
+
+#### API parity rationale
+
+Each engine's compatibility level is determined by how closely the underlying runtime matches
+what Azure Cosmos DB actually runs in production.
+
+---
+
+**🟢 PostgreSQL API — very high parity**
+
+Azure Cosmos DB for PostgreSQL *is* Citus — a distributed PostgreSQL extension developed by
+the same team that runs inside Azure. The wire protocol, query language, and drivers are
+identical to vanilla PostgreSQL.
+
+- **Client SDK**: standard PostgreSQL JDBC driver (`org.postgresql:postgresql`) — the same
+  driver you use in production, unchanged. [Official quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/postgresql/quickstart-app-stacks-java).
+- **Engine**: `citusdata/citus` Docker image (the exact same project).
+- **Known gaps**: Azure-specific HA/scaling, multi-region replication, and Azure RBAC
+  are infrastructure features with no local equivalent.
+- **Note**: Microsoft is retiring this API. The recommended migration path is Azure Database
+  for PostgreSQL (Elastic Clusters) or Cosmos DB for NoSQL.
+
+---
+
+**🟢 MongoDB API — very high parity**
+
+Azure Cosmos DB for MongoDB exposes the full MongoDB wire protocol (BSON + OP_MSG).
+Connecting with any MongoDB driver targets the same binary framing and command set
+regardless of whether the server is a real `mongod` or the Azure Cosmos service.
+
+- **Client SDK**: any MongoDB driver (`mongodb-driver-sync`, `pymongo`, `mongodb` Node.js
+  package) — the connection string format is identical.
+- **Engine**: `mongo:7` Community Server — the reference implementation of the protocol.
+- **Known gaps**: Azure-specific index types (wildcard compound), `$lookup` with `let`
+  in some API versions, and RU/s throughput governance.
+
+---
+
+**🟢 Table API — high parity**
+
+The Azure Table Storage REST API is a straightforward OData/JSON HTTP API. floci-az
+implements it directly in-process — no Docker required. Because the protocol is pure HTTP
+with a well-documented spec, compatibility is structural: the same SDK targets the same URLs
+and receives the same JSON shapes.
+
+- **Client SDK**: `azure-data-tables` SDK for Java, Python, Node.js, .NET — use the official
+  Cosmos DB for Table pattern: `.endpoint()` + `AzureNamedKeyCredential`. See
+  [Java quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java).
+  The connection string format is also supported for backward compatibility.
+- **Engine**: in-memory (`ConcurrentHashMap`) — instant startup, zero Docker overhead.
+- **Supported query operators**: OData `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`;
+  `$filter`, `$top`, `$select`.
+- **Known gaps**: Cosmos DB RU/s throughput model, TTL-based expiry, server-side pagination
+  continuation tokens beyond `$top`.
+
+---
+
+**🟢 Cassandra API — high parity**
+
+Azure Cosmos DB for Cassandra implements the Apache Cassandra CQL binary wire protocol
+(native transport, port 9042). Any CQL-compatible driver connects transparently.
+ScyllaDB is a CQL-compatible drop-in replacement that shares the same driver ecosystem.
+
+- **Client SDK**: DataStax Java Driver (`com.datastax.oss:java-driver-core`), `cassandra-driver-core`,
+  or any CQL v4 client — the contact point and port are all you need to change.
+- **Engine**: `scylladb/scylla` (default) or any Apache Cassandra image via the image override.
+- **Known gaps**: some Cosmos-specific TTL semantics, Cosmos RBAC, Cassandra LWT (lightweight
+  transactions) edge cases, and `ALLOW FILTERING` query restrictions differ slightly.
+
+---
+
+**🟡 Gremlin API — medium parity**
+
+Azure Cosmos DB for Gremlin is built on Apache TinkerPop. Standard Gremlin traversals
+work identically. However, Cosmos DB adds proprietary extensions (partition key semantics,
+bulk executor, certain graph-level operations) that TinkerPop Gremlin Server does not implement.
+
+- **Client SDK**: `gremlin-driver` (`org.apache.tinkerpop:gremlin-driver`) — connects via
+  WebSocket to port 8182, same as in production.
+- **Engine**: `tinkerpop/gremlin-server`.
+- **Known gaps**: Cosmos DB `pk` partition key column requirement, `addE`/`addV` Cosmos
+  extensions, bulk import API, and multi-region graph consistency guarantees.
+
+---
+
+**🟢 NoSQL / SQL API — very high parity**
+
+floci-az uses the official **Azure Cosmos DB Linux Emulator (vNext preview)** released by
+Microsoft. This is the same codebase that powers the Azure Cosmos DB Emulator, repackaged
+for Linux containers.
+
+- **Client SDK**: `azure-cosmos` Java SDK, `@azure/cosmos` (Node.js), `azure-cosmos`
+  (Python) — point the endpoint at `https://localhost:4578`.
+- **Engine**: `mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview`
+  (official Microsoft image).
+- **Known gaps**: only a subset of indexing policies and throughput governance features are
+  emulated; check the [vNext release notes](https://aka.ms/cosmosdb-emulator-release-notes)
+  for the current feature list.
+
+---
 
 ### Per-service storage override
 
