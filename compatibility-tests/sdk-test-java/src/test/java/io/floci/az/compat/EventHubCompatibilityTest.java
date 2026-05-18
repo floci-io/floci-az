@@ -29,10 +29,16 @@ class EventHubCompatibilityTest {
     private static final int RECV_TIMEOUT_MS = 10_000;
 
     private ConnectionFactory factory;
+    private String testId;
 
     @BeforeAll
     void setup() {
         factory = EmulatorConfig.buildAmqpConnectionFactory();
+    }
+
+    @BeforeEach
+    void newTestId() {
+        testId = UUID.randomUUID().toString().replace("-", "");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -44,18 +50,21 @@ class EventHubCompatibilityTest {
             Destination dest = session.createQueue(EmulatorConfig.amqpEntityAddress());
             MessageProducer producer = session.createProducer(dest);
             for (String text : texts) {
-                producer.send(session.createTextMessage(text));
+                TextMessage msg = session.createTextMessage(text);
+                msg.setStringProperty("testId", testId);
+                producer.send(msg);
             }
         }
     }
 
     private List<String> receiveMessages(String consumerGroup, int maxCount) throws JMSException {
         List<String> result = new ArrayList<>();
+        String selector = "testId = '" + testId + "'";
         try (Connection conn = factory.createConnection();
              Session session = conn.createSession(false, Session.AUTO_ACKNOWLEDGE)) {
             conn.start();
             Destination dest = session.createQueue(EmulatorConfig.amqpCgAddress(consumerGroup));
-            MessageConsumer consumer = session.createConsumer(dest);
+            MessageConsumer consumer = session.createConsumer(dest, selector);
             for (int i = 0; i < maxCount; i++) {
                 Message msg = consumer.receive(RECV_TIMEOUT_MS);
                 if (msg == null) break;

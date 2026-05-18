@@ -6,4 +6,3 @@ azure-appconfiguration==1.7.1
 azure-keyvault-secrets>=4.7.0
 azure-identity>=1.15.0
 azure-core>=1.30.0
-uamqp>=1.6.0
