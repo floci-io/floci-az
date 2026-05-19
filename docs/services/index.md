@@ -9,9 +9,10 @@ Floci-AZ provides emulation for several core Azure services.
 | **Table Storage** | `/{account}-table/` | ✅ Full CRUD |
 | **Azure Functions** | `/{account}-functions/` | ✅ HTTP Triggers, Docker runtimes |
 | **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks |
-| **Cosmos DB (SQL API)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, SQL queries, partition keys |
+| **Cosmos DB (NoSQL — always-on)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, full SQL dialect, PATCH, transactional batch |
+| **Cosmos DB engines (opt-in)** | `/{account}-cosmos-{api}/` | ✅ MongoDB · PostgreSQL · Cassandra · Gremlin (Docker-backed) · Table · NoSQL (embedded) |
 | **Key Vault** | `/{account}-keyvault/` | ✅ Secrets CRUD, versioning, soft-delete, properties update |
-| **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
+| **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |
 
 ## Unified Endpoint
 
