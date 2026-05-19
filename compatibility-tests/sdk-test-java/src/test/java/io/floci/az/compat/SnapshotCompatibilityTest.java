@@ -20,6 +20,7 @@ class SnapshotCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = EmulatorConfig.buildAppConfigClient();
     }
 

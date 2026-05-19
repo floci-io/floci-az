@@ -47,6 +47,10 @@
         </dependency>
         <dependency>
             <groupId>com.azure</groupId>
+            <artifactId>azure-cosmos</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
             <artifactId>azure-security-keyvault-secrets</artifactId>
         </dependency>
         <dependency>
@@ -74,6 +78,34 @@
             <version>2.0.13</version>
             <scope>test</scope>
         </dependency>
+        <!-- MongoDB -->
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+            <version>5.1.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- PostgreSQL JDBC -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.3</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Cassandra / ScyllaDB -->
+        <dependency>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-core</artifactId>
+            <version>4.17.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Gremlin -->
+        <dependency>
+            <groupId>org.apache.tinkerpop</groupId>
+            <artifactId>gremlin-driver</artifactId>
+            <version>3.7.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -82,7 +114,33 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    <!--
+                      Pass SSL + emulator cert config as JVM -D args so they are applied
+                      before ANY class is loaded (earlier than systemPropertyVariables).
+                      - noOpenSsl: forces Netty to use the JDK SSL provider, which respects
+                        javax.net.ssl.* properties (the native BoringSSL engine ignores them).
+                      - trustStore: the emulator's self-signed PKCS12, bundled in test resources
+                        so it is present both locally and inside the CI Docker image. The cert
+                        has SANs for "localhost" (local dev) and "floci-az" (CI Docker service).
+                    -->
+                    <argLine>
+                        --enable-native-access=ALL-UNNAMED
+                        -Dio.netty.handler.ssl.noOpenSsl=true
+                        -Djavax.net.ssl.trustStore=${project.basedir}/src/test/resources/floci-az.p12
+                        -Djavax.net.ssl.trustStorePassword=floci-az
+                        -Djavax.net.ssl.trustStoreType=PKCS12
+                    </argLine>
+                    <!--
+                      Engine tests require Docker + a specially configured emulator instance.
+                      They are excluded from the default 'mvn test' run and executed instead
+                      via dedicated Makefile targets (make test-cosmos-all, etc.) that start
+                      the emulator with each engine enabled, run the test, then stop it.
+                      The '-Dtest=CosmosXxxEngineCompatibilityTest' flag used by those targets
+                      overrides this exclusion automatically.
+                    -->
+                    <excludes>
+                        <exclude>**/*EngineCompatibilityTest.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
         </plugins>

@@ -21,6 +21,7 @@ class AppConfigCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = EmulatorConfig.buildAppConfigClient();
     }
 

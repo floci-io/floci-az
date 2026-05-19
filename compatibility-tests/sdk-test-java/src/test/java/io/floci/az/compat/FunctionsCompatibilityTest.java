@@ -42,6 +42,7 @@ class FunctionsCompatibilityTest {
 
     @BeforeAll
     static void checkDocker() {
+        EmulatorConfig.assumeEmulatorRunning();
         try {
             ProcessBuilder pb = new ProcessBuilder("docker", "info");
             pb.redirectErrorStream(true);

@@ -6,6 +6,13 @@ quarkus:
   http:
     port: ${floci-az.port}
     host: 0.0.0.0
+    ssl-port: ${floci-az.ssl-port}
+    insecure-requests: enabled   # keep plain HTTP on 4577 alongside HTTPS on 4578
+    ssl:
+      certificate:
+        key-store-file: certs/floci-az.p12
+        key-store-password: floci-az
+        key-store-file-type: PKCS12
   native:
     additional-build-args: >-
       --initialize-at-run-time=org.apache.hc.client5.http.impl.auth.NTLMEngineImpl,
@@ -14,7 +21,12 @@ quarkus:
 
 floci-az:
   port: 4577
+  ssl-port: 4578
+  tls:
+    enabled: false    # set to true to enable HTTPS (both HTTP+HTTPS on same port via proxy)
+    self-signed: true  # auto-generate self-signed cert
   base-url: http://localhost:4577
+  base-url-https: https://localhost:4578
   storage:
     # Global default — applies to every service unless overridden below.
     # Supported modes: memory, persistent, hybrid, wal
@@ -37,15 +49,17 @@ floci-az:
         flush-interval-ms: 5000
       app-config:
         flush-interval-ms: 5000
+      cosmos:
+        flush-interval-ms: 5000
       key-vault:
         flush-interval-ms: 5000
 
   dns:
-    # When floci-az runs inside Docker, an embedded DNS server is started on port 53
-    # and injected into every Azure Functions container as their resolver. It resolves
-    # *.hostname (above) and any extra suffixes to floci-az's Docker network IP.
-    # extra-suffixes:
-    #   - myapp.internal
+  # When floci-az runs inside Docker, an embedded DNS server is started on port 53
+  # and injected into every Azure Functions container as their resolver. It resolves
+  # *.hostname (above) and any extra suffixes to floci-az's Docker network IP.
+  # extra-suffixes:
+  #   - myapp.internal
 
   docker:
     docker-host: unix:///var/run/docker.sock
@@ -66,6 +80,29 @@ floci-az:
       container-idle-timeout-seconds: 300
     app-config:
       enabled: true
+    cosmos:
+      enabled: true
+      engines:
+        startup: on-demand
+        default-api: nosql
+        nosql:
+          enabled: false
+          # Embedded
+        mongodb:
+          enabled: false
+          # image: mongo:7
+        postgresql:
+          enabled: false
+          # image: citusdata/citus:12
+        cassandra:
+          enabled: false
+          # image: scylladb/scylla:6.2
+        gremlin:
+          enabled: false
+          # image: tinkerpop/gremlin-server
+        table:
+          enabled: false
+          # Embedded
     key-vault:
       enabled: true
     event-hub:

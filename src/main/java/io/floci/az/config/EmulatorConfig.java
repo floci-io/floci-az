@@ -2,6 +2,7 @@ package io.floci.az.config;
 
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
+import io.smallrye.config.WithName;
 import java.util.List;
 import java.util.Optional;
 
@@ -11,8 +12,14 @@ public interface EmulatorConfig {
     @WithDefault("4577")
     int port();
 
+    @WithDefault("4578")
+    int sslPort();
+
     @WithDefault("http://localhost:4577")
     String baseUrl();
+
+    @WithDefault("https://localhost:4578")
+    String baseUrlHttps();
 
     /**
      * When set, overrides the hostname in base-url for URLs returned in API responses.
@@ -29,6 +36,8 @@ public interface EmulatorConfig {
                 .map(h -> baseUrl().replaceFirst("://[^:/]+(:\\d+)?", "://" + h + "$1"))
                 .orElse(baseUrl());
     }
+
+    TlsConfig tls();
 
     StorageConfig storage();
 
@@ -70,6 +79,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig queue();
         ServiceStorageConfig table();
         ServiceStorageConfig appConfig();
+        ServiceStorageConfig cosmos();
         ServiceStorageConfig keyVault();
     }
 
@@ -97,6 +107,7 @@ public interface EmulatorConfig {
         TableServiceConfig     table();
         FunctionsConfig        functions();
         AppConfigServiceConfig appConfig();
+        CosmosServiceConfig    cosmos();
         KeyVaultConfig         keyVault();
         EventHubConfig         eventHub();
 
@@ -174,6 +185,42 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface CosmosServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        @WithName("engines")
+        CosmosEngineConfig engines();
+    }
+
+    interface CosmosEngineConfig {
+        /** Startup mode: "on-demand" (default), "eager", or "disabled". */
+        @WithDefault("on-demand")
+        String startup();
+
+        @WithDefault("nosql")
+        String defaultApi();
+
+        CosmosApiConfig nosql();
+        CosmosApiConfig mongodb();
+        CosmosApiConfig postgresql();
+        CosmosApiConfig cassandra();
+        CosmosApiConfig gremlin();
+        CosmosApiConfig table();
+    }
+
+    interface CosmosApiConfig {
+        /** Whether this API engine is enabled. */
+        @WithDefault("false")
+        boolean enabled();
+
+        /** Docker image override (optional). */
+        Optional<String> image();
+
+        /** Host port override (optional). */
+        Optional<Integer> port();
+    }
+
     interface KeyVaultConfig {
         @WithDefault("true")
         boolean enabled();
@@ -196,6 +243,22 @@ public interface EmulatorConfig {
 
         /** Overrides the hostname that function containers use to reach floci-az. */
         Optional<String> dockerHostOverride();
+    }
+
+    interface TlsConfig {
+        /** Enable TLS/HTTPS. When true, both HTTP and HTTPS are served on the same public port. */
+        @WithDefault("false")
+        boolean enabled();
+
+        /** Path to PEM certificate file. */
+        Optional<String> certPath();
+
+        /** Path to PEM private key file. */
+        Optional<String> keyPath();
+
+        /** Auto-generate a self-signed certificate when no cert-path/key-path provided. */
+        @WithDefault("true")
+        boolean selfSigned();
     }
 
     /**

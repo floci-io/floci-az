@@ -22,6 +22,7 @@ class KeyVaultCompatibilityTest {
 
     @BeforeAll
     void setup() {
+        EmulatorConfig.assumeEmulatorRunning();
         client = EmulatorConfig.buildKeyVaultClient();
     }
 

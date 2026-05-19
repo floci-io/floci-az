@@ -1,6 +1,8 @@
 package io.floci.az.core;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.services.cosmos.engine.CosmosApi;
+import io.floci.az.services.cosmos.engine.CosmosEngineRegistry;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -14,6 +16,9 @@ public class BannerLogger {
 
     @Inject
     EmulatorConfig config;
+
+    @Inject
+    CosmosEngineRegistry cosmosEngineRegistry;
 
     void onStart(@Observes StartupEvent ev) {
         LOGGER.info("=== Local Azure Emulator Starting ===");
@@ -35,6 +40,30 @@ public class BannerLogger {
         if (config.services().appConfig().enabled()) {
             sb.append(serviceStatus("appconfig", true, getStorageMode("appconfig")));
         }
+        if (config.services().cosmos().enabled()) {
+            sb.append(serviceStatus("cosmos", true, getStorageMode("cosmos")));
+            // Cosmos engine sub-APIs
+            EmulatorConfig.CosmosEngineConfig cosmosEngines = config.services().cosmos().engines();
+            String startupMode = cosmosEngines.startup();
+            for (CosmosApi api : CosmosApi.values()) {
+                EmulatorConfig.CosmosApiConfig apiCfg = resolveCosmosApiConfig(cosmosEngines, api);
+                if (apiCfg.enabled()) {
+                    boolean embedded = cosmosEngineRegistry.resolve(api)
+                            .map(p -> p.engine().isEmbedded()).orElse(false);
+                    String image = apiCfg.image().orElseGet(() ->
+                        cosmosEngineRegistry.resolve(api)
+                            .map(p -> p.engine().defaultImage())
+                            .orElse("?"));
+                    if (embedded) {
+                        sb.append(String.format("     %-10s [enabled ] mode:embedded\n",
+                            api.name().toLowerCase()));
+                    } else {
+                        sb.append(String.format("     %-10s [enabled ] startup:%-10s image:%s\n",
+                            api.name().toLowerCase(), startupMode, image));
+                    }
+                }
+            }
+        }
         if (config.services().keyVault().enabled()) {
             sb.append(serviceStatus("keyvault", true, getStorageMode("keyvault")));
         }
@@ -52,10 +81,11 @@ public class BannerLogger {
 
     private String getStorageMode(String service) {
         return switch (service) {
-            case "blob"  -> config.storage().services().blob().mode().orElse(config.storage().mode());
-            case "queue" -> config.storage().services().queue().mode().orElse(config.storage().mode());
+            case "blob"      -> config.storage().services().blob().mode().orElse(config.storage().mode());
+            case "queue"     -> config.storage().services().queue().mode().orElse(config.storage().mode());
             case "table"     -> config.storage().services().table().mode().orElse(config.storage().mode());
             case "appconfig" -> config.storage().services().appConfig().mode().orElse(config.storage().mode());
+            case "cosmos"    -> config.storage().services().cosmos().mode().orElse(config.storage().mode());
             case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
@@ -69,5 +99,17 @@ public class BannerLogger {
     private static String serviceStatusDocker(String name, boolean enabled, String dockerHost) {
         String status = enabled ? "enabled " : "disabled";
         return String.format("   %-9s [%s]  docker: %s\n", name, status, dockerHost);
+    }
+
+    private static EmulatorConfig.CosmosApiConfig resolveCosmosApiConfig(
+            EmulatorConfig.CosmosEngineConfig cosmosEngines, CosmosApi api) {
+        return switch (api) {
+            case NOSQL       -> cosmosEngines.nosql();
+            case MONGODB     -> cosmosEngines.mongodb();
+            case POSTGRESQL  -> cosmosEngines.postgresql();
+            case CASSANDRA   -> cosmosEngines.cassandra();
+            case GREMLIN     -> cosmosEngines.gremlin();
+            case TABLE       -> cosmosEngines.table();
+        };
     }
 }
