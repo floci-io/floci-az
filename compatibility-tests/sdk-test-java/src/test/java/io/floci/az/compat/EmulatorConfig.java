@@ -66,12 +66,18 @@ public final class EmulatorConfig {
         // floci-az normally uses path-based routing (/devstoreaccount1-cosmos/…),
         // but that is incompatible with the Java SDK's URL-building logic.
         //
-        // Instead we point the SDK at the bare HTTPS root (https://localhost:4578)
+        // Instead we point the SDK at the bare HTTPS root (https://<host>:4578)
         // and handle root-level Cosmos paths (/dbs, /colls, /) in the routing
         // filter on the server side, mapping them to the default account.
+        //
+        // TLS note: the SDK enforces TLS in gateway mode and cannot use plain HTTP.
+        // The emulator uses a self-signed cert with SANs for localhost AND the Docker
+        // service name "floci-az" (used in CI). The cert is bundled in test resources
+        // and added to the JVM trust store via javax.net.ssl.* surefire properties, so
+        // hostname verification and chain validation both succeed in all environments.
         String httpsBase = BASE.replace("http://", "https://").replace(":4577", ":4578");
         return new CosmosClientBuilder()
-                .endpoint(httpsBase)   // e.g. https://localhost:4578
+                .endpoint(httpsBase)   // e.g. https://localhost:4578 or https://floci-az:4578
                 .key(COSMOS_KEY)
                 .gatewayMode()
                 .endpointDiscoveryEnabled(false)

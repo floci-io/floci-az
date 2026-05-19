@@ -2,7 +2,10 @@ package io.floci.az.compat;
 
 import jakarta.jms.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Assumptions;
 
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +37,15 @@ class EventHubCompatibilityTest {
     @BeforeAll
     void setup() {
         EmulatorConfig.assumeEmulatorRunning();
+        // Skip if the Artemis AMQP sidecar is not running (it requires a separate 'make run-eventhubs')
+        boolean amqpReachable = false;
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(EmulatorConfig.EVENTHUB_HOST, EmulatorConfig.EVENTHUB_AMQP_PORT), 1000);
+            amqpReachable = true;
+        } catch (Exception ignored) {}
+        Assumptions.assumeTrue(amqpReachable,
+                "AMQP broker not reachable at " + EmulatorConfig.EVENTHUB_HOST
+                        + ":" + EmulatorConfig.EVENTHUB_AMQP_PORT + " — skipping Event Hubs tests");
         factory = EmulatorConfig.buildAmqpConnectionFactory();
     }
 

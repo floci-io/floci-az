@@ -114,7 +114,22 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    <!--
+                      Pass SSL + emulator cert config as JVM -D args so they are applied
+                      before ANY class is loaded (earlier than systemPropertyVariables).
+                      - noOpenSsl: forces Netty to use the JDK SSL provider, which respects
+                        javax.net.ssl.* properties (the native BoringSSL engine ignores them).
+                      - trustStore: the emulator's self-signed PKCS12, bundled in test resources
+                        so it is present both locally and inside the CI Docker image. The cert
+                        has SANs for "localhost" (local dev) and "floci-az" (CI Docker service).
+                    -->
+                    <argLine>
+                        --enable-native-access=ALL-UNNAMED
+                        -Dio.netty.handler.ssl.noOpenSsl=true
+                        -Djavax.net.ssl.trustStore=${project.basedir}/src/test/resources/floci-az.p12
+                        -Djavax.net.ssl.trustStorePassword=floci-az
+                        -Djavax.net.ssl.trustStoreType=PKCS12
+                    </argLine>
                     <!--
                       Engine tests require Docker + a specially configured emulator instance.
                       They are excluded from the default 'mvn test' run and executed instead
@@ -126,23 +141,6 @@
                     <excludes>
                         <exclude>**/*EngineCompatibilityTest.java</exclude>
                     </excludes>
-                    <systemPropertyVariables>
-                        <!--
-                          Force Netty to use the JDK SSL provider instead of the native OpenSSL
-                          engine (io.netty.tcnative).  The native engine bypasses javax.net.ssl.*
-                          system properties; the JDK provider respects them.
-                        -->
-                        <io.netty.handler.ssl.noOpenSsl>true</io.netty.handler.ssl.noOpenSsl>
-                        <!--
-                          Point the JDK trust store at the emulator's self-signed P12 so that
-                          the Cosmos SDK (via Netty JDK SSL) accepts the HTTPS certificate.
-                          The path navigates from this module's basedir up to the main project
-                          resources where the cert is kept.
-                        -->
-                        <javax.net.ssl.trustStore>${project.basedir}/../../src/main/resources/certs/floci-az.p12</javax.net.ssl.trustStore>
-                        <javax.net.ssl.trustStorePassword>floci-az</javax.net.ssl.trustStorePassword>
-                        <javax.net.ssl.trustStoreType>PKCS12</javax.net.ssl.trustStoreType>
-                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>
