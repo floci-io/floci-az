@@ -36,12 +36,27 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
     import com.azure.cosmos.CosmosClientBuilder;
 
     CosmosClient client = new CosmosClientBuilder()
-            .endpoint("https://localhost:4578/devstoreaccount1-cosmos")
+            .endpoint("https://localhost:4578")
             .key("C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==")
             .gatewayMode()
             .endpointDiscoveryEnabled(false)
             .buildClient();
     ```
+
+    > **TLS trust:** The Java SDK enforces TLS in gateway mode. floci-az ships a self-signed certificate
+    > on port 4578. To trust it, pass the bundled cert as a JVM truststore at startup:
+    >
+    > ```bash
+    > java -Djavax.net.ssl.trustStore=/path/to/floci-az.p12 \
+    >      -Djavax.net.ssl.trustStorePassword=floci-az \
+    >      -Djavax.net.ssl.trustStoreType=PKCS12 \
+    >      -Dio.netty.handler.ssl.noOpenSsl=true \
+    >      -jar your-app.jar
+    > ```
+    >
+    > The `.p12` file is available at `src/main/resources/certs/floci-az.p12` in the floci-az repo,
+    > or you can download it from the running emulator at
+    > `http://localhost:4577/devstoreaccount1-cosmos/cert`.
 
 === "Python"
 
@@ -71,7 +86,7 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
 
 > [!NOTE]
 > **Port difference by SDK:** The **Java SDK** enforces TLS in gateway mode and cannot use plain HTTP, so it connects
-> to `https://localhost:4578` (HTTPS, bundled self-signed cert — no import required). **Python and Node.js SDKs** accept
+> to `https://localhost:4578` (HTTPS — see the TLS trust note above). **Python and Node.js SDKs** accept
 > plain HTTP and connect to `http://localhost:4577/...`.
 
 ## API Reference

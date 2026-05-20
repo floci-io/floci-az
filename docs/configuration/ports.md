@@ -1,17 +1,21 @@
 # Ports Reference
 
-Floci-AZ uses **two fixed ports** for the management and control plane — no per-service port mapping needed.
+Floci-AZ uses a **single HTTP port** for all management APIs, plus one HTTPS port for the Cosmos Java SDK.
+Sidecar services (Event Hubs, Cosmos engines) bind their own ports directly on the host — they are not
+proxied through floci-az.
+
+## floci-az ports
 
 | Port | Protocol | Purpose |
 |---|---|---|
-| `4577` | HTTP | All services (management plane, REST API) |
-| `4578` | HTTPS | Cosmos DB Java SDK (gateway mode requires TLS) |
+| `4577` | HTTP | All REST services (Blob, Queue, Table, Functions, App Config, Cosmos, Key Vault) |
+| `4578` | HTTPS | Cosmos DB — Java SDK only (enforces TLS in gateway mode) |
 
----
+Both ports are exposed by floci-az itself. Only publish these two in your `docker-compose.yml`.
 
-## URL path routing
+## Path-based routing (port 4577)
 
-All services share port `4577` and are distinguished by URL path prefix:
+All services share port 4577 and are routed by URL path prefix:
 
 | Service | Path prefix |
 |---|---|
@@ -81,3 +85,6 @@ services:
     # Sidecar ports (SQL Server, MongoDB, Postgres, etc.) bind directly to the host
     # via the Docker daemon — do NOT list them here.
 ```
+
+Always update `FLOCI_AZ_BASE_URL` together with `FLOCI_AZ_PORT` so URLs embedded in API responses
+(SAS tokens, operation locations) point to the right address.
