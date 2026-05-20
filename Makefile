@@ -1,7 +1,7 @@
-.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql stop \
+.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
         test test-python test-java-compat test-node-compat test-appconfig test-cosmos \
         test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        compat-docker clean
+        test-sql compat-docker clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -64,6 +64,12 @@ run-cosmos-nosql:
 	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.nosql.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (NoSQL engine enabled)"
+
+run-sql:
+	$(MVN) quarkus:dev -Dno-color \
+		"-Dfloci-az.services.sql.accept-eula=Y" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
+	@echo "Emulator is up! (SQL service — EULA accepted)"
 
 # ── Standard SDK compatibility tests ──────────────────────────────────────────
 
@@ -142,6 +148,12 @@ test-cosmos-nosql:
 	@echo "==> Cosmos NoSQL engine test (embedded)"
 	$(MAKE) run-cosmos-nosql
 	cd $(JAVA_DIR) && mvn test -Dtest=CosmosNoSqlEngineCompatibilityTest; \
+	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
+
+test-sql:
+	@echo "==> Azure SQL Database compatibility test (requires Docker)"
+	$(MAKE) run-sql
+	cd $(JAVA_DIR) && mvn test -Dtest=SqlCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-cosmos-all:

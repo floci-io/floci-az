@@ -110,6 +110,7 @@ public interface EmulatorConfig {
         CosmosServiceConfig    cosmos();
         KeyVaultConfig         keyVault();
         EventHubConfig         eventHub();
+        SqlServiceConfig       sql();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -224,6 +225,41 @@ public interface EmulatorConfig {
     interface KeyVaultConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface SqlServiceConfig {
+        /** Enable or disable the Azure SQL Database service. */
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * Must be set to "Y" to accept the Microsoft SQL Server EULA.
+         * The service will return 503 until this is explicitly set.
+         */
+        @WithDefault("")
+        String acceptEula();
+
+        /** Docker image for the SQL Server container. */
+        @WithDefault("mcr.microsoft.com/azure-sql-edge:latest")
+        String image();
+
+        /**
+         * SA (system administrator) password used when launching containers.
+         * Must meet SQL Server complexity requirements (≥8 chars, upper+lower+digit+special).
+         */
+        @WithDefault("FlociAz_Strong123!")
+        String saPassword();
+
+        /**
+         * Maximum seconds to wait for a SQL Server container to become ready.
+         * SQL Server typically takes 10-20 s to initialise.
+         */
+        @WithDefault("60")
+        int startupTimeoutSeconds();
+
+        /** Default host port. 0 lets the OS pick a free port (recommended when running multiple servers). */
+        @WithDefault("0")
+        int defaultPort();
     }
 
     interface FunctionsConfig {

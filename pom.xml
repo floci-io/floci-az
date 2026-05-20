@@ -92,6 +92,15 @@
             <artifactId>commons-compress</artifactId>
             <version>1.28.0</version>
         </dependency>
+        <!-- Microsoft SQL Server JDBC — used by SqlServerManager to run DDL
+             (CREATE/DROP DATABASE) inside SQL Server containers.
+             sqlcmd is NOT included in azure-sql-edge, so JDBC is the only
+             portable DDL mechanism that works across all SQL Server images. -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>12.6.1.jre11</version>
+        </dependency>
         <!-- BouncyCastle for self-signed TLS cert generation (Artemis AMQP TLS) -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
