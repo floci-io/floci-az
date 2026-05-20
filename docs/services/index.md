@@ -10,9 +10,23 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Functions** | `/{account}-functions/` | ✅ HTTP Triggers, Docker runtimes |
 | **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks |
 | **Cosmos DB (SQL API)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, SQL queries, partition keys |
+| **Cosmos DB multi-API** | _(engine sidecars)_ | ✅ MongoDB, PostgreSQL, Cassandra, Gremlin, Table, NoSQL (opt-in Docker engines) |
 | **Key Vault** | `/{account}-keyvault/` | ✅ Secrets CRUD, versioning, soft-delete, properties update |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
+| **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; Docker-backed SQL Server containers |
 
 ## Unified Endpoint
 
 All services are accessible through a single port (`4577`). The routing is handled by inspecting the request path and headers.
+
+## Docker-backed services
+
+The following services spin up Docker containers on demand and require the Docker socket:
+
+| Service | Docker image | Data plane |
+|---|---|---|
+| **Azure Functions** | User-provided image | HTTP to container |
+| **Azure SQL Database** | `mcr.microsoft.com/azure-sql-edge:latest` | TDS direct to container port |
+| **Cosmos DB engines** | Various (mongo, postgres, cassandra, …) | Protocol direct to container port |
+
+> These services **must** have access to the Docker daemon (`/var/run/docker.sock` mount in Docker Compose).

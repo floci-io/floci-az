@@ -52,6 +52,27 @@ services:
       # FLOCI_AZ_STORAGE_MODE: persistent  # flush only on graceful shutdown
 ```
 
+### With Azure SQL Database
+
+SQL Server containers are started on-demand when a server is created via the management API.
+The Docker socket mount is required:
+
+```yaml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA: "Y"   # accept the Microsoft SQL Server EULA
+      # FLOCI_AZ_SERVICES_SQL_IMAGE: "mcr.microsoft.com/azure-sql-edge:latest"
+```
+
+> SQL Server containers bind a random host port directly via Docker — do **not** add those ports
+> to the `floci-az` service's `ports:` block. Use the `/connect` endpoint to discover the port.
+
 ### CI / Ephemeral — maximum speed
 
 Pure in-memory, no socket required, fastest startup:
@@ -180,6 +201,18 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_SERVICES_TABLE_ENABLED` | `true` | Enable or disable Table Storage |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED` | `true` | Enable or disable Azure Functions |
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable or disable App Configuration |
+| `FLOCI_AZ_SERVICES_COSMOS_ENABLED` | `true` | Enable or disable Cosmos DB (SQL API) |
+| `FLOCI_AZ_SERVICES_KEY_VAULT_ENABLED` | `true` | Enable or disable Key Vault |
+| `FLOCI_AZ_SERVICES_EVENT_HUB_ENABLED` | `true` | Enable or disable Event Hubs |
+| `FLOCI_AZ_SERVICES_SQL_ENABLED` | `true` | Enable or disable Azure SQL Database |
+
+### Azure SQL Database
+
+| Variable | Default | Description |
+|---|---|---|
+| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA (required) |
+| `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/azure-sql-edge:latest` | Docker image for SQL Server containers |
+| `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for SQL Server to become ready |
 
 ### Azure Functions
 

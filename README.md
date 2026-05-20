@@ -1,9 +1,9 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, and Event Hubs.
-Default Port: 4577. AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in).
-Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka.
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, and Azure SQL Database.
+Default Port: 4577. HTTPS port: 4578 (Cosmos DB Java SDK). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). SQL Server containers bind dynamic host ports via Docker socket.
+Tech Stack: Java, Quarkus, Docker-in-Docker for Functions and SQL Database. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka.
 -->
 
 <p align="center">
@@ -19,7 +19,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for E
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, and Event Hubs. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
+  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, Event Hubs, and SQL Database. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
 ---
@@ -45,6 +45,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for E
 | Cosmos DB (SQL API) | ✅                         | ❌                                           | ❌                                                                           |
 | Key Vault           | ✅                         | ❌                                           | ❌                                                                           |
 | Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
+| Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
 | Native binary       | ✅                         | ❌                                           | ✅                                                                           |
 | Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
 | Storage modes       | ✅ (persistent/WAL/Hybrid) | ❌                                           | ❌                                                                           |
@@ -159,6 +160,7 @@ flowchart LR
             E["App Configuration\n/{account}-appconfig/"]
             F["Key Vault\n/{account}-keyvault/"]
             G["Event Hubs\nAMQP :5672 / Kafka :9093"]
+        H["SQL Database\n/{account}-sql/\n+ARM paths"]
         end
 
         Router --> A
@@ -168,9 +170,11 @@ flowchart LR
         Router --> E
         Router --> F
         Router --> G
+        Router --> H
         A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
         G -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
+        H -->|" spawn / DDL "| SqlContainers["🐳 azure-sql-edge\n(one per server)"]
     end
 
     Client -->|" HTTP :4577\nAzure wire protocol "| Router
@@ -189,6 +193,7 @@ flowchart LR
 | **Cosmos DB NoSQL (embedded)** | `/{account}-cosmos-nosql/` | Same embedded SQL engine as above, exposed as a named engine endpoint. Opt-in with `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true`; no Docker required. |
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
+| **Azure SQL Database**  | `/{account}-sql/` + ARM paths | Servers, databases, firewall rules; one `azure-sql-edge` container per logical server; JDBC/ADO.NET/pyodbc/EF Core connection strings via `/connect` endpoint                                                        |
 
 ## Persistence & Storage Modes
 
@@ -244,8 +249,9 @@ docker run -d --name floci-az \
 All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are
 not validated.
 
-> **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount
-`/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
+> **Azure Functions** and **Azure SQL Database** require access to the Docker socket so floci-az can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use either service, the socket mount is optional.
+>
+> **Azure SQL Database** also requires accepting the Microsoft SQL Server EULA: set `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y`.
 
 ## CLI Usage (`azfloci`)
 
@@ -315,6 +321,7 @@ floci-az uses path-style routing:
 | Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** use `https://localhost:4578` — the SDK enforces TLS; bundled cert requires no import |
 | Key Vault         | `http://localhost:4577/{accountName}-keyvault`        | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
 | Event Hubs        | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` | |
+| SQL Database      | Management: `http://localhost:4577/{account}-sql/` + ARM paths · Data: TDS direct to container (dynamic port) | Use `GET /{account}-sql/servers/{name}/connect` to get the JDBC URL with the assigned port |
 
 The standard development storage connection string works out of the box:
 
@@ -557,7 +564,7 @@ TableTransactionAction(TableTransactionActionType.DELETE,
 | Module               | Language | SDK                                                                            | Tests |
 |----------------------|----------|--------------------------------------------------------------------------------|------:|
 | `sdk-test-python`    | Python 3 | azure-storage-blob / queue / data-tables / cosmos                              |    42 |
-| `sdk-test-java`      | Java 21  | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API |    92 |
+| `sdk-test-java`      | Java 21  | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API + SQL Database (mssql-jdbc) | 102 |
 | `sdk-test-node`      | Node.js  | @azure/storage-blob / storage-queue / data-tables / cosmos                     |    41 |
 | `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1                                                   |    36 |
 | `sdk-test-keyvault`  | Python 3 | azure-keyvault-secrets 4.11.0                                                  |    24 |
@@ -574,6 +581,7 @@ make test-appconfig
 make test-keyvault
 make test-eventhub
 make test-cosmos-all    # Cosmos engine tests: MongoDB · PostgreSQL · Cassandra · Gremlin · Table · NoSQL (requires Docker)
+make test-sql           # Azure SQL Database end-to-end test (requires Docker + EULA accepted)
 ```
 
 ## Image Tags
@@ -603,6 +611,12 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`  | `true`                        | Enable or disable Azure Functions                               |
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true`                        | Enable or disable App Configuration                             |
 | `FLOCI_AZ_SERVICES_COSMOS_ENABLED`     | `true`                        | Enable or disable Cosmos DB                                     |
+| `FLOCI_AZ_SERVICES_KEY_VAULT_ENABLED`  | `true`                        | Enable or disable Key Vault                                     |
+| `FLOCI_AZ_SERVICES_EVENT_HUB_ENABLED`  | `true`                        | Enable or disable Event Hubs                                    |
+| `FLOCI_AZ_SERVICES_SQL_ENABLED`        | `true`                        | Enable or disable Azure SQL Database                            |
+| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA`    | _(empty)_                     | Set to `Y` to accept the Microsoft SQL Server EULA (required)   |
+| `FLOCI_AZ_SERVICES_SQL_IMAGE`          | `mcr.microsoft.com/azure-sql-edge:latest` | Docker image for SQL Server containers            |
+| `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60`               | Seconds to wait for SQL Server to become ready                  |
 
 ### Cosmos DB multi-API engines
 
@@ -636,14 +650,14 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"
-      - "4578:4578"
-      - "27017:27017"   # MongoDB (Cosmos MongoDB API)
-      - "5432:5432"     # PostgreSQL (Cosmos PostgreSQL API)
+      - "4578:4578"   # HTTPS (Cosmos Java SDK)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED: "true"
       FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED: "true"
+    # MongoDB (27017) and PostgreSQL (5432) containers bind directly to the host
+    # via Docker daemon — do NOT add those ports here (would conflict with sidecars).
 ```
 
 **How it works (Docker-backed):** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
@@ -843,9 +857,11 @@ To prevent configuration errors, note what floci-az **does not** do:
 
 1. **HTTPS (most services):** Blob, Queue, Table, Functions, App Configuration, and Key Vault run on plain HTTP on port `4577`. Do not use `DefaultEndpointsProtocol=https` for those services. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
 2. **HTTPS (Cosmos DB Java SDK only):** The Azure Cosmos DB Java SDK enforces TLS in gateway mode and cannot connect over plain HTTP. floci-az exposes HTTPS on port `4578` with a bundled self-signed certificate (`CN=localhost`, valid 100 years). No certificate import or trust-store configuration is required — point the Java SDK at `https://localhost:4578` and it works out of the box.
-3. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
-4. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
-5. **Production Scale:** Designed for dev/test. Not for high-availability storage.
+3. **Azure SQL Database — TLS required:** `azure-sql-edge` enforces TLS on the data plane. Always use `encrypt=true;trustServerCertificate=true` in your JDBC URL / connection string (the `/connect` endpoint returns these settings pre-configured). `encrypt=false` causes `Connection reset` errors.
+4. **Azure SQL Database — EULA:** The Microsoft SQL Server EULA must be accepted explicitly. Set `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y` before creating any server.
+5. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
+6. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
+7. **Production Scale:** Designed for dev/test. Not for high-availability storage.
 
 ## Multi-container Docker Compose
 
