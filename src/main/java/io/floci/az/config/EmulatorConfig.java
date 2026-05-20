@@ -235,8 +235,9 @@ public interface EmulatorConfig {
         /**
          * Must be set to "Y" to accept the Microsoft SQL Server EULA.
          * The service will return 503 until this is explicitly set.
+         * Default is "N" (not accepted) — SmallRye Config treats empty string as null.
          */
-        @WithDefault("")
+        @WithDefault("N")
         String acceptEula();
 
         /** Docker image for the SQL Server container. */

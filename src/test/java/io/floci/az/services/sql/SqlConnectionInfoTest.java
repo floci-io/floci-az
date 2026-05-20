@@ -33,7 +33,7 @@ class SqlConnectionInfoTest {
         assertTrue(ado.contains("Initial Catalog=orders"), "database");
         assertTrue(ado.contains("User ID=sa"), "login");
         assertTrue(ado.contains("TrustServerCertificate=True"), "trust cert");
-        assertTrue(ado.contains("Encrypt=False"), "no encrypt locally");
+        assertTrue(ado.contains("Encrypt=True"), "encrypt=true (azure-sql-edge requires TLS)");
     }
 
     @Test
