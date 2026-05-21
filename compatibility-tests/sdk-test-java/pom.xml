@@ -106,6 +106,13 @@
             <version>3.7.1</version>
             <scope>test</scope>
         </dependency>
+        <!-- Microsoft SQL Server JDBC (for SqlCompatibilityTest) -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>12.6.1.jre11</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

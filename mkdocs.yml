@@ -75,5 +75,6 @@ nav:
     - Key Vault: services/key-vault.md
     - Event Hubs: services/event-hub.md
     - Cosmos DB: services/cosmos.md
+    - Azure SQL Database: services/sql.md
   - Contributing: contributing.md
   - Changelog: changelog.md

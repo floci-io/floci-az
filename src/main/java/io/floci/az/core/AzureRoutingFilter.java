@@ -66,6 +66,7 @@ public class AzureRoutingFilter {
         );
     }
 
+
     private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers) {
         String path = rawPath;
 
@@ -83,6 +84,30 @@ public class AzureRoutingFilter {
         // Identity bypass
         if (path.contains("oauth2/v2.0/token")) {
             return null;
+        }
+
+        // ---------------------------------------------------------------
+        // Azure SQL Database — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Sql/...
+        //   subscriptions/{sub}/providers/Microsoft.Sql/checkNameAvailability
+        // The subscriptionId and resourceGroupName are parsed by SqlHandler;
+        // here we just detect the ARM prefix and dispatch the full path.
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Sql/")) {
+            Map<String, String> sqlQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sqlQueryParams.put(k, v.get(0)));
+            AzureRequest sqlRequest = new AzureRequest(
+                requestContext.getMethod(), "sql", "sql", path, headers,
+                requestContext.getEntityStream(), sqlQueryParams, null);
+            AuthContext sqlAuth = authPipeline.resolve(sqlRequest);
+            sqlRequest = new AzureRequest(
+                requestContext.getMethod(), "sql", "sql", path, headers,
+                requestContext.getEntityStream(), sqlQueryParams, sqlAuth);
+            Optional<AzureServiceHandler> sqlHandler = serviceRegistry.resolve("sql");
+            if (sqlHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM SQL request to SqlHandler: %s %s", requestContext.getMethod(), path);
+                return sqlHandler.get().handle(sqlRequest);
+            }
         }
 
         String[] parts = path.split("/", 2);
@@ -168,6 +193,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-eventhub")) {
             serviceType = "eventhub";
             accountName = accountName.substring(0, accountName.length() - 9);
+        } else if (accountName.endsWith("-sql")) {
+            serviceType = "sql";
+            accountName = accountName.substring(0, accountName.length() - 4);
         } else {
             serviceType = resolveServiceType(requestContext, resourcePath);
         }
