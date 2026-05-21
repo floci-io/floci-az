@@ -650,7 +650,7 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"
-      - "4578:4578"   # HTTPS (Cosmos Java SDK)
+      - "4578:4578"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -659,6 +659,12 @@ services:
     # MongoDB (27017) and PostgreSQL (5432) containers bind directly to the host
     # via Docker daemon — do NOT add those ports here (would conflict with sidecars).
 ```
+
+> **Note:** Do **not** publish the engine ports (`27017`, `5432`, etc.) on the `floci-az` service.
+> Engines are launched as **sibling containers** by the host Docker daemon (via the mounted socket), so
+> they bind their ports directly on the host — `localhost:27017`, `localhost:5432`, etc. are already
+> accessible without extra mappings. Adding those ports to the `floci-az` service would cause a
+> conflict when the engine container tries to bind the same port.
 
 **How it works (Docker-backed):** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
 

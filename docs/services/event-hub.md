@@ -80,8 +80,6 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"   # floci-az HTTP
-      - "5672:5672"   # Event Hubs AMQP (Artemis)
-      - "9093:9093"   # Event Hubs Kafka (Redpanda, optional)
     environment:
       FLOCI_AZ_SERVICES_EVENT_HUB_ENABLED: "true"
       FLOCI_AZ_SERVICES_EVENT_HUB_DEFAULT_NAMESPACE: "emulatorNs1"
@@ -90,6 +88,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
+
+> **Note:** Do **not** publish the AMQP (`5672`) or Kafka (`9093`) ports on the `floci-az` service.
+> Artemis and Redpanda are launched as **sibling containers** by the host Docker daemon (via the
+> mounted socket). They bind their ports directly on the host, so `localhost:5672` and
+> `localhost:9093` are accessible without any extra mappings. Adding those ports to the `floci-az`
+> service would conflict when the sidecar container tries to bind the same port.
 
 ### Environment variables
 
