@@ -10,9 +10,6 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.Socket;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.Statement;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,10 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * arrives for a given server name, following the same pattern used by the
  * Cosmos DB engine providers.
  *
- * <p>DDL operations (CREATE DATABASE / DROP DATABASE) are executed via JDBC
- * using the bundled {@code mssql-jdbc} driver.  This approach is portable
- * across all SQL Server images — {@code sqlcmd} is NOT included in
- * {@code azure-sql-edge} and is therefore unreliable as a DDL mechanism.
+ * <p>This class is intentionally free of JDBC / DDL logic.  Database creation
+ * and schema migrations are the responsibility of the application (Flyway,
+ * Liquibase, EF Core, etc.) — the emulator only manages container lifecycle
+ * and tracks resource metadata in {@link SqlState}.
  */
 @ApplicationScoped
 public class SqlServerManager {
@@ -36,12 +33,6 @@ public class SqlServerManager {
     private static final Logger LOG = Logger.getLogger(SqlServerManager.class);
 
     private static final int SQL_CONTAINER_PORT = 1433;
-
-    /** JDBC connection string template used for internal DDL execution. */
-    private static final String DDL_JDBC_TEMPLATE =
-        "jdbc:sqlserver://localhost:%d;user=sa;password=%s;"
-        + "encrypt=true;trustServerCertificate=true;"
-        + "loginTimeout=10;";
 
     @Inject EmulatorConfig config;
     @Inject ContainerLifecycleManager containerManager;
@@ -92,7 +83,7 @@ public class SqlServerManager {
         LOG.infof("SQL Server container started: server=%s containerId=%s port=%d",
             entry.serverName(), containerId, hostPort);
 
-        waitForReady(hostPort, password, sqlConfig.startupTimeoutSeconds());
+        waitForReady(hostPort, sqlConfig.startupTimeoutSeconds());
         LOG.infof("SQL Server ready: server=%s port=%d", entry.serverName(), hostPort);
 
         return entry.withContainer(containerId, hostPort);
@@ -109,36 +100,6 @@ public class SqlServerManager {
         managedContainers.remove(entry.containerId());
     }
 
-    /**
-     * Executes {@code CREATE DATABASE [{dbName}] COLLATE {collation}} via JDBC.
-     */
-    public void createDatabase(SqlState.SqlServerEntry server, String dbName, String collation) {
-        String safe = dbName.replace("]", "]]");
-        String col  = (collation != null && !collation.isBlank())
-            ? collation : "SQL_Latin1_General_CP1_CI_AS";
-
-        String sql = String.format("CREATE DATABASE [%s] COLLATE %s", safe, col);
-        execDdl(server, sql);
-        LOG.infof("Created database: server=%s db=%s", server.serverName(), dbName);
-    }
-
-    /**
-     * Executes {@code DROP DATABASE [{dbName}]} via JDBC.
-     * The {@code master} database cannot be dropped.
-     */
-    public void dropDatabase(SqlState.SqlServerEntry server, String dbName) {
-        if ("master".equalsIgnoreCase(dbName)) {
-            throw new IllegalArgumentException("Cannot drop the master database");
-        }
-        // Kick out any open connections before dropping
-        String safe = dbName.replace("]", "]]");
-        String killSql = String.format(
-            "ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [%s]",
-            safe, safe);
-        execDdl(server, killSql);
-        LOG.infof("Dropped database: server=%s db=%s", server.serverName(), dbName);
-    }
-
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private void requireEulaAccepted() {
@@ -153,55 +114,36 @@ public class SqlServerManager {
     }
 
     /**
-     * Polls the SQL Server port until it accepts JDBC connections (not just TCP),
-     * then confirms the engine is ready by running a lightweight query.
+     * Polls the SQL Server port until it accepts TCP connections, then waits a
+     * short additional period to allow the engine to finish internal initialisation.
+     *
+     * <p>SQL Server opens its TDS port before it is fully ready to authenticate
+     * clients.  A brief post-TCP sleep covers the remaining boot window without
+     * requiring a JDBC driver on the main runtime classpath.
      */
-    private void waitForReady(int port, String password, int timeoutSeconds) {
+    private void waitForReady(int port, int timeoutSeconds) {
         LOG.infof("Waiting for SQL Server to be ready on port %d (timeout=%ds)…", port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
 
         // Phase 1 — wait for the port to accept TCP connections
         while (System.currentTimeMillis() < deadline) {
             try (Socket s = new Socket("localhost", port)) {
-                break; // port is open
+                LOG.infof("SQL Server TCP port %d is open — waiting for engine init…", port);
+                break;
             } catch (Exception e) {
                 sleep(1000);
             }
         }
 
-        // Phase 2 — wait for JDBC login to succeed (SQL Server initialises after TCP opens)
-        String jdbcUrl = String.format(DDL_JDBC_TEMPLATE, port, password);
-        while (System.currentTimeMillis() < deadline) {
-            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
-                LOG.infof("SQL Server JDBC ready on port %d", port);
-                return; // engine is up and accepting logins
-            } catch (Exception e) {
-                LOG.debugf("SQL Server not ready yet (port=%d): %s", port, e.getMessage());
-                sleep(2000);
-            }
+        // Phase 2 — give the engine a moment to finish startup after the port opens.
+        // SQL Server initialises system databases after TCP becomes available; a fixed
+        // post-TCP sleep is sufficient since clients use their own retry/timeout logic.
+        long postTcpMs = Math.min(10_000L, deadline - System.currentTimeMillis());
+        if (postTcpMs > 0) {
+            sleep(postTcpMs);
         }
 
-        throw new RuntimeException(
-            "SQL Server did not become ready within " + timeoutSeconds + " seconds on port " + port);
-    }
-
-    /**
-     * Executes a DDL statement via JDBC against the server's master database.
-     * Uses the SA credentials stored in the server entry.
-     */
-    private void execDdl(SqlState.SqlServerEntry server, String sql) {
-        String jdbcUrl = String.format(DDL_JDBC_TEMPLATE,
-            server.hostPort(), server.administratorLoginPassword());
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl);
-             Statement  st   = conn.createStatement()) {
-            // Some DDL (e.g. ALTER DATABASE) cannot run inside a transaction
-            conn.setAutoCommit(true);
-            st.execute(sql);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                "DDL failed on server=" + server.serverName() + " sql=[" + sql + "]", e);
-        }
+        LOG.infof("SQL Server ready: port=%d", port);
     }
 
     private static void sleep(long ms) {

@@ -285,11 +285,9 @@ public class SqlHandler implements AzureServiceHandler {
 
             boolean isNew = !state.databaseExists(serverName, dbName);
 
-            if (isNew && !"master".equalsIgnoreCase(dbName)) {
-                SqlState.SqlServerEntry server = serverOpt.get();
-                serverManager.createDatabase(server, dbName, collation);
-            }
-
+            // The emulator tracks the database in state only.
+            // Actual CREATE DATABASE is the responsibility of the application
+            // (Flyway, Liquibase, EF Core, etc.) using the JDBC URL from /connect.
             SqlState.SqlDatabaseEntry db = SqlState.SqlDatabaseEntry.create(
                 dbName, serverName, collation, edition, sku);
             state.putDatabase(serverName, db);
@@ -320,11 +318,7 @@ public class SqlHandler implements AzureServiceHandler {
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         if (!state.databaseExists(serverName, dbName))
             return notFound("Database '" + dbName + "' not found");
-        try {
-            serverManager.dropDatabase(serverOpt.get(), dbName);
-        } catch (Exception e) {
-            LOG.warnf(e, "Error dropping database %s on server %s", dbName, serverName);
-        }
+        // Remove from state only — actual DROP DATABASE is the application's responsibility.
         state.removeDatabase(serverName, dbName);
         return Response.status(204).build();
     }

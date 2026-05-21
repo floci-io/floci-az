@@ -162,7 +162,7 @@ class SqlCompatibilityTest {
             "{\"location\":\"eastus\",\"properties\":{\"collation\":\"%s\"}}",
             "SQL_Latin1_General_CP1_CI_AS");
 
-        // Allow up to 60s: CREATE DATABASE via sqlcmd exec inside the container
+        // Register the database in emulator state (no DDL executed in the container).
         HttpResponse<String> resp = send("PUT",
             ARM_BASE + "/servers/" + SERVER + "/databases/" + DB + "?api-version=2021-11-01",
             dbBody, Duration.ofSeconds(60));
@@ -201,6 +201,17 @@ class SqlCompatibilityTest {
     @DisplayName("JDBC connect to app database and run DDL/DML")
     void jdbcDdlAndDml() throws Exception {
         assumeTrue(appJdbcUrl != null, "createDatabase test did not set appJdbcUrl — skipping");
+
+        // The emulator registers the database in state but does NOT execute CREATE DATABASE
+        // inside the SQL Server container — that is the responsibility of the application
+        // (Flyway, Liquibase, EF Core migrations, etc.).  We create it here to simulate
+        // what a migration tool would do on first deploy.
+        try (Connection master = DriverManager.getConnection(masterJdbcUrl);
+             Statement init = master.createStatement()) {
+            master.setAutoCommit(true);
+            init.execute("IF DB_ID('" + DB + "') IS NULL "
+                + "CREATE DATABASE [" + DB + "] COLLATE SQL_Latin1_General_CP1_CI_AS");
+        }
 
         try (Connection conn = DriverManager.getConnection(appJdbcUrl)) {
             // Create table
