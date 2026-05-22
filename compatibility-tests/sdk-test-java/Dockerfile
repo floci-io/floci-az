@@ -19,6 +19,6 @@ ENV EVENTHUB_AMQP_PORT=5672
 
 RUN mkdir -p /results
 ENTRYPOINT ["bash", "-c", \
-  "status=0; mvn test -q -Dorg.slf4j.simpleLogger.defaultLogLevel=warn || status=$?; \
+  "status=0; mvn test -Dorg.slf4j.simpleLogger.defaultLogLevel=warn || status=$?; \
    cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; \
    exit $status"]
