@@ -1,5 +1,5 @@
 .PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
-        test test-python test-java-compat test-node-compat test-appconfig test-cosmos \
+        test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-cosmos \
         test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql compat-docker clean
 
@@ -88,6 +88,10 @@ test-node-compat:
 	@cd $(NODE_DIR) && \
 	npm install --silent && \
 	npm test
+
+test-servicebus-compat:
+	@echo "==> Service Bus Java SDK compatibility tests"
+	cd $(JAVA_DIR) && mvn test -Dtest=ServiceBusCompatibilityTest -q
 
 test-cosmos:
 	@echo "==> Cosmos DB NoSQL (in-memory) compatibility tests"
@@ -181,6 +185,9 @@ compat-docker:
 	@echo "==> Java SDK tests"
 	docker run --rm --network floci_az_default \
 		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		-e SERVICEBUS_HOST=floci-az-servicebus-default \
+		-e SERVICEBUS_AMQPS_PORT=5671 \
+		-e SERVICEBUS_NAMESPACE=default \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		floci-az-compat-java
 

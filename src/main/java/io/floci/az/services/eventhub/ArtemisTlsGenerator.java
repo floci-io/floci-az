@@ -37,7 +37,7 @@ import java.util.Date;
 @ApplicationScoped
 public class ArtemisTlsGenerator {
 
-    static final String KEYSTORE_PASSWORD = "artemis-tls";
+    public static final String KEYSTORE_PASSWORD = "artemis-tls";
     private static final String CONTAINER_ALIAS = "artemis";
 
     static {
@@ -50,9 +50,10 @@ public class ArtemisTlsGenerator {
 
     /**
      * Generates a new self-signed cert and PKCS12 keystore valid for 10 years.
-     * SANs cover the Artemis container hostname and localhost variants.
+     * SANs cover the Artemis container hostname, localhost variants, and any additional
+     * DNS names passed in (e.g. the Docker container name for the sidecar).
      */
-    public TlsBundle generate() throws Exception {
+    public TlsBundle generate(String... additionalDnsNames) throws Exception {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME);
         keyGen.initialize(2048, new SecureRandom());
         KeyPair keyPair = keyGen.generateKeyPair();
@@ -66,12 +67,15 @@ public class ArtemisTlsGenerator {
                 Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
                 name, keyPair.getPublic());
 
-        GeneralName[] sans = {
-                new GeneralName(GeneralName.dNSName, "floci-az-artemis"),
-                new GeneralName(GeneralName.dNSName, "localhost"),
-                new GeneralName(GeneralName.iPAddress,
-                        new DEROctetString(InetAddress.getByName("127.0.0.1").getAddress())),
-        };
+        java.util.List<GeneralName> sanList = new java.util.ArrayList<>();
+        sanList.add(new GeneralName(GeneralName.dNSName, "floci-az-artemis"));
+        sanList.add(new GeneralName(GeneralName.dNSName, "localhost"));
+        sanList.add(new GeneralName(GeneralName.iPAddress,
+                new DEROctetString(InetAddress.getByName("127.0.0.1").getAddress())));
+        for (String dnsName : additionalDnsNames) {
+            sanList.add(new GeneralName(GeneralName.dNSName, dnsName));
+        }
+        GeneralName[] sans = sanList.toArray(new GeneralName[0]);
         certBuilder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(sans));
         certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
         certBuilder.addExtension(Extension.keyUsage, true,

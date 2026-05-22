@@ -94,9 +94,10 @@ public class StorageFactory {
             case "blob"      -> Optional.of(config.storage().services().blob());
             case "queue"     -> Optional.of(config.storage().services().queue());
             case "table"     -> Optional.of(config.storage().services().table());
-            case "appconfig" -> Optional.of(config.storage().services().appConfig());
-            case "cosmos"    -> Optional.of(config.storage().services().cosmos());
-            default          -> Optional.empty();
+            case "appconfig"  -> Optional.of(config.storage().services().appConfig());
+            case "cosmos"     -> Optional.of(config.storage().services().cosmos());
+            case "servicebus" -> Optional.of(config.storage().services().serviceBus());
+            default           -> Optional.empty();
         };
     }
 }

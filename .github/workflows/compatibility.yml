@@ -63,10 +63,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test:
-          - sdk-test-python
-          - sdk-test-java
-          - sdk-test-node
+        include:
+          - test: sdk-test-python
+          - test: sdk-test-java
+            extra_env: >-
+              -e SERVICEBUS_HOST=floci-az-servicebus-default
+              -e SERVICEBUS_AMQPS_PORT=5671
+              -e SERVICEBUS_NAMESPACE=default
+          - test: sdk-test-node
 
     steps:
       - name: Download floci-az image
@@ -86,6 +90,7 @@ jobs:
           docker run -d --name floci-az --network compat-net \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -p 4577:4577 \
+            -e FLOCI_AZ_SERVICES_DOCKER_NETWORK=compat-net \
             floci-az:test
 
       - name: Wait for floci-az to be ready
@@ -113,6 +118,7 @@ jobs:
           mkdir -p test-results
           docker run --rm --network compat-net \
             -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+            ${{ matrix.extra_env }} \
             -v "$(pwd)/test-results:/results" \
             compat-${{ matrix.test }}
 

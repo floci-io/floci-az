@@ -8,12 +8,11 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.Map;
-
 /**
  * Lifecycle manager for Event Hubs sidecar containers.
- * Starts one Artemis container for the default namespace on application startup
- * and optionally Redpanda for Kafka. Stops all namespace containers on shutdown.
+ *
+ * Namespaces start on-demand via PUT /{account}-eventhub/namespaces/{ns}.
+ * When {@code mocked = true}, no containers are started; useful for unit tests.
  */
 @ApplicationScoped
 public class EventHubContainerManager {
@@ -34,29 +33,14 @@ public class EventHubContainerManager {
     }
 
     void onStart(@Observes StartupEvent ev) {
-        if (!config.services().eventHub().enabled()) {
-            LOG.info("Event Hubs service disabled — skipping container startup");
-            return;
-        }
-
         EmulatorConfig.EventHubConfig eh = config.services().eventHub();
-        try {
-            Map<String, java.util.List<String>> entities =
-                    ArtemisConfigGenerator.parseEntities(eh.entities(), eh.consumerGroups());
-            namespaceManager.startNamespace(eh.defaultNamespace(), entities,
-                    eh.amqpPort(), eh.amqpTlsPort());
-        } catch (Exception e) {
-            LOG.errorf(e, "Failed to start default Event Hubs namespace '%s' — AMQP will be unavailable. " +
-                    "Ensure Docker is accessible at %s", eh.defaultNamespace(), config.docker().dockerHost());
+        if (!eh.enabled()) {
             return;
         }
-
-        if (eh.kafkaEnabled()) {
-            try {
-                kafkaManager.start();
-            } catch (Exception e) {
-                LOG.errorf(e, "Failed to start Redpanda Kafka broker — Event Hubs Kafka will be unavailable");
-            }
+        if (eh.mocked()) {
+            LOG.info("Event Hubs service mocked — skipping container startup");
+        } else {
+            LOG.info("Event Hubs service enabled — namespaces start on-demand via PUT /{account}-eventhub/namespaces/{ns}");
         }
     }
 
@@ -64,7 +48,7 @@ public class EventHubContainerManager {
     void onStop() {
         if (!config.services().eventHub().enabled()) return;
 
-        if (config.services().eventHub().kafkaEnabled()) {
+        if (kafkaManager.isRunning()) {
             try {
                 kafkaManager.stop();
             } catch (Exception e) {

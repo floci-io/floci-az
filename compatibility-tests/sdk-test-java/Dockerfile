@@ -12,6 +12,7 @@ RUN mvn dependency:go-offline -q
 
 COPY src/ src/
 RUN mvn test-compile -q
+RUN mvn surefire:test -Dsurefire.failIfNoSpecifiedTests=false -Dtest=nonexistent -q || true
 
 ENV FLOCI_AZ_ENDPOINT=http://floci-az:4577
 ENV EVENTHUB_HOST=floci-az-artemis-emulatorNs1
@@ -19,6 +20,6 @@ ENV EVENTHUB_AMQP_PORT=5672
 
 RUN mkdir -p /results
 ENTRYPOINT ["bash", "-c", \
-  "status=0; mvn test -q -Dorg.slf4j.simpleLogger.defaultLogLevel=warn || status=$?; \
+  "status=0; mvn test -Dorg.slf4j.simpleLogger.log.com.azure=warn -Dorg.slf4j.simpleLogger.log.reactor=warn || status=$?; \
    cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; \
    exit $status"]

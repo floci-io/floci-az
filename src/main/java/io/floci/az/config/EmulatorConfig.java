@@ -81,6 +81,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig appConfig();
         ServiceStorageConfig cosmos();
         ServiceStorageConfig keyVault();
+        ServiceStorageConfig serviceBus();
     }
 
     interface ServiceStorageConfig {
@@ -111,14 +112,49 @@ public interface EmulatorConfig {
         KeyVaultConfig         keyVault();
         EventHubConfig         eventHub();
         SqlServiceConfig       sql();
+        ServiceBusConfig       serviceBus();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
     }
 
+    interface ServiceBusConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Artemis sidecar is started; service responds to management
+         * calls but AMQP data-plane is unavailable. Useful for tests without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
+        @WithDefault("5673")
+        int amqpPort();
+
+        @WithDefault("5674")
+        int amqpTlsPort();
+
+        @WithDefault("apache/activemq-artemis:latest")
+        String artemisImage();
+
+        @WithDefault("10")
+        int maxDeliveryCount();
+
+        @WithDefault("60")
+        long lockDurationSeconds();
+    }
+
     interface EventHubConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * When {@code true}, no Artemis sidecar is started; service responds to management
+         * calls but AMQP data-plane is unavailable. Useful for tests without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
 
         @WithDefault("emulatorNs1")
         String defaultNamespace();

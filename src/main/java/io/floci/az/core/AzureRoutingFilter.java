@@ -196,6 +196,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-sql")) {
             serviceType = "sql";
             accountName = accountName.substring(0, accountName.length() - 4);
+        } else if (accountName.endsWith("-servicebus")) {
+            serviceType = "servicebus";
+            accountName = accountName.substring(0, accountName.length() - 11);
         } else {
             serviceType = resolveServiceType(requestContext, resourcePath);
         }

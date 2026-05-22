@@ -8,11 +8,30 @@
  */
 import { Connection, AwaitableSender, Receiver, ReceiverEvents } from "rhea-promise";
 
-const HOST = process.env.EVENTHUB_HOST ?? "localhost";
-const PORT = parseInt(process.env.EVENTHUB_AMQP_PORT ?? "5672", 10);
-const NS = "emulatorNs1";
-const HUB = "eh1";
+const HOST     = process.env.EVENTHUB_HOST ?? "localhost";
+const PORT     = parseInt(process.env.EVENTHUB_AMQP_PORT ?? "5672", 10);
+const TLS_PORT = parseInt(process.env.EVENTHUB_AMQPS_PORT ?? "5671", 10);
+const NS       = process.env.EVENTHUB_NAMESPACE ?? "emulatorNs1";
+const HUB      = process.env.EVENTHUB_NAME ?? "eh1";
+const BASE     = process.env.FLOCI_AZ_ENDPOINT ?? "http://localhost:4577";
+const ACCOUNT  = process.env.FLOCI_AZ_ACCOUNT ?? "devstoreaccount1";
 const SEND_ADDR = `${NS}/${HUB}`;
+
+// ---- setup ------------------------------------------------------------------
+
+beforeAll(async () => {
+  const url  = `${BASE}/${ACCOUNT}-eventhub/namespaces/${NS}`;
+  const body = JSON.stringify({ amqpPort: PORT, amqpTlsPort: TLS_PORT });
+  const res  = await fetch(url, {
+    method:  "PUT",
+    headers: { "Content-Type": "application/json" },
+    body,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok && res.status !== 409) {
+    throw new Error(`Failed to start Event Hubs namespace: HTTP ${res.status}`);
+  }
+}, 130_000);
 
 // ---- helpers ----------------------------------------------------------------
 

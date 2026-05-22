@@ -22,15 +22,22 @@ import java.util.Optional;
  * <p>Namespace management endpoints:
  * <pre>
  *   GET    /{account}-eventhub/namespaces              — list all namespaces
- *   PUT    /{account}-eventhub/namespaces/{ns}         — create namespace
- *   DELETE /{account}-eventhub/namespaces/{ns}         — delete namespace
+ *   PUT    /{account}-eventhub/namespaces/{ns}         — start namespace on-demand
+ *   DELETE /{account}-eventhub/namespaces/{ns}         — stop namespace
  *   GET    /{account}-eventhub/namespaces/{ns}/connection  — connection info
  *   GET    /{account}-eventhub/namespaces/{ns}/tls-cert    — TLS certificate PEM
  * </pre>
  *
+ * <p>Kafka (Redpanda) management endpoints:
+ * <pre>
+ *   GET    /{account}-eventhub/kafka   — status
+ *   PUT    /{account}-eventhub/kafka   — start Kafka on-demand
+ *   DELETE /{account}-eventhub/kafka   — stop Kafka
+ * </pre>
+ *
  * <p>Backward-compatible endpoints:
  * <pre>
- *   GET    /{account}-eventhub/health    — overall health (default namespace)
+ *   GET    /{account}-eventhub/health    — overall health
  *   GET    /{account}-eventhub/tls-cert  — TLS cert for default namespace
  * </pre>
  */
@@ -41,12 +48,16 @@ public class EventHubHandler implements AzureServiceHandler {
 
     private final EmulatorConfig config;
     private final EventHubNamespaceManager namespaceManager;
+    private final EventHubsKafkaManager kafkaManager;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public EventHubHandler(EmulatorConfig config, EventHubNamespaceManager namespaceManager) {
+    public EventHubHandler(EmulatorConfig config,
+                            EventHubNamespaceManager namespaceManager,
+                            EventHubsKafkaManager kafkaManager) {
         this.config = config;
         this.namespaceManager = namespaceManager;
+        this.kafkaManager = kafkaManager;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -69,6 +80,11 @@ public class EventHubHandler implements AzureServiceHandler {
         }
         if ("tls-cert".equals(path)) {
             return handleDefaultTlsCert();
+        }
+
+        // Kafka management
+        if ("kafka".equals(path)) {
+            return handleKafka(req);
         }
 
         // Namespace management: namespaces[/{ns}[/{sub}]]
@@ -131,22 +147,27 @@ public class EventHubHandler implements AzureServiceHandler {
     }
 
     private Response handleCreateNamespace(AzureRequest req, String namespaceName) {
+        // Idempotent: return 200 if already running
         if (namespaceManager.getNamespace(namespaceName).isPresent()) {
-            return Response.status(409)
-                    .entity("{\"error\":\"Namespace already exists: " + namespaceName + "\"}")
-                    .type("application/json").build();
+            StringBuilder sb = new StringBuilder();
+            appendNamespaceJson(sb, namespaceName, namespaceManager.getNamespace(namespaceName).get());
+            return Response.ok(sb.toString()).type("application/json").build();
         }
 
         EmulatorConfig.EventHubConfig eh = config.services().eventHub();
         String entitiesStr = eh.entities();
         String consumerGroupsStr = eh.consumerGroups();
+        int amqpPort = eh.amqpPort();
+        int amqpTlsPort = eh.amqpTlsPort();
 
         try {
             if (req.bodyStream() != null && req.bodyStream().available() > 0) {
-                Map<String, String> body = objectMapper.readValue(
+                Map<String, Object> body = objectMapper.readValue(
                         req.bodyStream(), new TypeReference<>() {});
-                if (body.containsKey("entities")) entitiesStr = body.get("entities");
-                if (body.containsKey("consumerGroups")) consumerGroupsStr = body.get("consumerGroups");
+                if (body.containsKey("entities")) entitiesStr = body.get("entities").toString();
+                if (body.containsKey("consumerGroups")) consumerGroupsStr = body.get("consumerGroups").toString();
+                if (body.containsKey("amqpPort")) amqpPort = ((Number) body.get("amqpPort")).intValue();
+                if (body.containsKey("amqpTlsPort")) amqpTlsPort = ((Number) body.get("amqpTlsPort")).intValue();
             }
         } catch (Exception e) {
             LOG.debugv("Could not parse namespace creation body: {0}", e.getMessage());
@@ -156,7 +177,7 @@ public class EventHubHandler implements AzureServiceHandler {
 
         try {
             EventHubNamespaceManager.NamespaceState state =
-                    namespaceManager.startNamespace(namespaceName, entities, 0, 0);
+                    namespaceManager.startNamespace(namespaceName, entities, amqpPort, amqpTlsPort);
             StringBuilder sb = new StringBuilder();
             appendNamespaceJson(sb, namespaceName, state);
             return Response.status(201).entity(sb.toString()).type("application/json").build();
@@ -169,11 +190,6 @@ public class EventHubHandler implements AzureServiceHandler {
     }
 
     private Response handleDeleteNamespace(String namespaceName) {
-        if (namespaceName.equals(config.services().eventHub().defaultNamespace())) {
-            return Response.status(400)
-                    .entity("{\"error\":\"Cannot delete the default namespace\"}")
-                    .type("application/json").build();
-        }
         boolean stopped = namespaceManager.stopNamespace(namespaceName);
         if (!stopped) {
             return notFound("Namespace not found: " + namespaceName);
@@ -208,6 +224,49 @@ public class EventHubHandler implements AzureServiceHandler {
                 .type("application/json").build();
     }
 
+    // ── Kafka management ──────────────────────────────────────────────────────
+
+    private Response handleKafka(AzureRequest req) {
+        return switch (req.method()) {
+            case "GET"          -> handleKafkaStatus();
+            case "PUT", "POST"  -> handleKafkaStart();
+            case "DELETE"       -> handleKafkaStop();
+            default             -> Response.status(405).build();
+        };
+    }
+
+    private Response handleKafkaStatus() {
+        boolean running = kafkaManager.isRunning();
+        int port = config.services().eventHub().kafkaPort();
+        String body = String.format(
+                "{\"running\":%b,\"port\":%d}", running, running ? port : 0);
+        return Response.ok(body).type("application/json").build();
+    }
+
+    private Response handleKafkaStart() {
+        if (kafkaManager.isRunning()) {
+            return handleKafkaStatus();
+        }
+        try {
+            kafkaManager.start();
+            return Response.status(201).entity(handleKafkaStatus().getEntity())
+                    .type("application/json").build();
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to start Redpanda Kafka broker");
+            return Response.status(500)
+                    .entity("{\"error\":\"Failed to start Kafka: " + e.getMessage() + "\"}")
+                    .type("application/json").build();
+        }
+    }
+
+    private Response handleKafkaStop() {
+        if (!kafkaManager.isRunning()) {
+            return notFound("Kafka is not running");
+        }
+        kafkaManager.stop();
+        return Response.noContent().build();
+    }
+
     // ── Backward-compatible endpoints ─────────────────────────────────────────
 
     private Response handleHealth() {
@@ -217,10 +276,10 @@ public class EventHubHandler implements AzureServiceHandler {
         boolean amqpsUp = isTcpOpen("localhost", amqpsPort);
 
         String body = String.format(
-                "{\"amqp\":{\"port\":%d,\"status\":\"%s\"},\"amqps\":{\"port\":%d,\"status\":\"%s\"},\"kafka\":{\"enabled\":%b}}",
+                "{\"amqp\":{\"port\":%d,\"status\":\"%s\"},\"amqps\":{\"port\":%d,\"status\":\"%s\"},\"kafka\":{\"running\":%b}}",
                 amqpPort, amqpUp ? "up" : "down",
                 amqpsPort, amqpsUp ? "up" : "down",
-                config.services().eventHub().kafkaEnabled());
+                kafkaManager.isRunning());
 
         int status = (amqpUp || amqpsUp) ? 200 : 503;
         return Response.status(status).entity(body).type("application/json").build();

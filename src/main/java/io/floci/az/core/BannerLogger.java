@@ -21,7 +21,7 @@ public class BannerLogger {
     CosmosEngineRegistry cosmosEngineRegistry;
 
     void onStart(@Observes StartupEvent ev) {
-        LOGGER.info("=== Local Azure Emulator Starting ===");
+        LOGGER.info("=== FLOCI - AZ Starting ===");
         LOGGER.infof("Storage mode: %s", config.storage().mode());
         
         StringBuilder sb = new StringBuilder("\nEnabled Services:\n");
@@ -75,6 +75,11 @@ public class BannerLogger {
             }
             sb.append(serviceStatusDocker("eventhub", true, amqpInfo));
         }
+        if (config.services().serviceBus().enabled()) {
+            String amqpInfo = "amqp:" + config.services().serviceBus().amqpPort()
+                    + "  (on-demand)  storage:" + getStorageMode("servicebus");
+            sb.append(serviceStatusDocker("servicebus", true, amqpInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
@@ -87,6 +92,7 @@ public class BannerLogger {
             case "appconfig" -> config.storage().services().appConfig().mode().orElse(config.storage().mode());
             case "cosmos"    -> config.storage().services().cosmos().mode().orElse(config.storage().mode());
             case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
+            case "servicebus" -> config.storage().services().serviceBus().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

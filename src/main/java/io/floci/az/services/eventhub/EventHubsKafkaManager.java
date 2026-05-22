@@ -38,7 +38,14 @@ public class EventHubsKafkaManager {
         this.lifecycleManager = lifecycleManager;
     }
 
-    public void start() {
+    public boolean isRunning() {
+        return containerId != null;
+    }
+
+    public synchronized void start() {
+        if (containerId != null) {
+            return;
+        }
         EmulatorConfig.EventHubConfig eh = config.services().eventHub();
         LOG.infov("Starting Redpanda (Kafka) sidecar for Event Hubs on port {0}", eh.kafkaPort());
 

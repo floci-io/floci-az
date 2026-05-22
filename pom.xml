@@ -103,6 +103,12 @@
             <artifactId>bcpkix-jdk18on</artifactId>
             <version>1.84</version>
         </dependency>
+        <!-- proton-j for Service Bus CBS responder (same version as azure-core-amqp) -->
+        <dependency>
+            <groupId>org.apache.qpid</groupId>
+            <artifactId>proton-j</artifactId>
+            <version>0.34.1</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>

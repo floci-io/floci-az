@@ -1,5 +1,6 @@
 package io.floci.az.compat;
 
+import com.azure.core.amqp.AmqpTransportType;
 import com.azure.core.credential.AccessToken;
 import com.azure.core.http.HttpPipelineCallContext;
 import com.azure.core.http.HttpPipelineNextPolicy;
@@ -9,25 +10,38 @@ import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.qpid.jms.JmsConnectionFactory;
+import org.apache.qpid.proton.engine.SslDomain;
 import org.junit.jupiter.api.Assumptions;
 import reactor.core.publisher.Mono;
 
 import jakarta.jms.ConnectionFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.ConnectException;
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.charset.StandardCharsets;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 public final class EmulatorConfig {
 
@@ -128,10 +142,37 @@ public final class EmulatorConfig {
         System.getenv().getOrDefault("EVENTHUB_HOST", "localhost");
     static final int EVENTHUB_AMQP_PORT =
         Integer.parseInt(System.getenv().getOrDefault("EVENTHUB_AMQP_PORT", "5672"));
+    static final int EVENTHUB_AMQPS_PORT =
+        Integer.parseInt(System.getenv().getOrDefault("EVENTHUB_AMQPS_PORT", "5671"));
     static final String EVENTHUB_NAMESPACE =
         System.getenv().getOrDefault("EVENTHUB_NAMESPACE", "emulatorNs1");
     static final String EVENTHUB_NAME =
         System.getenv().getOrDefault("EVENTHUB_NAME", "eh1");
+
+    /**
+     * Starts the default Event Hubs namespace on-demand via the floci-az management API.
+     * Idempotent: returns 200 if the namespace is already running.
+     */
+    static void ensureEventHubNamespace() throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-eventhub/namespaces/" + EVENTHUB_NAMESPACE;
+        String body = String.format(
+                "{\"amqpPort\":%d,\"amqpTlsPort\":%d}",
+                EVENTHUB_AMQP_PORT, EVENTHUB_AMQPS_PORT);
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(120_000);
+        conn.setRequestProperty("Content-Type", "application/json");
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(body.getBytes(StandardCharsets.UTF_8));
+        }
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException(
+                    "Failed to start Event Hubs namespace '" + EVENTHUB_NAMESPACE + "', HTTP " + status);
+        }
+    }
 
     /**
      * Returns the AMQP entity address that Artemis has pre-configured as an ANYCAST address.
@@ -160,6 +201,249 @@ public final class EmulatorConfig {
                 .addPolicy(new ForceHttpPolicy())
                 .disableChallengeResourceVerification()
                 .buildClient();
+    }
+
+    // ── Service Bus ───────────────────────────────────────────────────────────
+
+    static final String SERVICEBUS_HOST =
+        System.getenv().getOrDefault("SERVICEBUS_HOST", "localhost");
+    static final String SERVICEBUS_NAMESPACE =
+        System.getenv().getOrDefault("SERVICEBUS_NAMESPACE", "default");
+
+    /**
+     * AMQPS (TLS) port resolved from the namespace API response (local) or the
+     * {@code SERVICEBUS_AMQPS_PORT} env var (Docker compat tests).
+     * Set by {@link #ensureServiceBusNamespace()}.
+     */
+    static int serviceBusAmqpsPort = 0;
+
+    /**
+     * True when the emulator is in mocked Service Bus mode (no Artemis broker started).
+     * AMQP tests should be skipped when this is true.
+     * Set by {@link #ensureServiceBusNamespace()}.
+     */
+    static boolean serviceBusMocked = false;
+
+    /**
+     * Starts a Service Bus namespace on-demand via the floci-az management API.
+     * Idempotent: returns 200 if the namespace already exists.
+     *
+     * Reads {@code amqpsPort} from the JSON response and installs the self-signed
+     * Artemis TLS certificate into the JVM default SSLContext so that proton-j
+     * (the AMQP transport used by the Azure SDK) can verify it.
+     *
+     * The Azure Service Bus SDK 7.17.x always uses TLS regardless of the
+     * {@code UseDevelopmentEmulator=true} flag — it hard-codes {@code enableSsl=true}
+     * when {@code customEndpointAddress} is set.
+     */
+    static void ensureServiceBusNamespace() throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/namespaces/" + SERVICEBUS_NAMESPACE;
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(120_000);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Content-Length", "2");
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write("{}".getBytes(StandardCharsets.UTF_8));
+        }
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException(
+                    "Failed to start Service Bus namespace '" + SERVICEBUS_NAMESPACE + "', HTTP " + status);
+        }
+
+        String responseBody = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> json = mapper.readValue(responseBody, Map.class);
+
+            // Prefer env var (Docker: SERVICEBUS_AMQPS_PORT=5671 = internal AMQPS port).
+            String envPort = System.getenv("SERVICEBUS_AMQPS_PORT");
+            if (envPort != null && !envPort.isEmpty()) {
+                serviceBusAmqpsPort = Integer.parseInt(envPort);
+            } else {
+                serviceBusAmqpsPort = ((Number) json.get("amqpsPort")).intValue();
+            }
+
+            // Detect mocked mode (no Artemis broker) — AMQP tests should be skipped.
+            Object mockedValue = json.get("mocked");
+            serviceBusMocked = Boolean.TRUE.equals(mockedValue);
+
+            // Install the Artemis self-signed cert so proton-j can verify it over TLS.
+            String certPem = (String) json.get("tlsCertPem");
+            if (certPem != null && !certPem.isEmpty()) {
+                installArtemisServiceBusCert(certPem);
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse namespace response: " + responseBody, e);
+        }
+    }
+
+    /**
+     * Installs a trust-all TrustManager into the JVM's default SSLContext so that
+     * proton-j (used by the Azure Service Bus SDK) accepts the Artemis self-signed cert.
+     * Acceptable for a local emulator — never use in production.
+     */
+    static void installArtemisServiceBusCert(String certPem) throws Exception {
+        TrustManager trustAll = new X509TrustManager() {
+            public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+            public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+        };
+        SSLContext ctx = SSLContext.getInstance("TLS");
+        ctx.init(null, new TrustManager[]{trustAll}, null);
+        SSLContext.setDefault(ctx);
+    }
+
+    /**
+     * Sets SslDomain.VerifyMode.ANONYMOUS_PEER on the builder via reflection.
+     *
+     * The {@code verifyMode()} method is package-private in ServiceBusClientBuilder, so we must
+     * use reflection to call it. ANONYMOUS_PEER disables both certificate chain validation and
+     * hostname verification at the proton-j level, which is required because the Artemis sidecar
+     * uses a self-signed cert that doesn't match the Docker service hostname.
+     */
+    private static void setAnonymousPeer(ServiceBusClientBuilder builder) {
+        try {
+            Method m = ServiceBusClientBuilder.class.getDeclaredMethod("verifyMode", SslDomain.VerifyMode.class);
+            m.setAccessible(true);
+            m.invoke(builder, SslDomain.VerifyMode.ANONYMOUS_PEER);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to set ANONYMOUS_PEER on ServiceBusClientBuilder", e);
+        }
+    }
+
+    /**
+     * Creates a queue via the Azure spec path (/{entityName}) — the same path used by
+     * {@code ServiceBusAdministrationClient}. Triggers lazy namespace auto-start.
+     */
+    static void createQueueViaSpecPath(String queueName, boolean requiresSession) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + queueName;
+        String body = requiresSession
+                ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                  + "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
+                  + "<RequiresSession>true</RequiresSession></QueueDescription></content></entry>"
+                : "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                  + "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
+                  + "</QueueDescription></content></entry>";
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(120_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("Content-Length", String.valueOf(bodyBytes.length));
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(bodyBytes);
+        }
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException("createQueueViaSpecPath '" + queueName + "' failed, HTTP " + status);
+        }
+    }
+
+    /** GET the Service Bus namespaces list; returns the raw JSON body. */
+    static String getServiceBusNamespaces() throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/namespaces";
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(10_000);
+        conn.getResponseCode();
+        InputStream is = conn.getResponseCode() < 400 ? conn.getInputStream() : conn.getErrorStream();
+        return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    /** Creates a queue via the floci-az management API (ATOM XML). */
+    static void ensureServiceBusQueue(String queueName, boolean requiresSession) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
+                + "/queues/" + queueName;
+        String body = requiresSession
+                ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                  + "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
+                  + "<RequiresSession>true</RequiresSession></QueueDescription></content></entry>"
+                : "";
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("Content-Length", String.valueOf(bodyBytes.length));
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(bodyBytes);
+        }
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException(
+                    "Failed to create Service Bus queue '" + queueName + "', HTTP " + status);
+        }
+    }
+
+    /** Creates a topic via the floci-az management API. */
+    static void ensureServiceBusTopic(String topicName) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
+                + "/topics/" + topicName;
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("Content-Length", "0");
+        conn.getOutputStream().close();
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException(
+                    "Failed to create Service Bus topic '" + topicName + "', HTTP " + status);
+        }
+    }
+
+    /** Creates a subscription via the floci-az management API. */
+    static void ensureServiceBusSubscription(String topicName, String subName) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
+                + "/topics/" + topicName + "/subscriptions/" + subName;
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("Content-Length", "0");
+        conn.getOutputStream().close();
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException(
+                    "Failed to create subscription '" + topicName + "/" + subName + "', HTTP " + status);
+        }
+    }
+
+    /**
+     * Returns a ServiceBusClientBuilder connected to the emulator's AMQPS (TLS) port.
+     *
+     * The Azure Service Bus SDK 7.17.x always uses TLS when {@code customEndpointAddress}
+     * is set ({@code enableSsl=true} hardcoded). We use ANONYMOUS_PEER via reflection to
+     * disable certificate chain and hostname verification at the proton-j level, since the
+     * Artemis self-signed cert cannot be validated against the Docker service hostname.
+     */
+    static ServiceBusClientBuilder serviceBusClientBuilder() {
+        String connStr = String.format(
+                "Endpoint=sb://%s;SharedAccessKeyName=RootManageSharedAccessKey;"
+                + "SharedAccessKey=devkey;",
+                SERVICEBUS_HOST);
+        ServiceBusClientBuilder builder = new ServiceBusClientBuilder()
+                .connectionString(connStr)
+                .customEndpointAddress("https://" + SERVICEBUS_HOST + ":" + serviceBusAmqpsPort)
+                .transportType(AmqpTransportType.AMQP);
+        setAnonymousPeer(builder);
+        return builder;
     }
 
     // ── Emulator reachability ─────────────────────────────────────────────────

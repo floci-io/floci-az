@@ -1,7 +1,6 @@
 quarkus:
   log:
     console:
-      color: true
       format: "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] %s%e%n"
   http:
     port: ${floci-az.port}
@@ -52,6 +51,8 @@ floci-az:
       cosmos:
         flush-interval-ms: 5000
       key-vault:
+        flush-interval-ms: 5000
+      service-bus:
         flush-interval-ms: 5000
 
   dns:
@@ -123,6 +124,14 @@ floci-az:
       sa-password: "FlociAz_Strong123!"
       startup-timeout-seconds: 60
       default-port: 0        # 0 = OS picks a free port per server (recommended)
+    service-bus:
+      enabled: true
+      mocked: true
+      amqp-port: 5673
+      amqp-tls-port: 5674
+      artemis-image: "apache/activemq-artemis:latest"
+      max-delivery-count: 10
+      lock-duration-seconds: 60
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:
