@@ -25,6 +25,7 @@ Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for E
   A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, and Event Hubs. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
+
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
   <a href="#what-is-floci-az">Features</a> ·
