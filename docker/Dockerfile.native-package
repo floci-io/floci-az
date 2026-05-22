@@ -39,8 +39,7 @@ VOLUME /app/data
 COPY --chown=1001:root native/${TARGETARCH}/ /app/
 RUN mv /app/*-runner /app/application && chmod +x /app/application
 
-COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 LABEL org.opencontainers.image.title="Floci AZ" \
       org.opencontainers.image.description="Local Azure emulator — open-source Azure SDK compatible emulator" \

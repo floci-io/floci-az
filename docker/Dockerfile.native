@@ -70,8 +70,7 @@ ENV FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH=/app/data/functions
 COPY --from=build /app/target/*-runner /app/application
 RUN chmod +x /app/application
 
-COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/app/application", "-Dquarkus.http.host=0.0.0.0"]

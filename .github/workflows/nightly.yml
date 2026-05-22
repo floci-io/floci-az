@@ -1,38 +1,50 @@
-name: Release
+name: Nightly
 
-# Triggered when a version tag (e.g. 1.2.3) is pushed.
-# Builds native (amd64 + arm64) Docker images and pushes them to Docker Hub.
+# Builds and publishes native images from the tip of main as nightly Docker tags.
+# Runs every night at 23:00 CT (04:00 UTC, approximate — shifts 1 h in CST winter).
+# Can also be triggered manually.
 #
 # Published tags:
-#   floci/floci-az:1.2.3   floci/floci-az:latest
+#   floci/floci-az:nightly   floci/floci-az:nightly-mmddyyyy
 #
 # Required secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 
 on:
-  push:
-    tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
+  schedule:
+    - cron: '0 4 * * *'   # 23:00 CT (CDT/UTC-5); shifts to 23:00 CST in winter
+  workflow_dispatch:        # Allow maintainers to trigger manually
 
 permissions:
   contents: read
 
-# Per-tag concurrency. Back-to-back tag pushes (e.g. 1.5.3 and 1.6.0 landing
-# minutes apart) resolve to different ${{ github.ref }} values, so they run
-# in parallel rather than cancelling each other. Re-runs of the same tag
-# supersede in-flight builds of that tag.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ── Compute nightly version (CT date) ────────────────────────────────────
+  prepare:
+    name: Prepare nightly version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.date.outputs.version }}
+
+    steps:
+      - name: Set date version (CT)
+        id: date
+        run: echo "version=$(TZ='America/Chicago' date +'%m%d%Y')" >> "$GITHUB_OUTPUT"
+
   # ── Build native artifact — amd64 ────────────────────────────────────────
   build-native-amd64:
     name: Build native artifact (amd64)
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
 
       - uses: graalvm/setup-graalvm@60c26726de13f8b90771df4bc1641a52a3159994 # v1
         with:
@@ -40,6 +52,9 @@ jobs:
           distribution: 'mandrel'
           cache: maven
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set nightly version
+        run: ./mvnw versions:set -DnewVersion="nightly-${{ needs.prepare.outputs.version }}" -DgenerateBackupPoms=false -q
 
       - name: Build native executable
         run: ./mvnw clean package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-march=x86-64-v2"
@@ -57,11 +72,14 @@ jobs:
   # ── Build native artifact — arm64 ────────────────────────────────────────
   build-native-arm64:
     name: Build native artifact (arm64)
+    needs: prepare
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
 
       - uses: graalvm/setup-graalvm@60c26726de13f8b90771df4bc1641a52a3159994 # v1
         with:
@@ -69,6 +87,9 @@ jobs:
           distribution: 'mandrel'
           cache: maven
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set nightly version
+        run: ./mvnw versions:set -DnewVersion="nightly-${{ needs.prepare.outputs.version }}" -DgenerateBackupPoms=false -q
 
       - name: Build native executable
         run: ./mvnw clean package -Dnative -DskipTests -B
@@ -83,27 +104,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # ── Push native Docker images (multi-arch manifest) ───────────────────────
+  # ── Push native Docker image (multi-arch manifest) ────────────────────────
   push-native:
-    name: Push native Docker images
-    needs: [build-native-amd64, build-native-arm64]
+    name: Push native Docker image
+    needs: [prepare, build-native-amd64, build-native-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v6
-
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-
-      - name: Set created timestamp
-        id: created
-        run: echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
-      - name: Set SOURCE_DATE_EPOCH
-        id: source_date
-        run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+        with:
+          ref: main
 
       - uses: actions/download-artifact@v8
         with:
@@ -118,6 +129,14 @@ jobs:
       - name: Make binaries executable
         run: chmod +x native/amd64/*-runner native/arm64/*-runner
 
+      - name: Set created timestamp
+        id: created
+        run: echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Set SOURCE_DATE_EPOCH
+        id: source_date
+        run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -125,7 +144,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push native multi-arch image
+      - name: Build and push native nightly image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         env:
           SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
@@ -135,15 +154,15 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            floci/floci-az:${{ steps.version.outputs.version }}
-            floci/floci-az:latest
+            floci/floci-az:nightly
+            floci/floci-az:nightly-${{ needs.prepare.outputs.version }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=nightly-${{ needs.prepare.outputs.version }}
           labels: |
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.version=nightly-${{ needs.prepare.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ steps.created.outputs.created }}
-            version=${{ steps.version.outputs.version }}
+            version=nightly-${{ needs.prepare.outputs.version }}
             build-date=${{ steps.created.outputs.created }}
             vcs-ref=${{ github.sha }}
           cache-from: type=gha
