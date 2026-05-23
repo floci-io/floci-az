@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **aks:** Azure Kubernetes Service emulation — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags, agent pool CRUD, `listClusterAdminCredential` / `listClusterUserCredential`; ARM path routing on `Microsoft.ContainerService`
+- **aks:** Real k3s mode — each cluster starts a privileged `rancher/k3s` container; background readiness poller transitions `provisioningState` from `Creating` → `Succeeded`; kubeconfig with real CA extracted from the container
+- **aks:** Mocked mode (`FLOCI_AZ_SERVICES_AKS_MOCKED=true`) — clusters immediately reach `Succeeded` with a synthetic kubeconfig; no Docker required; suitable for unit tests and CI without Docker
+- **aks:** `instanceId`-based container naming (`floci-az-aks-{instanceId}`) — 8-char UUID prefix per cluster prevents naming collisions when the same cluster name exists across resource groups
+- **aks:** 10 unit tests (`AksHandlerTest`) covering full CRUD in mocked mode; 5 Docker integration tests (`AksDockerTest`) with `@TestProfile(mocked=false)` exercising real k3s start, readiness poll, kubeconfig extraction, and deletion
+
 - **cosmos:** Azure Cosmos DB SQL API emulator — always-on at `/{account}-cosmos/`; databases, containers, and document CRUD; full SQL dialect (`SELECT`, `WHERE`, `ORDER BY`, `GROUP BY`, `OFFSET LIMIT`, `SELECT TOP`, `SELECT DISTINCT`); aggregates (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`); string, math, array, and type-check functions; named parameters; `PATCH` document operations; transactional batch; server-side pagination with continuation tokens; system properties (`_rid`, `_self`, `_etag`, `_ts`) auto-generated on every write ([#16](https://github.com/floci-io/floci-az/pull/16))
 - **cosmos:** Modular multi-API engine support — opt-in per API via environment variable; Docker-backed: MongoDB (`mongo:7`), PostgreSQL/Citus (`citusdata/citus`), Cassandra (`scylladb/scylla:6.2`), Gremlin (`tinkerpop/gremlin-server`); embedded (no Docker): NoSQL in-process SQL engine, Table in-memory OData; each engine exposes a `/connect` endpoint returning its connection string ([#16](https://github.com/floci-io/floci-az/pull/16))
 - **cosmos:** HTTPS proxy on port `4578` with bundled self-signed certificate (`CN=localhost`, valid 100 years) — required for the Azure Cosmos DB Java SDK which enforces TLS in gateway mode; no certificate import needed ([#16](https://github.com/floci-io/floci-az/pull/16))

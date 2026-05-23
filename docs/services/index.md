@@ -14,6 +14,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Key Vault** | `/{account}-keyvault/` | ✅ Secrets CRUD, versioning, soft-delete, properties update |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; Docker-backed SQL Server containers |
+| **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | ✅ Clusters, agent pools, credentials; real k3s containers or mocked |
 
 ## Unified Endpoint
 
@@ -28,5 +29,6 @@ The following services spin up Docker containers on demand and require the Docke
 | **Azure Functions** | User-provided image | HTTP to container |
 | **Azure SQL Database** | `mcr.microsoft.com/azure-sql-edge:latest` | TDS direct to container port |
 | **Cosmos DB engines** | Various (mongo, postgres, cassandra, …) | Protocol direct to container port |
+| **Azure Kubernetes Service** | `rancher/k3s:latest` | kubectl direct to k3s API server port |
 
 > These services **must** have access to the Docker daemon (`/var/run/docker.sock` mount in Docker Compose).

@@ -132,6 +132,13 @@ floci-az:
       artemis-image: "apache/activemq-artemis:latest"
       max-delivery-count: 10
       lock-duration-seconds: 60
+    aks:
+      enabled: true
+      mocked: false
+      default-image: "rancher/k3s:latest"
+      api-server-base-port: 6443
+      api-server-max-port: 7443
+      keep-running-on-shutdown: false
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:

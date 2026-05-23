@@ -80,6 +80,14 @@ public class BannerLogger {
                     + "  (on-demand)  storage:" + getStorageMode("servicebus");
             sb.append(serviceStatusDocker("servicebus", true, amqpInfo));
         }
+        if (config.services().aks().enabled()) {
+            String aksInfo = config.services().aks().mocked()
+                    ? "mocked  (no k3s)"
+                    : "k3s:" + config.services().aks().defaultImage()
+                            + "  ports:" + config.services().aks().apiServerBasePort()
+                            + "-" + config.services().aks().apiServerMaxPort();
+            sb.append(serviceStatusDocker("aks", true, aksInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

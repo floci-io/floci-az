@@ -1,9 +1,9 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, and Event Hubs.
-Default Port: 4577. AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in).
-Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka.
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Cosmos DB, Azure SQL Database, and Azure Kubernetes Service (AKS).
+Default Port: 4577. AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS).
+Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS.
 -->
 
 <p align="center">
@@ -51,6 +51,8 @@ Floci AZ is a free, open-source local Azure emulator for development, testing, a
 | Cosmos DB (SQL API) | ✅                         | ❌                                           | ❌                                                                           |
 | Key Vault           | ✅                         | ❌                                           | ❌                                                                           |
 | Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
+| Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
+| AKS (Kubernetes)    | ✅                         | ❌                                           | ❌                                                                           |
 | Native binary       | ✅                         | ❌                                           | ✅                                                                           |
 | Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
 | Storage modes       | ✅ (persistent/WAL/Hybrid) | ❌                                           | ❌                                                                           |
@@ -165,6 +167,8 @@ flowchart LR
             E["App Configuration\n/{account}-appconfig/"]
             F["Key Vault\n/{account}-keyvault/"]
             G["Event Hubs\nAMQP :5672 / Kafka :9093"]
+            H["Azure SQL\nMicrosoft.Sql"]
+            I["AKS\nMicrosoft.ContainerService"]
         end
 
         Router --> A
@@ -174,9 +178,13 @@ flowchart LR
         Router --> E
         Router --> F
         Router --> G
+        Router --> H
+        Router --> I
         A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
         G -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
+        H -->|" manages "| SqlContainers["🐳 azure-sql-edge\n(per server)"]
+        I -->|" manages "| K3s["🐳 k3s\n(per cluster)"]
     end
 
     Client -->|" HTTP :4577\nAzure wire protocol "| Router
@@ -195,6 +203,8 @@ flowchart LR
 | **Cosmos DB NoSQL (embedded)** | `/{account}-cosmos-nosql/` | Same embedded SQL engine as above, exposed as a named engine endpoint. Opt-in with `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true`; no Docker required. |
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
+| **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed `azure-sql-edge` containers; dynamic port allocation                                                                                                               |
+| **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
 
 ## Persistence & Storage Modes
 

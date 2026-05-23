@@ -87,6 +87,27 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Azure Kubernetes Service — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ContainerService/...
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerService/")) {
+            Map<String, String> aksQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> aksQueryParams.put(k, v.get(0)));
+            AzureRequest aksRequest = new AzureRequest(
+                requestContext.getMethod(), "aks", "aks", path, headers,
+                requestContext.getEntityStream(), aksQueryParams, null);
+            AuthContext aksAuth = authPipeline.resolve(aksRequest);
+            aksRequest = new AzureRequest(
+                requestContext.getMethod(), "aks", "aks", path, headers,
+                requestContext.getEntityStream(), aksQueryParams, aksAuth);
+            Optional<AzureServiceHandler> aksHandler = serviceRegistry.resolve("aks");
+            if (aksHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM AKS request to AksHandler: %s %s", requestContext.getMethod(), path);
+                return aksHandler.get().handle(aksRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Azure SQL Database — ARM management-plane paths:
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Sql/...
         //   subscriptions/{sub}/providers/Microsoft.Sql/checkNameAvailability

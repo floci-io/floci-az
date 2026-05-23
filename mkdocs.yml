@@ -76,5 +76,6 @@ nav:
     - Event Hubs: services/event-hub.md
     - Cosmos DB: services/cosmos.md
     - Azure SQL Database: services/sql.md
+    - Azure Kubernetes Service: services/aks.md
   - Contributing: contributing.md
   - Changelog: changelog.md

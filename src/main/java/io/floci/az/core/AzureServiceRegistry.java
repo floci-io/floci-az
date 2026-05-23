@@ -40,6 +40,7 @@ public class AzureServiceRegistry {
             case "eventhub"   -> config.services().eventHub().enabled();
             case "sql"        -> config.services().sql().enabled();
             case "servicebus" -> config.services().serviceBus().enabled();
+            case "aks"        -> config.services().aks().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->
                 config.services().cosmos().enabled() &&

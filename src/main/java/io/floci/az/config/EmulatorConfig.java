@@ -113,9 +113,38 @@ public interface EmulatorConfig {
         EventHubConfig         eventHub();
         SqlServiceConfig       sql();
         ServiceBusConfig       serviceBus();
+        AksConfig              aks();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
+    }
+
+    interface AksConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no k3s sidecar is started; clusters transition immediately to
+         * "Succeeded" with a synthetic kubeconfig. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /** Docker image for the k3s container. */
+        @WithDefault("rancher/k3s:latest")
+        String defaultImage();
+
+        /** Start of the host port range for k3s API servers. */
+        @WithDefault("6443")
+        int apiServerBasePort();
+
+        /** End of the host port range for k3s API servers. */
+        @WithDefault("7443")
+        int apiServerMaxPort();
+
+        /** When {@code true}, k3s containers are left running when floci-az shuts down. */
+        @WithDefault("false")
+        boolean keepRunningOnShutdown();
     }
 
     interface ServiceBusConfig {
