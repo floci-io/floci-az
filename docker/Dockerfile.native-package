@@ -38,6 +38,7 @@ VOLUME /app/data
 
 COPY --chown=1001:root native/${TARGETARCH}/ /app/
 RUN mv /app/*-runner /app/application && chmod +x /app/application
+COPY --chown=1001:root src/main/resources/certs/ certs/
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
@@ -58,7 +59,7 @@ LABEL org.opencontainers.image.title="Floci AZ" \
       url="https://floci.io" \
       vendor="Floci"
 
-EXPOSE 4577
+EXPOSE 4577 4578
 
 HEALTHCHECK --interval=5s --timeout=3s --retries=10 \
     CMD curl -f http://localhost:4577/_floci/health || exit 1

@@ -44,11 +44,13 @@ RUN mkdir -p /app/data \
 COPY --from=build /build/target/quarkus-app/ quarkus-app/
 RUN chown -R 1001:root /app/quarkus-app
 
+COPY --from=build --chown=1001:root /build/src/main/resources/certs/ certs/
+
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 VOLUME /app/data
 
-EXPOSE 4577
+EXPOSE 4577 4578
 
 HEALTHCHECK --interval=5s --timeout=3s --retries=5 \
     CMD wget -q --spider http://localhost:4577/_floci/health || exit 1
