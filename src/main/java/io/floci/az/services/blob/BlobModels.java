@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
+import java.util.Map;
 
 public class BlobModels {
 
@@ -51,7 +52,8 @@ public class BlobModels {
     @RegisterForReflection
     public record BlobItem(
         @JacksonXmlProperty(localName = "Name") String Name,
-        @JacksonXmlProperty(localName = "Properties") BlobProperties Properties
+        @JacksonXmlProperty(localName = "Properties") BlobProperties Properties,
+        @JacksonXmlProperty(localName = "Metadata") Map<String, String> Metadata
     ) {}
 
     @RegisterForReflection

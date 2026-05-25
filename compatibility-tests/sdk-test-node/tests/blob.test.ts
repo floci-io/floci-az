@@ -79,6 +79,57 @@ test("blob overwrite: second upload replaces content", async () => {
   await client.deleteContainer(name);
 });
 
+test("blob metadata: upload, update, get properties, and list with metadata", async () => {
+  const name = containerName();
+  const { containerClient } = await client.createContainer(name);
+  const blob = containerClient.getBlockBlobClient("metadata.txt");
+
+  await blob.upload(Buffer.from("metadata"), 8, { metadata: { owner: "compat" } });
+  let props = await blob.getProperties();
+  expect(props.metadata).toMatchObject({ owner: "compat" });
+
+  await blob.setMetadata({ owner: "updated", purpose: "blob-parity" });
+  props = await blob.getProperties();
+  expect(props.metadata).toMatchObject({ owner: "updated", purpose: "blob-parity" });
+
+  const listed = [];
+  for await (const item of containerClient.listBlobsFlat({ includeMetadata: true })) listed.push(item);
+  expect(listed).toHaveLength(1);
+  expect(listed[0].metadata).toMatchObject({ owner: "updated", purpose: "blob-parity" });
+
+  await client.deleteContainer(name);
+});
+
+test("blob range download: returns requested byte slice", async () => {
+  const name = containerName();
+  const { containerClient } = await client.createContainer(name);
+  const blob = containerClient.getBlockBlobClient("range.txt");
+
+  await blob.upload(Buffer.from("0123456789"), 10);
+
+  const downloaded = await blob.downloadToBuffer(2, 4);
+  expect(downloaded.toString()).toBe("2345");
+
+  await client.deleteContainer(name);
+});
+
+test("blob conditional download: rejects wrong etag", async () => {
+  const name = containerName();
+  const { containerClient } = await client.createContainer(name);
+  const blob = containerClient.getBlockBlobClient("conditional.txt");
+
+  await blob.upload(Buffer.from("condition"), 9);
+  const props = await blob.getProperties();
+
+  const ok = await blob.downloadToBuffer(0, undefined, { conditions: { ifMatch: props.etag } });
+  expect(ok.toString()).toBe("condition");
+
+  await expect(blob.downloadToBuffer(0, undefined, { conditions: { ifMatch: "wrong-etag" } }))
+    .rejects.toMatchObject({ statusCode: 412 });
+
+  await client.deleteContainer(name);
+});
+
 // --- Error cases ---
 
 test("download missing blob → 404 BlobNotFound", async () => {

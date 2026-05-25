@@ -46,6 +46,7 @@ public class BlobServiceTest {
 
         given()
             .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-meta-owner", "compat")
             .contentType("text/plain")
             .body(BLOB_CONTENT)
             .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
@@ -55,7 +56,96 @@ public class BlobServiceTest {
             .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
             .then()
             .statusCode(200)
+            .header("x-ms-meta-owner", "compat")
             .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void setAndGetBlobMetadata() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-meta-owner", "initial")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-meta-owner", "updated")
+            .header("x-ms-meta-purpose", "blob-parity")
+            .when().put("/{account}/{container}/{blob}?comp=metadata", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=metadata", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("x-ms-meta-owner", "updated")
+            .header("x-ms-meta-purpose", "blob-parity")
+            .header("x-ms-meta-missing", nullValue());
+    }
+
+    @Test
+    void listBlobsIncludesMetadataWhenRequested() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-meta-owner", "compat")
+            .body("data")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&include=metadata", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(containsString("<Metadata>"))
+            .body(containsString("<owner>compat</owner>"));
+    }
+
+    @Test
+    void blobConditionalGetHonorsIfMatch() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        given()
+            .header("If-Match", etag)
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .header("If-Match", "wrong-etag")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "ConditionNotMet");
+    }
+
+    @Test
+    void blobConditionalDeleteHonorsIfNoneMatch() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        given()
+            .header("If-None-Match", etag)
+            .when().delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "ConditionNotMet");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
     }
 
     @Test

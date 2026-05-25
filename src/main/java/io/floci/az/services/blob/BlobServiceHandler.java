@@ -31,6 +31,7 @@ public class BlobServiceHandler implements AzureServiceHandler {
             .withZone(ZoneId.of("GMT"));
 
     private static final String NS_PREFIX = "__ns__:";
+    private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final StoredObject NS_SENTINEL =
             new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
 
@@ -86,7 +87,12 @@ public class BlobServiceHandler implements AzureServiceHandler {
                             .toXmlResponse(501);
                 }
             } else {
-                if ("PUT".equalsIgnoreCase(method)) {
+                if ("PUT".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
+                    response = setBlobMetadata(request, containerName, blobName);
+                } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
+                        && "metadata".equals(query.get("comp"))) {
+                    response = getBlobMetadata(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method)) {
                     response = putBlob(request, containerName, blobName);
                 } else if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlob(request, containerName, blobName, "HEAD".equalsIgnoreCase(method));
@@ -165,6 +171,17 @@ public class BlobServiceHandler implements AzureServiceHandler {
 
     private Response putBlob(AzureRequest request, String containerName, String blobName) {
         try {
+            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+            Response conditionFailure = validateBlobConditions(request, existing);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+
             byte[] data = request.bodyStream().readAllBytes();
             Map<String, String> metadata = new HashMap<>();
             String blobType = request.headers().getHeaderString("x-ms-blob-type");
@@ -172,13 +189,15 @@ public class BlobServiceHandler implements AzureServiceHandler {
             String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
             metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
             metadata.put("Name", blobName);
+            metadata.putAll(readUserMetadata(request));
 
+            String etag = UUID.randomUUID().toString();
             store.put(objKey(request.accountName(), containerName, blobName),
-                    new StoredObject(blobName, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+                    new StoredObject(blobName, data, metadata, Instant.now(), etag));
 
             return Response.status(Response.Status.CREATED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                    .header("ETag", UUID.randomUUID().toString())
+                    .header("ETag", etag)
                     .header("x-ms-request-server-encrypted", "true")
                     .header("Content-Length", 0)
                     .build();
@@ -193,6 +212,11 @@ public class BlobServiceHandler implements AzureServiceHandler {
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Response conditionFailure = validateBlobConditions(request, object);
+        if (conditionFailure != null) {
+            return conditionFailure;
         }
 
         StoredObject so = object.get();
@@ -233,6 +257,7 @@ public class BlobServiceHandler implements AzureServiceHandler {
                 .header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize))
                 .header("x-ms-blob-content-length", totalSize)
                 .header("Accept-Ranges", "bytes");
+        addUserMetadataHeaders(rb, so.metadata());
 
         if (!headOnly) {
             if (isRangeRequest) {
@@ -247,8 +272,68 @@ public class BlobServiceHandler implements AzureServiceHandler {
     }
 
     private Response deleteBlob(AzureRequest request, String containerName, String blobName) {
+        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        if (object.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        Response conditionFailure = validateBlobConditions(request, object);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
         store.delete(objKey(request.accountName(), containerName, blobName));
         return Response.status(Response.Status.ACCEPTED).build();
+    }
+
+    private Response getBlobMetadata(AzureRequest request, String containerName, String blobName) {
+        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        if (object.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Response conditionFailure = validateBlobConditions(request, object);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
+
+        StoredObject so = object.get();
+        Response.ResponseBuilder rb = Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(so.lastModified()))
+                .header("ETag", so.etag());
+        addUserMetadataHeaders(rb, so.metadata());
+        return rb.build();
+    }
+
+    private Response setBlobMetadata(AzureRequest request, String containerName, String blobName) {
+        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        if (object.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Response conditionFailure = validateBlobConditions(request, object);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
+
+        StoredObject so = object.get();
+        Map<String, String> metadata = new HashMap<>();
+        so.metadata().forEach((key, value) -> {
+            if (!key.startsWith(USER_METADATA_PREFIX)) {
+                metadata.put(key, value);
+            }
+        });
+        metadata.putAll(readUserMetadata(request));
+
+        String etag = UUID.randomUUID().toString();
+        store.put(objKey(request.accountName(), containerName, blobName),
+                new StoredObject(so.key(), so.data(), metadata, Instant.now(), etag));
+
+        return Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                .header("ETag", etag)
+                .build();
     }
 
     private Response listBlobs(AzureRequest request, String containerName) {
@@ -264,7 +349,7 @@ public class BlobServiceHandler implements AzureServiceHandler {
                             (long) so.data().length,
                             so.metadata().getOrDefault("Content-Type", "application/octet-stream"),
                             so.metadata().getOrDefault("BlobType", "BlockBlob")
-                    ));
+                    ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null);
                 })
                 .collect(Collectors.toList());
 
@@ -286,5 +371,72 @@ public class BlobServiceHandler implements AzureServiceHandler {
 
     private static String objKey(String accountName, String containerName, String blobName) {
         return accountName + "/" + containerName + "/" + blobName;
+    }
+
+    private static Map<String, String> readUserMetadata(AzureRequest request) {
+        Map<String, String> metadata = new HashMap<>();
+        request.headers().getRequestHeaders().forEach((name, values) -> {
+            if (name.toLowerCase(Locale.ROOT).startsWith("x-ms-meta-") && !values.isEmpty()) {
+                metadata.put(USER_METADATA_PREFIX + name.substring("x-ms-meta-".length()).toLowerCase(Locale.ROOT),
+                        values.get(0));
+            }
+        });
+        return metadata;
+    }
+
+    private static Map<String, String> userMetadata(Map<String, String> storedMetadata) {
+        return storedMetadata.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(USER_METADATA_PREFIX))
+                .collect(Collectors.toMap(
+                        entry -> entry.getKey().substring(USER_METADATA_PREFIX.length()),
+                        Map.Entry::getValue,
+                        (left, right) -> right,
+                        LinkedHashMap::new
+                ));
+    }
+
+    private static void addUserMetadataHeaders(Response.ResponseBuilder rb, Map<String, String> storedMetadata) {
+        userMetadata(storedMetadata).forEach((key, value) -> rb.header("x-ms-meta-" + key, value));
+    }
+
+    private static boolean includes(String include, String value) {
+        if (include == null || include.isBlank()) {
+            return false;
+        }
+        return Arrays.stream(include.split(","))
+                .map(String::trim)
+                .anyMatch(value::equalsIgnoreCase);
+    }
+
+    private static Response validateBlobConditions(AzureRequest request, Optional<StoredObject> object) {
+        String ifMatch = request.headers().getHeaderString(HttpHeaders.IF_MATCH);
+        if (ifMatch != null && object.map(StoredObject::etag).filter(etag -> etagMatches(ifMatch, etag)).isEmpty()) {
+            return new AzureErrorResponse("ConditionNotMet", "The condition specified using HTTP conditional header(s) is not met.")
+                    .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+
+        String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
+        if (ifNoneMatch != null && object.map(StoredObject::etag).filter(etag -> etagMatches(ifNoneMatch, etag)).isPresent()) {
+            return new AzureErrorResponse("ConditionNotMet", "The condition specified using HTTP conditional header(s) is not met.")
+                    .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        return null;
+    }
+
+    private static boolean etagMatches(String condition, String etag) {
+        if ("*".equals(condition.trim())) {
+            return true;
+        }
+        return Arrays.stream(condition.split(","))
+                .map(String::trim)
+                .map(BlobServiceHandler::unquote)
+                .anyMatch(candidate -> candidate.equals(unquote(etag)));
+    }
+
+    private static String unquote(String value) {
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 }

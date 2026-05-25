@@ -1,6 +1,7 @@
 import pytest
 import uuid
-from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
+from azure.core import MatchConditions
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError, ResourceExistsError
 
 
 def make_container_name():
@@ -98,5 +99,55 @@ def test_blob_overwrite(blob_service_client):
     blob.upload_blob(b"updated", overwrite=True)
 
     assert blob.download_blob().readall() == b"updated"
+
+    blob_service_client.delete_container(container_name)
+
+
+def test_blob_metadata_round_trip(blob_service_client):
+    container_name = make_container_name()
+    blob_service_client.create_container(container_name)
+    container = blob_service_client.get_container_client(container_name)
+    blob = container.get_blob_client("metadata.txt")
+
+    blob.upload_blob(b"metadata", metadata={"owner": "compat"}, overwrite=True)
+    assert blob.get_blob_properties().metadata == {"owner": "compat"}
+
+    blob.set_blob_metadata({"owner": "updated", "purpose": "blob-parity"})
+    assert blob.get_blob_properties().metadata == {"owner": "updated", "purpose": "blob-parity"}
+
+    listed = list(container.list_blobs(include=["metadata"]))
+    assert len(listed) == 1
+    assert listed[0].metadata == {"owner": "updated", "purpose": "blob-parity"}
+
+    blob_service_client.delete_container(container_name)
+
+
+def test_blob_range_download(blob_service_client):
+    container_name = make_container_name()
+    blob_service_client.create_container(container_name)
+    container = blob_service_client.get_container_client(container_name)
+    blob = container.get_blob_client("range.txt")
+
+    blob.upload_blob(b"0123456789", overwrite=True)
+
+    assert blob.download_blob(offset=2, length=4).readall() == b"2345"
+
+    blob_service_client.delete_container(container_name)
+
+
+def test_blob_conditional_download_rejects_wrong_etag(blob_service_client):
+    container_name = make_container_name()
+    blob_service_client.create_container(container_name)
+    container = blob_service_client.get_container_client(container_name)
+    blob = container.get_blob_client("conditional.txt")
+
+    blob.upload_blob(b"condition", overwrite=True)
+    etag = blob.get_blob_properties().etag
+
+    assert blob.download_blob(etag=etag, match_condition=MatchConditions.IfNotModified).readall() == b"condition"
+
+    with pytest.raises(HttpResponseError) as exc_info:
+        blob.download_blob(etag="wrong-etag", match_condition=MatchConditions.IfNotModified).readall()
+    assert exc_info.value.status_code == 412
 
     blob_service_client.delete_container(container_name)

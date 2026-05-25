@@ -1,5 +1,5 @@
-.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
-        test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-cosmos \
+.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop require-emulator \
+        test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-blob test-blob-python test-blob-java test-blob-node test-cosmos \
         test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql compat-docker clean
 
@@ -31,6 +31,10 @@ stop:
 	@kill $$(lsof -ti :$(PORT) -P 2>/dev/null) 2>/dev/null || true
 	@until ! lsof -ti :$(PORT) -P > /dev/null 2>&1; do sleep 1; done
 	@echo "Emulator stopped."
+
+require-emulator:
+	@curl -s http://127.0.0.1:$(PORT)/health > /dev/null || \
+		(echo "floci-az emulator is not reachable at http://127.0.0.1:$(PORT). Run 'make run' first, or use 'make test-blob' to start and stop it automatically."; exit 1)
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
 
@@ -92,6 +96,31 @@ test-node-compat:
 test-servicebus-compat:
 	@echo "==> Service Bus Java SDK compatibility tests"
 	cd $(JAVA_DIR) && mvn test -Dtest=ServiceBusCompatibilityTest -q
+
+test-blob-python: require-emulator
+	@echo "==> Blob Storage Python SDK compatibility tests"
+	@cd $(PYTHON_DIR) && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
+	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) ./venv/bin/pytest -q tests/test_blob.py
+
+test-blob-java: require-emulator
+	@echo "==> Blob Storage Java SDK compatibility tests"
+	cd $(JAVA_DIR) && FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) mvn test -Dtest=BlobCompatibilityTest
+
+test-blob-node: require-emulator
+	@echo "==> Blob Storage Node.js SDK compatibility tests"
+	@cd $(NODE_DIR) && \
+	npm install --silent && \
+	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) npm test -- --runTestsByPath tests/blob.test.ts
+
+test-blob:
+	@echo "==> Blob Storage SDK compatibility tests"
+	$(MAKE) run
+	$(MAKE) test-blob-python; \
+	EXIT=$$?; if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-node; EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-java; EXIT=$$?; fi; \
+	$(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-cosmos:
 	@echo "==> Cosmos DB NoSQL (in-memory) compatibility tests"
