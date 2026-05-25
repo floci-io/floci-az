@@ -7,6 +7,10 @@ function queueName(): string {
   return `test-${randomSuffix()}`;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // --- Golden path ---
 
 test("queue lifecycle: create → list → send → receive → delete", async () => {
@@ -80,6 +84,97 @@ test("delete message: removed from queue after explicit delete", async () => {
   const peeked = await queue.peekMessages({ numberOfMessages: 10 });
   expect(peeked.peekedMessageItems).toHaveLength(0);
 
+  await client.deleteQueue(name);
+});
+
+test("queue metadata: create, get properties, and list with metadata", async () => {
+  const name = queueName();
+  const metadata = { owner: "compat", purpose: "queue-parity" };
+  await client.createQueue(name, { metadata });
+
+  const queue = client.getQueueClient(name);
+  const props = await queue.getProperties();
+  expect(props.metadata).toMatchObject(metadata);
+
+  const listed: Array<{ name: string; metadata?: Record<string, string> }> = [];
+  for await (const q of client.listQueues({ prefix: name, includeMetadata: true })) {
+    listed.push(q);
+  }
+  expect(listed).toHaveLength(1);
+  expect(listed[0].metadata).toMatchObject(metadata);
+
+  await client.deleteQueue(name);
+});
+
+test("send message visibility timeout: hidden first, visible later", async () => {
+  const name = queueName();
+  await client.createQueue(name);
+  const queue = client.getQueueClient(name);
+
+  await queue.sendMessage("delayed", { visibilityTimeout: 1, messageTimeToLive: 5 });
+
+  let peeked = await queue.peekMessages({ numberOfMessages: 1 });
+  expect(peeked.peekedMessageItems).toHaveLength(0);
+
+  await delay(2000);
+  peeked = await queue.peekMessages({ numberOfMessages: 1 });
+  expect(peeked.peekedMessageItems).toHaveLength(1);
+  expect(peeked.peekedMessageItems[0].messageText).toBe("delayed");
+
+  await client.deleteQueue(name);
+});
+
+test("message TTL: expired messages are not visible", async () => {
+  const name = queueName();
+  await client.createQueue(name);
+  const queue = client.getQueueClient(name);
+
+  await queue.sendMessage("short-lived", { messageTimeToLive: 1 });
+
+  await delay(2000);
+  const peeked = await queue.peekMessages({ numberOfMessages: 1 });
+  expect(peeked.peekedMessageItems).toHaveLength(0);
+
+  await client.deleteQueue(name);
+});
+
+test("wrong pop receipt: delete is rejected", async () => {
+  const name = queueName();
+  await client.createQueue(name);
+  const queue = client.getQueueClient(name);
+
+  await queue.sendMessage("guarded");
+  const recv = await queue.receiveMessages({ numberOfMessages: 1 });
+  const msg = recv.receivedMessageItems[0];
+
+  await expect(queue.deleteMessage(msg.messageId, "wrong-receipt")).rejects.toMatchObject({
+    statusCode: 400,
+  });
+
+  await queue.deleteMessage(msg.messageId, msg.popReceipt);
+  await client.deleteQueue(name);
+});
+
+test("update message: replaces content and rotates pop receipt", async () => {
+  const name = queueName();
+  await client.createQueue(name);
+  const queue = client.getQueueClient(name);
+
+  await queue.sendMessage("before");
+  const recv = await queue.receiveMessages({ numberOfMessages: 1 });
+  const msg = recv.receivedMessageItems[0];
+  const updated = await queue.updateMessage(msg.messageId, msg.popReceipt, "after", 0);
+
+  await expect(queue.deleteMessage(msg.messageId, msg.popReceipt)).rejects.toMatchObject({
+    statusCode: 400,
+  });
+
+  const peeked = await queue.peekMessages({ numberOfMessages: 1 });
+  expect(peeked.peekedMessageItems).toHaveLength(1);
+  expect(peeked.peekedMessageItems[0].messageText).toBe("after");
+
+  expect(updated.popReceipt).toBeDefined();
+  await queue.deleteMessage(msg.messageId, updated.popReceipt!);
   await client.deleteQueue(name);
 });
 

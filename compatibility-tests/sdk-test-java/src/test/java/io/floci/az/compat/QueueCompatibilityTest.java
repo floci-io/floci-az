@@ -4,11 +4,17 @@ import com.azure.storage.queue.QueueClient;
 import com.azure.storage.queue.QueueServiceClient;
 import com.azure.storage.queue.QueueServiceClientBuilder;
 import com.azure.storage.queue.models.PeekedMessageItem;
+import com.azure.storage.queue.models.QueueItem;
 import com.azure.storage.queue.models.QueueMessageItem;
 import com.azure.storage.queue.models.QueueStorageException;
+import com.azure.storage.queue.models.QueuesSegmentOptions;
+import com.azure.storage.queue.models.UpdateMessageResult;
+import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -108,6 +114,98 @@ class QueueCompatibilityTest {
 
         assertEquals(0, queue.peekMessages(10, null, null).stream().count());
 
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("queue metadata: create, get properties, and list with metadata")
+    void queueMetadataRoundTrip() {
+        String name = queueName();
+        Map<String, String> metadata = Map.of("owner", "compat", "purpose", "queue-parity");
+
+        QueueClient queue = client.createQueueWithResponse(name, metadata, null, Context.NONE).getValue();
+
+        assertEquals(metadata, queue.getProperties().getMetadata());
+
+        QueuesSegmentOptions options = new QueuesSegmentOptions()
+            .setPrefix(name)
+            .setIncludeMetadata(true);
+        List<QueueItem> queues = client.listQueues(options, null, Context.NONE).stream().toList();
+        assertEquals(1, queues.size());
+        assertEquals(metadata, queues.get(0).getMetadata());
+
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("send message visibility timeout: hidden first, visible later")
+    void sendMessageVisibilityTimeout() throws Exception {
+        String name = queueName();
+        QueueClient queue = client.createQueue(name);
+
+        queue.sendMessageWithResponse("delayed", Duration.ofSeconds(1), Duration.ofSeconds(5), null, Context.NONE);
+
+        assertEquals(0, queue.peekMessages(1, null, null).stream().count());
+        Thread.sleep(2000);
+
+        List<PeekedMessageItem> peeked = queue.peekMessages(1, null, null).stream().toList();
+        assertEquals(1, peeked.size());
+        assertEquals("delayed", peeked.get(0).getMessageText());
+
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("message TTL: expired messages are not visible")
+    void messageTtlExpiration() throws Exception {
+        String name = queueName();
+        QueueClient queue = client.createQueue(name);
+
+        queue.sendMessageWithResponse("short-lived", null, Duration.ofSeconds(1), null, Context.NONE);
+
+        Thread.sleep(2000);
+        assertEquals(0, queue.peekMessages(1, null, null).stream().count());
+
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("wrong pop receipt: delete is rejected")
+    void wrongPopReceiptRejected() {
+        String name = queueName();
+        QueueClient queue = client.createQueue(name);
+
+        queue.sendMessage("guarded");
+        QueueMessageItem message = queue.receiveMessages(1).stream().toList().get(0);
+
+        QueueStorageException ex = assertThrows(QueueStorageException.class,
+            () -> queue.deleteMessage(message.getMessageId(), "wrong-receipt"));
+        assertEquals(400, ex.getStatusCode());
+
+        queue.deleteMessage(message.getMessageId(), message.getPopReceipt());
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("update message: replaces content and rotates pop receipt")
+    void updateMessageReplacesContentAndRotatesPopReceipt() {
+        String name = queueName();
+        QueueClient queue = client.createQueue(name);
+
+        queue.sendMessage("before");
+        QueueMessageItem message = queue.receiveMessages(1).stream().toList().get(0);
+        UpdateMessageResult updated = queue.updateMessage(
+            message.getMessageId(), message.getPopReceipt(), "after", Duration.ZERO);
+
+        QueueStorageException ex = assertThrows(QueueStorageException.class,
+            () -> queue.deleteMessage(message.getMessageId(), message.getPopReceipt()));
+        assertEquals(400, ex.getStatusCode());
+
+        List<PeekedMessageItem> peeked = queue.peekMessages(1, null, null).stream().toList();
+        assertEquals(1, peeked.size());
+        assertEquals("after", peeked.get(0).getMessageText());
+
+        queue.deleteMessage(message.getMessageId(), updated.getPopReceipt());
         client.deleteQueue(name);
     }
 

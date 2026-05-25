@@ -32,6 +32,9 @@ public class QueueServiceHandler implements AzureServiceHandler {
     private static final String NS_PREFIX = "__ns__:";
     private static final StoredObject NS_SENTINEL =
             new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
+    private static final long DEFAULT_MESSAGE_TTL_SECONDS = 604800;
+    private static final long DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 30;
+    private static final String NEVER_EXPIRES = "Fri, 31 Dec 9999 23:59:59 GMT";
 
     private final StorageBackend<String, StoredObject> store;
     private final XmlMapper xmlMapper = new XmlMapper();
@@ -73,7 +76,11 @@ public class QueueServiceHandler implements AzureServiceHandler {
             String subPath = parts.length > 1 ? parts[1] : "";
 
             if (subPath.isEmpty()) {
-                if ("PUT".equalsIgnoreCase(method)) {
+                if ("PUT".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
+                    response = setQueueMetadata(request, queueName);
+                } else if ("GET".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
+                    response = getQueueMetadata(request, queueName);
+                } else if ("PUT".equalsIgnoreCase(method)) {
                     response = createQueue(request, queueName);
                 } else if ("DELETE".equalsIgnoreCase(method)) {
                     response = deleteQueue(request, queueName);
@@ -86,6 +93,8 @@ public class QueueServiceHandler implements AzureServiceHandler {
                     response = putMessage(request, queueName);
                 } else if ("GET".equalsIgnoreCase(method)) {
                     response = getMessages(request, queueName, "true".equals(query.get("peekonly")));
+                } else if ("PUT".equalsIgnoreCase(method) && parts.length > 2) {
+                    response = updateMessage(request, queueName, parts[2], query.get("popreceipt"));
                 } else if ("DELETE".equalsIgnoreCase(method)) {
                     if (parts.length > 2) {
                         response = deleteMessage(request, queueName, parts[2], query.get("popreceipt"));
@@ -110,7 +119,12 @@ public class QueueServiceHandler implements AzureServiceHandler {
     }
 
     private Response createQueue(AzureRequest request, String queueName) {
-        store.put(nsKey(request.accountName(), queueName), NS_SENTINEL);
+        String key = nsKey(request.accountName(), queueName);
+        if (store.get(key).isPresent()) {
+            return Response.status(Response.Status.NO_CONTENT).build();
+        }
+        store.put(key,
+                new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
         return Response.status(Response.Status.CREATED).build();
     }
 
@@ -127,11 +141,17 @@ public class QueueServiceHandler implements AzureServiceHandler {
     private Response listQueues(AzureRequest request) {
         String prefix = request.queryParams().getOrDefault("prefix", "");
         String nsFilter = NS_PREFIX + request.accountName() + "/" + prefix;
+        boolean includeMetadata = includes(request.queryParams().get("include"), "metadata");
 
         List<QueueModels.QueueItem> queues = store.keys().stream()
                 .filter(k -> k.startsWith(nsFilter))
-                .map(k -> k.substring(NS_PREFIX.length() + request.accountName().length() + 1))
-                .map(name -> new QueueModels.QueueItem(name, Collections.emptyMap()))
+                .map(k -> {
+                    String name = k.substring(NS_PREFIX.length() + request.accountName().length() + 1);
+                    Map<String, String> metadata = includeMetadata
+                            ? store.get(k).map(StoredObject::metadata).orElseGet(Collections::emptyMap)
+                            : Collections.emptyMap();
+                    return new QueueModels.QueueItem(name, metadata);
+                })
                 .collect(Collectors.toList());
 
         QueueModels.QueueListResponse response = new QueueModels.QueueListResponse(
@@ -142,24 +162,86 @@ public class QueueServiceHandler implements AzureServiceHandler {
         return Response.ok(XmlUtils.toXml(response)).type(MediaType.APPLICATION_XML).build();
     }
 
+    private Response getQueueMetadata(AzureRequest request, String queueName) {
+        Optional<StoredObject> queue = store.get(nsKey(request.accountName(), queueName));
+        if (queue.isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Response.ResponseBuilder rb = Response.ok()
+                .header("x-ms-approximate-messages-count", approximateVisibleMessageCount(request, queueName));
+        queue.get().metadata().forEach((name, value) -> rb.header("x-ms-meta-" + name, value));
+        return rb.build();
+    }
+
+    private Response setQueueMetadata(AzureRequest request, String queueName) {
+        String key = nsKey(request.accountName(), queueName);
+        Optional<StoredObject> queue = store.get(key);
+        if (queue.isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        store.put(key, new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
+        return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
     private Response putMessage(AzureRequest request, String queueName) {
+        if (store.get(nsKey(request.accountName(), queueName)).isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
         try {
             QueueModels.QueueMessageRequest msgReq = xmlMapper.readValue(request.bodyStream(), QueueModels.QueueMessageRequest.class);
+            Instant now = Instant.now();
+            long visibilityTimeoutSecs;
+            Long ttlSecs;
+            try {
+                visibilityTimeoutSecs = parseLongQuery(request, "visibilitytimeout", 0);
+                ttlSecs = parseMessageTtl(request);
+            } catch (NumberFormatException e) {
+                return new AzureErrorResponse("InvalidQueryParameterValue",
+                        "visibilitytimeout and messagettl must be valid integers.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            if (visibilityTimeoutSecs < 0) {
+                return new AzureErrorResponse("OutOfRangeQueryParameterValue",
+                        "The visibilitytimeout parameter must be greater than or equal to 0.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+
+            if (ttlSecs != null && ttlSecs <= visibilityTimeoutSecs) {
+                return new AzureErrorResponse("OutOfRangeQueryParameterValue",
+                        "The messagettl parameter must be greater than visibilitytimeout.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+
             String messageId = UUID.randomUUID().toString();
-            String insertionTime = RFC1123_DATE_TIME.format(Instant.now());
-            String expirationTime = RFC1123_DATE_TIME.format(Instant.now().plusSeconds(604800));
+            String insertionTime = RFC1123_DATE_TIME.format(now);
+            Instant expirationInstant = ttlSecs == null ? null : now.plusSeconds(ttlSecs);
+            String expirationTime = expirationInstant == null ? NEVER_EXPIRES : RFC1123_DATE_TIME.format(expirationInstant);
             String popReceipt = UUID.randomUUID().toString();
+            Instant visibleAt = now.plusSeconds(visibilityTimeoutSecs);
 
             Map<String, String> metadata = new HashMap<>();
             metadata.put("InsertionTime", insertionTime);
+            metadata.put("_insertionEpoch", String.valueOf(now.getEpochSecond()));
+            if (expirationInstant != null) {
+                metadata.put("_expirationEpoch", String.valueOf(expirationInstant.getEpochSecond()));
+            }
             metadata.put("MessageText", msgReq.MessageText());
+            metadata.put("PopReceipt", popReceipt);
+            metadata.put("DequeueCount", "0");
+            metadata.put("_visibleAt", String.valueOf(visibleAt.getEpochSecond()));
 
             String key = System.currentTimeMillis() + "-" + messageId;
             store.put(objKey(request.accountName(), queueName, key),
                     new StoredObject(key, msgReq.MessageText().getBytes(), metadata, Instant.now(), messageId));
 
             QueueModels.QueueMessageItem item = new QueueModels.QueueMessageItem(
-                    messageId, insertionTime, expirationTime, popReceipt, insertionTime, 0, msgReq.MessageText()
+                    messageId, insertionTime, expirationTime, popReceipt,
+                    RFC1123_DATE_TIME.format(visibleAt), 0, msgReq.MessageText()
             );
 
             return Response.status(Response.Status.CREATED)
@@ -192,7 +274,12 @@ public class QueueServiceHandler implements AzureServiceHandler {
 
         long visibilityTimeoutSecs;
         try {
-            visibilityTimeoutSecs = Long.parseLong(request.queryParams().getOrDefault("visibilitytimeout", "30"));
+            visibilityTimeoutSecs = Long.parseLong(request.queryParams().getOrDefault("visibilitytimeout", String.valueOf(DEFAULT_VISIBILITY_TIMEOUT_SECONDS)));
+            if (visibilityTimeoutSecs < 1) {
+                return new AzureErrorResponse("OutOfRangeQueryParameterValue",
+                        "The visibilitytimeout parameter must be greater than 0.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
         } catch (NumberFormatException e) {
             visibilityTimeoutSecs = 30;
         }
@@ -212,6 +299,7 @@ public class QueueServiceHandler implements AzureServiceHandler {
                 meta.put("_visibleAt", String.valueOf(hiddenUntil.getEpochSecond()));
                 int dequeueCount = Integer.parseInt(meta.getOrDefault("DequeueCount", "0")) + 1;
                 meta.put("DequeueCount", String.valueOf(dequeueCount));
+                meta.put("PopReceipt", UUID.randomUUID().toString());
                 store.put(objKey(request.accountName(), queueName, so.key()),
                         new StoredObject(so.key(), so.data(), meta, so.lastModified(), so.etag()));
             }
@@ -221,16 +309,19 @@ public class QueueServiceHandler implements AzureServiceHandler {
         final long capturedVt = visibilityTimeoutSecs;
         List<QueueModels.QueueMessageItem> messages = visible.stream()
                 .map(so -> {
-                    Map<String, String> meta = so.metadata();
+                    StoredObject current = peekOnly
+                            ? so
+                            : store.get(objKey(request.accountName(), queueName, so.key())).orElse(so);
+                    Map<String, String> meta = current.metadata();
                     int dequeueCount = peekOnly
                             ? Integer.parseInt(meta.getOrDefault("DequeueCount", "0"))
-                            : Integer.parseInt(meta.getOrDefault("DequeueCount", "0")) + 1;
+                            : Integer.parseInt(meta.getOrDefault("DequeueCount", "0"));
                     return new QueueModels.QueueMessageItem(
                             so.etag(),
                             meta.get("InsertionTime"),
-                            RFC1123_DATE_TIME.format(capturedNow.plusSeconds(604800)),
-                            UUID.randomUUID().toString(),
-                            RFC1123_DATE_TIME.format(capturedNow.plusSeconds(capturedVt)),
+                            expirationTime(meta),
+                            peekOnly ? null : meta.get("PopReceipt"),
+                            peekOnly ? null : RFC1123_DATE_TIME.format(capturedNow.plusSeconds(capturedVt)),
                             dequeueCount,
                             new String(so.data())
                     );
@@ -241,6 +332,9 @@ public class QueueServiceHandler implements AzureServiceHandler {
     }
 
     private boolean isVisible(StoredObject so, Instant now) {
+        if (isExpired(so, now)) {
+            return false;
+        }
         String visibleAt = so.metadata().get("_visibleAt");
         if (visibleAt == null) return true;
         try {
@@ -251,12 +345,89 @@ public class QueueServiceHandler implements AzureServiceHandler {
     }
 
     private Response deleteMessage(AzureRequest request, String queueName, String messageId, String popReceipt) {
+        if (store.get(nsKey(request.accountName(), queueName)).isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (popReceipt == null || popReceipt.isBlank()) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "The popreceipt query parameter is required.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
         String keyPrefix = objKey(request.accountName(), queueName, "");
-        store.scan(k -> k.startsWith(keyPrefix)).stream()
+        Optional<StoredObject> message = store.scan(k -> k.startsWith(keyPrefix)).stream()
                 .filter(so -> messageId.equals(so.etag()))
-                .findFirst()
-                .ifPresent(so -> store.delete(objKey(request.accountName(), queueName, so.key())));
+                .findFirst();
+        if (message.isEmpty() || isExpired(message.get(), Instant.now())) {
+            return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (!popReceipt.equals(message.get().metadata().get("PopReceipt"))) {
+            return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        store.delete(objKey(request.accountName(), queueName, message.get().key()));
         return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    private Response updateMessage(AzureRequest request, String queueName, String messageId, String popReceipt) {
+        if (store.get(nsKey(request.accountName(), queueName)).isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (popReceipt == null || popReceipt.isBlank()) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "The popreceipt query parameter is required.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        long visibilityTimeoutSecs;
+        try {
+            visibilityTimeoutSecs = Long.parseLong(request.queryParams().getOrDefault("visibilitytimeout", String.valueOf(DEFAULT_VISIBILITY_TIMEOUT_SECONDS)));
+            if (visibilityTimeoutSecs < 0) {
+                return new AzureErrorResponse("OutOfRangeQueryParameterValue",
+                        "The visibilitytimeout parameter must be greater than or equal to 0.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+        } catch (NumberFormatException e) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "visibilitytimeout must be a valid integer.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        String keyPrefix = objKey(request.accountName(), queueName, "");
+        Optional<StoredObject> existing = store.scan(k -> k.startsWith(keyPrefix)).stream()
+                .filter(so -> messageId.equals(so.etag()))
+                .findFirst();
+        if (existing.isEmpty() || isExpired(existing.get(), Instant.now())) {
+            return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (!popReceipt.equals(existing.get().metadata().get("PopReceipt"))) {
+            return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        try {
+            QueueModels.QueueMessageRequest msgReq = xmlMapper.readValue(request.bodyStream(), QueueModels.QueueMessageRequest.class);
+            Instant visibleAt = Instant.now().plusSeconds(visibilityTimeoutSecs);
+            String newPopReceipt = UUID.randomUUID().toString();
+            Map<String, String> meta = new HashMap<>(existing.get().metadata());
+            meta.put("MessageText", msgReq.MessageText());
+            meta.put("PopReceipt", newPopReceipt);
+            meta.put("_visibleAt", String.valueOf(visibleAt.getEpochSecond()));
+
+            store.put(objKey(request.accountName(), queueName, existing.get().key()),
+                    new StoredObject(existing.get().key(), msgReq.MessageText().getBytes(), meta,
+                            Instant.now(), existing.get().etag()));
+
+            return Response.status(Response.Status.NO_CONTENT)
+                    .header("x-ms-popreceipt", newPopReceipt)
+                    .header("x-ms-time-next-visible", RFC1123_DATE_TIME.format(visibleAt))
+                    .build();
+        } catch (IOException e) {
+            return Response.serverError().build();
+        }
     }
 
     private Response clearMessages(AzureRequest request, String queueName) {
@@ -266,6 +437,81 @@ public class QueueServiceHandler implements AzureServiceHandler {
                 .toList()
                 .forEach(store::delete);
         return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    private long approximateVisibleMessageCount(AzureRequest request, String queueName) {
+        String keyPrefix = objKey(request.accountName(), queueName, "");
+        Instant now = Instant.now();
+        return store.scan(k -> k.startsWith(keyPrefix)).stream()
+                .filter(so -> isVisible(so, now))
+                .count();
+    }
+
+    private static Map<String, String> readMetadataHeaders(AzureRequest request) {
+        Map<String, String> metadata = new HashMap<>();
+        request.headers().getRequestHeaders().forEach((name, values) -> {
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("x-ms-meta-") && !values.isEmpty()) {
+                metadata.put(name.substring("x-ms-meta-".length()), values.get(0));
+            }
+        });
+        return metadata;
+    }
+
+    private static boolean includes(String include, String value) {
+        if (include == null || include.isBlank()) {
+            return false;
+        }
+        return Arrays.stream(include.split(","))
+                .map(String::trim)
+                .anyMatch(item -> item.equalsIgnoreCase(value));
+    }
+
+    private static long parseLongQuery(AzureRequest request, String name, long defaultValue) {
+        String value = request.queryParams().get(name);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        return Long.parseLong(value);
+    }
+
+    private static Long parseMessageTtl(AzureRequest request) {
+        String value = request.queryParams().get("messagettl");
+        if (value == null || value.isBlank()) {
+            return DEFAULT_MESSAGE_TTL_SECONDS;
+        }
+        long ttl = Long.parseLong(value);
+        if (ttl == -1) {
+            return null;
+        }
+        if (ttl < 1) {
+            throw new NumberFormatException("messagettl must be positive or -1");
+        }
+        return ttl;
+    }
+
+    private static boolean isExpired(StoredObject so, Instant now) {
+        String expirationEpoch = so.metadata().get("_expirationEpoch");
+        if (expirationEpoch == null) {
+            return false;
+        }
+        try {
+            return !Instant.ofEpochSecond(Long.parseLong(expirationEpoch)).isAfter(now);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static String expirationTime(Map<String, String> metadata) {
+        String expirationEpoch = metadata.get("_expirationEpoch");
+        if (expirationEpoch == null) {
+            return NEVER_EXPIRES;
+        }
+        try {
+            return RFC1123_DATE_TIME.format(Instant.ofEpochSecond(Long.parseLong(expirationEpoch)));
+        } catch (NumberFormatException e) {
+            return NEVER_EXPIRES;
+        }
     }
 
     public void clearAll() {
