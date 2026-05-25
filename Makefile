@@ -18,7 +18,9 @@ build:
 # ── Emulator: plain start / stop ──────────────────────────────────────────────
 
 run:
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color \
+		"-Dfloci-az.tls.enabled=true" \
+		> emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@echo "Waiting for emulator to start on port $(PORT)..."
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up!"
@@ -191,12 +193,16 @@ compat-docker:
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		floci-az-compat-java
 
-test: build
-	$(MVN) test
-	$(MAKE) run
+test-compat:
+	@echo "==> Running all SDK compatibility tests (emulator must be running)"
 	$(MAKE) test-python
 	$(MAKE) test-java-compat
 	$(MAKE) test-node-compat
+
+test: build
+	$(MVN) test
+	$(MAKE) run
+	$(MAKE) test-compat
 	$(MAKE) stop
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────

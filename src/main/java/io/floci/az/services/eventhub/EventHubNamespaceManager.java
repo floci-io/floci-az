@@ -41,12 +41,13 @@ public class EventHubNamespaceManager {
     /**
      * Immutable snapshot of a running namespace.
      *
-     * @param containerId  Docker container ID
-     * @param amqpHostPort host-side port for plain AMQP
-     * @param amqpsHostPort host-side port for TLS AMQP
-     * @param tlsCertPem   PEM-encoded self-signed cert for TLS AMQP
+     * @param containerId  Docker container ID (null when mocked)
+     * @param amqpHostPort host-side port for plain AMQP (0 when mocked)
+     * @param amqpsHostPort host-side port for TLS AMQP (0 when mocked)
+     * @param tlsCertPem   PEM-encoded self-signed cert for TLS AMQP (empty when mocked)
+     * @param mocked       true when no real Artemis broker is backing this namespace
      */
-    public record NamespaceState(String containerId, int amqpHostPort, int amqpsHostPort, String tlsCertPem) {}
+    public record NamespaceState(String containerId, int amqpHostPort, int amqpsHostPort, String tlsCertPem, boolean mocked) {}
 
     private final ConcurrentHashMap<String, NamespaceState> namespaces = new ConcurrentHashMap<>();
 
@@ -127,11 +128,19 @@ public class EventHubNamespaceManager {
         });
 
         NamespaceState state = new NamespaceState(
-                containerId, amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem());
+                containerId, amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem(), false);
         namespaces.put(namespaceName, state);
 
         LOG.infov("Event Hubs namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
                 namespaceName, amqpEndpoint, amqpsEndpoint);
+        return state;
+    }
+
+    /** Registers a mocked namespace with no backing broker — management API only. */
+    public NamespaceState registerMockedNamespace(String namespaceName) {
+        NamespaceState state = new NamespaceState(null, 0, 0, "", true);
+        namespaces.put(namespaceName, state);
+        LOG.infov("Registered mocked Event Hubs namespace ''{0}'' (no AMQP broker)", namespaceName);
         return state;
     }
 
@@ -145,8 +154,10 @@ public class EventHubNamespaceManager {
         if (state == null) {
             return false;
         }
-        lifecycleManager.stopAndRemove(state.containerId(), null);
-        LOG.infov("Stopped Artemis container for namespace ''{0}''", namespaceName);
+        if (!state.mocked() && state.containerId() != null) {
+            lifecycleManager.stopAndRemove(state.containerId(), null);
+            LOG.infov("Stopped Artemis container for namespace ''{0}''", namespaceName);
+        }
         return true;
     }
 

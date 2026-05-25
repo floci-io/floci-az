@@ -33,7 +33,10 @@ class EventHubCompatibilityTest {
 
     @BeforeAll
     void setup() throws Exception {
+        EmulatorConfig.assumeEmulatorRunning();
         EmulatorConfig.ensureEventHubNamespace();
+        Assumptions.assumeTrue(!EmulatorConfig.eventHubMocked,
+                "Event Hubs is in mocked mode (no Artemis broker) — AMQP tests skipped");
         factory = EmulatorConfig.buildAmqpConnectionFactory();
     }
 

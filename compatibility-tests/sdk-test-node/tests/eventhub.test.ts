@@ -5,6 +5,9 @@
  * delivery semantics. Each receiver connects to the event hub address and
  * Artemis assigns it an independent subscription queue — this mirrors the
  * consumer-group isolation model used by the Python/uamqp tests.
+ *
+ * Tests are skipped automatically when the emulator runs in mocked mode
+ * (no Artemis broker — namespace response includes "mocked": true).
  */
 import { Connection, AwaitableSender, Receiver, ReceiverEvents } from "rhea-promise";
 
@@ -19,6 +22,8 @@ const SEND_ADDR = `${NS}/${HUB}`;
 
 // ---- setup ------------------------------------------------------------------
 
+let eventHubMocked = false;
+
 beforeAll(async () => {
   const url  = `${BASE}/${ACCOUNT}-eventhub/namespaces/${NS}`;
   const body = JSON.stringify({ amqpPort: PORT, amqpTlsPort: TLS_PORT });
@@ -31,6 +36,10 @@ beforeAll(async () => {
   if (!res.ok && res.status !== 409) {
     throw new Error(`Failed to start Event Hubs namespace: HTTP ${res.status}`);
   }
+  try {
+    const json = await res.json() as Record<string, unknown>;
+    eventHubMocked = json["mocked"] === true;
+  } catch { /* ignore parse errors */ }
 }, 130_000);
 
 // ---- helpers ----------------------------------------------------------------
@@ -65,6 +74,7 @@ function collectMessages(receiver: Receiver): string[] {
 // ---- tests ------------------------------------------------------------------
 
 test("send and receive messages", async () => {
+  if (eventHubMocked) return;
   const payloads = ["alpha", "beta", "gamma"].map((p) => `${p}-${Date.now()}`);
 
   const conn = await openConn();
@@ -86,6 +96,7 @@ test("send and receive messages", async () => {
 }, 30_000);
 
 test("high-throughput: 50 messages delivered", async () => {
+  if (eventHubMocked) return;
   const payloads = Array.from({ length: 50 }, (_, i) => `bulk-${i}-${Date.now()}`);
 
   const conn = await openConn();
@@ -107,6 +118,7 @@ test("high-throughput: 50 messages delivered", async () => {
 }, 30_000);
 
 test("two independent receivers both get all messages (multicast)", async () => {
+  if (eventHubMocked) return;
   const payloads = ["mc-1", "mc-2", "mc-3"].map((p) => `${p}-${Date.now()}`);
 
   // Each receiver gets its own Artemis subscription queue — multicast delivers
@@ -140,6 +152,7 @@ test("two independent receivers both get all messages (multicast)", async () => 
 }, 30_000);
 
 test("receiver offsets are independent across connections", async () => {
+  if (eventHubMocked) return;
   const payloads = ["off-1", "off-2", "off-3"].map((p) => `${p}-${Date.now()}`);
 
   const connA = await openConn();

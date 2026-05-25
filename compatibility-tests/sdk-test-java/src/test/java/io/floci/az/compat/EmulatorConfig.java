@@ -36,6 +36,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -68,34 +71,73 @@ public final class EmulatorConfig {
         ACCOUNT, DEV_KEY, BASE, ACCOUNT);
 
     /**
-     * Builds a CosmosClient pointing at the floci-az emulator over HTTPS (port 4578).
+     * Builds a CosmosClient pointing at the floci-az emulator over HTTPS on the same port (4577).
      *
-     * The azure-cosmos Java SDK always enforces TLS in gateway mode, so the emulator
-     * must expose an HTTPS endpoint.  We disable certificate validation so the
-     * self-signed cert is accepted without importing it into a trust store.
+     * The azure-cosmos Java SDK always enforces TLS in gateway mode. floci-az serves both HTTP
+     * and HTTPS on port 4577 via a protocol-sniffing proxy when FLOCI_AZ_TLS_ENABLED=true.
+     *
+     * The emulator exposes its current TLS certificate (static or self-signed) via
+     * {@code GET /_floci-az/tls-cert}. We fetch it, write it to a temp PKCS12 truststore,
+     * and set {@code javax.net.ssl.*} system properties so Reactor Netty (JDK SSL mode,
+     * enabled via {@code -Dio.netty.handler.ssl.noOpenSsl=true} in the surefire argLine)
+     * picks up the truststore when building its SSL context.
      */
     static CosmosClient buildCosmosClient() {
+        try {
+            installEmulatorTlsCert();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to install emulator TLS certificate", e);
+        }
         // The Java Cosmos SDK (gateway mode) constructs request URLs from the
         // scheme+host+port of the endpoint, ignoring the path component.
-        // floci-az normally uses path-based routing (/devstoreaccount1-cosmos/…),
-        // but that is incompatible with the Java SDK's URL-building logic.
-        //
-        // Instead we point the SDK at the bare HTTPS root (https://<host>:4578)
-        // and handle root-level Cosmos paths (/dbs, /colls, /) in the routing
-        // filter on the server side, mapping them to the default account.
-        //
-        // TLS note: the SDK enforces TLS in gateway mode and cannot use plain HTTP.
-        // The emulator uses a self-signed cert with SANs for localhost AND the Docker
-        // service name "floci-az" (used in CI). The cert is bundled in test resources
-        // and added to the JVM trust store via javax.net.ssl.* surefire properties, so
-        // hostname verification and chain validation both succeed in all environments.
-        String httpsBase = BASE.replace("http://", "https://").replace(":4577", ":4578");
+        // floci-az uses path-based routing (/devstoreaccount1-cosmos/…) but the routing
+        // filter also handles root-level Cosmos paths (/dbs, /colls, /) mapping them
+        // to the default account, which is what the SDK produces.
+        String httpsBase = BASE.replace("http://", "https://");
         return new CosmosClientBuilder()
-                .endpoint(httpsBase)   // e.g. https://localhost:4578 or https://floci-az:4578
+                .endpoint(httpsBase)   // e.g. https://localhost:4577 or https://floci-az:4577
                 .key(COSMOS_KEY)
                 .gatewayMode()
                 .endpointDiscoveryEnabled(false)
                 .buildClient();
+    }
+
+    /**
+     * Fetches the emulator's TLS certificate PEM from {@code GET {BASE}/_floci-az/tls-cert},
+     * imports it into a temp PKCS12 KeyStore, and sets {@code javax.net.ssl.trustStore*}
+     * system properties so Reactor Netty (with JDK SSL) trusts the self-signed cert.
+     */
+    static void installEmulatorTlsCert() throws Exception {
+        String certUrl = BASE + "/_floci/tls-cert";
+        HttpURLConnection conn = (HttpURLConnection) URI.create(certUrl).toURL().openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(5_000);
+        int status = conn.getResponseCode();
+        if (status != 200) {
+            return; // TLS not enabled or cert not available — skip truststore setup
+        }
+        String pem = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (pem.isBlank()) {
+            return;
+        }
+
+        X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509")
+                .generateCertificate(new ByteArrayInputStream(pem.getBytes(StandardCharsets.UTF_8)));
+
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("floci-az", cert);
+
+        var tmp = Files.createTempFile("floci-az-trust-", ".p12");
+        tmp.toFile().deleteOnExit();
+        try (var os = Files.newOutputStream(tmp)) {
+            ks.store(os, "changeit".toCharArray());
+        }
+
+        System.setProperty("javax.net.ssl.trustStore", tmp.toAbsolutePath().toString());
+        System.setProperty("javax.net.ssl.trustStorePassword", "changeit");
+        System.setProperty("javax.net.ssl.trustStoreType", "PKCS12");
     }
 
     /**
@@ -150,8 +192,18 @@ public final class EmulatorConfig {
         System.getenv().getOrDefault("EVENTHUB_NAME", "eh1");
 
     /**
+     * True when the emulator is in mocked Event Hubs mode (no Artemis broker started).
+     * AMQP tests should be skipped when this is true.
+     * Set by {@link #ensureEventHubNamespace()}.
+     */
+    static boolean eventHubMocked = false;
+
+    /**
      * Starts the default Event Hubs namespace on-demand via the floci-az management API.
      * Idempotent: returns 200 if the namespace is already running.
+     *
+     * Reads {@code mocked} from the JSON response and stores it in {@link #eventHubMocked}.
+     * When mocked, AMQP data-plane tests should be skipped via {@code Assumptions.assumeTrue}.
      */
     static void ensureEventHubNamespace() throws Exception {
         String url = BASE + "/" + ACCOUNT + "-eventhub/namespaces/" + EVENTHUB_NAMESPACE;
@@ -171,6 +223,17 @@ public final class EmulatorConfig {
         if (status != 200 && status != 201) {
             throw new RuntimeException(
                     "Failed to start Event Hubs namespace '" + EVENTHUB_NAMESPACE + "', HTTP " + status);
+        }
+
+        String responseBody = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> json = mapper.readValue(responseBody, Map.class);
+            Object mockedValue = json.get("mocked");
+            eventHubMocked = Boolean.TRUE.equals(mockedValue);
+        } catch (Exception e) {
+            // If we can't parse the response, leave eventHubMocked as false
         }
     }
 
@@ -285,11 +348,11 @@ public final class EmulatorConfig {
     }
 
     /**
-     * Installs a trust-all TrustManager into the JVM's default SSLContext so that
-     * proton-j (used by the Azure Service Bus SDK) accepts the Artemis self-signed cert.
-     * Acceptable for a local emulator — never use in production.
+     * Installs a trust-all TrustManager into the JVM's default SSLContext.
+     * Used for local emulator connections where self-signed certs are expected.
+     * Acceptable for test-only code — never use in production.
      */
-    static void installArtemisServiceBusCert(String certPem) throws Exception {
+    static void installTrustAll() throws Exception {
         TrustManager trustAll = new X509TrustManager() {
             public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
             public void checkClientTrusted(X509Certificate[] chain, String authType) {}
@@ -298,6 +361,14 @@ public final class EmulatorConfig {
         SSLContext ctx = SSLContext.getInstance("TLS");
         ctx.init(null, new TrustManager[]{trustAll}, null);
         SSLContext.setDefault(ctx);
+    }
+
+    /**
+     * Installs a trust-all TrustManager into the JVM's default SSLContext so that
+     * proton-j (used by the Azure Service Bus SDK) accepts the Artemis self-signed cert.
+     */
+    static void installArtemisServiceBusCert(String certPem) throws Exception {
+        installTrustAll();
     }
 
     /**

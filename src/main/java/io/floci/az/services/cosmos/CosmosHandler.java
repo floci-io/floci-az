@@ -146,19 +146,14 @@ public class CosmosHandler implements AzureServiceHandler {
     private Response getAccountInfo(AzureRequest req) {
         String account = req.accountName();
 
-        // Derive the scheme+host from the Host header so that both HTTP (4577) and
-        // HTTPS (4578) clients receive a databaseAccountEndpoint that matches the
-        // scheme they used.  The Java Cosmos SDK validates that the endpoint returned
-        // in writableLocations is reachable with the same transport it already has.
+        // Derive the scheme+host from the Host header and whether the connection is TLS.
+        // The Java Cosmos SDK validates that the endpoint in writableLocations uses the
+        // same transport it connected with.
         String host   = req.headers().getHeaderString("Host");
         if (host == null || host.isBlank()) host = "localhost:4577";
-        // X-Forwarded-Proto is not set by Quarkus for direct requests, but keep the
-        // hook so a future reverse-proxy can inject it.
         String scheme = req.headers().getHeaderString("X-Forwarded-Proto");
         if (scheme == null || scheme.isBlank()) {
-            // If the port in the Host header matches the configured SSL port we are
-            // being called over HTTPS; otherwise assume plain HTTP.
-            scheme = host.endsWith(":4578") ? "https" : "http";
+            scheme = req.secure() ? "https" : "http";
         }
         String endpoint = scheme + "://" + host + "/" + account + "-cosmos/";
 

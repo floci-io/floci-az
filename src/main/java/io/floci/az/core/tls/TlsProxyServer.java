@@ -110,10 +110,10 @@ public class TlsProxyServer {
         proxyServer.listen().onComplete(ar -> {
             if (ar.succeeded()) {
                 LOG.infov("TLS proxy: listening on port {0} (HTTP→{1}, HTTPS→{2})",
-                        publicPort, HTTP_BACKEND_PORT, HTTPS_BACKEND_PORT);
+                        String.valueOf(publicPort), String.valueOf(HTTP_BACKEND_PORT), String.valueOf(HTTPS_BACKEND_PORT));
             } else {
                 LOG.errorv("TLS proxy: failed to start on port {0}: {1}",
-                        publicPort, ar.cause().getMessage());
+                        String.valueOf(publicPort), ar.cause().getMessage());
             }
         });
     }
