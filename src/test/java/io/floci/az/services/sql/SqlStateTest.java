@@ -1,5 +1,7 @@
 package io.floci.az.services.sql;
 
+import io.floci.az.core.StoredObject;
+import io.floci.az.core.storage.InMemoryStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link SqlState} — pure in-memory CRUD, no Quarkus, no Docker.
+ * Uses the package-private constructor to inject an {@link InMemoryStorage} backend directly.
  */
 @DisplayName("SqlState — in-memory state")
 class SqlStateTest {
@@ -22,7 +25,7 @@ class SqlStateTest {
 
     @BeforeEach
     void setup() {
-        state = new SqlState();
+        state = new SqlState(new InMemoryStorage<>());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -224,5 +227,92 @@ class SqlStateTest {
         assertEquals("master", master.databaseName());
         assertEquals("System", master.edition());
         assertEquals("Online", master.status());
+    }
+
+    // ── Persistence cycle ─────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("state survives backend reload — ARM metadata restored, runtime fields cleared")
+    void persistenceReload() {
+        // Shared backend simulates a persistent store (WAL, hybrid, persistent mode).
+        InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
+        SqlState original = new SqlState(sharedBackend);
+
+        // Populate: server with containerId/hostPort set (as if a container is running)
+        original.putServer(server("persist-srv"));   // containerId="container-abc", hostPort=14330
+        original.putDatabase("persist-srv",
+            SqlState.SqlDatabaseEntry.create("mydb", "persist-srv",
+                "SQL_Latin1_General_CP1_CI_AS", null, null));
+        original.putFirewallRule("persist-srv",
+            new SqlState.SqlFirewallRule("rule1", "10.0.0.1", "10.0.0.254"));
+
+        // Simulate emulator restart: new SqlState backed by the same storage
+        SqlState reloaded = new SqlState(sharedBackend);
+
+        // ── ARM metadata is fully restored ────────────────────────────────────
+        assertTrue(reloaded.serverExists("persist-srv"), "server should survive reload");
+        Optional<SqlState.SqlServerEntry> entry = reloaded.getServer("persist-srv");
+        assertTrue(entry.isPresent());
+        assertEquals("sub-001", entry.get().subscriptionId(), "subscriptionId restored");
+        assertEquals("rg-test",  entry.get().resourceGroupName(), "resourceGroup restored");
+        assertEquals("sa",       entry.get().administratorLogin(), "login restored");
+
+        // ── Runtime fields are cleared (containers don't survive restarts) ─────
+        assertNull(entry.get().containerId(),
+            "containerId must be null after reload — container is gone");
+        assertEquals(0, entry.get().hostPort(),
+            "hostPort must be 0 after reload — container is gone");
+
+        // ── Child resources are fully restored ────────────────────────────────
+        assertTrue(reloaded.databaseExists("persist-srv", "mydb"), "database restored");
+        Optional<SqlState.SqlDatabaseEntry> db = reloaded.getDatabase("persist-srv", "mydb");
+        assertTrue(db.isPresent());
+        assertEquals("SQL_Latin1_General_CP1_CI_AS", db.get().collation(), "collation restored");
+        assertEquals("Online", db.get().status(), "status restored");
+
+        Optional<SqlState.SqlFirewallRule> rule = reloaded.getFirewallRule("persist-srv", "rule1");
+        assertTrue(rule.isPresent(), "firewall rule restored");
+        assertEquals("10.0.0.1",   rule.get().startIpAddress(), "startIpAddress restored");
+        assertEquals("10.0.0.254", rule.get().endIpAddress(),   "endIpAddress restored");
+    }
+
+    @Test
+    @DisplayName("mutations after reload are write-through — visible in a subsequent reload")
+    void mutationsAfterReloadArePersisted() {
+        InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
+
+        // First session: create server
+        SqlState session1 = new SqlState(sharedBackend);
+        session1.putServer(server("srv"));
+
+        // Second session (reload): add a database
+        SqlState session2 = new SqlState(sharedBackend);
+        assertTrue(session2.serverExists("srv"), "server visible in second session");
+        session2.putDatabase("srv",
+            SqlState.SqlDatabaseEntry.create("newdb", "srv", null, null, null));
+
+        // Third session (reload): database should be there
+        SqlState session3 = new SqlState(sharedBackend);
+        assertTrue(session3.databaseExists("srv", "newdb"),
+            "database added in session2 must survive into session3");
+    }
+
+    @Test
+    @DisplayName("clearAll removes entries from both in-memory cache and backend")
+    void clearAllPurgesBackend() {
+        InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
+        SqlState s = new SqlState(sharedBackend);
+
+        s.putServer(server("s1"));
+        s.putServer(server("s2"));
+        assertEquals(2, s.listServers().size());
+
+        s.clearAll();
+        assertEquals(0, s.listServers().size(), "in-memory cache cleared");
+
+        // A fresh load from the same backend must also be empty
+        SqlState reloaded = new SqlState(sharedBackend);
+        assertEquals(0, reloaded.listServers().size(),
+            "backend cleared — reload produces no entries");
     }
 }

@@ -633,4 +633,9 @@ public class AksHandler implements AzureServiceHandler {
         return Response.status(405).entity(Map.of("error", "Method not allowed"))
                 .type("application/json").build();
     }
+
+    /** Wipes all AKS data — used by {@code POST /_admin/reset}. */
+    public void clearAll() {
+        storage.clear();
+    }
 }

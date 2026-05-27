@@ -1,9 +1,17 @@
 package io.floci.az.services.sql;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.floci.az.core.StoredObject;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -11,21 +19,46 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory state for the Azure SQL Database emulator.
+ * State store for the Azure SQL Database emulator.
  *
- * <p>Tracks logical servers and their child resources (databases, firewall rules,
- * connection policy).  State is lost on restart — this matches the behaviour of
- * Docker-backed engines in floci-az (the SQL Server container itself is also
- * ephemeral unless given a named volume).
+ * <p>Tracks logical servers and their child resources (databases, firewall rules).
+ * Uses a dual-layer approach: an in-memory {@link ConcurrentHashMap} for O(1) reads
+ * and a {@link StorageBackend} for pluggable persistence (memory / wal / hybrid /
+ * persistent), configured via {@code FLOCI_AZ_STORAGE_SERVICES_SQL_MODE}.
  *
- * <p>All public methods are thread-safe via {@link ConcurrentHashMap} and
- * {@code synchronized} blocks where compound operations are needed.
+ * <p>When the emulator restarts with a persistent backend, server ARM metadata
+ * (name, credentials, databases, firewall rules) is restored from disk.
+ * Container runtime state ({@code containerId}, {@code hostPort}) is always
+ * cleared on load — containers must be restarted on first use.
+ *
+ * <p>All public methods are thread-safe via {@code synchronized} blocks.
  */
 @ApplicationScoped
 public class SqlState {
 
-    // keyed by lower-cased server name for case-insensitive lookup
+    private static final Logger LOG = Logger.getLogger(SqlState.class);
+
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+        .registerModule(new JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    /** In-memory primary cache — source of truth for runtime reads. */
     private final ConcurrentHashMap<String, SqlServerEntry> servers = new ConcurrentHashMap<>();
+
+    /** Pluggable persistence backend — write-through on every mutation. */
+    private final StorageBackend<String, StoredObject> store;
+
+    @Inject
+    public SqlState(StorageFactory factory) {
+        this.store = factory.create("sql");
+        loadFromStore();
+    }
+
+    /** Package-private constructor for unit tests — bypasses CDI and uses the given backend. */
+    SqlState(StorageBackend<String, StoredObject> store) {
+        this.store = store;
+        loadFromStore();
+    }
 
     // ── Servers ───────────────────────────────────────────────────────────────
 
@@ -35,6 +68,7 @@ public class SqlState {
 
     public synchronized void putServer(SqlServerEntry entry) {
         servers.put(key(entry.serverName()), entry);
+        persist(entry);
     }
 
     public synchronized Optional<SqlServerEntry> getServer(String serverName) {
@@ -42,11 +76,14 @@ public class SqlState {
     }
 
     public synchronized boolean removeServer(String serverName) {
-        return servers.remove(key(serverName)) != null;
+        String k = key(serverName);
+        boolean removed = servers.remove(k) != null;
+        if (removed) store.delete(k);
+        return removed;
     }
 
     public synchronized List<SqlServerEntry> listServers() {
-        return new ArrayList<>(servers.values());
+        return List.copyOf(servers.values());
     }
 
     public synchronized List<SqlServerEntry> listServersBySubscription(String subscriptionId) {
@@ -72,7 +109,10 @@ public class SqlState {
     }
 
     public synchronized void putDatabase(String serverName, SqlDatabaseEntry db) {
-        getServer(serverName).ifPresent(s -> s.databases().put(key(db.databaseName()), db));
+        getServer(serverName).ifPresent(s -> {
+            s.databases().put(key(db.databaseName()), db);
+            persist(s);
+        });
     }
 
     public synchronized Optional<SqlDatabaseEntry> getDatabase(String serverName, String dbName) {
@@ -81,9 +121,11 @@ public class SqlState {
     }
 
     public synchronized boolean removeDatabase(String serverName, String dbName) {
-        return getServer(serverName)
-            .map(s -> s.databases().remove(key(dbName)) != null)
-            .orElse(false);
+        return getServer(serverName).map(s -> {
+            boolean removed = s.databases().remove(key(dbName)) != null;
+            if (removed) persist(s);
+            return removed;
+        }).orElse(false);
     }
 
     public synchronized List<SqlDatabaseEntry> listDatabases(String serverName) {
@@ -95,7 +137,10 @@ public class SqlState {
     // ── Firewall rules ────────────────────────────────────────────────────────
 
     public synchronized void putFirewallRule(String serverName, SqlFirewallRule rule) {
-        getServer(serverName).ifPresent(s -> s.firewallRules().put(key(rule.name()), rule));
+        getServer(serverName).ifPresent(s -> {
+            s.firewallRules().put(key(rule.name()), rule);
+            persist(s);
+        });
     }
 
     public synchronized Optional<SqlFirewallRule> getFirewallRule(String serverName, String ruleName) {
@@ -104,9 +149,11 @@ public class SqlState {
     }
 
     public synchronized boolean removeFirewallRule(String serverName, String ruleName) {
-        return getServer(serverName)
-            .map(s -> s.firewallRules().remove(key(ruleName)) != null)
-            .orElse(false);
+        return getServer(serverName).map(s -> {
+            boolean removed = s.firewallRules().remove(key(ruleName)) != null;
+            if (removed) persist(s);
+            return removed;
+        }).orElse(false);
     }
 
     public synchronized List<SqlFirewallRule> listFirewallRules(String serverName) {
@@ -115,7 +162,71 @@ public class SqlState {
             .orElse(List.of());
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Reset ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Removes all servers (and their child resources) from both the in-memory
+     * cache and the persistence backend.
+     * Callers are responsible for stopping running containers beforehand.
+     */
+    public synchronized void clearAll() {
+        servers.clear();
+        store.clear();
+    }
+
+    // ── Persistence helpers ───────────────────────────────────────────────────
+
+    /**
+     * Serialises {@code entry} and writes it to the backend.
+     * Silently logs on failure so a persistence hiccup never crashes the request.
+     */
+    private void persist(SqlServerEntry entry) {
+        try {
+            byte[] data = MAPPER.writeValueAsBytes(entry);
+            store.put(key(entry.serverName()), new StoredObject(
+                key(entry.serverName()), data,
+                Map.of("serverName", entry.serverName()),
+                entry.createdAt(),
+                UUID.randomUUID().toString()));
+        } catch (Exception e) {
+            LOG.warnf(e, "Failed to persist SQL server entry: %s", entry.serverName());
+        }
+    }
+
+    /**
+     * Reads all entries from the backend into the in-memory cache.
+     * Runtime-specific fields ({@code containerId}, {@code hostPort}) are always
+     * cleared — containers do not survive an emulator restart.
+     */
+    private void loadFromStore() {
+        int loaded = 0;
+        for (String serverKey : store.keys()) {
+            store.get(serverKey).ifPresent(obj -> {
+                try {
+                    SqlServerEntry e = MAPPER.readValue(obj.data(), SqlServerEntry.class);
+                    // Re-wrap maps as ConcurrentHashMap (Jackson deserialises them as LinkedHashMap)
+                    SqlServerEntry restored = new SqlServerEntry(
+                        e.serverName(), e.subscriptionId(), e.resourceGroupName(),
+                        e.location(), e.administratorLogin(), e.administratorLoginPassword(),
+                        null, 0,   // containerId / hostPort are always reset on load
+                        new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
+                        new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
+                        new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
+                        e.createdAt());
+                    servers.put(serverKey, restored);
+                } catch (Exception ex) {
+                    LOG.warnf(ex, "Failed to deserialize SQL server entry '%s' — skipping", serverKey);
+                    store.delete(serverKey);
+                }
+            });
+        }
+        if (!servers.isEmpty()) {
+            LOG.infof("Restored %d SQL server(s) from storage (containers will restart on next request)",
+                servers.size());
+        }
+    }
+
+    // ── Key helper ───────────────────────────────────────────────────────────
 
     private static String key(String name) {
         return name == null ? "" : name.toLowerCase();
@@ -125,7 +236,10 @@ public class SqlState {
 
     /**
      * Represents a logical SQL Server (maps 1-to-1 with a Docker container).
+     * <p>{@code containerId} and {@code hostPort} are runtime-only and are never
+     * restored from persistent storage.
      */
+    @RegisterForReflection
     public record SqlServerEntry(
             String serverName,
             String subscriptionId,
@@ -133,8 +247,8 @@ public class SqlState {
             String location,
             String administratorLogin,
             String administratorLoginPassword,   // stored, never returned in GET responses
-            String containerId,                   // null until container starts
-            int hostPort,                         // 0 until container starts
+            String containerId,                   // null until container starts; not persisted
+            int hostPort,                         // 0 until container starts; not persisted
             Map<String, String> tags,
             Map<String, SqlDatabaseEntry> databases,
             Map<String, SqlFirewallRule> firewallRules,
@@ -158,9 +272,8 @@ public class SqlState {
         }
     }
 
-    /**
-     * Represents a SQL Database inside a logical server.
-     */
+    /** Represents a SQL Database inside a logical server. */
+    @RegisterForReflection
     public record SqlDatabaseEntry(
             String databaseName,
             String serverName,
@@ -195,6 +308,7 @@ public class SqlState {
      * Represents a server-level firewall rule.
      * Rules are stored for API compliance but not enforced — all IPs are allowed in dev mode.
      */
+    @RegisterForReflection
     public record SqlFirewallRule(
             String name,
             String startIpAddress,

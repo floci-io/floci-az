@@ -587,4 +587,18 @@ public class SqlHandler implements AzureServiceHandler {
             "error", Map.of("code", "ServiceDisabled",
                 "message", "Azure SQL Database service is disabled on this emulator."))).build();
     }
+
+    /**
+     * Stops all running SQL Server containers and wipes state.
+     * Used by {@code POST /_admin/reset} for test isolation.
+     */
+    public void clearAll() {
+        state.listServers().forEach(entry -> {
+            try { serverManager.stopServer(entry); } catch (Exception e) {
+                LOG.warnf(e, "Error stopping SQL container during reset: server=%s", entry.serverName());
+            }
+        });
+        state.clearAll();
+        startLocks.clear();
+    }
 }

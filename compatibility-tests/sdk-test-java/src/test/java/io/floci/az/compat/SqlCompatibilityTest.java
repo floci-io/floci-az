@@ -341,6 +341,58 @@ class SqlCompatibilityTest {
         assertEquals(404, getResp.statusCode());
     }
 
+    @Test
+    @Order(80)
+    @DisplayName("_admin/reset wipes all SQL state (server + databases gone, container stopped)")
+    void adminResetClearsSqlState() throws Exception {
+        // Precondition: server created in @BeforeAll must still exist
+        HttpResponse<String> before = send("GET",
+            ARM_BASE + "/servers/" + SERVER + "?api-version=2021-11-01", null);
+        assertEquals(200, before.statusCode(),
+            "Server should exist before reset: " + before.body());
+
+        // Precondition: master database registered in state
+        HttpResponse<String> masterBefore = send("GET",
+            ARM_BASE + "/servers/" + SERVER + "/databases/master?api-version=2021-11-01", null);
+        assertEquals(200, masterBefore.statusCode(),
+            "master db should exist before reset: " + masterBefore.body());
+
+        // ── Reset ──────────────────────────────────────────────────────────────
+        HttpResponse<String> resetResp = send("POST", BASE + "/_admin/reset", null);
+        assertEquals(204, resetResp.statusCode(),
+            "/_admin/reset should return 204: " + resetResp.body());
+
+        // ── Verify server is gone ──────────────────────────────────────────────
+        HttpResponse<String> afterServer = send("GET",
+            ARM_BASE + "/servers/" + SERVER + "?api-version=2021-11-01", null);
+        assertEquals(404, afterServer.statusCode(),
+            "Server should be gone after reset: " + afterServer.body());
+
+        // ── Verify master database is gone ─────────────────────────────────────
+        HttpResponse<String> afterMaster = send("GET",
+            ARM_BASE + "/servers/" + SERVER + "/databases/master?api-version=2021-11-01", null);
+        assertEquals(404, afterMaster.statusCode(),
+            "master db should be gone after reset: " + afterMaster.body());
+
+        // ── Verify server list is empty ────────────────────────────────────────
+        HttpResponse<String> listResp = send("GET",
+            ARM_BASE + "/servers?api-version=2021-11-01", null);
+        assertEquals(200, listResp.statusCode());
+        assertFalse(listResp.body().contains(SERVER),
+            "Server list should be empty after reset: " + listResp.body());
+
+        // ── Re-create server proves the name is available again ────────────────
+        // (checkNameAvailability should now return available=true)
+        String checkBody = "{\"name\":\"" + SERVER + "\",\"type\":\"Microsoft.Sql/servers\"}";
+        HttpResponse<String> checkResp = send("POST",
+            BASE + "/subscriptions/" + SUB + "/providers/Microsoft.Sql/checkNameAvailability"
+            + "?api-version=2021-11-01",
+            checkBody);
+        assertEquals(200, checkResp.statusCode());
+        assertTrue(checkResp.body().contains("\"available\":true"),
+            "Name should be available again after reset: " + checkResp.body());
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static HttpResponse<String> send(String method, String url, String jsonBody)

@@ -84,6 +84,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig cosmos();
         ServiceStorageConfig keyVault();
         ServiceStorageConfig serviceBus();
+        ServiceStorageConfig sql();
     }
 
     interface ServiceStorageConfig {

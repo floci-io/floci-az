@@ -937,4 +937,9 @@ public class ServiceBusHandler implements AzureServiceHandler {
                         + "<Error><Code>404</Code><Detail>" + xmlEsc(message) + "</Detail></Error>")
                 .type(ATOM_XML_CONTENT_TYPE).build();
     }
+
+    /** Wipes all Service Bus data — used by {@code POST /_admin/reset}. */
+    public void clearAll() {
+        store.clear();
+    }
 }
