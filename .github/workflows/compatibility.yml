@@ -71,6 +71,8 @@ jobs:
               -e SERVICEBUS_AMQPS_PORT=5671
               -e SERVICEBUS_NAMESPACE=default
           - test: sdk-test-node
+          - test: compat-terraform
+          - test: compat-opentofu
 
     steps:
       - name: Download floci-az image

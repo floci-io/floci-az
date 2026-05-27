@@ -1,6 +1,8 @@
 package io.floci.az.core;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.auth.AuthPipeline;
+import io.floci.az.services.arm.ArmHandler;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -8,8 +10,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 
@@ -23,20 +25,21 @@ public class AzureRoutingFilter {
 
     private static final Logger LOGGER = Logger.getLogger(AzureRoutingFilter.class);
 
-    @Inject
-    AuthPipeline authPipeline;
+    private final AuthPipeline authPipeline;
+    private final AzureServiceRegistry serviceRegistry;
+    private final EmulatorConfig config;
+    private final ArmHandler armHandler;
+    private final Vertx vertx;
 
     @Inject
-    AzureServiceRegistry serviceRegistry;
-
-    @Inject
-    Vertx vertx;
-
-    @Context
-    UriInfo uriInfo;
-
-    @Context
-    HttpHeaders httpHeaders;
+    public AzureRoutingFilter(AuthPipeline authPipeline, AzureServiceRegistry serviceRegistry,
+            EmulatorConfig config, ArmHandler armHandler, Vertx vertx) {
+        this.authPipeline = authPipeline;
+        this.serviceRegistry = serviceRegistry;
+        this.config = config;
+        this.armHandler = armHandler;
+        this.vertx = vertx;
+    }
 
     /**
      * Cosmos DB top-level path segments that are used by the Java SDK when it
@@ -55,19 +58,24 @@ public class AzureRoutingFilter {
     );
 
     @ServerRequestFilter(preMatching = true)
-    public Uni<Response> filter(ContainerRequestContext requestContext) {
+    public Uni<Response> filter(ContainerRequestContext requestContext, @Context HttpHeaders httpHeaders) {
         // Capture context before switching threads
         String path0 = requestContext.getUriInfo().getPath();
         HttpHeaders headers = httpHeaders;
+        // Capture Host header now (JAX-RS request scope may not propagate to the blocking thread).
+        // Try both canonical and lowercase forms since HTTP header names are case-insensitive.
+        String h = requestContext.getHeaders().getFirst("Host");
+        if (h == null) h = requestContext.getHeaders().getFirst("host");
+        final String capturedHost = h;
 
         return Uni.createFrom().completionStage(
-            vertx.executeBlocking(() -> doFilter(requestContext, path0, headers))
+            vertx.executeBlocking(() -> doFilter(requestContext, path0, headers, capturedHost))
                  .toCompletionStage()
         );
     }
 
 
-    private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers) {
+    private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers, String capturedHost) {
         boolean secure = requestContext.getSecurityContext().isSecure();
         String path = rawPath;
 
@@ -82,9 +90,117 @@ public class AzureRoutingFilter {
 
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
+        // Host-based routing for Azure data-plane services.
+        // capturedHost is extracted in filter() before executeBlocking because the JAX-RS
+        // request scope may not propagate to the Vert.x blocking thread.
+        String hostOnly = null;
+        if (capturedHost != null) {
+            hostOnly = capturedHost.contains(":") ? capturedHost.split(":")[0] : capturedHost;
+        }
+
+        // Key Vault: {vaultName}.vault.azure.net
+        if (hostOnly != null && hostOnly.endsWith(".vault.azure.net")) {
+            String kvAccount = hostOnly.substring(0, hostOnly.length() - ".vault.azure.net".length());
+            Map<String, String> kvQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> kvQueryParams.put(k, v.get(0)));
+            AzureRequest kvRequest = new AzureRequest(
+                requestContext.getMethod(), kvAccount, "keyvault",
+                path, headers, requestContext.getEntityStream(), kvQueryParams, null, secure);
+            AuthContext kvAuth = authPipeline.resolve(kvRequest);
+            kvRequest = new AzureRequest(
+                requestContext.getMethod(), kvAccount, "keyvault",
+                path, headers, requestContext.getEntityStream(), kvQueryParams, kvAuth, secure);
+            Optional<AzureServiceHandler> kvHandler = serviceRegistry.resolve("keyvault");
+            if (kvHandler.isPresent()) {
+                LOGGER.infof("Dispatching vault.azure.net request to KeyVaultHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, kvAccount);
+                return kvHandler.get().handle(kvRequest);
+            }
+        }
+
+        // Blob Storage: {account}.blob.core.windows.net
+        if (hostOnly != null && hostOnly.endsWith(".blob.core.windows.net")) {
+            String blobAccount = hostOnly.substring(0, hostOnly.length() - ".blob.core.windows.net".length());
+            Map<String, String> blobQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> blobQueryParams.put(k, v.get(0)));
+            AzureRequest blobRequest = new AzureRequest(
+                requestContext.getMethod(), blobAccount, "blob",
+                path, headers, requestContext.getEntityStream(), blobQueryParams, null, secure);
+            AuthContext blobAuth = authPipeline.resolve(blobRequest);
+            blobRequest = new AzureRequest(
+                requestContext.getMethod(), blobAccount, "blob",
+                path, headers, requestContext.getEntityStream(), blobQueryParams, blobAuth, secure);
+            Optional<AzureServiceHandler> blobHandler = serviceRegistry.resolve("blob");
+            if (blobHandler.isPresent()) {
+                LOGGER.infof("Dispatching blob.core.windows.net request to BlobServiceHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, blobAccount);
+                return blobHandler.get().handle(blobRequest);
+            }
+        }
+
+        // Queue Storage: {account}.queue.core.windows.net
+        if (hostOnly != null && hostOnly.endsWith(".queue.core.windows.net")) {
+            String queueAccount = hostOnly.substring(0, hostOnly.length() - ".queue.core.windows.net".length());
+            Map<String, String> queueQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queueQueryParams.put(k, v.get(0)));
+            AzureRequest queueRequest = new AzureRequest(
+                requestContext.getMethod(), queueAccount, "queue",
+                path, headers, requestContext.getEntityStream(), queueQueryParams, null, secure);
+            AuthContext queueAuth = authPipeline.resolve(queueRequest);
+            queueRequest = new AzureRequest(
+                requestContext.getMethod(), queueAccount, "queue",
+                path, headers, requestContext.getEntityStream(), queueQueryParams, queueAuth, secure);
+            Optional<AzureServiceHandler> queueHandler = serviceRegistry.resolve("queue");
+            if (queueHandler.isPresent()) {
+                LOGGER.infof("Dispatching queue.core.windows.net request to QueueServiceHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, queueAccount);
+                return queueHandler.get().handle(queueRequest);
+            }
+        }
+
         // Identity bypass
         if (path.contains("oauth2/v2.0/token")) {
             return null;
+        }
+
+        // ARM metadata endpoint — called by go-azure-sdk for environment discovery.
+        // Return null so JAX-RS returns 404; the azurerm provider falls back to defaults.
+        // Implementing the metadata response causes the provider to detect Azure Stack
+        // and reject the configuration with an unsupported-environment error.
+        if (path.startsWith("metadata/endpoints")) {
+            return null;
+        }
+
+        // Microsoft Graph API — called by azurerm provider for service principal discovery
+        if (path.startsWith("v1.0/")) {
+            return null;
+        }
+
+        // Key Vault data-plane paths arriving at the ARM base URL.
+        // The azurerm v3 provider (when metadata/endpoints returns 404) sends all key vault
+        // data-plane requests directly to the ARM base URL rather than to *.vault.azure.net.
+        // Intercept well-known KV API path prefixes and route to KeyVaultHandler with a fixed
+        // account name so both the provider and kv_get in BATS tests use the same namespace.
+        if (path.startsWith("secrets/") || path.equals("secrets")
+                || path.startsWith("certificates/") || path.equals("certificates")
+                || path.startsWith("keys/") || path.equals("keys")
+                || path.startsWith("deletedsecrets/") || path.startsWith("deletedcertificates/")
+                || path.startsWith("deletedkeys/")) {
+            String kvAccount = armHandler.getDefaultKvAccount();
+            Map<String, String> kvQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> kvQueryParams.put(k, v.get(0)));
+            AzureRequest kvRequest = new AzureRequest(
+                requestContext.getMethod(), kvAccount, "keyvault",
+                path, headers, requestContext.getEntityStream(), kvQueryParams, null, secure);
+            AuthContext kvAuth = authPipeline.resolve(kvRequest);
+            kvRequest = new AzureRequest(
+                requestContext.getMethod(), kvAccount, "keyvault",
+                path, headers, requestContext.getEntityStream(), kvQueryParams, kvAuth, secure);
+            Optional<AzureServiceHandler> kvHandler = serviceRegistry.resolve("keyvault");
+            if (kvHandler.isPresent()) {
+                LOGGER.infof("Routing ARM-base KV path to KeyVaultHandler: %s %s", requestContext.getMethod(), path);
+                return kvHandler.get().handle(kvRequest);
+            }
         }
 
         // ---------------------------------------------------------------
@@ -129,6 +245,28 @@ public class AzureRoutingFilter {
             if (sqlHandler.isPresent()) {
                 LOGGER.infof("Dispatching ARM SQL request to SqlHandler: %s %s", requestContext.getMethod(), path);
                 return sqlHandler.get().handle(sqlRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // ARM general management-plane paths: subscriptions/{sub}/...
+        // (resource groups, storage accounts, key vaults, etc. not served
+        //  by the more-specific AKS and SQL handlers above)
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/")) {
+            Map<String, String> armQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> armQueryParams.put(k, v.get(0)));
+            AzureRequest armRequest = new AzureRequest(
+                requestContext.getMethod(), "arm", "arm", path, headers,
+                requestContext.getEntityStream(), armQueryParams, null, secure);
+            AuthContext armAuth = authPipeline.resolve(armRequest);
+            armRequest = new AzureRequest(
+                requestContext.getMethod(), "arm", "arm", path, headers,
+                requestContext.getEntityStream(), armQueryParams, armAuth, secure);
+            Optional<AzureServiceHandler> armHandler = serviceRegistry.resolve("arm");
+            if (armHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM request to ArmHandler: %s %s", requestContext.getMethod(), path);
+                return armHandler.get().handle(armRequest);
             }
         }
 

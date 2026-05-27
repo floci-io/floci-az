@@ -4,6 +4,7 @@ import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -63,6 +64,12 @@ public class BlobServiceHandler implements AzureServiceHandler {
         if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listContainers(request);
+            } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
+                if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+                    response = getBlobServiceProperties();
+                } else {
+                    response = Response.ok().build();
+                }
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toXmlResponse(501);
@@ -104,6 +111,32 @@ public class BlobServiceHandler implements AzureServiceHandler {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("Date", RFC1123_DATE_TIME.format(Instant.now()))
                 .build();
+    }
+
+    private Response getBlobServiceProperties() {
+        String xml = new XmlBuilder()
+            .start("StorageServiceProperties")
+                .start("Logging")
+                    .elem("Version", "1.0")
+                    .elem("Delete", "false")
+                    .elem("Read", "false")
+                    .elem("Write", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("Logging")
+                .start("HourMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("HourMetrics")
+                .start("MinuteMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("MinuteMetrics")
+                .start("StaticWebsite").elem("Enabled", "false").end("StaticWebsite")
+            .end("StorageServiceProperties")
+            .toString();
+        return Response.ok(xml, "application/xml").build();
     }
 
     private Response getContainer(AzureRequest request, String containerName, boolean headOnly) {
@@ -278,6 +311,10 @@ public class BlobServiceHandler implements AzureServiceHandler {
 
     public void clearAll() {
         store.clear();
+    }
+
+    public void ensureContainer(String accountName, String containerName) {
+        store.put(nsKey(accountName, containerName), NS_SENTINEL);
     }
 
     private static String nsKey(String accountName, String containerName) {

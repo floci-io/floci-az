@@ -1,7 +1,7 @@
 .PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
         test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-cosmos \
         test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql compat-docker clean
+        test-sql test-terraform test-opentofu test-iac compat-docker clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -9,6 +9,8 @@ PID_FILE       = emulator.pid
 PYTHON_DIR     = compatibility-tests/sdk-test-python
 JAVA_DIR       = compatibility-tests/sdk-test-java
 NODE_DIR       = compatibility-tests/sdk-test-node
+TERRAFORM_DIR  = compatibility-tests/compat-terraform
+OPENTOFU_DIR   = compatibility-tests/compat-opentofu
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -163,6 +165,24 @@ test-sql:
 	cd $(JAVA_DIR) && mvn test -Dtest=SqlCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
+test-terraform:
+	@echo "==> Terraform IaC compatibility tests"
+	@docker build -q -t floci-az-compat-terraform -f $(TERRAFORM_DIR)/Dockerfile $(TERRAFORM_DIR)/
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:$(PORT) \
+		-v "$(CURDIR)/test-results:/results" \
+		floci-az-compat-terraform
+
+test-opentofu:
+	@echo "==> OpenTofu IaC compatibility tests"
+	@docker build -q -t floci-az-compat-opentofu -f $(OPENTOFU_DIR)/Dockerfile $(OPENTOFU_DIR)/
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:$(PORT) \
+		-v "$(CURDIR)/test-results:/results" \
+		floci-az-compat-opentofu
+
+test-iac: test-terraform test-opentofu
+
 # ── Full test suite ────────────────────────────────────────────────────────────
 
 # Run all compatibility tests in Docker containers against the running floci-az.
@@ -172,6 +192,8 @@ compat-docker:
 	@docker build -q --platform linux/amd64 -t floci-az-compat-python -f $(PYTHON_DIR)/Dockerfile $(PYTHON_DIR)/
 	@docker build -q -t floci-az-compat-node -f $(NODE_DIR)/Dockerfile $(NODE_DIR)/
 	@docker build -q -t floci-az-compat-java -f $(JAVA_DIR)/Dockerfile $(JAVA_DIR)/
+	@docker build -q -t floci-az-compat-terraform -f $(TERRAFORM_DIR)/Dockerfile $(TERRAFORM_DIR)/
+	@docker build -q -t floci-az-compat-opentofu -f $(OPENTOFU_DIR)/Dockerfile $(OPENTOFU_DIR)/
 	@echo "==> Python SDK tests (blob, queue, table, appconfig, keyvault, eventhub)"
 	docker run --rm --platform linux/amd64 --network floci_az_default \
 		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -192,6 +214,14 @@ compat-docker:
 		-e SERVICEBUS_NAMESPACE=default \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		floci-az-compat-java
+	@echo "==> Terraform IaC tests"
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		floci-az-compat-terraform
+	@echo "==> OpenTofu IaC tests"
+	docker run --rm --network floci_az_default \
+		-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+		floci-az-compat-opentofu
 
 test-compat:
 	@echo "==> Running all SDK compatibility tests (emulator must be running)"

@@ -159,7 +159,8 @@ public class TlsConfigSource implements ConfigSource {
     private static List<String> buildSanList(List<String> customHostnames) {
         List<String> all = new ArrayList<>();
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
-                "localhost.floci-az.io", "*.localhost.floci-az.io"));
+                "localhost.floci-az.io", "*.localhost.floci-az.io",
+                "*.vault.azure.net"));
         all.addAll(customHostnames);
         return all;
     }
