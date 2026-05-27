@@ -64,4 +64,23 @@ public class BlobModels {
         @JacksonXmlProperty(localName = "Content-Type") String ContentType,
         @JacksonXmlProperty(localName = "BlobType") String BlobType
     ) {}
+
+    /** One entry in a GetBlockList response. */
+    @RegisterForReflection
+    public record BlockItem(
+        @JacksonXmlProperty(localName = "Name") String Name,
+        @JacksonXmlProperty(localName = "Size") Long Size
+    ) {}
+
+    /** Response body for GET ?comp=blocklist. */
+    @RegisterForReflection
+    @JacksonXmlRootElement(localName = "BlockList")
+    public record BlockListResponse(
+        @JacksonXmlElementWrapper(localName = "CommittedBlocks")
+        @JacksonXmlProperty(localName = "Block")
+        List<BlockItem> CommittedBlocks,
+        @JacksonXmlElementWrapper(localName = "UncommittedBlocks")
+        @JacksonXmlProperty(localName = "Block")
+        List<BlockItem> UncommittedBlocks
+    ) {}
 }

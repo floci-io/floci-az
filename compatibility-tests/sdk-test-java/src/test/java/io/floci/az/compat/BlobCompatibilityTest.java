@@ -9,11 +9,14 @@ import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
+import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -190,6 +193,85 @@ class BlobCompatibilityTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         blob.downloadStreamWithResponse(out, new BlobRange(2, 4L), null, null, false, null, Context.NONE);
         assertEquals("2345", out.toString(StandardCharsets.UTF_8));
+
+        client.deleteBlobContainer(name);
+    }
+
+    // --- Block Blob ---
+
+    @Test
+    @DisplayName("block blob: stage blocks, commit, download reassembled content")
+    void blockBlobStageAndCommit() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlockBlobClient blockBlob = container.getBlobClient("multipart.bin").getBlockBlobClient();
+
+        // Prepare 3 blocks (each ~10 bytes for simplicity)
+        byte[] part1 = "Hello, ".getBytes(StandardCharsets.UTF_8);
+        byte[] part2 = "Block ".getBytes(StandardCharsets.UTF_8);
+        byte[] part3 = "World!".getBytes(StandardCharsets.UTF_8);
+
+        String id1 = Base64.getEncoder().encodeToString("block-001".getBytes(StandardCharsets.UTF_8));
+        String id2 = Base64.getEncoder().encodeToString("block-002".getBytes(StandardCharsets.UTF_8));
+        String id3 = Base64.getEncoder().encodeToString("block-003".getBytes(StandardCharsets.UTF_8));
+
+        // Stage blocks
+        blockBlob.stageBlock(id1, new java.io.ByteArrayInputStream(part1), part1.length);
+        blockBlob.stageBlock(id2, new java.io.ByteArrayInputStream(part2), part2.length);
+        blockBlob.stageBlock(id3, new java.io.ByteArrayInputStream(part3), part3.length);
+
+        // Commit in order
+        blockBlob.commitBlockList(List.of(id1, id2, id3));
+
+        // Download and verify reassembled content
+        byte[] downloaded = blockBlob.downloadContent().toBytes();
+        assertEquals("Hello, Block World!", new String(downloaded, StandardCharsets.UTF_8));
+
+        // Verify blob appears in listing
+        List<BlobItem> blobs = container.listBlobs().stream().toList();
+        assertEquals(1, blobs.size());
+        assertEquals("multipart.bin", blobs.get(0).getName());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("block blob: get block list — uncommitted before commit, committed after")
+    void blockBlobGetBlockList() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlockBlobClient blockBlob = container.getBlobClient("listed.bin").getBlockBlobClient();
+
+        byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+        String id1 = Base64.getEncoder().encodeToString("blk1".getBytes(StandardCharsets.UTF_8));
+        String id2 = Base64.getEncoder().encodeToString("blk2".getBytes(StandardCharsets.UTF_8));
+
+        blockBlob.stageBlock(id1, new java.io.ByteArrayInputStream(data), data.length);
+        blockBlob.stageBlock(id2, new java.io.ByteArrayInputStream(data), data.length);
+
+        // Before commit: both blocks are uncommitted
+        var beforeCommit = blockBlob.listBlocks(BlockListType.ALL);
+        assertEquals(0, beforeCommit.getCommittedBlocks().size(),
+                "no committed blocks before commit");
+        assertEquals(2, beforeCommit.getUncommittedBlocks().size(),
+                "two uncommitted blocks staged");
+
+        // Commit
+        blockBlob.commitBlockList(List.of(id1, id2));
+
+        // After commit: blocks are committed, none uncommitted
+        var afterCommit = blockBlob.listBlocks(BlockListType.ALL);
+        assertEquals(2, afterCommit.getCommittedBlocks().size(),
+                "two committed blocks after commit");
+        assertEquals(0, afterCommit.getUncommittedBlocks().size(),
+                "no uncommitted blocks after commit");
+
+        // Verify the committed block names match what we staged
+        List<String> committedNames = afterCommit.getCommittedBlocks().stream()
+                .map(b -> b.getName())
+                .toList();
+        assertTrue(committedNames.contains(id1), "id1 in committed list");
+        assertTrue(committedNames.contains(id2), "id2 in committed list");
 
         client.deleteBlobContainer(name);
     }
