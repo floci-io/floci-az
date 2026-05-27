@@ -12,5 +12,6 @@ public record AzureRequest(
     HttpHeaders headers,
     InputStream bodyStream,
     Map<String, String> queryParams,
-    AuthContext authContext
+    AuthContext authContext,
+    boolean secure           // true when the request arrived over HTTPS
 ) {}

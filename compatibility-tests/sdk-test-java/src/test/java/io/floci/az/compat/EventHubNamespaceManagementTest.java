@@ -34,6 +34,7 @@ class EventHubNamespaceManagementTest {
     private String ns;
     private int amqpPort;
     private int amqpsPort;
+    private boolean namespaceMocked = false;
 
     @BeforeAll
     void chooseUniqueNamespace() {
@@ -117,6 +118,7 @@ class EventHubNamespaceManagementTest {
         assertTrue(body.contains("\"name\":\"" + ns + "\""), "Response missing namespace name");
         assertTrue(body.contains("\"amqpPort\":"), "Response missing amqpPort field");
         assertTrue(body.contains("\"amqpsPort\":"), "Response missing amqpsPort field");
+        namespaceMocked = body.contains("\"mocked\":true");
     }
 
     @Test
@@ -169,6 +171,9 @@ class EventHubNamespaceManagementTest {
     @Order(6)
     @DisplayName("GET tls-cert returns a PEM certificate")
     void getTlsCert_returnsPem() throws Exception {
+        Assumptions.assumeTrue(!namespaceMocked,
+                "Namespace is mocked (no Artemis broker) — TLS cert not available");
+
         int status = getStatus(tlsCertUrl());
         assertEquals(200, status);
 

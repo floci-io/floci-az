@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-25
+
+### Added
+
+- **tls:** Dynamic self-signed certificate generation at runtime via BouncyCastle — no static cert bundled in the image; certs persist under `data/tls/` and regenerate automatically when hostname config changes (`FLOCI_AZ_HOSTNAME` or `FLOCI_AZ_BASE_URL`)
+- **tls:** Protocol-sniffing `TlsProxyServer` — both HTTP and HTTPS served on the same public port `4577`; first byte `0x16` routes to the HTTPS backend, anything else to HTTP
+- **tls:** `GET /_floci/tls-cert` endpoint — returns the active TLS certificate PEM so SDK clients and compat tests can dynamically install it into their truststores
+- **tls:** `CertificateGenerator` — dedicated class (matching aws-local structure) responsible for X.509 self-signed cert generation with configurable SANs (hostname, IP, wildcard)
+- **tls:** `BouncyCastleInitializer` — CDI `@Startup` bean that registers the BouncyCastle JCA provider at application startup
+- **event-hubs:** Mocked namespace mode — management API returns `"mocked":true` when no Artemis broker is running; compat tests skip AMQP data-plane assertions gracefully via `Assumptions.assumeTrue`
+- **compat (java):** `CosmosCompatibilityTest` now works in Docker compat runs — `EmulatorConfig.installEmulatorTlsCert()` fetches the emulator cert at test setup and installs it into a temp PKCS12 truststore; Netty forced to JDK SSL via `-Dio.netty.handler.ssl.noOpenSsl=true`
+
+### Changed
+
+- **tls:** Replaced static bundled certificates (`src/main/resources/certs/`) with runtime generation — removed `floci-az.crt`, `floci-az.key`, `floci-az.p12` from the image
+- **tls:** `TlsConfigSource` delegates cert generation to `CertificateGenerator` instead of inlining BouncyCastle calls
+- **build:** Added GraalVM `--initialize-at-run-time` flags for BouncyCastle classes (`DRBG`, `SP800SecureRandom`, `KeyPairGeneratorSpi`, `CertificateFactory`) and `CertificateGenerator` to support native image builds
+- **ci:** Compatibility workflow now starts the emulator with `FLOCI_AZ_TLS_ENABLED=true` and `FLOCI_AZ_HOSTNAME=floci-az` — required for Cosmos Java SDK which enforces HTTPS in gateway mode
+- **compat (java):** Removed static `floci-az.p12` truststore from test resources — truststore is now built dynamically from the live emulator cert
+
 ## [0.3.0] - 2026-05-23
 
 ### Added
@@ -133,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) — native binary (`latest`) and JVM (`latest-jvm`) tags
 - Single unified port `4577` for all services
 
-[Unreleased]: https://github.com/floci-io/floci-az/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/floci-io/floci-az/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/floci-io/floci-az/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/floci-io/floci-az/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/floci-io/floci-az/compare/0.1.4...0.2.0
 [0.1.4]: https://github.com/floci-io/floci-az/compare/0.1.3...0.1.4

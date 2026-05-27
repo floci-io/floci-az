@@ -91,6 +91,8 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             -p 4577:4577 \
             -e FLOCI_AZ_SERVICES_DOCKER_NETWORK=compat-net \
+            -e FLOCI_AZ_TLS_ENABLED=true \
+            -e FLOCI_AZ_HOSTNAME=floci-az \
             floci-az:test
 
       - name: Wait for floci-az to be ready

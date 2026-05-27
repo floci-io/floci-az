@@ -2,8 +2,9 @@
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
 Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Cosmos DB, Azure SQL Database, and Azure Kubernetes Service (AKS).
-Default Port: 4577. AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS).
+Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS.
+TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
 -->
 
 <p align="center">
@@ -85,7 +86,7 @@ the cloud service — but it carries the full weight of that fidelity.
 | **Gremlin API provider**         | Native Cosmos Emulator                                   | 🟡 Apache TinkerPop — standard traversals work; Cosmos extensions not emulated          |
 | **Table API provider**           | Native Cosmos Emulator                                   | 🟢 In-memory (embedded) — same `azure-data-tables` SDK, no Docker                       |
 | **Other Azure services**         | Cosmos DB only                                           | Blob · Queue · Table · Functions · App Config · Cosmos DB in a unified local Azure stack |
-| **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Most services: plain HTTP on `4577`, zero cert setup. **Cosmos DB Java SDK only:** HTTPS on `4578` with a bundled self-signed cert — no import required, works out of the box |
+| **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Plain HTTP on `4577` by default. Optional TLS: set `FLOCI_AZ_TLS_ENABLED=true` — HTTP and HTTPS served on the same port `4577` via protocol-sniffing proxy; self-signed cert generated at runtime, no static cert bundled, cert available at `GET /_floci/tls-cert` |
 | **Web UI / Data Explorer**       | ✅ Built-in                                               | ❌ API-focused local development environment                                              |
 | **Open source**                  | ❌ Proprietary                                            | ✅ MIT                                                                                    |
 | **CI/CD friendliness**           | ⚠️ Heavy images and slower pipelines                     | ✅ Fast startup and Linux-friendly containers                                             |
@@ -157,6 +158,7 @@ flowchart LR
     Client["☁️ Azure SDK / CLI"]
 
     subgraph floci-az ["floci-az — port 4577"]
+        Proxy["TLS Proxy\n(optional, protocol-sniffing)\nHTTP + HTTPS on :4577"]
         Router["HTTP Router\n(JAX-RS / Vert.x)"]
 
         subgraph Services ["Services"]
@@ -171,6 +173,7 @@ flowchart LR
             I["AKS\nMicrosoft.ContainerService"]
         end
 
+        Proxy -->|" route "| Router
         Router --> A
         Router --> B
         Router --> C
@@ -187,7 +190,7 @@ flowchart LR
         I -->|" manages "| K3s["🐳 k3s\n(per cluster)"]
     end
 
-    Client -->|" HTTP :4577\nAzure wire protocol "| Router
+    Client -->|" HTTP/HTTPS :4577\nAzure wire protocol "| Proxy
 ```
 
 ## Supported Services
@@ -252,6 +255,27 @@ All services are available at `http://localhost:4577`. Use any account name and 
 
 > **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount
 `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
+
+### TLS (for the Cosmos DB Java SDK)
+
+The Azure Cosmos DB Java SDK enforces TLS in gateway mode. Enable the built-in TLS proxy to serve HTTP and HTTPS on the same port:
+
+```yaml
+# docker-compose.yml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data        # persist generated cert across restarts
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+      FLOCI_AZ_HOSTNAME: floci-az   # add Docker service name to cert SANs
+```
+
+The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore — no static cert to bundle or import manually.
 
 ## CLI Usage (`azfloci`)
 
@@ -318,7 +342,7 @@ floci-az uses path-style routing:
 | Table             | `http://localhost:4577/{accountName}-table`           | |
 | Functions         | `http://localhost:4577/{accountName}-functions`       | |
 | App Configuration | `http://localhost:4577/{accountName}-appconfig`       | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
-| Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** use `https://localhost:4578` — the SDK enforces TLS; bundled cert requires no import |
+| Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and use `https://localhost:4577` — the SDK enforces TLS; cert auto-generated at runtime, fetch from `GET /_floci/tls-cert` |
 | Key Vault         | `http://localhost:4577/{accountName}-keyvault`        | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
 | Event Hubs        | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` | |
 
@@ -648,7 +672,7 @@ Use `latest` for stable releases, a pinned version for reproducible builds, and 
 
 ```yaml
 image: floci/floci-az:latest      # recommended
-image: floci/floci-az:0.3.0       # pinned release
+image: floci/floci-az:0.4.0       # pinned release
 image: floci/floci-az:edge        # track main
 ```
 
@@ -660,6 +684,11 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 |----------------------------------------|-------------------------------|-----------------------------------------------------------------|
 | `FLOCI_AZ_PORT`                        | `4577`                        | Port exposed by the API                                         |
 | `FLOCI_AZ_BASE_URL`                    | `http://localhost:4577`       | Base URL for the emulator                                       |
+| `FLOCI_AZ_HOSTNAME`                    | _(none)_                      | Additional hostname to include in the self-signed TLS certificate SANs (e.g. `floci-az` when running in Docker Compose) |
+| `FLOCI_AZ_TLS_ENABLED`                 | `false`                       | Enable HTTP+HTTPS on the same port via protocol-sniffing proxy  |
+| `FLOCI_AZ_TLS_SELF_SIGNED`             | `true`                        | Auto-generate a self-signed cert at runtime (cert persisted under `data/tls/`) |
+| `FLOCI_AZ_TLS_CERT_PATH`               | _(none)_                      | Path to a PEM certificate file (disables self-signed generation) |
+| `FLOCI_AZ_TLS_KEY_PATH`                | _(none)_                      | Path to a PEM private key file (pair with `FLOCI_AZ_TLS_CERT_PATH`) |
 | `FLOCI_AZ_STORAGE_MODE`                | `memory`                      | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
 | `FLOCI_AZ_STORAGE_PATH`                | `/app/data`                   | Directory for persisted state                                   |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST`          | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers                 |
@@ -703,7 +732,6 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"
-      - "4578:4578"
       - "27017:27017"   # MongoDB (Cosmos MongoDB API)
       - "5432:5432"     # PostgreSQL (Cosmos PostgreSQL API)
     volumes:
@@ -731,8 +759,8 @@ floci-az clears it.
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory OData engine (ConcurrentHashMap)         |
 
 **NoSQL engine** — activating this endpoint enables the same embedded SQL engine already powering
-`/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4578` as the connection URL
-(Java SDK requires TLS; the bundled self-signed cert requires no import).
+`/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4577` as the connection URL
+(Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`).
 
 **Table engine** — supported operations: create/delete table · insert/get/replace/merge/delete entity ·
 OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
@@ -887,7 +915,7 @@ in-process:
 - Type checks: `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`,
   `IS_INTEGER`, `IS_PRIMITIVE`
 - Named parameters (`@name`)
-- **Client SDK**: `azure-cosmos` Java SDK — point to `https://localhost:4578`.
+- **Client SDK**: `azure-cosmos` Java SDK — enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and point to `https://localhost:4577`; fetch the runtime cert from `GET /_floci/tls-cert` and install it into your truststore.
 - **Known gaps**: JOIN with nested arrays, full-text / vector search, geospatial,
   multi-region and RU/s governance features.
 
@@ -908,8 +936,8 @@ environment:
 
 To prevent configuration errors, note what floci-az **does not** do:
 
-1. **HTTPS (most services):** Blob, Queue, Table, Functions, App Configuration, and Key Vault run on plain HTTP on port `4577`. Do not use `DefaultEndpointsProtocol=https` for those services. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
-2. **HTTPS (Cosmos DB Java SDK only):** The Azure Cosmos DB Java SDK enforces TLS in gateway mode and cannot connect over plain HTTP. floci-az exposes HTTPS on port `4578` with a bundled self-signed certificate (`CN=localhost`, valid 100 years). No certificate import or trust-store configuration is required — point the Java SDK at `https://localhost:4578` and it works out of the box.
+1. **HTTPS (most services):** All services run on plain HTTP on port `4577` by default. Do not use `DefaultEndpointsProtocol=https` unless you have explicitly enabled TLS. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
+2. **TLS (optional):** Set `FLOCI_AZ_TLS_ENABLED=true` to enable HTTP+HTTPS on the same port `4577` via a protocol-sniffing proxy. A self-signed certificate is generated at runtime and persisted under `data/tls/`; it regenerates automatically when `FLOCI_AZ_HOSTNAME` or `FLOCI_AZ_BASE_URL` changes. Fetch the active certificate PEM from `GET /_floci/tls-cert` to install it dynamically into your truststore. The **Azure Cosmos DB Java SDK** requires TLS — enable this when using it.
 3. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
 4. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
 5. **Production Scale:** Designed for dev/test. Not for high-availability storage.

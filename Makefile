@@ -1,7 +1,5 @@
-.PHONY: build run run-docker run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop stop-docker require-emulator \
-        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image \
-        test test-python test-python-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat test-appconfig \
-        test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local test-cosmos \
+.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
+        test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-cosmos \
         test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql compat-docker clean
 
@@ -26,7 +24,9 @@ build:
 # ── Emulator: plain start / stop ──────────────────────────────────────────────
 
 run:
-	$(MVN) quarkus:dev -Dno-color > emulator.log 2>&1 & echo $$! > $(PID_FILE)
+	$(MVN) quarkus:dev -Dno-color \
+		"-Dfloci-az.tls.enabled=true" \
+		> emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@echo "Waiting for emulator to start on port $(PORT)..."
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up!"
@@ -126,18 +126,18 @@ run-sql:
 
 # ── Standard SDK compatibility tests ──────────────────────────────────────────
 
-test-python-local:
+test-python:
 	@echo "==> Python SDK compatibility tests (all services)"
 	@cd $(PYTHON_DIR) && \
 	if [ ! -d venv ]; then python3 -m venv venv; fi && \
 	./venv/bin/pip install -q -r requirements.txt && \
 	./venv/bin/pytest tests/ -v
 
-test-java-compat-local:
+test-java-compat:
 	@echo "==> Java SDK compatibility tests"
 	cd $(JAVA_DIR) && mvn test -q
 
-test-node-compat-local:
+test-node-compat:
 	@echo "==> Node.js SDK compatibility tests"
 	@cd $(NODE_DIR) && \
 	npm install --silent && \
@@ -388,6 +388,8 @@ test-sql:
 
 # ── Full test suite ────────────────────────────────────────────────────────────
 
+# Run all compatibility tests in Docker containers against the running floci-az.
+# Requires: docker compose up -d
 compat-docker:
 	$(MAKE) compat-build
 	$(MAKE) compat-run
@@ -430,9 +432,17 @@ compat-docker:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
+test-compat:
+	@echo "==> Running all SDK compatibility tests (emulator must be running)"
+	$(MAKE) test-python
+	$(MAKE) test-java-compat
+	$(MAKE) test-node-compat
+
 test: build
 	$(MVN) test
-	$(MAKE) compat-docker
+	$(MAKE) run
+	$(MAKE) test-compat
+	$(MAKE) stop
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

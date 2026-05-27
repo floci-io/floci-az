@@ -44,7 +44,7 @@ public class AzureRoutingFilter {
      * configured endpoint (discarding the path component).
      *
      * <p>When the Java Cosmos SDK receives an endpoint such as
-     * {@code https://localhost:4578} it sends requests like {@code GET /dbs} or
+     * {@code https://localhost:4577} it sends requests like {@code GET /dbs} or
      * {@code POST /dbs/mydb/colls/items/docs} rather than the path-prefixed
      * form {@code /devstoreaccount1-cosmos/dbs} that the Python and Node SDKs
      * produce.  We intercept these root-level Cosmos paths here and re-route
@@ -68,6 +68,7 @@ public class AzureRoutingFilter {
 
 
     private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers) {
+        boolean secure = requestContext.getSecurityContext().isSecure();
         String path = rawPath;
 
         if (path.startsWith("/")) {
@@ -75,7 +76,7 @@ public class AzureRoutingFilter {
         }
 
         // Health and admin endpoints bypass
-        if (path.equals("health") || path.equals("_floci/health") || path.equals("ready") || path.startsWith("_admin")) {
+        if (path.equals("health") || path.startsWith("_floci/") || path.equals("ready") || path.startsWith("_admin")) {
             return null;
         }
 
@@ -95,11 +96,11 @@ public class AzureRoutingFilter {
             requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> aksQueryParams.put(k, v.get(0)));
             AzureRequest aksRequest = new AzureRequest(
                 requestContext.getMethod(), "aks", "aks", path, headers,
-                requestContext.getEntityStream(), aksQueryParams, null);
+                requestContext.getEntityStream(), aksQueryParams, null, secure);
             AuthContext aksAuth = authPipeline.resolve(aksRequest);
             aksRequest = new AzureRequest(
                 requestContext.getMethod(), "aks", "aks", path, headers,
-                requestContext.getEntityStream(), aksQueryParams, aksAuth);
+                requestContext.getEntityStream(), aksQueryParams, aksAuth, secure);
             Optional<AzureServiceHandler> aksHandler = serviceRegistry.resolve("aks");
             if (aksHandler.isPresent()) {
                 LOGGER.infof("Dispatching ARM AKS request to AksHandler: %s %s", requestContext.getMethod(), path);
@@ -119,11 +120,11 @@ public class AzureRoutingFilter {
             requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sqlQueryParams.put(k, v.get(0)));
             AzureRequest sqlRequest = new AzureRequest(
                 requestContext.getMethod(), "sql", "sql", path, headers,
-                requestContext.getEntityStream(), sqlQueryParams, null);
+                requestContext.getEntityStream(), sqlQueryParams, null, secure);
             AuthContext sqlAuth = authPipeline.resolve(sqlRequest);
             sqlRequest = new AzureRequest(
                 requestContext.getMethod(), "sql", "sql", path, headers,
-                requestContext.getEntityStream(), sqlQueryParams, sqlAuth);
+                requestContext.getEntityStream(), sqlQueryParams, sqlAuth, secure);
             Optional<AzureServiceHandler> sqlHandler = serviceRegistry.resolve("sql");
             if (sqlHandler.isPresent()) {
                 LOGGER.infof("Dispatching ARM SQL request to SqlHandler: %s %s", requestContext.getMethod(), path);
@@ -152,12 +153,12 @@ public class AzureRoutingFilter {
             AzureRequest azureRequest = new AzureRequest(
                 requestContext.getMethod(), defaultAccount, "cosmos",
                 resourcePath, headers, requestContext.getEntityStream(),
-                queryParams, null);
+                queryParams, null, secure);
             AuthContext authContext = authPipeline.resolve(azureRequest);
             azureRequest = new AzureRequest(
                 requestContext.getMethod(), defaultAccount, "cosmos",
                 resourcePath, headers, requestContext.getEntityStream(),
-                queryParams, authContext);
+                queryParams, authContext, secure);
             Optional<AzureServiceHandler> handler = serviceRegistry.resolve("cosmos");
             if (handler.isPresent()) {
                 LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
@@ -235,7 +236,8 @@ public class AzureRoutingFilter {
             headers,
             requestContext.getEntityStream(),
             queryParams,
-            null
+            null,
+            secure
         );
 
         AuthContext authContext = authPipeline.resolve(azureRequest);
@@ -247,7 +249,8 @@ public class AzureRoutingFilter {
             headers,
             requestContext.getEntityStream(),
             queryParams,
-            authContext
+            authContext,
+            secure
         );
 
         if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {

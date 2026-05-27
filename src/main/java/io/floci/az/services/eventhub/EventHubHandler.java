@@ -175,6 +175,13 @@ public class EventHubHandler implements AzureServiceHandler {
 
         Map<String, List<String>> entities = ArtemisConfigGenerator.parseEntities(entitiesStr, consumerGroupsStr);
 
+        if (eh.mocked()) {
+            EventHubNamespaceManager.NamespaceState state = namespaceManager.registerMockedNamespace(namespaceName);
+            StringBuilder sb = new StringBuilder();
+            appendNamespaceJson(sb, namespaceName, state);
+            return Response.status(201).entity(sb.toString()).type("application/json").build();
+        }
+
         try {
             EventHubNamespaceManager.NamespaceState state =
                     namespaceManager.startNamespace(namespaceName, entities, amqpPort, amqpTlsPort);
@@ -303,6 +310,7 @@ public class EventHubHandler implements AzureServiceHandler {
         sb.append("{\"name\":\"").append(name).append("\"")
           .append(",\"amqpPort\":").append(state.amqpHostPort())
           .append(",\"amqpsPort\":").append(state.amqpsHostPort())
+          .append(",\"mocked\":").append(state.mocked())
           .append("}");
     }
 
