@@ -5,6 +5,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
+import io.floci.az.core.XmlParser;
 import io.floci.az.core.XmlUtils;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -15,7 +16,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Arrays;
 import java.time.ZoneId;
@@ -32,6 +35,7 @@ public class BlobServiceHandler implements AzureServiceHandler {
             .withZone(ZoneId.of("GMT"));
 
     private static final String NS_PREFIX = "__ns__:";
+    private static final String BLOCK_PREFIX = "__blk__:";
     private static final StoredObject NS_SENTINEL =
             new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
 
@@ -94,7 +98,14 @@ public class BlobServiceHandler implements AzureServiceHandler {
                 }
             } else {
                 if ("PUT".equalsIgnoreCase(method)) {
-                    response = putBlob(request, containerName, blobName);
+                    String comp = query.get("comp");
+                    if ("block".equals(comp)) {
+                        response = putBlock(request, containerName, blobName);
+                    } else if ("blocklist".equals(comp)) {
+                        response = putBlockList(request, containerName, blobName);
+                    } else {
+                        response = putBlob(request, containerName, blobName);
+                    }
                 } else if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlob(request, containerName, blobName, "HEAD".equalsIgnoreCase(method));
                 } else if ("DELETE".equalsIgnoreCase(method)) {
@@ -208,6 +219,72 @@ public class BlobServiceHandler implements AzureServiceHandler {
 
             store.put(objKey(request.accountName(), containerName, blobName),
                     new StoredObject(blobName, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                    .header("ETag", UUID.randomUUID().toString())
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0)
+                    .build();
+        } catch (IOException e) {
+            return Response.serverError().build();
+        }
+    }
+
+    private String blockKey(String account, String container, String blob, String blockId) {
+        return BLOCK_PREFIX + account + "/" + container + "/" + blob + "/" + blockId;
+    }
+
+    private Response putBlock(AzureRequest request, String containerName, String blobName) {
+        String blockId = request.queryParams().get("blockid");
+        if (blockId == null || blockId.isBlank()) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "The blockid query parameter is required.").toXmlResponse(400);
+        }
+        try {
+            byte[] data = request.bodyStream().readAllBytes();
+            store.put(blockKey(request.accountName(), containerName, blobName, blockId),
+                    new StoredObject(blockId, data, Map.of(), Instant.now(), UUID.randomUUID().toString()));
+            return Response.status(Response.Status.CREATED)
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0)
+                    .build();
+        } catch (IOException e) {
+            return Response.serverError().build();
+        }
+    }
+
+    private Response putBlockList(AzureRequest request, String containerName, String blobName) {
+        try {
+            String xml = new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8);
+            // <BlockList> contains <Latest>, <Committed>, or <Uncommitted> elements in commit order.
+            // The SDK uses <Latest> for fresh uploads; collect all three preserving per-type order.
+            List<String> blockIds = new ArrayList<>();
+            blockIds.addAll(XmlParser.extractAll(xml, "Latest"));
+            blockIds.addAll(XmlParser.extractAll(xml, "Committed"));
+            blockIds.addAll(XmlParser.extractAll(xml, "Uncommitted"));
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            for (String blockId : blockIds) {
+                Optional<StoredObject> block = store.get(
+                        blockKey(request.accountName(), containerName, blobName, blockId));
+                if (block.isEmpty()) {
+                    return new AzureErrorResponse("InvalidBlockList",
+                            "The specified block list is invalid.").toXmlResponse(400);
+                }
+                out.write(block.get().data());
+                store.delete(blockKey(request.accountName(), containerName, blobName, blockId));
+            }
+
+            Map<String, String> metadata = new HashMap<>();
+            metadata.put("BlobType", "BlockBlob");
+            String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+            metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
+            metadata.put("Name", blobName);
+
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(blobName, out.toByteArray(), metadata, Instant.now(),
+                            UUID.randomUUID().toString()));
 
             return Response.status(Response.Status.CREATED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
