@@ -249,17 +249,17 @@ class FunctionsCompatibilityTest {
     }
 
     /**
-     * Builds a minimal Azure Functions v3 Node.js ZIP in-memory and returns it as base64.
-     * Structure:
-     *   host.json
-     *   hello/function.json   (HTTP trigger)
-     *   hello/index.js        (handler)
+     * Builds a minimal Azure Functions Node.js ZIP in-memory and returns it as base64.
+     * Flat structure — ContainerLauncher injects at wwwroot/{funcName}/ and separately
+     * provides host.json at wwwroot/host.json, so ZIPs must NOT include host.json or
+     * a {funcName}/ subdirectory.
+     *   function.json   (HTTP trigger binding)
+     *   index.js        (handler)
      */
     private static String buildNodeZipBase64() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(baos)) {
-            addZipEntry(zos, "host.json", "{\"version\":\"2.0\"}");
-            addZipEntry(zos, "hello/function.json", """
+            addZipEntry(zos, "function.json", """
                     {
                       "bindings": [
                         {"authLevel":"anonymous","type":"httpTrigger","direction":"in",
@@ -268,7 +268,7 @@ class FunctionsCompatibilityTest {
                       ]
                     }
                     """);
-            addZipEntry(zos, "hello/index.js", """
+            addZipEntry(zos, "index.js", """
                     module.exports = async function(context, req) {
                         const msg = (req.query && req.query.msg) || "world";
                         context.res = { status: 200, body: "Hello, " + msg + "!" };

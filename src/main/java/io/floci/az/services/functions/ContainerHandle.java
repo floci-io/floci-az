@@ -8,15 +8,15 @@ public class ContainerHandle {
     public enum State { WARM, BUSY, STOPPED }
 
     private final String containerId;
-    private final String functionKey;   // "{account}/{appName}/{funcName}"
+    private final String appKey;        // "{account}/{appName}" — all functions in one app share one container
     private final String host;
     private final int port;             // host-mapped port for container's port 80
     private volatile long lastUsedMs;
     private volatile State state;
 
-    public ContainerHandle(String containerId, String functionKey, String host, int port) {
+    public ContainerHandle(String containerId, String appKey, String host, int port) {
         this.containerId  = containerId;
-        this.functionKey  = functionKey;
+        this.appKey       = appKey;
         this.host         = host;
         this.port         = port;
         this.lastUsedMs   = System.currentTimeMillis();
@@ -24,7 +24,7 @@ public class ContainerHandle {
     }
 
     public String containerId()  { return containerId; }
-    public String functionKey()  { return functionKey; }
+    public String appKey()       { return appKey; }
     public String host()         { return host; }
     public int    port()         { return port; }
     public State  state()        { return state; }

@@ -3,6 +3,7 @@ package io.floci.az.services.functions;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.services.functions.FunctionModels.FunctionDefinition;
+import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -45,7 +46,7 @@ public class FunctionsExecutorService {
                 .build();
     }
 
-    public Response invoke(FunctionDefinition def, AzureRequest request) {
+    public Response invoke(FunctionDefinition def, List<FunctionDefinition> appDefs, AzureRequest request) {
         if (def.codeLocalPath() == null) {
             return new AzureErrorResponse("FunctionCodeNotDeployed",
                     "No code has been deployed for function '" + def.funcName() + "'. "
@@ -55,12 +56,12 @@ public class FunctionsExecutorService {
 
         ContainerHandle handle = null;
         try {
-            handle = warmPool.acquire(def);
+            handle = warmPool.acquire(def, appDefs);
             return proxy(handle, request, def.funcName(), def.timeoutSeconds());
         } catch (Exception e) {
-            LOG.errorv("Invocation failed for {0}: {1}", def.functionKey(), e.getMessage());
+            LOG.errorv("Invocation failed for {0}: {1}", def.appKey(), e.getMessage());
             if (handle != null) {
-                warmPool.drain(def.functionKey());
+                warmPool.drain(def.appKey());
                 handle = null;
             }
             return new AzureErrorResponse("FunctionInvocationError", e.getMessage())

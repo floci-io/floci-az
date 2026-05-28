@@ -14,6 +14,7 @@ import io.floci.az.core.dns.EmbeddedDnsServer;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.DockerHostResolver;
 import io.floci.az.services.functions.FunctionModels.FunctionDefinition;
+import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -87,21 +89,27 @@ public class ContainerLauncher {
                 .build();
     }
 
-    public ContainerHandle launch(FunctionDefinition def) {
-        LOG.infov("Launching container for function: {0}/{1}", def.appName(), def.funcName());
+    /**
+     * Launches a single container for an entire function app.
+     * All deployed functions in {@code appDefs} have their code injected into
+     * the container under {@code /home/site/wwwroot/{funcName}/} so the
+     * Azure Functions host discovers and loads them all at startup.
+     */
+    public ContainerHandle launch(List<FunctionDefinition> appDefs) {
+        FunctionDefinition primary = appDefs.get(0);
+        LOG.infov("Launching app container for: {0} ({1} function(s))",
+                primary.appName(), appDefs.size());
 
-        if (def.codeLocalPath() != null && !Files.exists(Path.of(def.codeLocalPath()))) {
-            throw new RuntimeException("Code directory not found for " + def.funcName()
-                    + ": " + def.codeLocalPath());
-        }
-
-        String image = resolveImage(def.runtime());
+        String image = resolveImage(primary.runtime());
         ensureImage(image);
 
-        List<String> env = buildEnv(def);
+        List<String> env = buildEnv(primary);
 
         String shortId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
-        String containerName = "floci-az-fn-" + def.appName() + "-" + def.funcName() + "-" + shortId;
+        String containerName = "floci-az-fn-" + primary.appName() + "-" + shortId;
+
+        // Use primary as `def` alias for the remainder of the method
+        FunctionDefinition def = primary;
 
         // Create container with port 80 bound to a dynamic host port
         ExposedPort exposed  = ExposedPort.tcp(FUNCTIONS_PORT);
@@ -144,9 +152,16 @@ public class ContainerLauncher {
         String containerId = created.getId();
         LOG.infov("Created container {0} ({1})", containerName, containerId.substring(0, 12));
 
-        // Inject function code before starting so the Functions host finds it on startup
-        if (def.codeLocalPath() != null) {
-            copyCodeToContainer(containerId, Path.of(def.codeLocalPath()), def.funcName());
+        // Inject a shared host.json at the wwwroot root so the Functions host starts
+        // correctly when each function's code is in its own subdirectory.
+        injectHostJson(containerId);
+
+        // Inject code for every function in the app before starting so the Functions
+        // host finds them all at /home/site/wwwroot/{funcName}/ on startup.
+        for (FunctionDefinition fn : appDefs) {
+            if (fn.codeLocalPath() != null && Files.exists(Path.of(fn.codeLocalPath()))) {
+                copyCodeToContainer(containerId, Path.of(fn.codeLocalPath()), fn.funcName());
+            }
         }
 
         dockerClient.startContainerCmd(containerId).exec();
@@ -172,7 +187,7 @@ public class ContainerLauncher {
         int targetPort = targetHost.equals("localhost") ? hostPort : 80;
         waitForReady(targetHost, targetPort, 60);
 
-        return new ContainerHandle(containerId, def.functionKey(), targetHost, targetPort);
+        return new ContainerHandle(containerId, def.appKey(), targetHost, targetPort);
     }
 
     public void stop(ContainerHandle handle) {
@@ -270,13 +285,44 @@ public class ContainerLauncher {
         return Integer.parseInt(binding[0].getHostPortSpec());
     }
 
+    private void injectHostJson(String containerId) {
+        byte[] content = "{\"version\":\"2.0\"}".getBytes(StandardCharsets.UTF_8);
+        try (PipedOutputStream pos = new PipedOutputStream();
+             PipedInputStream pis = new PipedInputStream(pos, 65536)) {
+            Thread tarThread = new Thread(() -> {
+                try (pos; TarArchiveOutputStream tar = newTar(pos)) {
+                    TarArchiveEntry entry = new TarArchiveEntry("home/site/wwwroot/host.json");
+                    entry.setSize(content.length);
+                    entry.setMode(0644);
+                    tar.putArchiveEntry(entry);
+                    tar.write(content);
+                    tar.closeArchiveEntry();
+                } catch (IOException e) {
+                    LOG.errorv("Failed to stream host.json TAR: {0}", e.getMessage());
+                }
+            }, "tar-host-json");
+            tarThread.setDaemon(true);
+            tarThread.start();
+            dockerClient.copyArchiveToContainerCmd(containerId)
+                    .withRemotePath("/")
+                    .withTarInputStream(pis)
+                    .exec();
+            LOG.debugv("Injected host.json into {0}", WWWROOT);
+        } catch (Exception e) {
+            LOG.warnv("Failed to inject host.json: {0}", e.getMessage());
+        }
+    }
+
     private void copyCodeToContainer(String containerId, Path codeDir, String funcName) {
         try (PipedOutputStream pos = new PipedOutputStream();
              PipedInputStream  pis = new PipedInputStream(pos, 256 * 1024)) {
 
+            // Each function lives at /home/site/wwwroot/{funcName}/ so the Azure
+            // Functions host discovers all functions in the app from one container.
+            String prefix = "home/site/wwwroot/" + funcName + "/";
             Thread tarThread = new Thread(() -> {
                 try (pos) {
-                    createTarWithPrefix(codeDir, pos, "home/site/wwwroot/");
+                    createTarWithPrefix(codeDir, pos, prefix);
                 } catch (IOException e) {
                     LOG.errorv("Failed to stream TAR for {0}: {1}", funcName, e.getMessage());
                 }
