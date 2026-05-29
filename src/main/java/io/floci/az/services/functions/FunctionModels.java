@@ -32,6 +32,11 @@ public class FunctionModels {
             @JsonInclude(JsonInclude.Include.NON_NULL) String codeLocalPath,
             Instant createdAt
     ) {
+        /** Pool key — all functions in one app share one container. */
+        public String appKey() {
+            return accountName + "/" + appName;
+        }
+
         public String functionKey() {
             return accountName + "/" + appName + "/" + funcName;
         }

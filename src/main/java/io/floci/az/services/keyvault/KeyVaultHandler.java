@@ -67,6 +67,14 @@ public class KeyVaultHandler implements AzureServiceHandler {
                     .build();
         }
 
+        // Root probe — azurerm provider polls this to confirm the vault is reachable.
+        if (path.isEmpty() || path.equals("/")) {
+            return Response.ok(java.util.Map.of(
+                "type", "Microsoft.KeyVault/vaults",
+                "id",   "https://" + account + ".vault.azure.net/"
+            )).build();
+        }
+
         if ("secrets".equals(path)) {
             return "GET".equals(method) ? listSecrets(account) : methodNotAllowed();
         }
@@ -78,6 +86,18 @@ public class KeyVaultHandler implements AzureServiceHandler {
         }
         if (path.startsWith("deletedsecrets/")) {
             return handleDeletedSecrets(req, method, account, path.substring("deletedsecrets/".length()));
+        }
+
+        // Certificate contacts — azurerm provider reads this after key vault creation.
+        // Return an empty contacts list so the provider sees no contacts configured.
+        if ("certificates/contacts".equals(path)) {
+            if ("GET".equals(method)) {
+                return Response.ok(java.util.Map.of(
+                    "id", "https://" + account + ".vault.azure.net/certificates/contacts",
+                    "contacts", java.util.List.of()
+                )).build();
+            }
+            return methodNotAllowed();
         }
 
         return kvError(404, "BadRequest", "Resource not found: " + path);
@@ -517,7 +537,7 @@ public class KeyVaultHandler implements AzureServiceHandler {
     // -------------------------------------------------------------------------
 
     private String vaultHost(String account) {
-        return "https://" + account + "-keyvault";
+        return "https://" + account + ".vault.azure.net";
     }
 
     private String secretVersionId(String account, String name, String version) {

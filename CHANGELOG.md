@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-28
+
+### Added
+
+- **arm:** Azure Resource Manager management-plane emulation — ARM routing on `management.azure.com`-style paths; resource group CRUD (`Microsoft.Resources`); storage account + blob/queue/table endpoint resolution (`Microsoft.Storage`); Key Vault CRUD with vault URI (`Microsoft.KeyVault`); subscription and resource-group list endpoints; OAuth token endpoint (`/oauth2/token`) returning a synthetic bearer token accepted by the ARM routing layer ([#40](https://github.com/floci-io/floci-az/pull/40))
+- **arm:** Terraform compatibility — `azurerm` provider `~> 4.0`; `make compat-terraform` target; BATS test suite covering resource group, storage account, storage container, storage queue, Key Vault, and Key Vault secret via Terraform apply/destroy ([#40](https://github.com/floci-io/floci-az/pull/40))
+- **arm:** OpenTofu compatibility — identical BATS suite against OpenTofu `tofu` CLI; `make compat-opentofu` target ([#40](https://github.com/floci-io/floci-az/pull/40))
+
+### Fixed
+
+- **blob:** Large blob uploads beyond 20 MB now work correctly — raised Quarkus HTTP body limit to `2G` (`quarkus.http.limits.max-body-size`) and Jackson string-length limit to 512 MB; implemented block blob protocol (`PUT ?comp=block` / `PUT ?comp=blocklist`) so the Azure SDK's chunked multi-part upload path is fully supported ([#41](https://github.com/floci-io/floci-az/pull/41))
+- **functions:** All functions in a Function App now share a single container — pool keyed on `appKey` (`account/appName`) instead of per-function; `ContainerLauncher.launch()` injects every function's code at `wwwroot/{funcName}/` and writes a shared `host.json` before the container starts; previously N functions started N containers ([#42](https://github.com/floci-io/floci-az/pull/42))
+
+---
+
 ## [0.4.0] - 2026-05-25
 
 ### Added
@@ -153,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) — native binary (`latest`) and JVM (`latest-jvm`) tags
 - Single unified port `4577` for all services
 
-[Unreleased]: https://github.com/floci-io/floci-az/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/floci-io/floci-az/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/floci-io/floci-az/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/floci-io/floci-az/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/floci-io/floci-az/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/floci-io/floci-az/compare/0.1.4...0.2.0

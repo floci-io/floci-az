@@ -151,3 +151,41 @@ def test_blob_conditional_download_rejects_wrong_etag(blob_service_client):
     assert exc_info.value.status_code == 412
 
     blob_service_client.delete_container(container_name)
+
+
+# --- Large payload tests (regression for Jackson StreamConstraintsException > 20 MB) ---
+
+def test_large_blob_single_put(blob_service_client):
+    """25 MB blob via PutBlob — just above the old 20 MB Jackson string-length default."""
+    container_name = make_container_name()
+    blob_service_client.create_container(container_name)
+    container = blob_service_client.get_container_client(container_name)
+
+    size = 25 * 1024 * 1024  # 25 MB
+    data = b"x" * size
+
+    blob = container.get_blob_client("large-single.bin")
+    blob.upload_blob(data, overwrite=True, max_concurrency=1)
+
+    props = blob.get_blob_properties()
+    assert props.size == size
+
+    blob_service_client.delete_container(container_name)
+
+
+def test_large_blob_block_upload(blob_service_client):
+    """100 MB blob — SDK switches to Put Block / Put Block List chunked upload."""
+    container_name = make_container_name()
+    blob_service_client.create_container(container_name)
+    container = blob_service_client.get_container_client(container_name)
+
+    size = 100 * 1024 * 1024  # 100 MB
+    data = b"y" * size
+
+    blob = container.get_blob_client("large-chunked.bin")
+    blob.upload_blob(data, overwrite=True)
+
+    props = blob.get_blob_properties()
+    assert props.size == size
+
+    blob_service_client.delete_container(container_name)

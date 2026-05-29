@@ -1,7 +1,10 @@
-.PHONY: build run run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql stop \
-        test test-python test-java-compat test-node-compat test-servicebus-compat test-appconfig test-cosmos \
-        test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql compat-docker clean
+.PHONY: build run run-docker stop stop-docker require-emulator \
+        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image compat-terraform-image compat-opentofu-image \
+        run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
+        test test-python test-python-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat test-appconfig \
+        test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
+        test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
+        test-sql test-terraform test-opentofu test-iac compat-docker test-compat clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -9,19 +12,23 @@ PID_FILE       = emulator.pid
 PYTHON_DIR     = compatibility-tests/sdk-test-python
 JAVA_DIR       = compatibility-tests/sdk-test-java
 NODE_DIR       = compatibility-tests/sdk-test-node
+TERRAFORM_DIR  = compatibility-tests/compat-terraform
+OPENTOFU_DIR   = compatibility-tests/compat-opentofu
 COMPAT_NETWORK = compat-net
 COMPAT_RESULTS = test-results
 FLOCI_AZ_IMAGE = floci-az:test
 PYTHON_IMAGE   = compat-sdk-test-python
 JAVA_IMAGE     = compat-sdk-test-java
 NODE_IMAGE     = compat-sdk-test-node
+TERRAFORM_IMAGE = compat-terraform
+OPENTOFU_IMAGE  = compat-opentofu
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 build:
 	$(MVN) compile
 
-# ── Emulator: plain start / stop ──────────────────────────────────────────────
+# ── Emulator: local start / stop ──────────────────────────────────────────────
 
 run:
 	$(MVN) quarkus:dev -Dno-color \
@@ -51,9 +58,9 @@ stop-docker:
 
 require-emulator:
 	@curl -s http://127.0.0.1:$(PORT)/health > /dev/null || \
-		(echo "floci-az emulator is not reachable at http://127.0.0.1:$(PORT). Run 'make run' first, or use 'make test-blob' to start and stop it automatically."; exit 1)
+		(echo "floci-az emulator is not reachable at http://127.0.0.1:$(PORT). Run 'make run' first, or use a Docker target such as 'make test-blob'."; exit 1)
 
-# ── Compatibility test environment (mirrors .github/workflows/compatibility.yml) ──
+# ── Compatibility environment — mirrors .github/workflows/compatibility.yml ──
 
 compat-network:
 	@docker network inspect $(COMPAT_NETWORK) >/dev/null 2>&1 || docker network create $(COMPAT_NETWORK)
@@ -85,6 +92,12 @@ compat-java-image:
 
 compat-node-image:
 	docker build -t $(NODE_IMAGE) -f $(NODE_DIR)/Dockerfile $(NODE_DIR)/
+
+compat-terraform-image:
+	docker build -t $(TERRAFORM_IMAGE) -f $(TERRAFORM_DIR)/Dockerfile $(TERRAFORM_DIR)/
+
+compat-opentofu-image:
+	docker build -t $(OPENTOFU_IMAGE) -f $(OPENTOFU_DIR)/Dockerfile $(OPENTOFU_DIR)/
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
 
@@ -124,32 +137,15 @@ run-sql:
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (SQL service — EULA accepted)"
 
-# ── Standard SDK compatibility tests ──────────────────────────────────────────
-
-test-python:
-	@echo "==> Python SDK compatibility tests (all services)"
-	@cd $(PYTHON_DIR) && \
-	if [ ! -d venv ]; then python3 -m venv venv; fi && \
-	./venv/bin/pip install -q -r requirements.txt && \
-	./venv/bin/pytest tests/ -v
-
-test-java-compat:
-	@echo "==> Java SDK compatibility tests"
-	cd $(JAVA_DIR) && mvn test -q
-
-test-node-compat:
-	@echo "==> Node.js SDK compatibility tests"
-	@cd $(NODE_DIR) && \
-	npm install --silent && \
-	npm test
+# ── SDK compatibility tests — Docker by default ───────────────────────────────
 
 test-python:
 	@echo "==> Python SDK compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/python
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-python-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -166,8 +162,8 @@ test-java-compat:
 	@mkdir -p $(COMPAT_RESULTS)/java
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-java-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-java-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -186,8 +182,8 @@ test-node-compat:
 	@mkdir -p $(COMPAT_RESULTS)/node
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-node-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-node-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -199,34 +195,36 @@ test-node-compat:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
+test-python-local:
+	@echo "==> Python SDK compatibility tests (all services, local emulator)"
+	@cd $(PYTHON_DIR) && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
+	./venv/bin/pytest tests/ -v
+
+test-java-compat-local:
+	@echo "==> Java SDK compatibility tests (local emulator)"
+	cd $(JAVA_DIR) && mvn test -q
+
+test-node-compat-local:
+	@echo "==> Node.js SDK compatibility tests (local emulator)"
+	@cd $(NODE_DIR) && \
+	npm install --silent && \
+	npm test
+
 test-servicebus-compat:
 	@echo "==> Service Bus Java SDK compatibility tests"
 	cd $(JAVA_DIR) && mvn test -Dtest=ServiceBusCompatibilityTest -q
 
-test-blob-python-local: require-emulator
-	@echo "==> Blob Storage Python SDK compatibility tests"
-	@cd $(PYTHON_DIR) && \
-	if [ ! -d venv ]; then python3 -m venv venv; fi && \
-	./venv/bin/pip install -q -r requirements.txt && \
-	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) ./venv/bin/pytest -q tests/test_blob.py
-
-test-blob-java-local: require-emulator
-	@echo "==> Blob Storage Java SDK compatibility tests"
-	cd $(JAVA_DIR) && FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) mvn test -Dtest=BlobCompatibilityTest
-
-test-blob-node-local: require-emulator
-	@echo "==> Blob Storage Node.js SDK compatibility tests"
-	@cd $(NODE_DIR) && \
-	npm install --silent && \
-	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) npm test -- --runTestsByPath tests/blob.test.ts
+# ── Blob compatibility subset ─────────────────────────────────────────────────
 
 test-blob-python:
 	@echo "==> Blob Storage Python SDK compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/blob-python
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-python-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -242,8 +240,8 @@ test-blob-java:
 	@mkdir -p $(COMPAT_RESULTS)/blob-java
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-java-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-java-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -259,8 +257,8 @@ test-blob-node:
 	@mkdir -p $(COMPAT_RESULTS)/blob-node
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	$(MAKE) compat-node-image; \
-	EXIT=$$?; \
+	@EXIT=0; \
+	$(MAKE) compat-node-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
@@ -272,14 +270,6 @@ test-blob-node:
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
-
-test-blob-local:
-	@echo "==> Blob Storage SDK compatibility tests"
-	$(MAKE) run
-	$(MAKE) test-blob-python-local; \
-	EXIT=$$?; if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-node-local; EXIT=$$?; fi; \
-	if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-java-local; EXIT=$$?; fi; \
-	$(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-blob:
 	@echo "==> Blob Storage SDK compatibility tests (Docker)"
@@ -318,6 +308,33 @@ test-blob:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
+test-blob-python-local: require-emulator
+	@echo "==> Blob Storage Python SDK compatibility tests (local emulator)"
+	@cd $(PYTHON_DIR) && \
+	if [ ! -d venv ]; then python3 -m venv venv; fi && \
+	./venv/bin/pip install -q -r requirements.txt && \
+	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) ./venv/bin/pytest -q tests/test_blob.py
+
+test-blob-java-local: require-emulator
+	@echo "==> Blob Storage Java SDK compatibility tests (local emulator)"
+	cd $(JAVA_DIR) && FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) mvn test -Dtest=BlobCompatibilityTest
+
+test-blob-node-local: require-emulator
+	@echo "==> Blob Storage Node.js SDK compatibility tests (local emulator)"
+	@cd $(NODE_DIR) && \
+	npm install --silent && \
+	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) npm test -- --runTestsByPath tests/blob.test.ts
+
+test-blob-local:
+	@echo "==> Blob Storage SDK compatibility tests (local emulator)"
+	$(MAKE) run
+	$(MAKE) test-blob-python-local; \
+	EXIT=$$?; if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-node-local; EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) test-blob-java-local; EXIT=$$?; fi; \
+	$(MAKE) -C $(CURDIR) stop; exit $$EXIT
+
+# ── Cosmos / SQL compatibility ────────────────────────────────────────────────
+
 test-cosmos:
 	@echo "==> Cosmos DB NoSQL (in-memory) compatibility tests"
 	@cd $(PYTHON_DIR) && \
@@ -330,10 +347,6 @@ test-cosmos:
 	@cd $(NODE_DIR) && \
 	npm install --silent && \
 	npx jest cosmos.test --testTimeout=30000
-
-# ── Cosmos engine tests — one target per API ──────────────────────────────────
-# Each target: starts the emulator with that engine enabled, runs the test, stops.
-# Requires Docker.
 
 test-cosmos-mongo:
 	@echo "==> Cosmos MongoDB engine test"
@@ -386,20 +399,58 @@ test-sql:
 	cd $(JAVA_DIR) && mvn test -Dtest=SqlCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
-# ── Full test suite ────────────────────────────────────────────────────────────
+# ── IaC compatibility ─────────────────────────────────────────────────────────
 
-# Run all compatibility tests in Docker containers against the running floci-az.
-# Requires: docker compose up -d
+test-terraform:
+	@echo "==> Terraform IaC compatibility tests (Docker)"
+	@mkdir -p $(COMPAT_RESULTS)/terraform
+	$(MAKE) compat-build
+	$(MAKE) compat-run
+	@EXIT=0; \
+	$(MAKE) compat-terraform-image || EXIT=$$?; \
+	if [ $$EXIT -eq 0 ]; then \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/terraform:/results" \
+			$(TERRAFORM_IMAGE); \
+		EXIT=$$?; \
+	fi; \
+	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+
+test-opentofu:
+	@echo "==> OpenTofu IaC compatibility tests (Docker)"
+	@mkdir -p $(COMPAT_RESULTS)/opentofu
+	$(MAKE) compat-build
+	$(MAKE) compat-run
+	@EXIT=0; \
+	$(MAKE) compat-opentofu-image || EXIT=$$?; \
+	if [ $$EXIT -eq 0 ]; then \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/opentofu:/results" \
+			$(OPENTOFU_IMAGE); \
+		EXIT=$$?; \
+	fi; \
+	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+
+test-iac:
+	$(MAKE) test-terraform
+	$(MAKE) test-opentofu
+
+# ── Full compatibility suite ──────────────────────────────────────────────────
+
 compat-docker:
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java
+	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-java-image || EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-terraform-image || EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-opentofu-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then \
-		echo "==> Python SDK tests (blob, queue, table, appconfig, keyvault, eventhub)"; \
+		echo "==> Python SDK tests"; \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
 			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
@@ -430,19 +481,30 @@ compat-docker:
 			$(JAVA_IMAGE); \
 		EXIT=$$?; \
 	fi; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "==> Terraform IaC tests"; \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/terraform:/results" \
+			$(TERRAFORM_IMAGE); \
+		EXIT=$$?; \
+	fi; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "==> OpenTofu IaC tests"; \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/opentofu:/results" \
+			$(OPENTOFU_IMAGE); \
+		EXIT=$$?; \
+	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
 test-compat:
-	@echo "==> Running all SDK compatibility tests (emulator must be running)"
-	$(MAKE) test-python
-	$(MAKE) test-java-compat
-	$(MAKE) test-node-compat
+	$(MAKE) compat-docker
 
 test: build
 	$(MVN) test
-	$(MAKE) run
-	$(MAKE) test-compat
-	$(MAKE) stop
+	$(MAKE) compat-docker
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
@@ -450,4 +512,5 @@ clean:
 	$(MVN) clean
 	rm -rf $(PYTHON_DIR)/venv $(PYTHON_DIR)/tests/__pycache__
 	rm -rf $(NODE_DIR)/node_modules $(NODE_DIR)/dist
+	rm -rf $(COMPAT_RESULTS)
 	rm -f emulator.log $(PID_FILE)

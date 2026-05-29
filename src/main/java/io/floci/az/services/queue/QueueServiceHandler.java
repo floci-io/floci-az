@@ -5,6 +5,7 @@ import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -66,6 +67,12 @@ public class QueueServiceHandler implements AzureServiceHandler {
         if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listQueues(request);
+            } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
+                if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+                    response = getQueueServiceProperties();
+                } else {
+                    response = Response.ok().build();
+                }
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toXmlResponse(501);
@@ -84,6 +91,8 @@ public class QueueServiceHandler implements AzureServiceHandler {
                     response = createQueue(request, queueName);
                 } else if ("DELETE".equalsIgnoreCase(method)) {
                     response = deleteQueue(request, queueName);
+                } else if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+                    response = getQueue(request, queueName);
                 } else {
                     response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                             .toXmlResponse(501);
@@ -116,6 +125,32 @@ public class QueueServiceHandler implements AzureServiceHandler {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("Date", RFC1123_DATE_TIME.format(Instant.now()))
                 .build();
+    }
+
+    private Response getQueueServiceProperties() {
+        String xml = new XmlBuilder()
+            .start("StorageServiceProperties")
+                .start("Logging")
+                    .elem("Version", "1.0")
+                    .elem("Delete", "false")
+                    .elem("Read", "false")
+                    .elem("Write", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("Logging")
+                .start("HourMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("HourMetrics")
+                .start("MinuteMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("MinuteMetrics")
+                .selfClose("Cors")
+            .end("StorageServiceProperties")
+            .toString();
+        return Response.ok(xml, "application/xml").build();
     }
 
     private Response createQueue(AzureRequest request, String queueName) {
@@ -185,6 +220,14 @@ public class QueueServiceHandler implements AzureServiceHandler {
 
         store.put(key, new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
         return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    private Response getQueue(AzureRequest request, String queueName) {
+        if (store.get(nsKey(request.accountName(), queueName)).isEmpty()) {
+            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        return Response.ok().build();
     }
 
     private Response putMessage(AzureRequest request, String queueName) {
@@ -516,6 +559,10 @@ public class QueueServiceHandler implements AzureServiceHandler {
 
     public void clearAll() {
         store.clear();
+    }
+
+    public void ensureQueue(String accountName, String queueName) {
+        store.put(nsKey(accountName, queueName), NS_SENTINEL);
     }
 
     private static String nsKey(String accountName, String queueName) {

@@ -2,6 +2,7 @@ package io.floci.az.services.functions;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.services.functions.FunctionModels.FunctionDefinition;
+import java.util.List;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -76,24 +77,25 @@ public class WarmPool {
     }
 
     /**
-     * Returns a warm container for the function, cold-starting one if necessary.
+     * Returns a warm container for the app, cold-starting one if necessary.
+     * All functions in the app share the same container pool slot.
      */
-    public ContainerHandle acquire(FunctionDefinition def) {
+    public ContainerHandle acquire(FunctionDefinition def, List<FunctionDefinition> appDefs) {
         boolean ephemeral = config.services().functions().ephemeral();
         ContainerHandle handle = null;
 
         if (!ephemeral) {
-            ArrayDeque<ContainerHandle> q = pool.computeIfAbsent(def.functionKey(), k -> new ArrayDeque<>());
+            ArrayDeque<ContainerHandle> q = pool.computeIfAbsent(def.appKey(), k -> new ArrayDeque<>());
             synchronized (q) {
                 handle = q.pollFirst();
             }
         }
 
         if (handle == null) {
-            LOG.debugv(ephemeral ? "Ephemeral start: {0}" : "Cold start: {0}", def.functionKey());
-            handle = launcher.launch(def);
+            LOG.debugv(ephemeral ? "Ephemeral start: {0}" : "Cold start: {0}", def.appKey());
+            handle = launcher.launch(appDefs);
         } else {
-            LOG.debugv("Warm container reused: {0}", def.functionKey());
+            LOG.debugv("Warm container reused: {0}", def.appKey());
         }
 
         handle.setState(ContainerHandle.State.BUSY);
@@ -112,16 +114,16 @@ public class WarmPool {
         handle.setState(ContainerHandle.State.WARM);
         handle.touchLastUsed();
 
-        ArrayDeque<ContainerHandle> q = pool.computeIfAbsent(handle.functionKey(), k -> new ArrayDeque<>());
+        ArrayDeque<ContainerHandle> q = pool.computeIfAbsent(handle.appKey(), k -> new ArrayDeque<>());
         boolean returned;
         synchronized (q) {
             returned = q.size() < maxPoolSizePerFunction;
             if (returned) q.addFirst(handle);
         }
         if (returned) {
-            LOG.debugv("Container returned to pool: {0}", handle.functionKey());
+            LOG.debugv("Container returned to pool: {0}", handle.appKey());
         } else {
-            LOG.debugv("Pool full for {0}, discarding container", handle.functionKey());
+            LOG.debugv("Pool full for {0}, discarding container", handle.appKey());
             stopQuietly(handle);
         }
     }

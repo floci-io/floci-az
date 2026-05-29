@@ -84,8 +84,8 @@ class TlsConfigSourceCertificateGenerationTest {
         assertTrue(sans.contains("localhost"));
         assertTrue(sans.contains("127.0.0.1"));
         assertTrue(sans.contains("0.0.0.0"));
-        assertEquals(6, sans.size(),
-            "Default cert should have exactly 6 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io)");
+        assertEquals(7, sans.size(),
+            "Default cert should have exactly 7 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net)");
     }
 
     @Test

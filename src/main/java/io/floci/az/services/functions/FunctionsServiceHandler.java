@@ -168,14 +168,9 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
     }
 
     private Response deleteApp(AzureRequest request, String appName) {
-        // Drain all warm containers for every function in the app
+        // Drain the shared app container pool before removing all functions.
+        warmPool.drain(request.accountName() + "/" + appName);
         String fnPrefix = fnScanPrefix(request.accountName(), appName);
-        store.scan(k -> k.startsWith(fnPrefix)).forEach(so -> {
-            try {
-                FunctionDefinition def = mapper.readValue(so.data(), FunctionDefinition.class);
-                warmPool.drain(def.functionKey());
-            } catch (IOException ignored) {}
-        });
         // Delete all function entries
         store.keys().stream()
                 .filter(k -> k.startsWith(fnPrefix))
@@ -226,8 +221,8 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
                     codePath,
                     Instant.now());
 
-            // Drain stale warm containers on redeploy
-            warmPool.drain(def.functionKey());
+            // Drain the app container on redeploy — container must restart with updated code.
+            warmPool.drain(def.appKey());
             store.put(fnKey(request.accountName(), appName, funcName), toStoredObject(def));
 
             return Response.status(201).type(MediaType.APPLICATION_JSON)
@@ -267,12 +262,8 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
 
     private Response deleteFunction(AzureRequest request, String appName, String funcName) {
         String key = fnKey(request.accountName(), appName, funcName);
-        store.get(key).ifPresent(so -> {
-            try {
-                FunctionDefinition def = mapper.readValue(so.data(), FunctionDefinition.class);
-                warmPool.drain(def.functionKey());
-            } catch (IOException ignored) {}
-        });
+        // Drain the app container — it must restart without the removed function.
+        warmPool.drain(request.accountName() + "/" + appName);
         store.delete(key);
         codeStore.deleteCode(request.accountName(), appName, funcName);
         return Response.noContent().build();
@@ -298,7 +289,19 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
 
         try {
             FunctionDefinition def = mapper.readValue(fnSo.get().data(), FunctionDefinition.class);
-            return executor.invoke(def, request);
+
+            // All functions in the app share one container — collect them all so the
+            // launcher can inject every function's code before starting the host.
+            String fnPrefix = fnScanPrefix(request.accountName(), appName);
+            List<FunctionModels.FunctionDefinition> appDefs = store.scan(k -> k.startsWith(fnPrefix)).stream()
+                    .map(so -> {
+                        try { return mapper.readValue(so.data(), FunctionDefinition.class); }
+                        catch (IOException e) { return null; }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            return executor.invoke(def, appDefs, request);
         } catch (IOException e) {
             return Response.serverError().build();
         }
