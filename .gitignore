@@ -26,6 +26,7 @@ local
 go.sum
 package-lock.json
 test-results.xml
+test-results/
 
 *.log
 

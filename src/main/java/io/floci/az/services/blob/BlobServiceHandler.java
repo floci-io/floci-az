@@ -15,7 +15,6 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -558,8 +557,31 @@ public class BlobServiceHandler implements AzureServiceHandler {
                  .forEach(uncommitted::add);
         }
 
-        BlobModels.BlockListResponse body = new BlobModels.BlockListResponse(committed, uncommitted);
-        return Response.ok(XmlUtils.toXml(body)).type(MediaType.APPLICATION_XML).build();
+        String body = buildBlockListXml(committed, uncommitted);
+        return Response.ok(body).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private static String buildBlockListXml(List<BlobModels.BlockItem> committed,
+                                            List<BlobModels.BlockItem> uncommitted) {
+        XmlBuilder xml = new XmlBuilder()
+                .start("BlockList")
+                .start("CommittedBlocks");
+        appendBlockItems(xml, committed);
+        xml.end("CommittedBlocks")
+                .start("UncommittedBlocks");
+        appendBlockItems(xml, uncommitted);
+        return xml.end("UncommittedBlocks")
+                .end("BlockList")
+                .build();
+    }
+
+    private static void appendBlockItems(XmlBuilder xml, List<BlobModels.BlockItem> blocks) {
+        for (BlobModels.BlockItem block : blocks) {
+            xml.start("Block")
+                    .elem("Name", block.Name())
+                    .elem("Size", block.Size())
+                    .end("Block");
+        }
     }
 
     // ── Block key helpers ─────────────────────────────────────────────────────
