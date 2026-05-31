@@ -127,18 +127,31 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
     private Response createApp(AzureRequest request, String appName) {
         try {
             CreateAppRequest body = mapper.readValue(request.bodyStream(), CreateAppRequest.class);
-            if (body.runtime() == null || body.runtime().isBlank()) {
+            String runtime = body.runtime();
+            if ((runtime == null || runtime.isBlank()) && body.linuxFxVersion() != null) {
+                runtime = FunctionRuntime.runtimeFromLinuxFxVersion(body.linuxFxVersion());
+            }
+            if (runtime == null || runtime.isBlank()) {
                 return error("InvalidInput", "runtime is required", 400);
             }
+            FunctionRuntime.resolveImage(runtime, body.linuxFxVersion());
             String key = appKey(request.accountName(), appName);
             FunctionApp app = new FunctionApp(appName, request.accountName(),
-                    body.runtime(), body.environment(), Instant.now());
+                    runtime, body.linuxFxVersion(), body.environment(), Instant.now());
             store.put(key, toStoredObject(app));
             return Response.status(201).type(MediaType.APPLICATION_JSON)
                     .entity(toAppResponse(app)).build();
-        } catch (IOException e) {
+        } catch (IOException | IllegalArgumentException e) {
             return error("InvalidInput", "Invalid request body: " + e.getMessage(), 400);
         }
+    }
+
+    public void upsertApp(String accountName, String appName, String runtime, String linuxFxVersion,
+                          Map<String, String> environment) {
+        FunctionRuntime.resolveImage(runtime, linuxFxVersion);
+        FunctionApp app = new FunctionApp(appName, accountName, runtime, linuxFxVersion,
+                environment, Instant.now());
+        store.put(appKey(accountName, appName), toStoredObject(app));
     }
 
     private Response getApp(AzureRequest request, String appName) {
@@ -215,6 +228,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
             FunctionDefinition def = new FunctionDefinition(
                     appName, funcName, request.accountName(),
                     app.runtime(),
+                    app.linuxFxVersion(),
                     body.handler() != null ? body.handler() : "index.handler",
                     body.timeoutSeconds() > 0 ? body.timeoutSeconds() : 230,
                     env.isEmpty() ? null : env,
@@ -326,14 +340,15 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
     }
 
     private AppResponse toAppResponse(FunctionApp app) {
-        return new AppResponse(app.appName(), app.runtime(), "Running", app.createdAt());
+        return new AppResponse(app.appName(), app.runtime(), app.linuxFxVersion(),
+                "Running", app.createdAt());
     }
 
     private FunctionResponse toFunctionResponse(FunctionDefinition def, String accountName) {
         String invokeUrl = config.effectiveBaseUrl() + "/" + accountName
                 + "-functions/api/" + def.appName() + "/" + def.funcName();
         return new FunctionResponse(
-                def.funcName(), def.appName(), def.runtime(), def.handler(),
+                def.funcName(), def.appName(), def.runtime(), def.linuxFxVersion(), def.handler(),
                 def.timeoutSeconds(), invokeUrl,
                 def.codeLocalPath() != null ? "Ready" : "AwaitingDeploy",
                 def.createdAt());

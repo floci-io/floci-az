@@ -510,6 +510,9 @@ curl "$BASE/api/my-app/hello?msg=world"
 
 Supported runtimes: `node`, `python`, `java`, `dotnet`.
 
+To select a Linux language version, pass the Azure-compatible `linuxFxVersion`.
+For example, Python 3.12 uses `{"runtime":"python","linuxFxVersion":"Python|3.12"}`.
+
 </details>
 
 <details>

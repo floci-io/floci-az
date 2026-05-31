@@ -41,12 +41,19 @@ Default account: `devstoreaccount1`
 **Create app request body:**
 ```json
 {
-  "runtime": "node",
+  "runtime": "python",
+  "linuxFxVersion": "Python|3.12",
   "environment": {
     "MY_VAR": "hello"
   }
 }
 ```
+
+`linuxFxVersion` is optional. When set, floci-az selects the matching Azure Functions
+Linux image, such as `mcr.microsoft.com/azure-functions/python:4-python3.12`.
+The ARM-compatible `Microsoft.Web/sites` and `Microsoft.Web/sites/{name}/config/web`
+paths accept the same setting under `properties.siteConfig.linuxFxVersion` and
+`properties.linuxFxVersion`, respectively.
 
 ### Functions
 

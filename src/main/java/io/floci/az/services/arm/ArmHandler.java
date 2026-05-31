@@ -5,6 +5,8 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
+import io.floci.az.services.functions.FunctionRuntime;
+import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -43,21 +45,26 @@ public class ArmHandler implements AzureServiceHandler {
 
     private static final String SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000001";
     private static final String TENANT_ID       = "00000000-0000-0000-0000-000000000002";
+    private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
 
     // In-memory ARM resource state — no StorageBackend needed, these are ephemeral
     private final Map<String, Map<String, Object>> resourceGroups   = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> keyVaults        = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> webApps          = new ConcurrentHashMap<>();
 
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
     private final QueueServiceHandler queueHandler;
+    private final FunctionsServiceHandler functionsHandler;
 
     @Inject
-    public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler) {
-        this.config       = config;
-        this.blobHandler  = blobHandler;
-        this.queueHandler = queueHandler;
+    public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
+                      FunctionsServiceHandler functionsHandler) {
+        this.config           = config;
+        this.blobHandler      = blobHandler;
+        this.queueHandler     = queueHandler;
+        this.functionsHandler = functionsHandler;
     }
 
     @Override
@@ -164,6 +171,10 @@ public class ArmHandler implements AzureServiceHandler {
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
                     .map(ArmHandler::stripInternal)
                     .forEach(resources::add);
+            webApps.values().stream()
+                    .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
+                    .map(ArmHandler::stripInternal)
+                    .forEach(resources::add);
             return Response.ok(Map.of("value", resources)).build();
         }
 
@@ -184,7 +195,125 @@ public class ArmHandler implements AzureServiceHandler {
         if (path.contains("/providers/Microsoft.KeyVault/")) {
             return handleKeyVault(req, path, method, sub);
         }
+        if (path.contains("/providers/Microsoft.Web/")) {
+            return handleWeb(req, path, method, sub);
+        }
         return armNotFound(path);
+    }
+
+    // ── Function Apps ────────────────────────────────────────────────────────
+
+    private Response handleWeb(AzureRequest req, String path, String method, String sub) {
+        String rg = extractRg(path);
+
+        if (path.matches(".*/providers/Microsoft\\.Web/sites([?].*)?")) {
+            List<Map<String, Object>> apps = webApps.values().stream()
+                    .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")))
+                    .map(ArmHandler::stripInternal)
+                    .toList();
+            return Response.ok(Map.of("value", apps)).build();
+        }
+
+        if (path.contains("/sites/")) {
+            String appName = extractResourceName(path, "sites");
+            if (path.contains("/config/web")) {
+                return handleWebConfig(req, path, method, sub, rg, appName);
+            }
+            return switch (method) {
+                case "PUT"    -> createOrUpdateWebApp(req, sub, rg, appName);
+                case "GET"    -> getWebApp(sub, rg, appName);
+                case "DELETE" -> { webApps.remove(webAppKey(sub, rg, appName)); yield Response.ok().build(); }
+                default       -> Response.status(405).build();
+            };
+        }
+
+        return armNotFound(path);
+    }
+
+    private Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
+        Map<String, Object> body = parseBody(req);
+        Map<String, Object> properties = cast(body.get("properties"));
+        Map<String, Object> siteConfig = cast(properties.get("siteConfig"));
+        String linuxFxVersion = bodyString(siteConfig, "linuxFxVersion", null);
+        try {
+            Map<String, Object> resource = webAppResource(sub, rg, appName,
+                    bodyString(body, "location", "eastus"), linuxFxVersion);
+            syncFunctionApp(appName, linuxFxVersion);
+            webApps.put(webAppKey(sub, rg, appName), resource);
+            return Response.ok(stripInternal(resource)).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("error", Map.of(
+                    "code", "InvalidLinuxFxVersion", "message", e.getMessage()))).build();
+        }
+    }
+
+    private Response getWebApp(String sub, String rg, String appName) {
+        Map<String, Object> resource = webApps.get(webAppKey(sub, rg, appName));
+        return resource == null ? armNotFound("sites/" + appName)
+                : Response.ok(stripInternal(resource)).build();
+    }
+
+    private Response handleWebConfig(AzureRequest req, String path, String method, String sub,
+                                     String rg, String appName) {
+        Map<String, Object> resource = webApps.get(webAppKey(sub, rg, appName));
+        if (resource == null) {
+            return armNotFound("sites/" + appName);
+        }
+        if ("GET".equals(method)) {
+            return Response.ok(Map.of("id", path, "name", "web",
+                    "type", "Microsoft.Web/sites/config",
+                    "properties", cast(resource.get("properties")).get("siteConfig"))).build();
+        }
+        if (!"PUT".equals(method)) {
+            return Response.status(405).build();
+        }
+
+        Map<String, Object> body = parseBody(req);
+        Map<String, Object> config = body.containsKey("properties") ? cast(body.get("properties")) : body;
+        String linuxFxVersion = bodyString(config, "linuxFxVersion", null);
+        try {
+            Map<String, Object> updated = webAppResource(sub, rg, appName,
+                    bodyString(resource, "location", "eastus"), linuxFxVersion);
+            syncFunctionApp(appName, linuxFxVersion);
+            webApps.put(webAppKey(sub, rg, appName), updated);
+            return Response.ok(Map.of("id", path, "name", "web",
+                    "type", "Microsoft.Web/sites/config",
+                    "properties", cast(updated.get("properties")).get("siteConfig"))).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("error", Map.of(
+                    "code", "InvalidLinuxFxVersion", "message", e.getMessage()))).build();
+        }
+    }
+
+    private void syncFunctionApp(String appName, String linuxFxVersion) {
+        if (linuxFxVersion == null || linuxFxVersion.isBlank()) {
+            return;
+        }
+        String runtime = FunctionRuntime.runtimeFromLinuxFxVersion(linuxFxVersion);
+        functionsHandler.upsertApp(DEFAULT_FUNCTIONS_ACCOUNT, appName, runtime, linuxFxVersion, null);
+    }
+
+    private static Map<String, Object> webAppResource(String sub, String rg, String appName,
+                                                       String location, String linuxFxVersion) {
+        Map<String, Object> siteConfig = new LinkedHashMap<>();
+        if (linuxFxVersion != null) {
+            siteConfig.put("linuxFxVersion", linuxFxVersion);
+        }
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("state", "Running");
+        properties.put("siteConfig", siteConfig);
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("_sub", sub);
+        resource.put("_rg", rg);
+        resource.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg
+                + "/providers/Microsoft.Web/sites/" + appName);
+        resource.put("name", appName);
+        resource.put("type", "Microsoft.Web/sites");
+        resource.put("location", location);
+        resource.put("kind", "functionapp,linux");
+        resource.put("properties", properties);
+        return resource;
     }
 
     // ── Storage Accounts ─────────────────────────────────────────────────────
@@ -503,6 +632,7 @@ public class ArmHandler implements AzureServiceHandler {
     private static String rgKey(String sub, String rg)               { return sub + "/" + rg; }
     private static String saKey(String sub, String rg, String name)  { return sub + "/" + rg + "/" + name; }
     private static String kvKey(String sub, String rg, String name)  { return sub + "/" + rg + "/kv/" + name; }
+    private static String webAppKey(String sub, String rg, String name) { return sub + "/" + rg + "/web/" + name; }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object o) {

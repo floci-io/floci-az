@@ -16,6 +16,7 @@ public class FunctionModels {
             String appName,
             String accountName,
             String runtime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String linuxFxVersion,
             @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, String> environment,
             Instant createdAt
     ) {}
@@ -26,6 +27,7 @@ public class FunctionModels {
             String funcName,
             String accountName,
             String runtime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String linuxFxVersion,
             String handler,
             int timeoutSeconds,
             @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, String> environment,
@@ -47,6 +49,7 @@ public class FunctionModels {
     @RegisterForReflection
     public record CreateAppRequest(
             String runtime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String linuxFxVersion,
             @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, String> environment
     ) {}
 
@@ -64,6 +67,7 @@ public class FunctionModels {
     public record AppResponse(
             String name,
             String runtime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String linuxFxVersion,
             String status,
             Instant createdAt
     ) {}
@@ -73,6 +77,7 @@ public class FunctionModels {
             String name,
             String appName,
             String runtime,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String linuxFxVersion,
             String handler,
             int timeoutSeconds,
             String invokeUrl,

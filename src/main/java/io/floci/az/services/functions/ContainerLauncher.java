@@ -58,13 +58,6 @@ public class ContainerLauncher {
     private static final String WWWROOT = "/home/site/wwwroot";
     private static final int FUNCTIONS_PORT = 80;
 
-    private static final Map<String, String> RUNTIME_IMAGES = Map.of(
-            "node",   "mcr.microsoft.com/azure-functions/node:4",
-            "python", "mcr.microsoft.com/azure-functions/python:4",
-            "java",   "mcr.microsoft.com/azure-functions/java:4",
-            "dotnet", "mcr.microsoft.com/azure-functions/dotnet-isolated:4"
-    );
-
     private final DockerClient dockerClient;
     private final DockerHostResolver hostResolver;
     private final ContainerDetector containerDetector;
@@ -100,7 +93,7 @@ public class ContainerLauncher {
         LOG.infov("Launching app container for: {0} ({1} function(s))",
                 primary.appName(), appDefs.size());
 
-        String image = resolveImage(primary.runtime());
+        String image = FunctionRuntime.resolveImage(primary.runtime(), primary.linuxFxVersion());
         ensureImage(image);
 
         List<String> env = buildEnv(primary);
@@ -225,15 +218,6 @@ public class ContainerLauncher {
             LOG.warnv("Failed to detect self network, falling back to bridge: {0}", e.getMessage());
         }
         return "bridge";
-    }
-
-    private String resolveImage(String runtime) {
-        String image = RUNTIME_IMAGES.get(runtime != null ? runtime.toLowerCase() : "node");
-        if (image == null) {
-            throw new RuntimeException("Unsupported runtime: " + runtime
-                    + ". Supported: " + RUNTIME_IMAGES.keySet());
-        }
-        return image;
     }
 
     private void ensureImage(String image) {
