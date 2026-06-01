@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 531.25 156.71">
-  <!-- Generator: Adobe Illustrator 30.4.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 226)  -->
+  <!-- Header variant: white cloud + wordmark for the solid brand-colored header bar; Azure-blue dots. -->
   <defs>
     <style>
       .st0 {
-        fill: #151515;
+        fill: #ffffff;
       }
 
       .st1 {
@@ -16,24 +16,15 @@
       }
 
       .st3 {
-        fill: #141414;
+        fill: #ffffff;
       }
 
       .st4 {
-        fill: #262425;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        .st0,
-        .st3,
-        .st4 {
-          fill: #ffffff;
-        }
+        fill: #ffffff;
       }
     </style>
   </defs>
   <g class="st2">
-
     <g class="st2">
       <path class="st4" d="M305.44,141.35h-15.94V39.04h-17.08c-13.18,0-16.75,7.81-16.59,17.4v8.95h17.4v13.34h-17.4v62.62h-15.94v-62.62h-14.64v-13.34h14.64v-7.16c0-20.66,8.95-34.16,29.6-34.16h35.95v117.28Z"/>
       <path class="st4" d="M324.31,103.29c0-24.07,18.22-39.85,39.85-39.85s40.01,15.78,40.01,39.85-18.38,40.01-40.01,40.01-39.85-15.94-39.85-40.01ZM388.24,103.29c0-14.64-11.06-24.89-24.07-24.89s-23.91,10.25-23.91,24.89,10.9,25.05,23.91,25.05,24.07-10.25,24.07-25.05Z"/>

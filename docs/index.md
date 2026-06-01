@@ -1,7 +1,7 @@
 # Floci-AZ
 
 <p align="center">
-  <img src="assets/floci.png" alt="Floci-AZ" width="500" />
+  <img src="assets/floci.svg" alt="Floci-AZ" width="500" />
 </p>
 
 <p align="center"><em>Light, fluffy, and always free</em></p>

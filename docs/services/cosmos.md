@@ -263,7 +263,7 @@ environment:
 
 This page covers the always-on **SQL / NoSQL** endpoint (`{account}-cosmos` and `{account}-cosmos-nosql`).
 For MongoDB, PostgreSQL, Cassandra, Gremlin, and Table Cosmos APIs see the
-[Cosmos DB configuration reference](../../README.md#cosmos-db-multi-api-engines) in the main README.
+[Cosmos DB configuration reference](https://github.com/floci-io/floci-az/blob/main/README.md#cosmos-db-multi-api-engines) in the main README.
 
 ## Known Limitations
 

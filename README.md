@@ -8,7 +8,8 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 -->
 
 <p align="center">
-  <img src="floci-az-banner.svg" alt="Floci AZ" />
+  <img src="floci-azure-black.svg#gh-light-mode-only" alt="Floci Azure" width="500" />
+  <img src="floci-azure-white.svg#gh-dark-mode-only" alt="Floci Azure" width="500" />
   <p align="center">
     <strong>Light, fluffy, and always free</strong><br />
     No account. No auth token. No feature gates. Just <code>docker compose up</code>.
