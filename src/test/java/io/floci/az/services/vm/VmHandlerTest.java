@@ -164,8 +164,10 @@ class VmHandlerTest {
     @DisplayName("DELETE removes the VM (then GET 404)")
     void deleteVm() {
         createVm("vm1");
-        given().when().delete(BASE + "/virtualMachines/vm1" + API).then().statusCode(202);
+        given().when().delete(BASE + "/virtualMachines/vm1" + API).then().statusCode(204);
         given().when().get(BASE + "/virtualMachines/vm1" + API).then().statusCode(404);
+        // Deleting a non-existent VM is idempotent (204).
+        given().when().delete(BASE + "/virtualMachines/vm1" + API).then().statusCode(204);
     }
 
     @Test

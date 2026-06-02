@@ -50,7 +50,12 @@ public class AzureIdentityController {
         String baseUrl = uriInfo.getBaseUri().toString().replaceAll("/+$", "");
         return Response.ok(Map.of(
             "name",                     "floci-az",
-            "resourceManager",          baseUrl + "/",
+            // No trailing slash: in Azure Stack mode the go-azure-sdk concatenates this
+            // endpoint with leading-slash resource paths, so a trailing slash yields
+            // "//subscriptions/..." — a network-path reference that breaks the SDK's LRO
+            // poller URL resolution (it drops the resource name and polls the collection
+            // forever, e.g. hanging `terraform destroy` of a virtual machine).
+            "resourceManager",          baseUrl,
             "microsoftGraphResourceId", baseUrl + "/",
             "portal",                   baseUrl + "/",
             "gallery",                  baseUrl + "/",

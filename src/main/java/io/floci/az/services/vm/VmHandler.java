@@ -198,12 +198,12 @@ public class VmHandler implements AzureServiceHandler {
     }
 
     private Response handleDelete(String sub, String rg, String vmName) {
-        String key = storageKey(sub, rg, vmName);
-        if (getVm(key).isEmpty()) {
-            return Response.status(204).build();
-        }
-        storage.delete(key);
-        return acceptedWithAsync(sub, null);
+        storage.delete(storageKey(sub, rg, vmName));
+        // Delete synchronously with 204 No Content. The azurerm provider's virtualmachines
+        // DeleteThenPoll treats a 202/200 as a long-running operation and polls the collection
+        // forever against the emulator; a terminal 204 signals the delete is complete so
+        // `terraform destroy` proceeds. 204 is also idempotent for an already-absent VM.
+        return Response.status(204).build();
     }
 
     private Response handleListSubscription(String sub, boolean expandInstanceView) {
