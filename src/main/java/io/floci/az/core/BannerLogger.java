@@ -88,6 +88,12 @@ public class BannerLogger {
                             + "-" + config.services().aks().apiServerMaxPort();
             sb.append(serviceStatusDocker("aks", true, aksInfo));
         }
+        if (config.services().vm().enabled()) {
+            String vmInfo = config.services().vm().mocked()
+                    ? "mocked  (no docker)"
+                    : "image:" + config.services().vm().defaultImage();
+            sb.append(serviceStatusDocker("vm", true, vmInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

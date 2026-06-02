@@ -11,6 +11,7 @@ import io.floci.az.services.queue.QueueServiceHandler;
 import io.floci.az.services.servicebus.ServiceBusHandler;
 import io.floci.az.services.sql.SqlHandler;
 import io.floci.az.services.table.TableServiceHandler;
+import io.floci.az.services.vm.VmHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -32,6 +33,7 @@ public class AdminController {
     @Inject ServiceBusHandler       serviceBusHandler;
     @Inject SqlHandler              sqlHandler;
     @Inject TableServiceHandler     tableHandler;
+    @Inject VmHandler               vmHandler;
 
     @GET
     @Path("/accounts")
@@ -63,6 +65,7 @@ public class AdminController {
         queueHandler.clearAll();
         serviceBusHandler.clearAll();
         tableHandler.clearAll();
+        vmHandler.clearAll();
 
         // Docker-backed services — stop containers first, then clear state
         sqlHandler.clearAll();

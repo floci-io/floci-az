@@ -95,3 +95,28 @@ setup() {
     assert_success
     assert_output --partial "hello-from-opentofu"
 }
+
+@test "OpenTofu: virtual network created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/virtualNetworks/${VNET_NAME}"
+    assert_success
+    assert_output --partial "$VNET_NAME"
+}
+
+@test "OpenTofu: network interface has a private IP" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/networkInterfaces/${NIC_NAME}"
+    assert_success
+    assert_output --partial "privateIPAddress"
+}
+
+@test "OpenTofu: linux virtual machine created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Compute/virtualMachines/${VM_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Compute/virtualMachines"
+    assert_output --partial "Succeeded"
+}
+
+@test "OpenTofu: VM instanceView reports running power state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Compute/virtualMachines/${VM_NAME}/instanceView"
+    assert_success
+    assert_output --partial "PowerState/running"
+}

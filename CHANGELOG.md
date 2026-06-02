@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **vm:** Azure Virtual Machines emulation (`Microsoft.Compute/virtualMachines`) — VM lifecycle (CreateOrUpdate, Get, List by subscription and resource group, UpdateTags, Delete), power actions (`start`, `powerOff`, `deallocate`, `restart`, `redeploy`, `reapply`), `instanceView` reporting `ProvisioningState/*` and `PowerState/*`, and `?$expand=instanceView`. Power actions return `202` with an `Azure-AsyncOperation` header and a terminal operation-status endpoint for SDK LRO polling. Mocked mode (default) requires no Docker; container-backed VMs are planned ([#19](https://github.com/floci-io/floci-az/issues/19))
+- **arm:** `Microsoft.Network` dependency stubs — virtual networks, subnets, network interfaces (synthesized private IP), public IP addresses, and network security groups, so Terraform's `azurerm_linux_virtual_machine` and its dependencies apply end-to-end
+- **arm:** Terraform/OpenTofu compatibility suite extended with a Linux virtual machine and its network dependencies
+
 ## [0.5.0] - 2026-05-28
 
 ### Added

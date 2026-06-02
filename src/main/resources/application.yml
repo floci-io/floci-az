@@ -140,6 +140,10 @@ floci-az:
       api-server-base-port: 6443
       api-server-max-port: 7443
       keep-running-on-shutdown: false
+    vm:
+      enabled: true
+      mocked: true          # true = no Docker; VMs are pure ARM state. false = back VMs with containers (phase 2)
+      default-image: "ubuntu:22.04"
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:

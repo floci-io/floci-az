@@ -52,6 +52,7 @@ public class ArmHandler implements AzureServiceHandler {
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> keyVaults        = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> webApps          = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> networkResources = new ConcurrentHashMap<>();
 
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
@@ -175,6 +176,10 @@ public class ArmHandler implements AzureServiceHandler {
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
                     .map(ArmHandler::stripInternal)
                     .forEach(resources::add);
+            networkResources.values().stream()
+                    .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
+                    .map(ArmHandler::stripInternal)
+                    .forEach(resources::add);
             return Response.ok(Map.of("value", resources)).build();
         }
 
@@ -197,6 +202,9 @@ public class ArmHandler implements AzureServiceHandler {
         }
         if (path.contains("/providers/Microsoft.Web/")) {
             return handleWeb(req, path, method, sub);
+        }
+        if (path.contains("/providers/Microsoft.Network/")) {
+            return handleNetwork(req, path, method, sub);
         }
         return armNotFound(path);
     }
@@ -314,6 +322,128 @@ public class ArmHandler implements AzureServiceHandler {
         resource.put("kind", "functionapp,linux");
         resource.put("properties", properties);
         return resource;
+    }
+
+    // ── Network resources (VM dependencies) ───────────────────────────────────
+    //
+    // Lightweight ARM shells for the resources an azurerm_linux_virtual_machine needs:
+    // virtualNetworks (+ subnets), networkInterfaces, publicIPAddresses,
+    // networkSecurityGroups. Submitted properties are echoed back with
+    // provisioningState=Succeeded; NIC private IPs and public IPs are synthesised so the
+    // provider can read them back after apply.
+
+    private Response handleNetwork(AzureRequest req, String path, String method, String sub) {
+        String rg   = extractRg(path);
+        String tail = extractAfter(path, "/providers/Microsoft.Network/");
+
+        // LIST: tail is a single resource-type segment (e.g. "virtualNetworks").
+        if (tail.matches("[^/]+")) {
+            return listNetworkResources(sub, rg, "Microsoft.Network/" + tail);
+        }
+        // LIST subnets of a vnet: "virtualNetworks/{vnet}/subnets".
+        if (tail.matches("virtualNetworks/[^/]+/subnets")) {
+            return listNetworkResources(sub, rg, "Microsoft.Network/virtualNetworks/subnets");
+        }
+
+        String resourceType = networkResourceType(tail);
+        String name         = networkResourceName(tail);
+        String key          = netKey(sub, rg, tail);
+
+        return switch (method) {
+            case "PUT"    -> createOrUpdateNetworkResource(req, sub, rg, tail, resourceType, name, key);
+            case "GET"    -> {
+                Map<String, Object> resource = networkResources.get(key);
+                yield resource == null ? armNotFound(tail) : Response.ok(stripInternal(resource)).build();
+            }
+            case "DELETE" -> { networkResources.remove(key); yield Response.ok().build(); }
+            default       -> Response.status(405).build();
+        };
+    }
+
+    private Response listNetworkResources(String sub, String rg, String type) {
+        List<Map<String, Object>> items = networkResources.values().stream()
+                .filter(r -> sub.equals(r.get("_sub")) && rg.equals(r.get("_rg")) && type.equals(r.get("type")))
+                .map(ArmHandler::stripInternal)
+                .toList();
+        return Response.ok(Map.of("value", items)).build();
+    }
+
+    private Response createOrUpdateNetworkResource(AzureRequest req, String sub, String rg, String tail,
+                                                   String resourceType, String name, String key) {
+        Map<String, Object> body       = parseBody(req);
+        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+        synthesizeNetworkProperties(resourceType, properties);
+        properties.put("provisioningState", "Succeeded");
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("_sub", sub);
+        resource.put("_rg", rg);
+        resource.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg
+                + "/providers/Microsoft.Network/" + tail);
+        resource.put("name", name);
+        resource.put("type", resourceType);
+        String location = bodyString(body, "location", null);
+        if (location != null) {
+            resource.put("location", location);
+        }
+        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+            resource.put("tags", tags);
+        }
+        resource.put("properties", properties);
+        networkResources.put(key, resource);
+        return Response.ok(stripInternal(resource)).build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void synthesizeNetworkProperties(String resourceType, Map<String, Object> properties) {
+        switch (resourceType) {
+            case "Microsoft.Network/networkInterfaces" -> {
+                Object cfgs = properties.get("ipConfigurations");
+                List<Object> configs = cfgs instanceof List<?> l && !l.isEmpty()
+                        ? new ArrayList<>((List<Object>) l)
+                        : new ArrayList<>(List.of(new LinkedHashMap<String, Object>(Map.of("name", "ipconfig1"))));
+                boolean[] first = {true};
+                configs.replaceAll(c -> {
+                    Map<String, Object> cfg = new LinkedHashMap<>(cast(c));
+                    Map<String, Object> cp = new LinkedHashMap<>(cast(cfg.get("properties")));
+                    cp.putIfAbsent("privateIPAddress", "10.0.0.4");
+                    cp.putIfAbsent("privateIPAllocationMethod", "Dynamic");
+                    cp.put("primary", first[0]);
+                    cp.put("provisioningState", "Succeeded");
+                    cfg.put("properties", cp);
+                    cfg.putIfAbsent("name", "ipconfig1");
+                    first[0] = false;
+                    return cfg;
+                });
+                properties.put("ipConfigurations", configs);
+            }
+            case "Microsoft.Network/publicIPAddresses" -> {
+                properties.putIfAbsent("ipAddress", "20.0.0.4");
+                properties.putIfAbsent("publicIPAllocationMethod", "Dynamic");
+            }
+            default -> { /* virtualNetworks, subnets, networkSecurityGroups: echo as-is */ }
+        }
+    }
+
+    private static String networkResourceType(String tail) {
+        // "networkInterfaces/{name}" -> "Microsoft.Network/networkInterfaces"
+        // "virtualNetworks/{v}/subnets/{s}" -> "Microsoft.Network/virtualNetworks/subnets"
+        String[] parts = tail.split("/");
+        if (parts.length >= 4 && "subnets".equals(parts[2])) {
+            return "Microsoft.Network/virtualNetworks/subnets";
+        }
+        return "Microsoft.Network/" + parts[0];
+    }
+
+    private static String networkResourceName(String tail) {
+        String[] parts = tail.split("[/?]");
+        return parts.length > 0 ? parts[parts.length - 1] : tail;
+    }
+
+    private static String netKey(String sub, String rg, String tail) {
+        int q = tail.indexOf('?');
+        String clean = q >= 0 ? tail.substring(0, q) : tail;
+        return sub + "/" + rg + "/net/" + clean;
     }
 
     // ── Storage Accounts ─────────────────────────────────────────────────────

@@ -117,9 +117,27 @@ public interface EmulatorConfig {
         SqlServiceConfig       sql();
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
+        VmConfig               vm();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
+    }
+
+    interface VmConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Docker container is started; virtual machines transition
+         * immediately to {@code Succeeded} / {@code PowerState/running} and power actions are
+         * pure state transitions. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /** Default Docker image used when an imageReference cannot be resolved (non-mocked mode). */
+        @WithDefault("ubuntu:22.04")
+        String defaultImage();
     }
 
     interface AksConfig {

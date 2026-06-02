@@ -249,6 +249,28 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Azure Virtual Machines — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Compute/virtualMachines/...
+        //   subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Compute/")) {
+            Map<String, String> vmQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> vmQueryParams.put(k, v.get(0)));
+            AzureRequest vmRequest = new AzureRequest(
+                requestContext.getMethod(), "vm", "vm", path, headers,
+                requestContext.getEntityStream(), vmQueryParams, null, secure);
+            AuthContext vmAuth = authPipeline.resolve(vmRequest);
+            vmRequest = new AzureRequest(
+                requestContext.getMethod(), "vm", "vm", path, headers,
+                requestContext.getEntityStream(), vmQueryParams, vmAuth, secure);
+            Optional<AzureServiceHandler> vmHandler = serviceRegistry.resolve("vm");
+            if (vmHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM VM request to VmHandler: %s %s", requestContext.getMethod(), path);
+                return vmHandler.get().handle(vmRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // ARM general management-plane paths: subscriptions/{sub}/...
         // (resource groups, storage accounts, key vaults, etc. not served
         //  by the more-specific AKS and SQL handlers above)
