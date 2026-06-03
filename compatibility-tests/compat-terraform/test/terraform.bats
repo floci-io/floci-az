@@ -95,3 +95,28 @@ setup() {
     assert_success
     assert_output --partial "hello-from-terraform"
 }
+
+@test "Terraform: virtual network created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/virtualNetworks/${VNET_NAME}"
+    assert_success
+    assert_output --partial "$VNET_NAME"
+}
+
+@test "Terraform: network interface has a private IP" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/networkInterfaces/${NIC_NAME}"
+    assert_success
+    assert_output --partial "privateIPAddress"
+}
+
+@test "Terraform: linux virtual machine created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Compute/virtualMachines/${VM_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Compute/virtualMachines"
+    assert_output --partial "Succeeded"
+}
+
+@test "Terraform: VM instanceView reports running power state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Compute/virtualMachines/${VM_NAME}/instanceView"
+    assert_success
+    assert_output --partial "PowerState/running"
+}

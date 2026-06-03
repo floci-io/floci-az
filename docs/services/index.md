@@ -15,6 +15,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; Docker-backed SQL Server containers |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | ✅ Clusters, agent pools, credentials; real k3s containers or mocked |
+| **Virtual Machines** | ARM path (`Microsoft.Compute` / `Microsoft.Network`) | ✅ VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView, network dependency stubs; mocked (Docker backing planned) |
 
 ## Unified Endpoint
 

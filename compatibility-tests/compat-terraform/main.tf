@@ -43,6 +43,60 @@ resource "azurerm_key_vault_secret" "secret" {
   key_vault_id = azurerm_key_vault.kv.id
 }
 
+resource "azurerm_virtual_network" "vnet" {
+  name                = "floci-test-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_subnet" "subnet" {
+  name                 = "floci-test-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+resource "azurerm_network_interface" "nic" {
+  name                = "floci-test-nic"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                  = "floci-test-vm"
+  resource_group_name   = azurerm_resource_group.rg.name
+  location              = azurerm_resource_group.rg.location
+  size                  = "Standard_B1s"
+  admin_username        = "azureuser"
+  network_interface_ids = [azurerm_network_interface.nic.id]
+
+  admin_password                  = "FlociAz_Strong123!"
+  disable_password_authentication = false
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+}
+
+output "vm_id" {
+  value = azurerm_linux_virtual_machine.vm.id
+}
+
 output "storage_account_name" {
   value = azurerm_storage_account.sa.name
 }

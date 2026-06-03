@@ -25,6 +25,9 @@ export KV_NAME="floci-test-kv"
 export CONTAINER_NAME="floci-test-container"
 export QUEUE_NAME="floci-test-queue"
 export SECRET_NAME="floci-test-secret"
+export VNET_NAME="floci-test-vnet"
+export NIC_NAME="floci-test-nic"
+export VM_NAME="floci-test-vm"
 export SUB_ID="${TF_VAR_subscription_id}"
 
 arm_get() {

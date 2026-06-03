@@ -77,5 +77,6 @@ nav:
     - Cosmos DB: services/cosmos.md
     - Azure SQL Database: services/sql.md
     - Azure Kubernetes Service: services/aks.md
+    - Virtual Machines: services/vm.md
   - Contributing: contributing.md
   - Changelog: changelog.md
