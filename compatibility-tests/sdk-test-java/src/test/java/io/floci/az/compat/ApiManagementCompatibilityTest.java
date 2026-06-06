@@ -30,6 +30,9 @@ class ApiManagementCompatibilityTest {
     private static final String SERVICE = "apim" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     private static final String API_ID = "catalog-api";
     private static final String OPERATION_ID = "get-item";
+    private static final String PRODUCT_ID = "starter";
+    private static final String SUBSCRIPTION_ID = "starter-sub";
+    private static final String SUBSCRIPTION_KEY = "floci-apim-test-key";
     private static final String API_VERSION = "2024-05-01";
 
     private static final HttpClient http = HttpClient.newHttpClient();
@@ -139,7 +142,95 @@ class ApiManagementCompatibilityTest {
 
     @Test
     @Order(6)
+    void apiPolicy_appliesSetHeaderAndRewriteUri() throws Exception {
+        String policyXml = """
+                <policies>
+                  <inbound>
+                    <base />
+                    <rewrite-uri template="/backend/items/42" />
+                    <set-header name="X-Floci-Apim" exists-action="override">
+                      <value>policy-applied</value>
+                    </set-header>
+                  </inbound>
+                  <backend>
+                    <base />
+                  </backend>
+                  <outbound>
+                    <base />
+                  </outbound>
+                  <on-error>
+                    <base />
+                  </on-error>
+                </policies>
+                """;
+        HttpResponse<String> putResp = put(apiPolicyUrl(), policyBody(policyXml));
+        assertOk(putResp, "create api policy");
+        JsonNode policy = mapper.readTree(putResp.body());
+        assertEquals("policy", policy.get("name").asText());
+        assertTrue(policy.get("properties").get("value").asText().contains("rewrite-uri"));
+
+        HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
+
+        JsonNode json = mapper.readTree(gatewayResp.body());
+        assertEquals("/catalog/items/42", json.get("path").asText());
+        assertEquals("/backend/items/42", json.get("backendPath").asText());
+        assertEquals("policy-applied", json.get("headers").get("X-Floci-Apim").asText());
+    }
+
+    @Test
+    @Order(7)
+    void productSubscription_enforcesSubscriptionKeyOnGateway() throws Exception {
+        String productBody = """
+                {
+                  "properties": {
+                    "displayName": "Starter",
+                    "subscriptionRequired": true,
+                    "approvalRequired": false,
+                    "state": "published"
+                  }
+                }
+                """;
+        HttpResponse<String> productResp = put(productUrl(), productBody);
+        assertOk(productResp, "create product");
+        assertEquals(PRODUCT_ID, mapper.readTree(productResp.body()).get("name").asText());
+
+        assertOk(put(productApiUrl(), "{}"), "link product api");
+
+        String subscriptionBody = """
+                {
+                  "properties": {
+                    "displayName": "Starter subscription",
+                    "scope": "/products/%s",
+                    "state": "active",
+                    "primaryKey": "%s",
+                    "secondaryKey": "secondary-%s"
+                  }
+                }
+                """.formatted(PRODUCT_ID, SUBSCRIPTION_KEY, SUBSCRIPTION_KEY);
+        HttpResponse<String> subscriptionResp = put(subscriptionUrl(), subscriptionBody);
+        assertOk(subscriptionResp, "create subscription");
+
+        assertContainsName(mapper.readTree(get(productsCollectionUrl()).body()).get("value"), PRODUCT_ID);
+        assertContainsName(mapper.readTree(get(subscriptionsCollectionUrl()).body()).get("value"), SUBSCRIPTION_ID);
+
+        String gatewayUrl = BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42";
+        HttpResponse<String> withoutKey = get(gatewayUrl);
+        assertEquals(401, withoutKey.statusCode(), withoutKey.body());
+
+        HttpResponse<String> withKey = getWithHeader(gatewayUrl, "Ocp-Apim-Subscription-Key", SUBSCRIPTION_KEY);
+        assertEquals(200, withKey.statusCode(), withKey.body());
+        JsonNode json = mapper.readTree(withKey.body());
+        assertEquals(API_ID, json.get("apiId").asText());
+        assertEquals("/backend/items/42", json.get("backendPath").asText());
+    }
+
+    @Test
+    @Order(8)
     void deleteResources_removesService() throws Exception {
+        assertOk(delete(subscriptionUrl()), "delete subscription");
+        assertOk(delete(productApiUrl()), "delete product api");
+        assertOk(delete(productUrl()), "delete product");
         assertOk(delete(operationUrl()), "delete operation");
         assertOk(delete(apiUrl()), "delete api");
         assertOk(delete(serviceUrl()), "delete service");
@@ -184,6 +275,42 @@ class ApiManagementCompatibilityTest {
                 + "/apis/" + API_ID + "/operations?api-version=" + API_VERSION;
     }
 
+    private static String apiPolicyUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/apis/" + API_ID + "/policies/policy?api-version=" + API_VERSION;
+    }
+
+    private static String productsCollectionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/products?api-version=" + API_VERSION;
+    }
+
+    private static String productUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/products/" + PRODUCT_ID + "?api-version=" + API_VERSION;
+    }
+
+    private static String productApiUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/products/" + PRODUCT_ID + "/apis/" + API_ID + "?api-version=" + API_VERSION;
+    }
+
+    private static String subscriptionsCollectionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/subscriptions?api-version=" + API_VERSION;
+    }
+
+    private static String subscriptionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/subscriptions/" + SUBSCRIPTION_ID + "?api-version=" + API_VERSION;
+    }
+
     private static String collectionUrl(String resourceType) {
         return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
                 + "/providers/Microsoft.ApiManagement/" + resourceType
@@ -192,6 +319,14 @@ class ApiManagementCompatibilityTest {
 
     private static HttpResponse<String> get(String url) throws Exception {
         return http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> getWithHeader(String url, String name, String value) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create(url))
+                        .GET()
+                        .header(name, value)
+                        .build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 
@@ -222,5 +357,14 @@ class ApiManagementCompatibilityTest {
             }
         }
         throw new AssertionError("Expected list to contain name " + name + ": " + array);
+    }
+
+    private static String policyBody(String xml) throws Exception {
+        return mapper.writeValueAsString(java.util.Map.of(
+                "properties", java.util.Map.of(
+                        "format", "rawxml",
+                        "value", xml
+                )
+        ));
     }
 }
