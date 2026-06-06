@@ -33,6 +33,7 @@ class ApiManagementCompatibilityTest {
     private static final String OPERATION_ID = "get-item";
     private static final String OPENAPI_GET_OPERATION_ID = "getOrder";
     private static final String OPENAPI_CREATE_OPERATION_ID = "createOrder";
+    private static final String OPENAPI_UPDATED_OPERATION_ID = "getCustomer";
     private static final String PRODUCT_ID = "starter";
     private static final String SUBSCRIPTION_ID = "starter-sub";
     private static final String SUBSCRIPTION_KEY = "floci-apim-test-key";
@@ -153,6 +154,23 @@ class ApiManagementCompatibilityTest {
         assertEquals(OPENAPI_API_ID, json.get("apiId").asText());
         assertEquals(OPENAPI_GET_OPERATION_ID, json.get("operationId").asText());
         assertEquals("/orders/42", json.get("backendPath").asText());
+
+        HttpResponse<String> updatedApiResp = put(openApiApiUrl(), openApiUpdatedImportBody());
+        assertOk(updatedApiResp, "reimport openapi api");
+        JsonNode updatedOperations = mapper.readTree(get(openApiOperationsCollectionUrl()).body()).get("value");
+        assertContainsName(updatedOperations, OPENAPI_UPDATED_OPERATION_ID);
+        assertDoesNotContainName(updatedOperations, OPENAPI_GET_OPERATION_ID);
+        assertDoesNotContainName(updatedOperations, OPENAPI_CREATE_OPERATION_ID);
+
+        HttpResponse<String> removedRouteResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/openapi/orders/42");
+        assertEquals(404, removedRouteResp.statusCode(), removedRouteResp.body());
+
+        HttpResponse<String> updatedGatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/openapi/customers/7");
+        assertEquals(200, updatedGatewayResp.statusCode(), updatedGatewayResp.body());
+        JsonNode updatedJson = mapper.readTree(updatedGatewayResp.body());
+        assertEquals(OPENAPI_API_ID, updatedJson.get("apiId").asText());
+        assertEquals(OPENAPI_UPDATED_OPERATION_ID, updatedJson.get("operationId").asText());
+        assertEquals("/customers/7", updatedJson.get("backendPath").asText());
     }
 
     @Test
@@ -179,6 +197,29 @@ class ApiManagementCompatibilityTest {
                     <set-header name="X-Floci-Apim" exists-action="override">
                       <value>policy-applied</value>
                     </set-header>
+                    <set-header name="X-Floci-Skip" exists-action="override">
+                      <value>first</value>
+                    </set-header>
+                    <set-header name="X-Floci-Skip" exists-action="skip">
+                      <value>second</value>
+                    </set-header>
+                    <set-header name="X-Floci-Append" exists-action="override">
+                      <value>one</value>
+                    </set-header>
+                    <set-header name="X-Floci-Append" exists-action="append">
+                      <value>two</value>
+                    </set-header>
+                    <set-header name="X-Floci-Delete" exists-action="override">
+                      <value>remove-me</value>
+                    </set-header>
+                    <set-header name="X-Floci-Delete" exists-action="delete" />
+                    <set-query-parameter name="floci-mode" exists-action="override">
+                      <value>compat</value>
+                    </set-query-parameter>
+                    <set-query-parameter name="caller" exists-action="skip">
+                      <value>policy-caller</value>
+                    </set-query-parameter>
+                    <set-query-parameter name="remove-me" exists-action="delete" />
                   </inbound>
                   <backend>
                     <base />
@@ -197,17 +238,62 @@ class ApiManagementCompatibilityTest {
         assertEquals("policy", policy.get("name").asText());
         assertTrue(policy.get("properties").get("value").asText().contains("rewrite-uri"));
 
-        HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE
+                + "/catalog/items/42?caller=test&remove-me=yes");
         assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
 
         JsonNode json = mapper.readTree(gatewayResp.body());
         assertEquals("/catalog/items/42", json.get("path").asText());
         assertEquals("/backend/items/42", json.get("backendPath").asText());
         assertEquals("policy-applied", json.get("headers").get("X-Floci-Apim").asText());
+        assertEquals("first", json.get("headers").get("X-Floci-Skip").asText());
+        assertEquals("one,two", json.get("headers").get("X-Floci-Append").asText());
+        assertTrue(json.get("headers").get("X-Floci-Delete") == null);
+        assertEquals("test", json.get("queryParams").get("caller").asText());
+        assertEquals("compat", json.get("queryParams").get("floci-mode").asText());
+        assertTrue(json.get("queryParams").get("remove-me") == null);
     }
 
     @Test
     @Order(8)
+    void operationPolicy_returnResponseShortCircuitsGateway() throws Exception {
+        String policyXml = """
+                <policies>
+                  <inbound>
+                    <base />
+                    <return-response>
+                      <set-status code="429" reason="Too Many Requests" />
+                      <set-header name="Retry-After" exists-action="override">
+                        <value>30</value>
+                      </set-header>
+                      <set-body>{"error":"rate-limited"}</set-body>
+                    </return-response>
+                  </inbound>
+                  <backend>
+                    <base />
+                  </backend>
+                  <outbound>
+                    <base />
+                  </outbound>
+                  <on-error>
+                    <base />
+                  </on-error>
+                </policies>
+                """;
+        assertOk(put(operationPolicyUrl(), policyBody(policyXml)), "create operation policy");
+
+        HttpResponse<String> throttled = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        assertEquals(429, throttled.statusCode(), throttled.body());
+        assertEquals("30", throttled.headers().firstValue("Retry-After").orElse(""));
+        assertTrue(throttled.body().contains("rate-limited"), throttled.body());
+
+        assertOk(delete(operationPolicyUrl()), "delete operation policy");
+        HttpResponse<String> restored = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        assertEquals(200, restored.statusCode(), restored.body());
+    }
+
+    @Test
+    @Order(9)
     void namedValuesAndBackends_areUsableFromPolicies() throws Exception {
         String namedValueBody = """
                 {
@@ -320,7 +406,7 @@ class ApiManagementCompatibilityTest {
     }
 
     @Test
-    @Order(9)
+    @Order(10)
     void productSubscription_enforcesSubscriptionKeyOnGateway() throws Exception {
         String productBody = """
                 {
@@ -371,7 +457,7 @@ class ApiManagementCompatibilityTest {
     }
 
     @Test
-    @Order(10)
+    @Order(11)
     void deleteResources_removesService() throws Exception {
         assertOk(delete(subscriptionUrl()), "delete subscription");
         assertOk(delete(productApiUrl()), "delete product api");
@@ -440,6 +526,13 @@ class ApiManagementCompatibilityTest {
         return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE
                 + "/apis/" + API_ID + "/policies/policy?api-version=" + API_VERSION;
+    }
+
+    private static String operationPolicyUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/apis/" + API_ID + "/operations/" + OPERATION_ID
+                + "/policies/policy?api-version=" + API_VERSION;
     }
 
     private static String namedValuesCollectionUrl() {
@@ -550,6 +643,16 @@ class ApiManagementCompatibilityTest {
         throw new AssertionError("Expected list to contain name " + name + ": " + array);
     }
 
+    private static void assertDoesNotContainName(JsonNode array, String name) {
+        assertNotNull(array);
+        assertTrue(array.isArray(), "Expected array but got " + array);
+        for (JsonNode item : array) {
+            if (name.equals(item.get("name").asText())) {
+                throw new AssertionError("Expected list not to contain name " + name + ": " + array);
+            }
+        }
+    }
+
     private static void assertNamedValueDoesNotExposeValue(JsonNode array, String name) {
         assertNotNull(array);
         for (JsonNode item : array) {
@@ -596,6 +699,33 @@ class ApiManagementCompatibilityTest {
         return mapper.writeValueAsString(java.util.Map.of(
                 "properties", java.util.Map.of(
                         "displayName", "Orders API",
+                        "path", "openapi",
+                        "protocols", java.util.List.of("https"),
+                        "format", "openapi+json",
+                        "value", openApi
+                )
+        ));
+    }
+
+    private static String openApiUpdatedImportBody() throws Exception {
+        String openApi = mapper.writeValueAsString(java.util.Map.of(
+                "openapi", "3.0.1",
+                "info", java.util.Map.of(
+                        "title", "Customers API",
+                        "version", "2.0"
+                ),
+                "paths", java.util.Map.of(
+                        "/customers/{customerId}", java.util.Map.of(
+                                "get", java.util.Map.of(
+                                        "operationId", OPENAPI_UPDATED_OPERATION_ID,
+                                        "summary", "Get customer"
+                                )
+                        )
+                )
+        ));
+        return mapper.writeValueAsString(java.util.Map.of(
+                "properties", java.util.Map.of(
+                        "displayName", "Customers API",
                         "path", "openapi",
                         "protocols", java.util.List.of("https"),
                         "format", "openapi+json",

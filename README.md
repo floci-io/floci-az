@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), and Virtual Machines (Microsoft.Compute).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), and Virtual Machines (Microsoft.Compute).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -24,7 +24,7 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, and Event Hubs. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
+  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, Event Hubs, API Management, and more. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
 </p>
 
 
@@ -55,6 +55,7 @@ Floci AZ is a free, open-source local Azure emulator for development, testing, a
 | Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
 | Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
 | AKS (Kubernetes)    | ✅                         | ❌                                           | ❌                                                                           |
+| API Management      | ✅                         | ❌                                           | ❌                                                                           |
 | Virtual Machines    | ✅                         | ❌                                           | ❌                                                                           |
 | Native binary       | ✅                         | ❌                                           | ✅                                                                           |
 | Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
@@ -173,6 +174,7 @@ flowchart LR
             G["Event Hubs\nAMQP :5672 / Kafka :9093"]
             H["Azure SQL\nMicrosoft.Sql"]
             I["AKS\nMicrosoft.ContainerService"]
+            J["API Management\nMicrosoft.ApiManagement"]
         end
 
         Proxy -->|" route "| Router
@@ -185,6 +187,7 @@ flowchart LR
         Router --> G
         Router --> H
         Router --> I
+        Router --> J
         A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
         G -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
@@ -210,7 +213,58 @@ flowchart LR
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
 | **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed `azure-sql-edge` containers; dynamic port allocation                                                                                                               |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
+| **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
 | **Virtual Machines**    | ARM path (`Microsoft.Compute` / `Microsoft.Network`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state, network dependency stubs (vnet/subnet/NIC/public IP/NSG); mocked — no Docker (container backing planned) |
+
+## API Management Scope
+
+floci-az includes an **in-process API Management emulator** intended for local development, SDK compatibility tests, and CI workflows that need APIM-shaped ARM resources plus a lightweight gateway. It is not a full Azure APIM gateway implementation.
+
+APIM is available through:
+
+- ARM-compatible resource paths under `Microsoft.ApiManagement`.
+- Gateway routes under `/{account}-apim/{serviceName}/{apiPath...}`. With the default account this is `http://localhost:4577/devstoreaccount1-apim/{serviceName}/...`.
+
+### Supported
+
+- Management service resources: create, get, list, delete.
+- API resources: create, get, list, delete.
+- Operation resources: create, get, list, delete.
+- Policy resources at service, API, and operation scope.
+- Product resources and product-to-API links.
+- Subscription resources with gateway subscription-key enforcement.
+- Named values, including secret named values whose `properties.value` is not exposed in ARM responses.
+- Backends and `<set-backend-service backend-id="...">`.
+- OpenAPI JSON import for APIs, including operation generation from `paths`.
+- OpenAPI reimport behavior that replaces previous generated operations.
+- Gateway route matching for API paths and operation URL templates.
+- Basic backend proxying when an API `serviceUrl` or backend policy is configured.
+
+### Supported Policy Subset
+
+The policy engine intentionally supports a focused subset:
+
+- `<set-header>` with `exists-action="override"`, `skip`, `append`, and `delete`.
+- `<set-query-parameter>` with `exists-action="override"`, `skip`, and `delete`.
+- `<rewrite-uri template="...">`.
+- `<set-backend-service base-url="...">`.
+- `<set-backend-service backend-id="...">`.
+- `<return-response>`.
+- `<set-status code="...">` inside `return-response`.
+- `<set-body>` inside `return-response`.
+- Named value interpolation with `{{name}}` in supported policy values.
+
+### Partial or Out of Scope
+
+The APIM emulator is intentionally scoped. These features are not fully emulated:
+
+- The full APIM policy language and C# policy expressions.
+- JWT validation, OAuth/OIDC flows, certificates, mTLS, and managed identities.
+- API revisions, API versions, version sets, releases, tags, groups, users, loggers, diagnostics, named value Key Vault references, and developer portal behavior.
+- APIM networking, private endpoints, custom domains, DNS, scale units, regions, SKU behavior, and deployment lifecycle timing.
+- Exact APIM error formats, tracing, analytics, caching, rate-limit counters, quota counters, and distributed gateway behavior.
+
+The current goal is practical local parity for common APIM provisioning and gateway tests, not full Azure infrastructure simulation.
 
 ## Persistence & Storage Modes
 

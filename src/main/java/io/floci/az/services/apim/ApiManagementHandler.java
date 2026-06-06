@@ -97,12 +97,18 @@ public class ApiManagementHandler implements AzureServiceHandler {
 
         Optional<Map<String, Object>> operation = matchedOperationResource(serviceName,
                 apiId, request.method(), match.suffix());
+        if (operation.isEmpty() && hasOperations(serviceName, apiId)) {
+            return notFound("No API operation matched: " + gatewayPath);
+        }
         PolicyContext policy = applyPolicies(serviceName, apiId,
                 operation.map(o -> String.valueOf(o.get("name"))).orElse(null),
-                match.suffix());
+                match.suffix(), request.queryParams());
+        if (policy.returnStatusCode() != null) {
+            return policyResponse(policy);
+        }
         String serviceUrl = firstNonBlank(policy.backendUrl(), stringValue(cast(match.api().get("properties")).get("serviceUrl")));
         if (serviceUrl != null) {
-            return proxy(request, serviceUrl, policy.suffix(), policy.headers());
+            return proxy(request, serviceUrl, policy.suffix(), policy.headers(), policy.queryParams());
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -113,6 +119,7 @@ public class ApiManagementHandler implements AzureServiceHandler {
         body.put("backendPath", "/" + trimSlashes(policy.suffix()));
         body.put("operationId", operation.map(o -> String.valueOf(o.get("name"))).orElse(null));
         body.put("headers", policy.headers());
+        body.put("queryParams", policy.queryParams());
         return Response.ok(body).build();
     }
 
@@ -436,6 +443,11 @@ public class ApiManagementHandler implements AzureServiceHandler {
                 .findFirst();
     }
 
+    private boolean hasOperations(String serviceName, String apiId) {
+        return operations.values().stream()
+                .anyMatch(o -> serviceName.equals(o.get("_service")) && apiId.equals(o.get("_api")));
+    }
+
     private Response handlePolicy(AzureRequest request, String method, String parentKey, String parentId,
                                   String type, String[] parts) {
         if (parts.length < 1 || !"policies".equals(parts[parts.length - 1]) && parts.length < 2) {
@@ -712,8 +724,13 @@ public class ApiManagementHandler implements AzureServiceHandler {
                 || scope.endsWith("/products/" + productId));
     }
 
-    private PolicyContext applyPolicies(String serviceName, String apiId, String operationId, String suffix) {
-        PolicyContext context = new PolicyContext(serviceName, null, suffix, new LinkedHashMap<>());
+    private PolicyContext applyPolicies(String serviceName, String apiId, String operationId, String suffix,
+                                        Map<String, String> requestQueryParams) {
+        Map<String, String> queryParams = new LinkedHashMap<>();
+        if (requestQueryParams != null) {
+            queryParams.putAll(requestQueryParams);
+        }
+        PolicyContext context = new PolicyContext(serviceName, null, suffix, new LinkedHashMap<>(), queryParams);
         applyPolicy(context, findPolicyByScopeService(serviceName));
         applyPolicy(context, findPolicyByScopeApi(serviceName, apiId));
         if (operationId != null) {
@@ -739,6 +756,8 @@ public class ApiManagementHandler implements AzureServiceHandler {
             applySetBackendService(context, doc);
             applyRewriteUri(context, doc);
             applySetHeaders(context, doc);
+            applySetQueryParameters(context, doc);
+            applyReturnResponse(context, doc);
         } catch (Exception e) {
             LOG.warnf("Ignoring unsupported APIM policy XML: %s", e.getMessage());
         }
@@ -782,11 +801,71 @@ public class ApiManagementHandler implements AzureServiceHandler {
             if (name.isBlank()) {
                 continue;
             }
+            String action = element.getAttribute("exists-action");
+            if ("delete".equalsIgnoreCase(action)) {
+                context.headers().remove(name);
+                continue;
+            }
+            if ("skip".equalsIgnoreCase(action) && context.headers().containsKey(name)) {
+                continue;
+            }
             NodeList values = element.getElementsByTagName("value");
             if (values.getLength() > 0) {
-                context.headers().put(name, resolveNamedValues(context.serviceName(),
+                String value = resolveNamedValues(context.serviceName(),
+                        values.item(values.getLength() - 1).getTextContent());
+                if ("append".equalsIgnoreCase(action) && context.headers().containsKey(name)) {
+                    context.headers().put(name, context.headers().get(name) + "," + value);
+                } else {
+                    context.headers().put(name, value);
+                }
+            }
+        }
+    }
+
+    private void applySetQueryParameters(PolicyContext context, Document doc) {
+        NodeList nodes = doc.getElementsByTagName("set-query-parameter");
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element element = (Element) nodes.item(i);
+            String name = element.getAttribute("name");
+            if (name.isBlank()) {
+                continue;
+            }
+            String action = element.getAttribute("exists-action");
+            if ("delete".equalsIgnoreCase(action)) {
+                context.queryParams().remove(name);
+                continue;
+            }
+            if ("skip".equalsIgnoreCase(action) && context.queryParams().containsKey(name)) {
+                continue;
+            }
+            NodeList values = element.getElementsByTagName("value");
+            if (values.getLength() > 0) {
+                context.queryParams().put(name, resolveNamedValues(context.serviceName(),
                         values.item(values.getLength() - 1).getTextContent()));
             }
+        }
+    }
+
+    private void applyReturnResponse(PolicyContext context, Document doc) {
+        NodeList nodes = doc.getElementsByTagName("return-response");
+        if (nodes.getLength() == 0) {
+            return;
+        }
+        Element element = (Element) nodes.item(nodes.getLength() - 1);
+        NodeList statuses = element.getElementsByTagName("set-status");
+        int statusCode = 200;
+        if (statuses.getLength() > 0) {
+            Element status = (Element) statuses.item(statuses.getLength() - 1);
+            String code = status.getAttribute("code");
+            if (!code.isBlank()) {
+                statusCode = Integer.parseInt(code);
+            }
+        }
+        NodeList bodies = element.getElementsByTagName("set-body");
+        context.returnStatusCode(statusCode);
+        if (bodies.getLength() > 0) {
+            context.returnBody(resolveNamedValues(context.serviceName(),
+                    bodies.item(bodies.getLength() - 1).getTextContent()));
         }
     }
 
@@ -845,9 +924,11 @@ public class ApiManagementHandler implements AzureServiceHandler {
                 .findFirst();
     }
 
-    private Response proxy(AzureRequest request, String serviceUrl, String suffix, Map<String, String> extraHeaders) {
+    private Response proxy(AzureRequest request, String serviceUrl, String suffix, Map<String, String> extraHeaders,
+                           Map<String, String> extraQueryParams) {
         try {
-            String target = serviceUrl.replaceAll("/+$", "") + "/" + trimSlashes(suffix) + queryString(request.queryParams());
+            String target = serviceUrl.replaceAll("/+$", "") + "/" + trimSlashes(suffix)
+                    + queryString(extraQueryParams);
             byte[] body = request.bodyStream() == null ? new byte[0] : request.bodyStream().readAllBytes();
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(target))
                     .method(request.method(), body.length == 0
@@ -868,6 +949,19 @@ public class ApiManagementHandler implements AzureServiceHandler {
                     "message", e.getMessage() == null ? "Backend unavailable" : e.getMessage()
             ))).build();
         }
+    }
+
+    private Response policyResponse(PolicyContext policy) {
+        Response.ResponseBuilder response = Response.status(policy.returnStatusCode());
+        if (policy.returnBody() != null) {
+            response.entity(policy.returnBody());
+            String trimmed = policy.returnBody().trim();
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                response.type("application/json");
+            }
+        }
+        policy.headers().forEach(response::header);
+        return response.build();
     }
 
     private static String firstNonBlank(String first, String second) {
@@ -1118,12 +1212,17 @@ public class ApiManagementHandler implements AzureServiceHandler {
         private String backendUrl;
         private String suffix;
         private final Map<String, String> headers;
+        private final Map<String, String> queryParams;
+        private Integer returnStatusCode;
+        private String returnBody;
 
-        private PolicyContext(String serviceName, String backendUrl, String suffix, Map<String, String> headers) {
+        private PolicyContext(String serviceName, String backendUrl, String suffix, Map<String, String> headers,
+                              Map<String, String> queryParams) {
             this.serviceName = serviceName;
             this.backendUrl = backendUrl;
             this.suffix = suffix;
             this.headers = headers;
+            this.queryParams = queryParams;
         }
 
         private String serviceName() {
@@ -1148,6 +1247,26 @@ public class ApiManagementHandler implements AzureServiceHandler {
 
         private Map<String, String> headers() {
             return headers;
+        }
+
+        private Map<String, String> queryParams() {
+            return queryParams;
+        }
+
+        private Integer returnStatusCode() {
+            return returnStatusCode;
+        }
+
+        private void returnStatusCode(Integer returnStatusCode) {
+            this.returnStatusCode = returnStatusCode;
+        }
+
+        private String returnBody() {
+            return returnBody;
+        }
+
+        private void returnBody(String returnBody) {
+            this.returnBody = returnBody;
         }
     }
 }
