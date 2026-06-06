@@ -1,5 +1,6 @@
 package io.floci.az.services.apim;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
@@ -44,6 +45,8 @@ public class ApiManagementHandler implements AzureServiceHandler {
     private final Map<String, Map<String, Object>> policies = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> products = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> subscriptions = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> namedValues = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> backends = new ConcurrentHashMap<>();
     private final Map<String, String> productApis = new ConcurrentHashMap<>();
     private final EmulatorConfig config;
     private final HttpClient httpClient;
@@ -153,6 +156,14 @@ public class ApiManagementHandler implements AzureServiceHandler {
             return handleSubscriptions(request, method, sub, rg, serviceName, parts);
         }
 
+        if (parts.length >= 3 && "namedValues".equals(parts[2])) {
+            return handleNamedValues(request, method, sub, rg, serviceName, parts);
+        }
+
+        if (parts.length >= 3 && "backends".equals(parts[2])) {
+            return handleBackends(request, method, sub, rg, serviceName, parts);
+        }
+
         if (parts.length >= 3 && "apis".equals(parts[2])) {
             if (parts.length == 3) {
                 return Response.ok(Map.of("value", listApis(sub, rg, serviceName))).build();
@@ -257,6 +268,7 @@ public class ApiManagementHandler implements AzureServiceHandler {
                 null, properties);
         resource.put("_service", serviceName);
         apis.put(apiKey(sub, rg, serviceName, apiId), resource);
+        importOpenApiOperations(sub, rg, serviceName, apiId, properties);
         return Response.ok(stripInternal(resource)).build();
     }
 
@@ -280,6 +292,62 @@ public class ApiManagementHandler implements AzureServiceHandler {
         resource.put("_api", apiId);
         operations.put(operationKey(sub, rg, serviceName, apiId, operationId), resource);
         return Response.ok(stripInternal(resource)).build();
+    }
+
+    private void importOpenApiOperations(String sub, String rg, String serviceName, String apiId,
+                                         Map<String, Object> apiProperties) {
+        String format = stringValue(apiProperties.get("format"));
+        String value = stringValue(apiProperties.get("value"));
+        if (format == null || value == null || !format.toLowerCase().contains("openapi")) {
+            return;
+        }
+        try {
+            JsonNode document = MAPPER.readTree(value);
+            JsonNode info = document.path("info");
+            if (!apiProperties.containsKey("displayName") && info.path("title").isTextual()) {
+                apiProperties.put("displayName", info.path("title").asText());
+            }
+            JsonNode paths = document.path("paths");
+            if (!paths.isObject()) {
+                return;
+            }
+            operations.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId) + "/operations/"));
+            paths.fields().forEachRemaining(pathEntry -> importOpenApiPath(sub, rg, serviceName, apiId,
+                    pathEntry.getKey(), pathEntry.getValue()));
+        } catch (Exception e) {
+            LOG.warnf("Ignoring unsupported OpenAPI import for API %s: %s", apiId, e.getMessage());
+        }
+    }
+
+    private void importOpenApiPath(String sub, String rg, String serviceName, String apiId,
+                                   String path, JsonNode pathItem) {
+        if (!pathItem.isObject()) {
+            return;
+        }
+        pathItem.fields().forEachRemaining(methodEntry -> {
+            String method = methodEntry.getKey().toUpperCase();
+            if (!isOpenApiHttpMethod(method)) {
+                return;
+            }
+            JsonNode operation = methodEntry.getValue();
+            String operationId = operation.path("operationId").isTextual()
+                    ? operation.path("operationId").asText()
+                    : generatedOperationId(method, path);
+            Map<String, Object> properties = new LinkedHashMap<>();
+            properties.put("displayName", firstNonBlank(textValue(operation.path("summary")), operationId));
+            properties.put("method", method);
+            properties.put("urlTemplate", path == null || path.isBlank() ? "/" : path);
+
+            Map<String, Object> resource = resource(sub, rg,
+                    "Microsoft.ApiManagement/service/apis/operations", operationId,
+                    "/subscriptions/" + sub + "/resourceGroups/" + rg
+                            + "/providers/Microsoft.ApiManagement/service/" + serviceName
+                            + "/apis/" + apiId + "/operations/" + operationId,
+                    null, properties);
+            resource.put("_service", serviceName);
+            resource.put("_api", apiId);
+            operations.put(operationKey(sub, rg, serviceName, apiId, operationId), resource);
+        });
     }
 
     private List<Map<String, Object>> listApis(String sub, String rg, String serviceName) {
@@ -311,6 +379,20 @@ public class ApiManagementHandler implements AzureServiceHandler {
                 .toList();
     }
 
+    private List<Map<String, Object>> listNamedValues(String sub, String rg, String serviceName) {
+        return namedValues.values().stream()
+                .filter(n -> sub.equals(n.get("_sub")) && rg.equals(n.get("_rg")) && serviceName.equals(n.get("_service")))
+                .map(ApiManagementHandler::stripInternal)
+                .toList();
+    }
+
+    private List<Map<String, Object>> listBackends(String sub, String rg, String serviceName) {
+        return backends.values().stream()
+                .filter(b -> sub.equals(b.get("_sub")) && rg.equals(b.get("_rg")) && serviceName.equals(b.get("_service")))
+                .map(ApiManagementHandler::stripInternal)
+                .toList();
+    }
+
     private Response getResource(String key, Map<String, Map<String, Object>> store, String path) {
         Map<String, Object> resource = store.get(key);
         return resource == null ? notFound(path) : Response.ok(stripInternal(resource)).build();
@@ -323,6 +405,8 @@ public class ApiManagementHandler implements AzureServiceHandler {
         policies.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName)));
         products.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
         subscriptions.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/subscriptions/"));
+        namedValues.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/namedValues/"));
+        backends.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/backends/"));
         productApis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
     }
 
@@ -521,6 +605,81 @@ public class ApiManagementHandler implements AzureServiceHandler {
         return Response.ok(stripInternal(resource)).build();
     }
 
+    private Response handleNamedValues(AzureRequest request, String method, String sub, String rg,
+                                       String serviceName, String[] parts) {
+        if (parts.length == 3) {
+            return Response.ok(Map.of("value", listNamedValues(sub, rg, serviceName))).build();
+        }
+        String namedValueId = parts[3];
+        return switch (method) {
+            case "PUT" -> createOrUpdateNamedValue(request, sub, rg, serviceName, namedValueId);
+            case "GET" -> getResource(namedValueKey(sub, rg, serviceName, namedValueId),
+                    namedValues, "namedValues/" + namedValueId);
+            case "DELETE" -> {
+                namedValues.remove(namedValueKey(sub, rg, serviceName, namedValueId));
+                yield Response.ok().build();
+            }
+            default -> Response.status(405).build();
+        };
+    }
+
+    private Response createOrUpdateNamedValue(AzureRequest request, String sub, String rg,
+                                              String serviceName, String namedValueId) {
+        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+            return notFound("service/" + serviceName);
+        }
+        Map<String, Object> body = parseBody(request);
+        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+        properties.putIfAbsent("displayName", namedValueId);
+        properties.putIfAbsent("value", "");
+        properties.putIfAbsent("secret", false);
+
+        Map<String, Object> resource = resource(sub, rg, "Microsoft.ApiManagement/service/namedValues", namedValueId,
+                "/subscriptions/" + sub + "/resourceGroups/" + rg
+                        + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/namedValues/" + namedValueId,
+                null, properties);
+        resource.put("_service", serviceName);
+        namedValues.put(namedValueKey(sub, rg, serviceName, namedValueId), resource);
+        return Response.ok(stripInternal(resource)).build();
+    }
+
+    private Response handleBackends(AzureRequest request, String method, String sub, String rg,
+                                    String serviceName, String[] parts) {
+        if (parts.length == 3) {
+            return Response.ok(Map.of("value", listBackends(sub, rg, serviceName))).build();
+        }
+        String backendId = parts[3];
+        return switch (method) {
+            case "PUT" -> createOrUpdateBackend(request, sub, rg, serviceName, backendId);
+            case "GET" -> getResource(backendKey(sub, rg, serviceName, backendId), backends, "backends/" + backendId);
+            case "DELETE" -> {
+                backends.remove(backendKey(sub, rg, serviceName, backendId));
+                yield Response.ok().build();
+            }
+            default -> Response.status(405).build();
+        };
+    }
+
+    private Response createOrUpdateBackend(AzureRequest request, String sub, String rg,
+                                           String serviceName, String backendId) {
+        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+            return notFound("service/" + serviceName);
+        }
+        Map<String, Object> body = parseBody(request);
+        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+        properties.putIfAbsent("title", backendId);
+        properties.putIfAbsent("protocol", "http");
+        properties.putIfAbsent("url", "");
+
+        Map<String, Object> resource = resource(sub, rg, "Microsoft.ApiManagement/service/backends", backendId,
+                "/subscriptions/" + sub + "/resourceGroups/" + rg
+                        + "/providers/Microsoft.ApiManagement/service/" + serviceName + "/backends/" + backendId,
+                null, properties);
+        resource.put("_service", serviceName);
+        backends.put(backendKey(sub, rg, serviceName, backendId), resource);
+        return Response.ok(stripInternal(resource)).build();
+    }
+
     private Response validateSubscriptionKey(AzureRequest request, String serviceName, String apiId) {
         List<String> requiredProducts = productApis.entrySet().stream()
                 .filter(e -> e.getValue().endsWith("/apis/" + apiId))
@@ -554,7 +713,7 @@ public class ApiManagementHandler implements AzureServiceHandler {
     }
 
     private PolicyContext applyPolicies(String serviceName, String apiId, String operationId, String suffix) {
-        PolicyContext context = new PolicyContext(null, suffix, new LinkedHashMap<>());
+        PolicyContext context = new PolicyContext(serviceName, null, suffix, new LinkedHashMap<>());
         applyPolicy(context, findPolicyByScopeService(serviceName));
         applyPolicy(context, findPolicyByScopeApi(serviceName, apiId));
         if (operationId != null) {
@@ -591,9 +750,15 @@ public class ApiManagementHandler implements AzureServiceHandler {
             return;
         }
         Element element = (Element) nodes.item(nodes.getLength() - 1);
+        String backendId = element.getAttribute("backend-id");
+        if (!backendId.isBlank()) {
+            resolveBackendUrl(context.serviceName(), resolveNamedValues(context.serviceName(), backendId))
+                    .ifPresent(context::backendUrl);
+            return;
+        }
         String baseUrl = element.getAttribute("base-url");
         if (!baseUrl.isBlank()) {
-            context.backendUrl(baseUrl);
+            context.backendUrl(resolveNamedValues(context.serviceName(), baseUrl));
         }
     }
 
@@ -605,7 +770,7 @@ public class ApiManagementHandler implements AzureServiceHandler {
         Element element = (Element) nodes.item(nodes.getLength() - 1);
         String template = element.getAttribute("template");
         if (!template.isBlank()) {
-            context.suffix(trimSlashes(template));
+            context.suffix(trimSlashes(resolveNamedValues(context.serviceName(), template)));
         }
     }
 
@@ -619,9 +784,41 @@ public class ApiManagementHandler implements AzureServiceHandler {
             }
             NodeList values = element.getElementsByTagName("value");
             if (values.getLength() > 0) {
-                context.headers().put(name, values.item(values.getLength() - 1).getTextContent());
+                context.headers().put(name, resolveNamedValues(context.serviceName(),
+                        values.item(values.getLength() - 1).getTextContent()));
             }
         }
+    }
+
+    private String resolveNamedValues(String serviceName, String value) {
+        if (value == null || !value.contains("{{")) {
+            return value;
+        }
+        java.util.regex.Matcher matcher = Pattern.compile("\\{\\{\\s*([^}]+?)\\s*}}").matcher(value);
+        StringBuilder resolved = new StringBuilder();
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            String replacement = findNamedValue(serviceName, name).orElse(matcher.group(0));
+            matcher.appendReplacement(resolved, java.util.regex.Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(resolved);
+        return resolved.toString();
+    }
+
+    private Optional<String> findNamedValue(String serviceName, String namedValueId) {
+        return namedValues.values().stream()
+                .filter(n -> serviceName.equals(n.get("_service")) && namedValueId.equals(n.get("name")))
+                .map(n -> stringValue(cast(n.get("properties")).get("value")))
+                .filter(v -> v != null)
+                .findFirst();
+    }
+
+    private Optional<String> resolveBackendUrl(String serviceName, String backendId) {
+        return backends.values().stream()
+                .filter(b -> serviceName.equals(b.get("_service")) && backendId.equals(b.get("name")))
+                .map(b -> stringValue(cast(b.get("properties")).get("url")))
+                .filter(v -> v != null && !v.isBlank())
+                .findFirst();
     }
 
     private Optional<Map<String, Object>> findPolicyByScopeService(String serviceName) {
@@ -799,6 +996,25 @@ public class ApiManagementHandler implements AzureServiceHandler {
         return value instanceof String s ? s : null;
     }
 
+    private static String textValue(JsonNode node) {
+        return node != null && node.isTextual() ? node.asText() : null;
+    }
+
+    private static boolean isOpenApiHttpMethod(String method) {
+        return switch (method) {
+            case "GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE" -> true;
+            default -> false;
+        };
+    }
+
+    private static String generatedOperationId(String method, String path) {
+        String cleanPath = trimSlashes(path).replaceAll("\\{([^/]+)}", "$1")
+                .replaceAll("[^A-Za-z0-9]+", "-")
+                .replaceAll("^-+", "")
+                .replaceAll("-+$", "");
+        return method.toLowerCase() + (cleanPath.isBlank() ? "" : "-" + cleanPath);
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest request) {
         try {
@@ -818,6 +1034,13 @@ public class ApiManagementHandler implements AzureServiceHandler {
         copy.remove("_service");
         copy.remove("_api");
         copy.remove("_parent");
+        if ("Microsoft.ApiManagement/service/namedValues".equals(copy.get("type"))) {
+            Map<String, Object> properties = new LinkedHashMap<>(cast(copy.get("properties")));
+            if (Boolean.parseBoolean(String.valueOf(properties.getOrDefault("secret", false)))) {
+                properties.remove("value");
+                copy.put("properties", properties);
+            }
+        }
         return copy;
     }
 
@@ -863,6 +1086,14 @@ public class ApiManagementHandler implements AzureServiceHandler {
         return productKey(sub, rg, serviceName, productId) + "/apis/" + apiId;
     }
 
+    private static String namedValueKey(String sub, String rg, String serviceName, String namedValueId) {
+        return serviceKey(sub, rg, serviceName) + "/namedValues/" + namedValueId;
+    }
+
+    private static String backendKey(String sub, String rg, String serviceName, String backendId) {
+        return serviceKey(sub, rg, serviceName) + "/backends/" + backendId;
+    }
+
     private static String productIdFromProductApiKey(String key) {
         String marker = "/products/";
         int start = key.indexOf(marker);
@@ -883,14 +1114,20 @@ public class ApiManagementHandler implements AzureServiceHandler {
     }
 
     private static final class PolicyContext {
+        private final String serviceName;
         private String backendUrl;
         private String suffix;
         private final Map<String, String> headers;
 
-        private PolicyContext(String backendUrl, String suffix, Map<String, String> headers) {
+        private PolicyContext(String serviceName, String backendUrl, String suffix, Map<String, String> headers) {
+            this.serviceName = serviceName;
             this.backendUrl = backendUrl;
             this.suffix = suffix;
             this.headers = headers;
+        }
+
+        private String serviceName() {
+            return serviceName;
         }
 
         private String backendUrl() {

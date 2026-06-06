@@ -29,10 +29,16 @@ class ApiManagementCompatibilityTest {
     private static final String RG = "apim-rg-" + UUID.randomUUID().toString().substring(0, 8);
     private static final String SERVICE = "apim" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     private static final String API_ID = "catalog-api";
+    private static final String OPENAPI_API_ID = "openapi-api";
     private static final String OPERATION_ID = "get-item";
+    private static final String OPENAPI_GET_OPERATION_ID = "getOrder";
+    private static final String OPENAPI_CREATE_OPERATION_ID = "createOrder";
     private static final String PRODUCT_ID = "starter";
     private static final String SUBSCRIPTION_ID = "starter-sub";
     private static final String SUBSCRIPTION_KEY = "floci-apim-test-key";
+    private static final String NAMED_VALUE_ID = "floci-header";
+    private static final String SECRET_NAMED_VALUE_ID = "floci-secret-header";
+    private static final String BACKEND_ID = "catalog-backend";
     private static final String API_VERSION = "2024-05-01";
 
     private static final HttpClient http = HttpClient.newHttpClient();
@@ -129,6 +135,28 @@ class ApiManagementCompatibilityTest {
 
     @Test
     @Order(5)
+    void openApiImport_createsOperationsAndGatewayRoutes() throws Exception {
+        HttpResponse<String> apiResp = put(openApiApiUrl(), openApiImportBody());
+        assertOk(apiResp, "import openapi api");
+        JsonNode api = mapper.readTree(apiResp.body());
+        assertEquals(OPENAPI_API_ID, api.get("name").asText());
+        assertEquals("openapi", api.get("properties").get("path").asText());
+        assertEquals("openapi+json", api.get("properties").get("format").asText());
+
+        JsonNode operations = mapper.readTree(get(openApiOperationsCollectionUrl()).body()).get("value");
+        assertContainsName(operations, OPENAPI_GET_OPERATION_ID);
+        assertContainsName(operations, OPENAPI_CREATE_OPERATION_ID);
+
+        HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/openapi/orders/42");
+        assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
+        JsonNode json = mapper.readTree(gatewayResp.body());
+        assertEquals(OPENAPI_API_ID, json.get("apiId").asText());
+        assertEquals(OPENAPI_GET_OPERATION_ID, json.get("operationId").asText());
+        assertEquals("/orders/42", json.get("backendPath").asText());
+    }
+
+    @Test
+    @Order(6)
     void gatewayRoute_matchesRegisteredApiAndOperation() throws Exception {
         HttpResponse<String> resp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
         assertEquals(200, resp.statusCode(), resp.body());
@@ -141,7 +169,7 @@ class ApiManagementCompatibilityTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     void apiPolicy_appliesSetHeaderAndRewriteUri() throws Exception {
         String policyXml = """
                 <policies>
@@ -179,7 +207,120 @@ class ApiManagementCompatibilityTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
+    void namedValuesAndBackends_areUsableFromPolicies() throws Exception {
+        String namedValueBody = """
+                {
+                  "properties": {
+                    "displayName": "floci-header",
+                    "value": "named-value-applied",
+                    "secret": false
+                  }
+                }
+                """;
+        HttpResponse<String> namedValueResp = put(namedValueUrl(), namedValueBody);
+        assertOk(namedValueResp, "create named value");
+        assertEquals(NAMED_VALUE_ID, mapper.readTree(namedValueResp.body()).get("name").asText());
+
+        String secretNamedValueBody = """
+                {
+                  "properties": {
+                    "displayName": "floci-secret-header",
+                    "value": "secret-value-applied",
+                    "secret": true
+                  }
+                }
+                """;
+        HttpResponse<String> secretNamedValueResp = put(secretNamedValueUrl(), secretNamedValueBody);
+        assertOk(secretNamedValueResp, "create secret named value");
+        JsonNode secretNamedValue = mapper.readTree(secretNamedValueResp.body());
+        assertEquals(SECRET_NAMED_VALUE_ID, secretNamedValue.get("name").asText());
+        assertTrue(secretNamedValue.get("properties").get("secret").asBoolean());
+        assertTrue(secretNamedValue.get("properties").get("value") == null,
+                "secret named value should not expose properties.value");
+
+        String backendBody = """
+                {
+                  "properties": {
+                    "title": "Catalog backend",
+                    "protocol": "http",
+                    "url": "http://127.0.0.1:4577"
+                  }
+                }
+                """;
+        HttpResponse<String> backendResp = put(backendUrl(), backendBody);
+        assertOk(backendResp, "create backend");
+        JsonNode backend = mapper.readTree(backendResp.body());
+        assertEquals(BACKEND_ID, backend.get("name").asText());
+        assertEquals("http://127.0.0.1:4577", backend.get("properties").get("url").asText());
+
+        assertContainsName(mapper.readTree(get(namedValuesCollectionUrl()).body()).get("value"), NAMED_VALUE_ID);
+        JsonNode namedValues = mapper.readTree(get(namedValuesCollectionUrl()).body()).get("value");
+        assertContainsName(namedValues, SECRET_NAMED_VALUE_ID);
+        assertNamedValueDoesNotExposeValue(namedValues, SECRET_NAMED_VALUE_ID);
+        assertTrue(mapper.readTree(get(secretNamedValueUrl()).body()).get("properties").get("value") == null,
+                "secret named value GET should not expose properties.value");
+        assertContainsName(mapper.readTree(get(backendsCollectionUrl()).body()).get("value"), BACKEND_ID);
+
+        String policyXml = """
+                <policies>
+                  <inbound>
+                    <base />
+                    <set-header name="X-Floci-NamedValue" exists-action="override">
+                      <value>{{floci-header}}</value>
+                    </set-header>
+                    <set-header name="X-Floci-SecretNamedValue" exists-action="override">
+                      <value>{{floci-secret-header}}</value>
+                    </set-header>
+                  </inbound>
+                  <backend>
+                    <base />
+                  </backend>
+                  <outbound>
+                    <base />
+                  </outbound>
+                  <on-error>
+                    <base />
+                  </on-error>
+                </policies>
+                """;
+        assertOk(put(apiPolicyUrl(), policyBody(policyXml)), "replace api policy with named value");
+
+        HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
+        JsonNode json = mapper.readTree(gatewayResp.body());
+        assertEquals("named-value-applied", json.get("headers").get("X-Floci-NamedValue").asText());
+        assertEquals("secret-value-applied", json.get("headers").get("X-Floci-SecretNamedValue").asText());
+
+        String backendPolicyXml = """
+                <policies>
+                  <inbound>
+                    <base />
+                    <set-backend-service backend-id="catalog-backend" />
+                    <rewrite-uri template="/health" />
+                  </inbound>
+                  <backend>
+                    <base />
+                  </backend>
+                  <outbound>
+                    <base />
+                  </outbound>
+                  <on-error>
+                    <base />
+                  </on-error>
+                </policies>
+                """;
+        assertOk(put(apiPolicyUrl(), policyBody(backendPolicyXml)), "replace api policy with backend-id");
+
+        HttpResponse<String> backendGatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
+        assertEquals(200, backendGatewayResp.statusCode(), backendGatewayResp.body());
+        assertTrue(backendGatewayResp.body().contains("\"status\""), backendGatewayResp.body());
+
+        assertOk(put(apiPolicyUrl(), policyBody(policyXml)), "restore named value api policy");
+    }
+
+    @Test
+    @Order(9)
     void productSubscription_enforcesSubscriptionKeyOnGateway() throws Exception {
         String productBody = """
                 {
@@ -197,18 +338,7 @@ class ApiManagementCompatibilityTest {
 
         assertOk(put(productApiUrl(), "{}"), "link product api");
 
-        String subscriptionBody = """
-                {
-                  "properties": {
-                    "displayName": "Starter subscription",
-                    "scope": "/products/%s",
-                    "state": "active",
-                    "primaryKey": "%s",
-                    "secondaryKey": "secondary-%s"
-                  }
-                }
-                """.formatted(PRODUCT_ID, SUBSCRIPTION_KEY, SUBSCRIPTION_KEY);
-        HttpResponse<String> subscriptionResp = put(subscriptionUrl(), subscriptionBody);
+        HttpResponse<String> subscriptionResp = put(subscriptionUrl(), subscriptionBody("active"));
         assertOk(subscriptionResp, "create subscription");
 
         assertContainsName(mapper.readTree(get(productsCollectionUrl()).body()).get("value"), PRODUCT_ID);
@@ -222,16 +352,35 @@ class ApiManagementCompatibilityTest {
         assertEquals(200, withKey.statusCode(), withKey.body());
         JsonNode json = mapper.readTree(withKey.body());
         assertEquals(API_ID, json.get("apiId").asText());
-        assertEquals("/backend/items/42", json.get("backendPath").asText());
+        assertEquals("/items/42", json.get("backendPath").asText());
+
+        HttpResponse<String> withQueryKey = get(gatewayUrl + "?subscription-key=" + SUBSCRIPTION_KEY);
+        assertEquals(200, withQueryKey.statusCode(), withQueryKey.body());
+
+        assertOk(put(subscriptionUrl(), subscriptionBody("inactive")), "deactivate subscription");
+        HttpResponse<String> inactiveSubscription = getWithHeader(gatewayUrl, "Ocp-Apim-Subscription-Key", SUBSCRIPTION_KEY);
+        assertEquals(401, inactiveSubscription.statusCode(), inactiveSubscription.body());
+
+        assertOk(put(subscriptionUrl(), subscriptionBody("active")), "reactivate subscription");
+        assertEquals(200, getWithHeader(gatewayUrl, "Ocp-Apim-Subscription-Key", SUBSCRIPTION_KEY).statusCode());
+
+        assertOk(delete(productApiUrl()), "unlink product api");
+        HttpResponse<String> afterUnlinkWithoutKey = get(gatewayUrl);
+        assertEquals(200, afterUnlinkWithoutKey.statusCode(), afterUnlinkWithoutKey.body());
+        assertOk(put(productApiUrl(), "{}"), "relink product api");
     }
 
     @Test
-    @Order(8)
+    @Order(10)
     void deleteResources_removesService() throws Exception {
         assertOk(delete(subscriptionUrl()), "delete subscription");
         assertOk(delete(productApiUrl()), "delete product api");
         assertOk(delete(productUrl()), "delete product");
+        assertOk(delete(backendUrl()), "delete backend");
+        assertOk(delete(secretNamedValueUrl()), "delete secret named value");
+        assertOk(delete(namedValueUrl()), "delete named value");
         assertOk(delete(operationUrl()), "delete operation");
+        assertOk(delete(openApiApiUrl()), "delete openapi api");
         assertOk(delete(apiUrl()), "delete api");
         assertOk(delete(serviceUrl()), "delete service");
 
@@ -256,6 +405,12 @@ class ApiManagementCompatibilityTest {
                 + "/apis/" + API_ID + "?api-version=" + API_VERSION;
     }
 
+    private static String openApiApiUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/apis/" + OPENAPI_API_ID + "?api-version=" + API_VERSION;
+    }
+
     private static String operationUrl() {
         return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE
@@ -275,10 +430,46 @@ class ApiManagementCompatibilityTest {
                 + "/apis/" + API_ID + "/operations?api-version=" + API_VERSION;
     }
 
+    private static String openApiOperationsCollectionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/apis/" + OPENAPI_API_ID + "/operations?api-version=" + API_VERSION;
+    }
+
     private static String apiPolicyUrl() {
         return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE
                 + "/apis/" + API_ID + "/policies/policy?api-version=" + API_VERSION;
+    }
+
+    private static String namedValuesCollectionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/namedValues?api-version=" + API_VERSION;
+    }
+
+    private static String namedValueUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/namedValues/" + NAMED_VALUE_ID + "?api-version=" + API_VERSION;
+    }
+
+    private static String secretNamedValueUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/namedValues/" + SECRET_NAMED_VALUE_ID + "?api-version=" + API_VERSION;
+    }
+
+    private static String backendsCollectionUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/backends?api-version=" + API_VERSION;
+    }
+
+    private static String backendUrl() {
+        return BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/backends/" + BACKEND_ID + "?api-version=" + API_VERSION;
     }
 
     private static String productsCollectionUrl() {
@@ -359,6 +550,18 @@ class ApiManagementCompatibilityTest {
         throw new AssertionError("Expected list to contain name " + name + ": " + array);
     }
 
+    private static void assertNamedValueDoesNotExposeValue(JsonNode array, String name) {
+        assertNotNull(array);
+        for (JsonNode item : array) {
+            if (name.equals(item.get("name").asText())) {
+                assertTrue(item.get("properties").get("value") == null,
+                        "secret named value should not expose properties.value in list");
+                return;
+            }
+        }
+        throw new AssertionError("Expected list to contain named value " + name + ": " + array);
+    }
+
     private static String policyBody(String xml) throws Exception {
         return mapper.writeValueAsString(java.util.Map.of(
                 "properties", java.util.Map.of(
@@ -366,5 +569,52 @@ class ApiManagementCompatibilityTest {
                         "value", xml
                 )
         ));
+    }
+
+    private static String openApiImportBody() throws Exception {
+        String openApi = mapper.writeValueAsString(java.util.Map.of(
+                "openapi", "3.0.1",
+                "info", java.util.Map.of(
+                        "title", "Orders API",
+                        "version", "1.0"
+                ),
+                "paths", java.util.Map.of(
+                        "/orders/{orderId}", java.util.Map.of(
+                                "get", java.util.Map.of(
+                                        "operationId", OPENAPI_GET_OPERATION_ID,
+                                        "summary", "Get order"
+                                )
+                        ),
+                        "/orders", java.util.Map.of(
+                                "post", java.util.Map.of(
+                                        "operationId", OPENAPI_CREATE_OPERATION_ID,
+                                        "summary", "Create order"
+                                )
+                        )
+                )
+        ));
+        return mapper.writeValueAsString(java.util.Map.of(
+                "properties", java.util.Map.of(
+                        "displayName", "Orders API",
+                        "path", "openapi",
+                        "protocols", java.util.List.of("https"),
+                        "format", "openapi+json",
+                        "value", openApi
+                )
+        ));
+    }
+
+    private static String subscriptionBody(String state) {
+        return """
+                {
+                  "properties": {
+                    "displayName": "Starter subscription",
+                    "scope": "/products/%s",
+                    "state": "%s",
+                    "primaryKey": "%s",
+                    "secondaryKey": "secondary-%s"
+                  }
+                }
+                """.formatted(PRODUCT_ID, state, SUBSCRIPTION_KEY, SUBSCRIPTION_KEY);
     }
 }
