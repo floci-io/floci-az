@@ -3,6 +3,7 @@
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
         test test-python test-python-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat test-appconfig \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
+        test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql test-terraform test-opentofu test-iac compat-docker test-compat clean
 
@@ -267,6 +268,23 @@ test-blob-node:
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-node:/results" \
 			--entrypoint npm \
 			$(NODE_IMAGE) test -- --runTestsByPath tests/blob.test.ts; \
+		EXIT=$$?; \
+	fi; \
+	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+
+test-apim-java:
+	@echo "==> API Management Java compatibility tests (Docker)"
+	@mkdir -p $(COMPAT_RESULTS)/apim-java
+	$(MAKE) compat-build
+	$(MAKE) compat-run
+	@EXIT=0; \
+	$(MAKE) compat-java-image || EXIT=$$?; \
+	if [ $$EXIT -eq 0 ]; then \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/apim-java:/results" \
+			--entrypoint bash \
+			$(JAVA_IMAGE) -c 'mvn test -Dtest=ApiManagementCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status'; \
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT

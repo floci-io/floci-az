@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.services.apim.ApiManagementHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
@@ -58,14 +59,16 @@ public class ArmHandler implements AzureServiceHandler {
     private final BlobServiceHandler blobHandler;
     private final QueueServiceHandler queueHandler;
     private final FunctionsServiceHandler functionsHandler;
+    private final ApiManagementHandler apiManagementHandler;
 
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
-                      FunctionsServiceHandler functionsHandler) {
-        this.config           = config;
-        this.blobHandler      = blobHandler;
-        this.queueHandler     = queueHandler;
-        this.functionsHandler = functionsHandler;
+                      FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler) {
+        this.config               = config;
+        this.blobHandler          = blobHandler;
+        this.queueHandler         = queueHandler;
+        this.functionsHandler     = functionsHandler;
+        this.apiManagementHandler = apiManagementHandler;
     }
 
     @Override
@@ -121,10 +124,11 @@ public class ArmHandler implements AzureServiceHandler {
         // look up a vault by its vaultUri. Return all key vaults for the subscription.
         if (path.matches("subscriptions/[^/?]+/resources([?].*)?")) {
             String sub = extractSub(path);
-            List<Map<String, Object>> resources = keyVaults.values().stream()
+            List<Map<String, Object>> resources = new ArrayList<>(keyVaults.values().stream()
                     .filter(v -> sub.equals(v.get("_sub")))
                     .map(ArmHandler::stripInternal)
-                    .toList();
+                    .toList());
+            resources.addAll(apiManagementHandler.listSubscriptionServices(sub));
             return Response.ok(Map.of("value", resources)).build();
         }
 
@@ -180,6 +184,7 @@ public class ArmHandler implements AzureServiceHandler {
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
                     .map(ArmHandler::stripInternal)
                     .forEach(resources::add);
+            resources.addAll(apiManagementHandler.listServices(sub, rg));
             return Response.ok(Map.of("value", resources)).build();
         }
 
@@ -205,6 +210,9 @@ public class ArmHandler implements AzureServiceHandler {
         }
         if (path.contains("/providers/Microsoft.Network/")) {
             return handleNetwork(req, path, method, sub);
+        }
+        if (path.contains("/providers/Microsoft.ApiManagement/")) {
+            return apiManagementHandler.handleArm(req, path, method, sub);
         }
         return armNotFound(path);
     }

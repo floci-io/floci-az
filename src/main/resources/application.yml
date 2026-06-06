@@ -144,6 +144,8 @@ floci-az:
       enabled: true
       mocked: true          # true = no Docker; VMs are pure ARM state. false = back VMs with containers (phase 2)
       default-image: "ubuntu:22.04"
+    apim:
+      enabled: true
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:

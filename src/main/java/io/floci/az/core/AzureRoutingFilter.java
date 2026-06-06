@@ -381,6 +381,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-servicebus")) {
             serviceType = "servicebus";
             accountName = accountName.substring(0, accountName.length() - 11);
+        } else if (accountName.endsWith("-apim")) {
+            serviceType = "apim";
+            accountName = accountName.substring(0, accountName.length() - 5);
         } else {
             serviceType = resolveServiceType(requestContext, resourcePath);
         }

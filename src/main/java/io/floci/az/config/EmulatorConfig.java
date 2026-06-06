@@ -118,9 +118,15 @@ public interface EmulatorConfig {
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
         VmConfig               vm();
+        ApimConfig             apim();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
+    }
+
+    interface ApimConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface VmConfig {
