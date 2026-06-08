@@ -9,9 +9,40 @@ Compatible with `azure-appconfiguration` SDKs (Java, Python, JavaScript, .NET).
 - **Feature flags** — first-class support via `.appconfig.featureflag/` prefix and `application/vnd.microsoft.appconfig.ff+json` content-type
 - **Revisions** — full revision history on every write; queryable via `GET /revisions`
 - **Locks** — lock/unlock individual key-values to prevent modification
-- **Snapshots** — point-in-time frozen copies of filtered key-value sets; archive/recover lifecycle
+- **Snapshots** — point-in-time frozen copies of filtered key-value sets; async provisioning + archive/recover lifecycle
 - **ETags** — conditional reads (`If-None-Match`) and conditional writes/deletes (`If-Match`)
 - **Composition types** — `key` (deduplicate by key) and `key_label` (keep all key+label pairs)
+- **Pagination** — `@nextLink` / `Link` header with opaque `after` continuation tokens (100 items per page)
+- **`$select` projection** — return only requested fields (`key`, `value`, `content_type`, `tags`, …)
+- **Tags filtering** — `tags=name=value` (repeatable, AND semantics) on key-value and revision lists
+- **Time-travel** — `Accept-Datetime` returns the historical value/list as of a point in time
+- **Sync-Token** — consistency token returned on every response
+
+## Filtering, pagination & consistency
+
+These behaviors are exercised transparently by the SDKs — the notes below describe the wire behavior.
+
+- **Pagination.** Lists return at most 100 items. When more exist the response body carries a relative
+  `@nextLink` (`/kv?api-version=2024-09-01&...&after=<token>`) and a matching `Link: <...>; rel="next"`
+  header. The continuation is an opaque base64 `after` token; SDK pagers follow it automatically.
+- **`$select`.** Pass `$Select=key,value` (CSV) to project each item down to the requested fields.
+- **Tags filtering.** Repeat `tags=env=prod&tags=tier=web` to filter key-values/revisions by **all**
+  given tags (AND). Available on `GET /kv` and `GET /revisions`.
+- **`Accept-Datetime`.** Send an HTTP-date (or ISO-8601) to read the state as of that moment; resolved
+  from the revision history. Note real clients send this at whole-second resolution.
+- **`Sync-Token`.** Every response includes a `Sync-Token` header (`<id>=<base64>;sn=<seq>`, monotonic
+  per account). The SDK round-trips it to guarantee read-your-writes consistency within a sequence.
+
+### Async snapshot provisioning
+
+`PUT /snapshots/{name}` returns `201` with `status: provisioning` and an `Operation-Location` header.
+SDK pollers (`begin_create_snapshot` / `beginCreateSnapshot`) poll `GET /operations?snapshot={name}`,
+which reports `Succeeded` and flips the snapshot to `ready`. Provisioning is effectively instantaneous
+in the emulator.
+
+!!! note "Out of scope (future work)"
+    Dedicated `Check*` HEAD operations with full header parity, problem+json bodies on every non-404
+    error path, snapshot retention/expiry enforcement, and the OAuth (AAD) auth flow.
 
 ## Endpoint
 
