@@ -93,8 +93,28 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 }
 
+resource "azurerm_redis_cache" "redis" {
+  name                = "floci-test-redis"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  capacity            = 0
+  family              = "C"
+  sku_name            = "Basic"
+  enable_non_ssl_port = true
+  minimum_tls_version = "1.2"
+}
+
 output "vm_id" {
   value = azurerm_linux_virtual_machine.vm.id
+}
+
+output "redis_hostname" {
+  value = azurerm_redis_cache.redis.hostname
+}
+
+output "redis_primary_access_key" {
+  value     = azurerm_redis_cache.redis.primary_access_key
+  sensitive = true
 }
 
 output "storage_account_name" {

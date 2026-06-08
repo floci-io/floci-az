@@ -16,6 +16,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; Docker-backed SQL Server containers |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | ✅ Clusters, agent pools, credentials; real k3s containers or mocked |
 | **Virtual Machines** | ARM path (`Microsoft.Compute` / `Microsoft.Network`) | ✅ VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView, network dependency stubs; mocked (Docker backing planned) |
+| **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | ✅ Cache CRUD, listKeys/regenerateKey; real Redis containers (data plane) or mocked |
 
 ## Unified Endpoint
 

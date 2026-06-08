@@ -119,6 +119,7 @@ public interface EmulatorConfig {
         AksConfig              aks();
         VmConfig               vm();
         ApimConfig             apim();
+        RedisConfig            redis();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -144,6 +145,34 @@ public interface EmulatorConfig {
         /** Default Docker image used when an imageReference cannot be resolved (non-mocked mode). */
         @WithDefault("ubuntu:22.04")
         String defaultImage();
+    }
+
+    interface RedisConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Redis container is started; caches transition immediately to
+         * "Succeeded" with {@code hostName=localhost}. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /** Docker image backing the cache. Valkey is a drop-in, RESP-compatible Redis fork. */
+        @WithDefault("valkey/valkey:8-alpine")
+        String defaultImage();
+
+        /** Start of the host port range for Redis instances. */
+        @WithDefault("6379")
+        int basePort();
+
+        /** End of the host port range for Redis instances. */
+        @WithDefault("6399")
+        int maxPort();
+
+        /** Per-instance max memory, e.g. "256mb", "1gb". */
+        @WithDefault("256mb")
+        String maxMemory();
     }
 
     interface AksConfig {

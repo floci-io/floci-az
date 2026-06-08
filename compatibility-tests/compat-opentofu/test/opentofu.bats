@@ -120,3 +120,11 @@ setup() {
     assert_success
     assert_output --partial "PowerState/running"
 }
+
+@test "OpenTofu: redis cache created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Cache/redis/${REDIS_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Cache/Redis"
+    assert_output --partial "Succeeded"
+    assert_output --partial "hostName"
+}

@@ -7,3 +7,5 @@ azure-appconfiguration==1.7.1
 azure-keyvault-secrets>=4.7.0
 azure-identity>=1.15.0
 azure-core>=1.30.0
+redis==5.0.8
+requests>=2.31.0

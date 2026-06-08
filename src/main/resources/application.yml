@@ -146,6 +146,13 @@ floci-az:
       default-image: "ubuntu:22.04"
     apim:
       enabled: true
+    redis:
+      enabled: true
+      mocked: true          # true = no Docker; caches are pure ARM state. false = back caches with real Redis containers
+      default-image: "valkey/valkey:8-alpine"   # RESP-compatible Redis fork (BSD-licensed)
+      base-port: 6379
+      max-port: 6399
+      max-memory: "256mb"
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:

@@ -8,6 +8,7 @@ import io.floci.az.services.eventhub.EventHubHandler;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.keyvault.KeyVaultHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
+import io.floci.az.services.redis.RedisHandler;
 import io.floci.az.services.servicebus.ServiceBusHandler;
 import io.floci.az.services.sql.SqlHandler;
 import io.floci.az.services.table.TableServiceHandler;
@@ -34,6 +35,7 @@ public class AdminController {
     @Inject SqlHandler              sqlHandler;
     @Inject TableServiceHandler     tableHandler;
     @Inject VmHandler               vmHandler;
+    @Inject RedisHandler            redisHandler;
 
     @GET
     @Path("/accounts")
@@ -66,6 +68,7 @@ public class AdminController {
         serviceBusHandler.clearAll();
         tableHandler.clearAll();
         vmHandler.clearAll();
+        redisHandler.clearAll();
 
         // Docker-backed services — stop containers first, then clear state
         sqlHandler.clearAll();

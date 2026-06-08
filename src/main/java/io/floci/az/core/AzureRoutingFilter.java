@@ -271,6 +271,27 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Azure Cache for Redis — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Cache/redis/...
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Cache/")) {
+            Map<String, String> redisQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> redisQueryParams.put(k, v.get(0)));
+            AzureRequest redisRequest = new AzureRequest(
+                requestContext.getMethod(), "redis", "redis", path, headers,
+                requestContext.getEntityStream(), redisQueryParams, null, secure);
+            AuthContext redisAuth = authPipeline.resolve(redisRequest);
+            redisRequest = new AzureRequest(
+                requestContext.getMethod(), "redis", "redis", path, headers,
+                requestContext.getEntityStream(), redisQueryParams, redisAuth, secure);
+            Optional<AzureServiceHandler> redisHandler = serviceRegistry.resolve("redis");
+            if (redisHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM Redis request to RedisHandler: %s %s", requestContext.getMethod(), path);
+                return redisHandler.get().handle(redisRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // ARM general management-plane paths: subscriptions/{sub}/...
         // (resource groups, storage accounts, key vaults, etc. not served
         //  by the more-specific AKS and SQL handlers above)

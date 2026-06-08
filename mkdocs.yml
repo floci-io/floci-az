@@ -78,5 +78,6 @@ nav:
     - Azure SQL Database: services/sql.md
     - Azure Kubernetes Service: services/aks.md
     - Virtual Machines: services/vm.md
+    - Azure Cache for Redis: services/redis.md
   - Contributing: contributing.md
   - Changelog: changelog.md

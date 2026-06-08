@@ -94,6 +94,14 @@ public class BannerLogger {
                     : "image:" + config.services().vm().defaultImage();
             sb.append(serviceStatusDocker("vm", true, vmInfo));
         }
+        if (config.services().redis().enabled()) {
+            String redisInfo = config.services().redis().mocked()
+                    ? "mocked  (no docker)"
+                    : "image:" + config.services().redis().defaultImage()
+                            + "  ports:" + config.services().redis().basePort()
+                            + "-" + config.services().redis().maxPort();
+            sb.append(serviceStatusDocker("redis", true, redisInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
