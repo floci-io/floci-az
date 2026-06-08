@@ -225,6 +225,28 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Azure Container Registry — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ContainerRegistry/...
+        //   subscriptions/{sub}/providers/Microsoft.ContainerRegistry/checkNameAvailability
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerRegistry/")) {
+            Map<String, String> acrQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> acrQueryParams.put(k, v.get(0)));
+            AzureRequest acrRequest = new AzureRequest(
+                requestContext.getMethod(), "acr", "acr", path, headers,
+                requestContext.getEntityStream(), acrQueryParams, null, secure);
+            AuthContext acrAuth = authPipeline.resolve(acrRequest);
+            acrRequest = new AzureRequest(
+                requestContext.getMethod(), "acr", "acr", path, headers,
+                requestContext.getEntityStream(), acrQueryParams, acrAuth, secure);
+            Optional<AzureServiceHandler> acrHandler = serviceRegistry.resolve("acr");
+            if (acrHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM ACR request to AcrHandler: %s %s", requestContext.getMethod(), path);
+                return acrHandler.get().handle(acrRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Azure SQL Database — ARM management-plane paths:
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Sql/...
         //   subscriptions/{sub}/providers/Microsoft.Sql/checkNameAvailability

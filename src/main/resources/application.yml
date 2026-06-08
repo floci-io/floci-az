@@ -153,6 +153,12 @@ floci-az:
       base-port: 6379
       max-port: 6399
       max-memory: "256mb"
+    acr:
+      enabled: true
+      mocked: true          # true = no Docker; registries are pure ARM state. false = back with real registry:2 containers
+      default-image: "registry:2"
+      base-port: 5000
+      max-port: 5099
     # docker-network:  # optional: shared Docker network for sidecar containers
 
   auth:

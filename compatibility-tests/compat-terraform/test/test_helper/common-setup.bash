@@ -29,6 +29,7 @@ export VNET_NAME="floci-test-vnet"
 export NIC_NAME="floci-test-nic"
 export VM_NAME="floci-test-vm"
 export REDIS_NAME="floci-test-redis"
+export ACR_NAME="flocitestacr"
 export SUB_ID="${TF_VAR_subscription_id}"
 
 arm_get() {

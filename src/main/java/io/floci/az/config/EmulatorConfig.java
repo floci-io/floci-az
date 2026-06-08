@@ -120,6 +120,7 @@ public interface EmulatorConfig {
         VmConfig               vm();
         ApimConfig             apim();
         RedisConfig            redis();
+        AcrConfig              acr();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -128,6 +129,30 @@ public interface EmulatorConfig {
     interface ApimConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface AcrConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no registry container is started; registries transition immediately to
+         * "Succeeded" with a cosmetic {@code {name}.azurecr.io} loginServer. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /** Docker image backing each registry (standard Docker Registry V2). */
+        @WithDefault("registry:2")
+        String defaultImage();
+
+        /** Start of the host port range for registry instances. */
+        @WithDefault("5000")
+        int basePort();
+
+        /** End of the host port range for registry instances. */
+        @WithDefault("5099")
+        int maxPort();
     }
 
     interface VmConfig {

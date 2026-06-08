@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.floci.az.services.appconfig.AppConfigHandler;
+import io.floci.az.services.acr.AcrHandler;
 import io.floci.az.services.aks.AksHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.cosmos.CosmosHandler;
@@ -24,6 +25,7 @@ import java.util.List;
 public class AdminController {
 
     @Inject AppConfigHandler        appConfigHandler;
+    @Inject AcrHandler              acrHandler;
     @Inject AksHandler              aksHandler;
     @Inject BlobServiceHandler      blobHandler;
     @Inject CosmosHandler           cosmosHandler;
@@ -59,6 +61,7 @@ public class AdminController {
     public Response reset() {
         // Services backed by StorageBackend — just clear the store
         appConfigHandler.clearAll();
+        acrHandler.clearAll();
         aksHandler.clearAll();
         blobHandler.clearAll();
         cosmosHandler.clearAll();

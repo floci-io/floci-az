@@ -102,6 +102,14 @@ public class BannerLogger {
                             + "-" + config.services().redis().maxPort();
             sb.append(serviceStatusDocker("redis", true, redisInfo));
         }
+        if (config.services().acr().enabled()) {
+            String acrInfo = config.services().acr().mocked()
+                    ? "mocked  (no registry)"
+                    : "registry:" + config.services().acr().defaultImage()
+                            + "  ports:" + config.services().acr().basePort()
+                            + "-" + config.services().acr().maxPort();
+            sb.append(serviceStatusDocker("acr", true, acrInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

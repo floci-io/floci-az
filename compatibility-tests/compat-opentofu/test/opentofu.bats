@@ -128,3 +128,11 @@ setup() {
     assert_output --partial "Succeeded"
     assert_output --partial "hostName"
 }
+
+@test "OpenTofu: container registry created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.ContainerRegistry/registries"
+    assert_output --partial "Succeeded"
+    assert_output --partial "loginServer"
+}

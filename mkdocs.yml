@@ -79,5 +79,6 @@ nav:
     - Azure Kubernetes Service: services/aks.md
     - Virtual Machines: services/vm.md
     - Azure Cache for Redis: services/redis.md
+    - Azure Container Registry: services/acr.md
   - Contributing: contributing.md
   - Changelog: changelog.md
