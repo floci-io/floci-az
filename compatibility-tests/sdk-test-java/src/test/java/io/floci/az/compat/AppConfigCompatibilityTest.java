@@ -1,12 +1,19 @@
 package io.floci.az.compat;
 
 import com.azure.core.exception.HttpResponseException;
+import com.azure.core.util.Context;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.models.ConfigurationSetting;
+import com.azure.data.appconfiguration.models.ConfigurationSettingsFilter;
+import com.azure.data.appconfiguration.models.ConfigurationSnapshot;
+import com.azure.data.appconfiguration.models.ConfigurationSnapshotStatus;
 import com.azure.data.appconfiguration.models.FeatureFlagConfigurationSetting;
+import com.azure.data.appconfiguration.models.SettingFields;
 import com.azure.data.appconfiguration.models.SettingSelector;
 import org.junit.jupiter.api.*;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -451,5 +458,129 @@ class AppConfigCompatibilityTest {
         assertEquals("protected", client.getConfigurationSetting(k, null).getValue());
 
         client.deleteConfigurationSetting(k, null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Pagination
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("list pages transparently across >100 settings")
+    void listPaginatesBeyondOnePage() {
+        String prefix = "page-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        for (int i = 0; i < 120; i++) {
+            client.setConfigurationSetting(prefix + ":" + String.format("%03d", i), null, "v");
+        }
+
+        long count = client.listConfigurationSettings(
+                        new SettingSelector().setKeyFilter(prefix + ":*"))
+                .stream().count();
+        assertEquals(120, count);
+    }
+
+    // -------------------------------------------------------------------------
+    // $select projection
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("$select returns only requested fields")
+    void selectProjectsFields() {
+        String k = key("sel");
+        client.setConfigurationSetting(new ConfigurationSetting()
+                .setKey(k).setValue("hello").setContentType("text/plain"));
+
+        ConfigurationSetting projected = client.listConfigurationSettings(
+                        new SettingSelector().setKeyFilter(k)
+                                .setFields(SettingFields.KEY, SettingFields.VALUE))
+                .stream().findFirst().orElseThrow();
+
+        assertEquals(k, projected.getKey());
+        assertEquals("hello", projected.getValue());
+        assertNull(projected.getContentType());
+
+        client.deleteConfigurationSetting(k, null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Tags filtering
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("tags filter uses AND semantics")
+    void tagsFilterAndSemantics() {
+        String prefix = "tag-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        client.setConfigurationSetting(new ConfigurationSetting()
+                .setKey(prefix + ":a").setValue("a").setTags(Map.of("env", "prod", "tier", "web")));
+        client.setConfigurationSetting(new ConfigurationSetting()
+                .setKey(prefix + ":b").setValue("b").setTags(Map.of("env", "prod")));
+        client.setConfigurationSetting(new ConfigurationSetting()
+                .setKey(prefix + ":c").setValue("c").setTags(Map.of("env", "dev")));
+
+        long oneTag = client.listConfigurationSettings(new SettingSelector()
+                        .setKeyFilter(prefix + ":*").setTagsFilter(List.of("env=prod")))
+                .stream().count();
+        assertEquals(2, oneTag);
+
+        List<String> twoTags = client.listConfigurationSettings(new SettingSelector()
+                        .setKeyFilter(prefix + ":*").setTagsFilter(List.of("env=prod", "tier=web")))
+                .stream().map(ConfigurationSetting::getKey).toList();
+        assertEquals(List.of(prefix + ":a"), twoTags);
+
+        client.deleteConfigurationSetting(prefix + ":a", null);
+        client.deleteConfigurationSetting(prefix + ":b", null);
+        client.deleteConfigurationSetting(prefix + ":c", null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Accept-Datetime time-travel
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("accept-datetime list returns historical value")
+    void acceptDatetimeTimeTravel() throws InterruptedException {
+        String k = key("tt");
+
+        // The Java SDK sends Accept-Datetime as RFC1123 (whole-second resolution), so the two
+        // writes must straddle a full second for the as-of read to distinguish them.
+        client.setConfigurationSetting(k, null, "old");
+        Thread.sleep(1100);
+        OffsetDateTime between = OffsetDateTime.now(ZoneOffset.UTC);
+        Thread.sleep(1100);
+        client.setConfigurationSetting(k, null, "new");
+
+        assertEquals("new", client.getConfigurationSetting(k, null).getValue());
+
+        ConfigurationSetting asOf = client.listConfigurationSettings(
+                        new SettingSelector().setKeyFilter(k).setAcceptDatetime(between))
+                .stream().findFirst().orElseThrow();
+        assertEquals("old", asOf.getValue());
+
+        client.deleteConfigurationSetting(k, null);
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshots (async provisioning poller)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("beginCreateSnapshot polls to a READY snapshot")
+    void snapshotCreatePoller() {
+        String prefix = "snap-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        client.setConfigurationSetting(prefix + ":a", null, "1");
+        client.setConfigurationSetting(prefix + ":b", null, "2");
+
+        String snapshotName = "s-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        ConfigurationSnapshot snapshot = client.beginCreateSnapshot(
+                        snapshotName,
+                        new ConfigurationSnapshot(List.of(new ConfigurationSettingsFilter(prefix + ":*"))),
+                        Context.NONE)
+                .getFinalResult();
+
+        assertEquals(ConfigurationSnapshotStatus.READY, snapshot.getStatus());
+
+        long inSnapshot = client.listConfigurationSettingsForSnapshot(snapshotName).stream().count();
+        assertEquals(2, inSnapshot);
+
+        client.archiveSnapshot(snapshotName);
     }
 }

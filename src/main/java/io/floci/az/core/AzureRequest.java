@@ -2,6 +2,7 @@ package io.floci.az.core;
 
 import jakarta.ws.rs.core.HttpHeaders;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Map;
 
 public record AzureRequest(
@@ -12,6 +13,20 @@ public record AzureRequest(
     HttpHeaders headers,
     InputStream bodyStream,
     Map<String, String> queryParams,
+    Map<String, List<String>> queryParamsMulti, // repeated query params preserved (e.g. App Config `tags`)
     AuthContext authContext,
     boolean secure           // true when the request arrived over HTTPS
-) {}
+) {
+
+    /**
+     * Backwards-compatible constructor for the majority of call sites that only ever read
+     * single-valued query params. Repeated params collapse to {@code queryParamsMulti = {}};
+     * use the canonical constructor when a handler needs multi-valued parameters.
+     */
+    public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
+                        HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
+                        AuthContext authContext, boolean secure) {
+        this(method, accountName, serviceType, resourcePath, headers, bodyStream,
+             queryParams, Map.of(), authContext, secure);
+    }
+}

@@ -389,7 +389,11 @@ public class AzureRoutingFilter {
         }
         LOGGER.infof("Resolved accountName: %s, serviceType: %s, resourcePath: %s", accountName, serviceType, resourcePath);
         Map<String, String> queryParams = new HashMap<>();
-        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+        Map<String, List<String>> queryParamsMulti = new HashMap<>();
+        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> {
+            queryParams.put(k, v.get(0));
+            queryParamsMulti.put(k, List.copyOf(v));
+        });
 
         AzureRequest azureRequest = new AzureRequest(
             requestContext.getMethod(),
@@ -399,6 +403,7 @@ public class AzureRoutingFilter {
             headers,
             requestContext.getEntityStream(),
             queryParams,
+            queryParamsMulti,
             null,
             secure
         );
@@ -412,6 +417,7 @@ public class AzureRoutingFilter {
             headers,
             requestContext.getEntityStream(),
             queryParams,
+            queryParamsMulti,
             authContext,
             secure
         );

@@ -6,11 +6,12 @@
     "test": "jest --testTimeout=30000 --reporters=default --reporters=jest-junit"
   },
   "dependencies": {
+    "@azure/app-configuration": "^1.11.0",
+    "@azure/cosmos": "^4.1.0",
+    "@azure/data-tables": "^13.3.0",
+    "@azure/keyvault-secrets": "^4.8.0",
     "@azure/storage-blob": "^12.23.0",
     "@azure/storage-queue": "^12.22.0",
-    "@azure/data-tables": "^13.3.0",
-    "@azure/cosmos": "^4.1.0",
-    "@azure/keyvault-secrets": "^4.8.0",
     "rhea-promise": "^3.0.0"
   },
   "devDependencies": {

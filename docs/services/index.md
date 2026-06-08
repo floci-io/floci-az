@@ -8,7 +8,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Queue Storage** | `/{account}-queue/` | ✅ Full CRUD |
 | **Table Storage** | `/{account}-table/` | ✅ Full CRUD |
 | **Azure Functions** | `/{account}-functions/` | ✅ HTTP Triggers, Docker runtimes |
-| **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks |
+| **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks, pagination, `$select`, tags filtering, `Accept-Datetime`, `Sync-Token` |
 | **Cosmos DB (SQL API)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, SQL queries, partition keys |
 | **Cosmos DB multi-API** | _(engine sidecars)_ | ✅ MongoDB, PostgreSQL, Cassandra, Gremlin, Table, NoSQL (opt-in Docker engines) |
 | **Key Vault** | `/{account}-keyvault/` | ✅ Secrets CRUD, versioning, soft-delete, properties update |
