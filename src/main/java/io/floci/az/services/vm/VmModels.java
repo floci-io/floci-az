@@ -2,6 +2,7 @@ package io.floci.az.services.vm;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.Map;
@@ -15,6 +16,7 @@ public class VmModels {
      * networkProfile, …) is stored verbatim so GET round-trips faithfully for SDKs and Terraform.
      * {@code provisioningState}, {@code vmId} and power state are managed by the emulator.</p>
      */
+    @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class VirtualMachine {

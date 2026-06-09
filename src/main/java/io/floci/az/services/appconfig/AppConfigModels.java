@@ -1,5 +1,7 @@
 package io.floci.az.services.appconfig;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.util.List;
 import java.util.Map;
 
@@ -32,10 +34,12 @@ public final class AppConfigModels {
     public static final String STATUS_FAILED       = "failed";
 
     /** A single page of list results plus the optional relative continuation link. */
+    @RegisterForReflection
     public record Page(List<Map<String, Object>> items, String nextLink) {
     }
 
     /** Response body for {@code GET /operations?snapshot=...}. */
+    @RegisterForReflection
     public record OperationDetails(String id, String status, Object error) {
     }
 }
