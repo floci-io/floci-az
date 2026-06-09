@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-09
+
 ### Added
 
 - **acr:** Azure Container Registry emulation (`Microsoft.ContainerRegistry/registries`) — registry lifecycle (CreateOrUpdate, Get, Patch, List by subscription and resource group, Delete), `listCredentials` / `regenerateCredential`, `listUsages`, and `checkNameAvailability`. Non-mocked mode backs all registries with a single shared `registry:2` sidecar exposing the Docker Registry HTTP API V2; registries are isolated by an internal repository prefix, so `loginServer` is path-style (`localhost:{port}/{name}`, not `{name}.azurecr.io`) and standard `docker push`/`pull` work against it. The shared registry runs anonymous (admin credentials are issued but not enforced at the data plane). Registries provision asynchronously (`Creating` → `Succeeded` once `GET /v2/` answers); mocked mode (default in tests) is management-plane only. Compatibility: Terraform/OpenTofu `azurerm_container_registry` suites and a Python data-plane push/pull test
@@ -183,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) — native binary (`latest`) and JVM (`latest-jvm`) tags
 - Single unified port `4577` for all services
 
-[Unreleased]: https://github.com/floci-io/floci-az/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/floci-io/floci-az/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/floci-io/floci-az/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/floci-io/floci-az/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/floci-io/floci-az/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/floci-io/floci-az/compare/0.2.0...0.3.0

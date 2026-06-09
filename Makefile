@@ -76,6 +76,8 @@ compat-run: compat-network
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-p $(PORT):4577 \
 		-e FLOCI_AZ_SERVICES_DOCKER_NETWORK=$(COMPAT_NETWORK) \
+		-e FLOCI_AZ_TLS_ENABLED=true \
+		-e FLOCI_AZ_HOSTNAME=floci-az \
 		$(FLOCI_AZ_IMAGE)
 	@echo "Waiting for floci-az Docker emulator to start on port $(PORT)..."
 	@until curl -sf http://127.0.0.1:$(PORT)/health > /dev/null; do sleep 1; done

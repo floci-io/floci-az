@@ -8,6 +8,7 @@ import io.floci.az.services.cosmos.CosmosHandler;
 import io.floci.az.services.eventhub.EventHubHandler;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.keyvault.KeyVaultHandler;
+import io.floci.az.services.network.NetworkHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import io.floci.az.services.redis.RedisHandler;
 import io.floci.az.services.servicebus.ServiceBusHandler;
@@ -32,6 +33,7 @@ public class AdminController {
     @Inject EventHubHandler         eventHubHandler;
     @Inject FunctionsServiceHandler functionsHandler;
     @Inject KeyVaultHandler         keyVaultHandler;
+    @Inject NetworkHandler          networkHandler;
     @Inject QueueServiceHandler     queueHandler;
     @Inject ServiceBusHandler       serviceBusHandler;
     @Inject SqlHandler              sqlHandler;
@@ -67,6 +69,7 @@ public class AdminController {
         cosmosHandler.clearAll();
         functionsHandler.clearAll();
         keyVaultHandler.clearAll();
+        networkHandler.clearAll();
         queueHandler.clearAll();
         serviceBusHandler.clearAll();
         tableHandler.clearAll();
