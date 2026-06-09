@@ -99,5 +99,7 @@ def test_wrong_password_rejected(provisioned_cache):
     except redis.exceptions.RedisError:
         pytest.skip("Redis sidecar not reachable (mocked mode or no Docker)")
 
-    with pytest.raises(redis.exceptions.ResponseError):
+    # A wrong password raises AuthenticationError (newer redis-py) or a ResponseError "WRONGPASS"
+    # (older); accept either.
+    with pytest.raises((redis.exceptions.AuthenticationError, redis.exceptions.ResponseError)):
         _client(props, "wrong-password").ping()

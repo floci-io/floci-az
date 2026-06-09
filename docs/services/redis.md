@@ -4,9 +4,9 @@ Compatible with the `azure-mgmt-redis` SDK, the `az redis` CLI, Terraform's `azu
 and any ARM-speaking client for the management plane — plus **any standard Redis client**
 (redis-py, StackExchange.Redis, Jedis, `redis-cli`, …) for the data plane.
 
-> **Real sidecar.** When `mocked=false`, each cache is backed by a real container
+> **Real sidecar (default).** With `mocked=false` (the default), each cache is backed by a real container
 > (`valkey/valkey:8-alpine` — a drop-in, RESP-compatible Redis fork) that clients connect to with
-> the Redis protocol. The default in unit-test profiles is `mocked=true` (management plane only, no
+> the Redis protocol. Unit-test profiles force `mocked=true` (management plane only, no
 > Docker).
 
 ---
@@ -106,7 +106,7 @@ floci-az:
   services:
     redis:
       enabled: true
-      mocked: true              # true = no Docker, management plane only. false = real cache container per cache
+      mocked: false             # false (default) = real cache container per cache. true = no Docker, management plane only
       default-image: "valkey/valkey:8-alpine"
       base-port: 6379           # host port range start for cache containers
       max-port: 6399            # host port range end
@@ -116,7 +116,7 @@ floci-az:
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_REDIS_ENABLED` | `true` | Enable/disable the service |
-| `FLOCI_AZ_SERVICES_REDIS_MOCKED` | `true` | Mocked mode (no Docker) |
+| `FLOCI_AZ_SERVICES_REDIS_MOCKED` | `false` | Mocked mode (management plane only, no Docker) |
 | `FLOCI_AZ_SERVICES_REDIS_DEFAULT_IMAGE` | `valkey/valkey:8-alpine` | Cache container image (RESP-compatible) |
 | `FLOCI_AZ_SERVICES_REDIS_BASE_PORT` | `6379` | Host port range start |
 | `FLOCI_AZ_SERVICES_REDIS_MAX_PORT` | `6399` | Host port range end |

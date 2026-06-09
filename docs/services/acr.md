@@ -33,8 +33,8 @@ The **data plane** is served directly by the registry sidecar (not proxied throu
 > Docker handles this transparently: `docker login localhost:{port}` ignores the path, and an image
 > ref like `localhost:{port}/{registryName}/app` parses as registry `localhost:{port}` + repo
 > `{registryName}/app`. Docker treats `localhost:PORT` as insecure (plain-HTTP) automatically, so no
-> daemon config is needed. In **mocked** mode (default, no Docker) `loginServer` is the cosmetic
-> `{name}.azurecr.io` for management-plane fidelity.
+> daemon config is needed. The data plane is on by default (`mocked: false`). In **mocked** mode
+> (no Docker) `loginServer` is the cosmetic `{name}.azurecr.io` for management-plane fidelity.
 
 ## Authentication
 
@@ -61,7 +61,7 @@ floci-az:
   services:
     acr:
       enabled: true
-      mocked: true              # true = no Docker, management plane only. false = one shared registry:2 for all registries
+      mocked: false             # false (default) = one shared registry:2 for all registries. true = management plane only, no Docker
       default-image: "registry:2"
       base-port: 5000           # host port range start for registry containers
       max-port: 5099            # host port range end
@@ -70,7 +70,7 @@ floci-az:
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_ACR_ENABLED` | `true` | Enable/disable the service |
-| `FLOCI_AZ_SERVICES_ACR_MOCKED` | `true` | Mocked mode (no Docker) |
+| `FLOCI_AZ_SERVICES_ACR_MOCKED` | `false` | Mocked mode (management plane only, no Docker) |
 | `FLOCI_AZ_SERVICES_ACR_DEFAULT_IMAGE` | `registry:2` | Registry container image |
 | `FLOCI_AZ_SERVICES_ACR_BASE_PORT` | `5000` | Host port range start |
 | `FLOCI_AZ_SERVICES_ACR_MAX_PORT` | `5099` | Host port range end |

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **arm:** `Microsoft.Network` dependency stubs — virtual networks, subnets, network interfaces (synthesized private IP), public IP addresses, and network security groups, so Terraform's `azurerm_linux_virtual_machine` and its dependencies apply end-to-end
 - **arm:** Terraform/OpenTofu compatibility suite extended with a Linux virtual machine and its network dependencies
 
+### Changed
+
+- **acr, redis:** Docker backing is now **on by default** (`mocked: false`) — creating a registry or cache starts a real container (a shared `registry:2` for ACR, a `valkey/valkey:8-alpine` container per cache for Redis). Set `FLOCI_AZ_SERVICES_ACR_MOCKED=true` / `FLOCI_AZ_SERVICES_REDIS_MOCKED=true` to restore management-plane-only mode. Unit tests pin `mocked=true` via test profiles and remain Docker-free.
+
 ## [0.5.0] - 2026-05-28
 
 ### Added
