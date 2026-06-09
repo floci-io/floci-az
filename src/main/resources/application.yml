@@ -148,14 +148,14 @@ floci-az:
       enabled: true
     redis:
       enabled: true
-      mocked: true          # true = no Docker; caches are pure ARM state. false = back caches with real Redis containers
+      mocked: false         # false = back caches with real Valkey containers (default). true = no Docker; pure ARM state
       default-image: "valkey/valkey:8-alpine"   # RESP-compatible Redis fork (BSD-licensed)
       base-port: 6379
       max-port: 6399
       max-memory: "256mb"
     acr:
       enabled: true
-      mocked: true          # true = no Docker; registries are pure ARM state. false = back with real registry:2 containers
+      mocked: false         # false = back registries with a shared registry:2 container (default). true = no Docker; pure ARM state
       default-image: "registry:2"
       base-port: 5000
       max-port: 5099
