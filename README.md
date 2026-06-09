@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), and Azure Container Registry (Microsoft.ContainerRegistry).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), and Azure Container Registry (Microsoft.ContainerRegistry).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -53,6 +53,7 @@ Floci AZ is a free, open-source local Azure emulator for development, testing, a
 | Cosmos DB (SQL API) | ✅                         | ❌                                           | ❌                                                                           |
 | Key Vault           | ✅                         | ❌                                           | ❌                                                                           |
 | Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
+| Service Bus         | ✅                         | ❌                                           | ❌                                                                           |
 | Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
 | AKS (Kubernetes)    | ✅                         | ❌                                           | ❌                                                                           |
 | API Management      | ✅                         | ❌                                           | ❌                                                                           |
@@ -177,6 +178,11 @@ flowchart LR
             H["Azure SQL\nMicrosoft.Sql"]
             I["AKS\nMicrosoft.ContainerService"]
             J["API Management\nMicrosoft.ApiManagement"]
+            K["Cosmos DB\n/{account}-cosmos/"]
+            L["Service Bus\n/{account}-servicebus/"]
+            M["Virtual Machines\nMicrosoft.Compute"]
+            N["Azure Cache for Redis\nMicrosoft.Cache"]
+            O["Container Registry\nMicrosoft.ContainerRegistry"]
         end
 
         Proxy -->|" route "| Router
@@ -190,11 +196,19 @@ flowchart LR
         Router --> H
         Router --> I
         Router --> J
-        A & B & C & E & F --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
+        Router --> K
+        Router --> L
+        Router --> M
+        Router --> N
+        Router --> O
+        A & B & C & E & F & K --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
         D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
-        G -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
+        G & L -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
         H -->|" manages "| SqlContainers["🐳 azure-sql-edge\n(per server)"]
         I -->|" manages "| K3s["🐳 k3s\n(per cluster)"]
+        K -->|" engines "| CosmosEngines["🐳 Cosmos engines\n(mongo · citus · scylla · …)"]
+        N -->|" manages "| RedisC["🐳 valkey\n(per cache)"]
+        O -->|" manages "| RegistryC["🐳 registry:2\n(shared)"]
     end
 
     Client -->|" HTTP/HTTPS :4577\nAzure wire protocol "| Proxy
@@ -213,6 +227,7 @@ flowchart LR
 | **Cosmos DB NoSQL (embedded)** | `/{account}-cosmos-nosql/` | Same embedded SQL engine as above, exposed as a named engine endpoint. Opt-in with `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true`; no Docker required. |
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
+| **Service Bus**         | `/{account}-servicebus/` + AMQP `:5673` | Queues, topics, subscriptions (created dynamically); AMQP 1.0 data plane via Artemis sidecar, or mocked (management plane only)                                                                             |
 | **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed `azure-sql-edge` containers; dynamic port allocation                                                                                                               |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
 | **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
