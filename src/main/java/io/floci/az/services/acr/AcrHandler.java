@@ -151,6 +151,10 @@ public class AcrHandler implements AzureServiceHandler {
             // Image import is a no-op stub: accept and report success.
             return Response.status(202).build();
         }
+        if (tail.matches("registries/[^/]+/replications")) {
+            // The azurerm provider lists geo-replications during Read; the emulator has none.
+            return Response.ok(Map.of("value", List.of())).type("application/json").build();
+        }
 
         // ── Single registry CRUD ───────────────────────────────────────────
         if (tail.matches("registries/[^/]+")) {

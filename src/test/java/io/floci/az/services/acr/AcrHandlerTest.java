@@ -123,6 +123,15 @@ public class AcrHandlerTest {
     }
 
     @Test
+    void replicationsReturnsEmptyList() {
+        createRegistry("acrrepl");
+        // The azurerm provider lists geo-replications during Read; must be 200 + empty, not 404.
+        given().when().get(registry("acrrepl") + "/replications" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(0));
+    }
+
+    @Test
     void deleteRemovesTheRegistry() {
         createRegistry("acrdelete");
 
