@@ -414,6 +414,11 @@ public class AcrHandler implements AzureServiceHandler {
         props.put("adminUserEnabled", registry.isAdminUserEnabled());
         props.put("publicNetworkAccess", "Enabled");
         props.put("anonymousPullEnabled", false);
+        // The azurerm provider dereferences these without nil checks (e.g. *props.ZoneRedundancy),
+        // so they must always be present in the response or the provider plugin panics.
+        props.put("zoneRedundancy", "Disabled");
+        props.put("dataEndpointEnabled", false);
+        props.put("networkRuleBypassOptions", "AzureServices");
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", registry.armId());

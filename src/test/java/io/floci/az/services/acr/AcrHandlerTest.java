@@ -56,7 +56,10 @@ public class AcrHandlerTest {
                 .body("sku.name", is("Basic"))
                 .body("properties.provisioningState", is("Succeeded"))
                 .body("properties.adminUserEnabled", is(true))
-                .body("properties.loginServer", endsWith(".azurecr.io"));
+                .body("properties.loginServer", endsWith(".azurecr.io"))
+                // Fields the azurerm provider dereferences without nil checks — must be present.
+                .body("properties.zoneRedundancy", is("Disabled"))
+                .body("properties.publicNetworkAccess", is("Enabled"));
     }
 
     @Test
