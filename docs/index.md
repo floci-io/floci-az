@@ -8,7 +8,7 @@
 
 ---
 
-Floci-AZ is a fast, free, and open-source local Azure service emulator — providing Blob Storage, Queues, Tables, Azure Functions, App Configuration, Cosmos DB (all APIs), Key Vault, and Event Hubs in a single native binary.
+Floci-AZ is a fast, free, and open-source local Azure service emulator — providing Blob Storage, Queues, Tables, Azure Functions, App Configuration, Cosmos DB (all APIs), Key Vault, Event Hubs, API Management, Virtual Network, Virtual Machines, Azure Cache for Redis, and Azure Container Registry in a single native binary.
 
 ## Why floci-az?
 
@@ -48,6 +48,7 @@ flowchart LR
             F["Cosmos DB\n/{account}-cosmos(-*)/"]
             G["Key Vault\n/{account}-keyvault/"]
             H["Event Hubs\nAMQP :5672 / Kafka :9093"]
+            I["ARM Services\nAPIM · Network · VM · Redis · ACR"]
         end
 
         Router --> A
@@ -58,7 +59,9 @@ flowchart LR
         Router --> F
         Router --> G
         Router --> H
+        Router --> I
         A & B & C & E & F & G --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
+        I --> Store
         D -->|"spawn / proxy"| Docker["🐳 Docker\n(function containers)"]
         F -->|"optional engines"| DockerEngines["🐳 MongoDB · PostgreSQL\nCassandra · Gremlin"]
         H -->|"manages"| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
@@ -80,6 +83,11 @@ flowchart LR
 | **Cosmos DB engines** | `/{account}-cosmos-{api}/` | MongoDB · PostgreSQL · Cassandra · Gremlin (Docker-backed, opt-in) · Table · NoSQL (embedded, opt-in) |
 | **Key Vault** | `/{account}-keyvault/` | Secrets CRUD, versioning, soft-delete, properties update |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |
+| **API Management** | ARM path + `/{account}-apim/` | APIs, operations, products, subscriptions, gateway routing, focused policy subset |
+| **Virtual Network** | ARM path (`Microsoft.Network`) | VNets, subnets, NICs, public IPs, NSGs for Terraform/OpenTofu and VM dependencies |
+| **Virtual Machines** | ARM path (`Microsoft.Compute`) | VM lifecycle, power actions, instanceView; mocked control plane |
+| **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, keys, real Redis-compatible containers or mocked mode |
+| **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, credentials, Docker Registry V2 push/pull support |
 
 ## Quick Start
 

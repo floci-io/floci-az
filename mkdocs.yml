@@ -80,6 +80,7 @@ nav:
     - Azure SQL Database: services/sql.md
     - Azure Kubernetes Service: services/aks.md
     - API Management: services/apim.md
+    - Virtual Network: services/network.md
     - Virtual Machines: services/vm.md
     - Azure Cache for Redis: services/redis.md
     - Azure Container Registry: services/acr.md
