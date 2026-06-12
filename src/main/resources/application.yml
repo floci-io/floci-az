@@ -19,6 +19,7 @@ quarkus:
       --initialize-at-run-time=org.bouncycastle.jcajce.provider.asymmetric.x509.CertificateFactory,
       --initialize-at-run-time=io.floci.az.core.tls.TlsConfigSource,
       --initialize-at-run-time=io.floci.az.core.tls.CertificateGenerator,
+      --initialize-at-run-time=io.floci.az.services.eventhub.ArtemisTlsGenerator,
       --initialize-at-run-time=io.floci.az.services.acr.AcrHandler,
       --initialize-at-run-time=io.floci.az.services.redis.RedisHandler
 

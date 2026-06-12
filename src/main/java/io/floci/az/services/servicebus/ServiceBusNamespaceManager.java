@@ -90,7 +90,8 @@ public class ServiceBusNamespaceManager {
             tls = tlsGenerator.generate(containerName);
         } catch (Exception e) {
             throw new RuntimeException(
-                    "Failed to generate TLS certificate for Service Bus namespace: " + namespaceName, e);
+                    "Failed to generate TLS certificate for Service Bus namespace '" + namespaceName
+                            + "': " + rootMessage(e), e);
         }
 
         String brokerXml = configGenerator.generate(namespaceName);
@@ -251,6 +252,15 @@ public class ServiceBusNamespaceManager {
 
     static String containerName(String namespaceName) {
         return "floci-az-servicebus-" + namespaceName;
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        return root.getClass().getSimpleName() + (message == null || message.isBlank() ? "" : ": " + message);
     }
 
     @FunctionalInterface
