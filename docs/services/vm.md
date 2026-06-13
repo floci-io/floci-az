@@ -13,9 +13,9 @@ Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azur
 - **Lifecycle** — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
 - **Power actions** — `start`, `powerOff`, `deallocate`, `restart`, `redeploy`, `reapply`
 - **instanceView** — reports `ProvisioningState/*` and `PowerState/*` statuses
-- **Network dependency stubs** — `Microsoft.Network` shells (virtual networks, subnets, network
-  interfaces, public IPs, network security groups) so `azurerm_linux_virtual_machine` and its
-  dependencies apply end-to-end. Network interfaces get a synthesized private IP.
+- **Network integration** — VM ARM resources can reference `Microsoft.Network` network
+  interfaces. The Network emulator supplies VNet, subnet, NIC, public IP, and NSG ARM resources
+  so `azurerm_linux_virtual_machine` and its dependencies apply end-to-end.
 - **Long-running operations** — power actions return `202` with an `Azure-AsyncOperation` header
   pointing at an operation-status endpoint, so SDK pollers complete cleanly.
 
@@ -35,13 +35,10 @@ POST   .../virtualMachines/{name}/{start|powerOff|deallocate|restart|redeploy|re
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines
 GET    /subscriptions/{sub}/providers/Microsoft.Compute/virtualMachines
 
-# Network dependency shells
-PUT/GET/DELETE  .../providers/Microsoft.Network/virtualNetworks/{name}
-PUT/GET/DELETE  .../providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{name}
-PUT/GET/DELETE  .../providers/Microsoft.Network/networkInterfaces/{name}
-PUT/GET/DELETE  .../providers/Microsoft.Network/publicIPAddresses/{name}
-PUT/GET/DELETE  .../providers/Microsoft.Network/networkSecurityGroups/{name}
+# Network resources are handled by the Microsoft.Network emulator.
 ```
+
+See [Azure Virtual Network](network.md) for VNet, subnet, NIC, public IP, and NSG scope.
 
 Use `?$expand=instanceView` on a Get to embed the instance view under `properties.instanceView`.
 
@@ -118,7 +115,7 @@ floci-az:
 ## Notes & limitations
 
 - Mocked mode does not run a real OS — there is no SSH, no guest agent, and `runCommand` is not executed.
-- Network dependency shells echo submitted properties with `provisioningState = "Succeeded"`;
-  NIC private IPs and public IPs are synthesized, not allocated from a real address pool.
+- Network resources are ARM control-plane emulation only. NIC private IPs and public IPs are
+  synthesized by the Network emulator, not allocated from a real address pool.
 - Real container-backed VMs (image resolution via `imageReference`, `docker start/stop/restart`)
   are planned for a follow-up.
