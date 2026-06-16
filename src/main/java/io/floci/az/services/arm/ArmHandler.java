@@ -9,6 +9,7 @@ import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.network.NetworkHandler;
+import io.floci.az.services.monitor.MonitorHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -60,17 +61,19 @@ public class ArmHandler implements AzureServiceHandler {
     private final FunctionsServiceHandler functionsHandler;
     private final ApiManagementHandler apiManagementHandler;
     private final NetworkHandler networkHandler;
+    private final MonitorHandler monitorHandler;
 
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
-                      NetworkHandler networkHandler) {
+                      NetworkHandler networkHandler, MonitorHandler monitorHandler) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
         this.functionsHandler     = functionsHandler;
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
+        this.monitorHandler       = monitorHandler;
     }
 
     @Override
@@ -212,6 +215,12 @@ public class ArmHandler implements AzureServiceHandler {
         }
         if (path.contains("/providers/Microsoft.ApiManagement/")) {
             return apiManagementHandler.handleArm(req, path, method, sub);
+        }
+        if (path.contains("/providers/Microsoft.OperationalInsights/")) {
+            return monitorHandler.handleArm(req, path, method, sub);
+        }
+        if (path.contains("/providers/Microsoft.Insights/")) {
+            return monitorHandler.handleArm(req, path, method, sub);
         }
         return armNotFound(path);
     }

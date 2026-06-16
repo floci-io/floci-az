@@ -57,6 +57,8 @@ floci-az:
         flush-interval-ms: 5000
       service-bus:
         flush-interval-ms: 5000
+      monitor:
+        flush-interval-ms: 5000
 
   dns:
   # When floci-az runs inside Docker, an embedded DNS server is started on port 53
@@ -136,6 +138,8 @@ floci-az:
       artemis-image: "apache/activemq-artemis:latest"
       max-delivery-count: 10
       lock-duration-seconds: 60
+    monitor:
+      enabled: true
     aks:
       enabled: true
       mocked: false

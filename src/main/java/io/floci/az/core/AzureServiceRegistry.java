@@ -45,6 +45,7 @@ public class AzureServiceRegistry {
             case "apim"       -> config.services().apim().enabled();
             case "redis"      -> config.services().redis().enabled();
             case "acr"        -> config.services().acr().enabled();
+            case "monitor"    -> config.services().monitor().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->
                 config.services().cosmos().enabled() &&
