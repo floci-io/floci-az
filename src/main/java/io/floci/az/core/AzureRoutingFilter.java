@@ -196,6 +196,27 @@ public class AzureRoutingFilter {
             return null;
         }
 
+        if (path.startsWith("dataCollectionRules/") || path.startsWith("v1/workspaces/")) {
+            Map<String, String> monitorQueryParams = new HashMap<>();
+            Map<String, List<String>> monitorQueryParamsMulti = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> {
+                monitorQueryParams.put(k, v.get(0));
+                monitorQueryParamsMulti.put(k, List.copyOf(v));
+            });
+            AzureRequest monitorRequest = new AzureRequest(
+                requestContext.getMethod(), "monitor", "monitor", path, headers,
+                requestContext.getEntityStream(), monitorQueryParams, monitorQueryParamsMulti, null, secure);
+            AuthContext monitorAuth = authPipeline.resolve(monitorRequest);
+            monitorRequest = new AzureRequest(
+                requestContext.getMethod(), "monitor", "monitor", path, headers,
+                requestContext.getEntityStream(), monitorQueryParams, monitorQueryParamsMulti, monitorAuth, secure);
+            Optional<AzureServiceHandler> monitorHandler = serviceRegistry.resolve("monitor");
+            if (monitorHandler.isPresent()) {
+                LOGGER.infof("Dispatching Monitor request: %s %s", requestContext.getMethod(), path);
+                return monitorHandler.get().handle(monitorRequest);
+            }
+        }
+
         // Key Vault data-plane paths arriving at the ARM base URL.
         // The azurerm v3 provider (when metadata/endpoints returns 404) sends all key vault
         // data-plane requests directly to the ARM base URL rather than to *.vault.azure.net.

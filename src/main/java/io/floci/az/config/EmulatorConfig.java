@@ -85,6 +85,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig keyVault();
         ServiceStorageConfig serviceBus();
         ServiceStorageConfig sql();
+        ServiceStorageConfig monitor();
     }
 
     interface ServiceStorageConfig {
@@ -126,12 +127,19 @@ public interface EmulatorConfig {
         ApimConfig             apim();
         RedisConfig            redis();
         AcrConfig              acr();
+        MonitorConfig          monitor();
+
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
 
         // Added Email service configuration
         EmailServiceConfig email();
+    }
+
+    interface MonitorConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ApimConfig {
