@@ -47,7 +47,7 @@ docker compose up -d
 
 Then run via Make:
 ```bash
-make test-python        # Python SDK (virtualenv)
+make test-python-compat # Python SDK (virtualenv)
 make test-java-compat   # Java SDK (Maven)
 make test-node-compat   # Node.js SDK (npm)
 ```

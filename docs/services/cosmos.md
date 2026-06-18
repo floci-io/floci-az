@@ -261,9 +261,118 @@ environment:
 
 ## Multi-API engines
 
-This page covers the always-on **SQL / NoSQL** endpoint (`{account}-cosmos` and `{account}-cosmos-nosql`).
-For MongoDB, PostgreSQL, Cassandra, Gremlin, and Table Cosmos APIs see the
-[Cosmos DB configuration reference](https://github.com/floci-io/floci-az/blob/main/README.md#cosmos-db-multi-api-engines) in the main README.
+The API reference above covers the always-on **SQL / NoSQL** endpoint (`{account}-cosmos` and
+`{account}-cosmos-nosql`). Floci AZ also emulates the other Cosmos DB APIs through API-specific engines.
+
+All engines are **disabled by default** — enable only the APIs your application uses. Four APIs are
+**Docker-backed** (MongoDB, PostgreSQL, Cassandra, Gremlin) — they launch a sidecar container on first
+request. Two APIs are **embedded** (NoSQL and Table) — in-process, no Docker pull, instant startup.
+
+### Docker-backed engines
+
+| Variable                                              | Default | Engine image                | Native port |
+|-------------------------------------------------------|---------|-----------------------------|-------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED`    | `false` | `mongo:7`                   | `27017`     |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`           | `5432`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla:6.2`       | `9042`      |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED`    | `false` | `tinkerpop/gremlin-server`  | `8182`      |
+
+You can override the Docker image or host port for any Docker-backed engine:
+
+| Variable                                              | Description                       |
+|-------------------------------------------------------|-----------------------------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_IMAGE`      | Override the MongoDB image        |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_PORT`       | Override the MongoDB host port    |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_STARTUP`            | `on-demand` (default) or `eager`  |
+
+**docker-compose.yml example — enable MongoDB and PostgreSQL:**
+
+```yaml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+      - "27017:27017"   # MongoDB (Cosmos MongoDB API)
+      - "5432:5432"     # PostgreSQL (Cosmos PostgreSQL API)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED: "true"
+      FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED: "true"
+```
+
+**How it works:** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7`
+and starts the container. Subsequent requests go directly to the container's native port
+(`localhost:27017`). The `/connect` endpoint returns the connection string:
+
+```bash
+curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
+# → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
+```
+
+> Do not publish engine ports (`27017`, `5432`, etc.) on the `floci-az` service. Engines are launched as
+> sibling containers by the host Docker daemon, so they bind ports directly on the host.
+
+### Embedded engines — NoSQL and Table API (no Docker)
+
+Both engines run entirely inside floci-az — no Docker pull, no container boot time. Data lives in memory;
+restarting floci-az clears it.
+
+| Variable                                              | Default | Backend                                            |
+|-------------------------------------------------------|---------|----------------------------------------------------|
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-process SQL engine — full Cosmos DB SQL dialect |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory OData engine (ConcurrentHashMap)         |
+
+**NoSQL engine** — activating this endpoint enables the same embedded SQL engine already powering
+`/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4577` as the connection URL
+(Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`).
+
+**Table engine** — supported operations: create/delete table · insert/get/replace/merge/delete entity ·
+OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
+
+```bash
+# Enable the Table engine
+export FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true
+
+# Trigger engine activation and retrieve connection string
+curl http://localhost:4577/devstoreaccount1-cosmos-table/connect
+# → {"api":"TABLE","status":"running","connectionString":"DefaultEndpointsProtocol=http;...","notes":"..."}
+```
+
+Use the `host` and `port` from the `/connect` response to build the endpoint, then connect
+with `AzureNamedKeyCredential` — the **official Cosmos DB for Table pattern**
+([quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java)):
+
+=== "Java"
+
+    ```java
+    // official Cosmos DB for Table SDK pattern
+    String endpoint = "http://" + host + ":" + port + "/devstoreaccount1-cosmos-table";
+
+    TableServiceClient client = new TableServiceClientBuilder()
+        .endpoint(endpoint)
+        .credential(new AzureNamedKeyCredential(
+            "devstoreaccount1",
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="))
+        .buildClient();
+    ```
+
+=== "Python"
+
+    ```python
+    from azure.data.tables import TableServiceClient
+    from azure.core.credentials import AzureNamedKeyCredential
+
+    credential = AzureNamedKeyCredential("devstoreaccount1",
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==")
+    client = TableServiceClient(
+        endpoint=f"http://{host}:{port}/devstoreaccount1-cosmos-table",
+        credential=credential)
+    ```
+
+The `connectionString` field in the `/connect` response is also available for SDK clients that prefer the
+Azure Storage connection string format.
 
 ## Known Limitations
 
