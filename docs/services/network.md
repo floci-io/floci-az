@@ -75,6 +75,22 @@ The current Network scope is enough for Terraform/OpenTofu to create and destroy
 
 ---
 
+## Configuration
+
+```yaml
+floci-az:
+  services:
+    network:
+      enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
+    arm:
+      enabled: true       # central management plane; disabling it turns OFF all ARM-based services
+```
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `FLOCI_AZ_SERVICES_NETWORK_ENABLED` | `true` | Enable/disable all of Microsoft.Network (VNet, subnets, NIC, public IP, NSG, **and DNS zones**). When disabled, `/providers/Microsoft.Network/...` calls return `404 ResourceNotFound`; the rest of ARM keeps working. |
+| `FLOCI_AZ_SERVICES_ARM_ENABLED` | `true` | Enable/disable the ARM management plane itself (`/providers`, `/subscriptions`, resource groups). **Disabling it turns off every ARM-based service** (vm, aks, sql, redis, acr, servicebus, apim, monitor, network, storage/keyvault ARM) — use only to fully shut down the management plane. |
+
 ## Scope And Limitations
 
 - No real L2/L3 networking, routing, peering, DNS, packet forwarding, or service endpoints

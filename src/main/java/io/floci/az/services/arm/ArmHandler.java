@@ -91,6 +91,9 @@ public class ArmHandler implements AzureServiceHandler {
 
         // ── Network Provider (subscription & resource-group levels) ───────────
         if (path.contains("/providers/Microsoft.Network/")) {
+            if (!config.services().network().enabled()) {
+                return armNotFound(path);
+            }
             return networkHandler.handleArm(req, path, method, extractSub(path));
         }
 
@@ -215,7 +218,9 @@ public class ArmHandler implements AzureServiceHandler {
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
                     .map(ArmHandler::stripInternal)
                     .forEach(resources::add);
-            resources.addAll(networkHandler.listResources(sub, rg));
+            if (config.services().network().enabled()) {
+                resources.addAll(networkHandler.listResources(sub, rg));
+            }
             resources.addAll(apiManagementHandler.listServices(sub, rg));
             return Response.ok(Map.of("value", resources)).build();
         }
@@ -241,6 +246,9 @@ public class ArmHandler implements AzureServiceHandler {
             return handleWeb(req, path, method, sub);
         }
         if (path.contains("/providers/Microsoft.Network/")) {
+            if (!config.services().network().enabled()) {
+                return armNotFound(path);
+            }
             return networkHandler.handleArm(req, path, method, sub);
         }
         if (path.contains("/providers/Microsoft.ApiManagement/")) {

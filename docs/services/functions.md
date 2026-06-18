@@ -102,6 +102,27 @@ environment:
 
 ---
 
+## Mocked Mode
+
+Set `mocked: true` (default `false`) to run the Functions service without Docker:
+
+```yaml
+environment:
+  FLOCI_AZ_SERVICES_FUNCTIONS_MOCKED: "true"
+```
+
+In mocked mode the management plane (create app, deploy/list/get/delete
+function) works entirely from state and no runtime container is ever launched.
+Because user code cannot execute without the runtime container, invocations
+(`POST api/{app}/{func}`) return a synthetic `200` stub instead of running the
+function. Useful for tests and CI environments without a Docker daemon.
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `FLOCI_AZ_SERVICES_FUNCTIONS_MOCKED` | `false` | Mocked mode (management plane only, no Docker; invocations return a synthetic 200 stub) |
+
+---
+
 ## Embedded DNS (Docker-in-Docker)
 
 When floci-az is itself running inside Docker, it starts an embedded UDP/53 DNS server and

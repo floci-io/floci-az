@@ -83,6 +83,7 @@ floci-az:
       enabled: true
     functions:
       enabled: true
+      mocked: false         # false = run functions in real runtime containers (default). true = no Docker; invocations return a synthetic 200 stub
       code-path: ${user.home}/.floci-az/functions
       ephemeral: false
       container-idle-timeout-seconds: 300
@@ -90,6 +91,7 @@ floci-az:
       enabled: true
     cosmos:
       enabled: true
+      mocked: false         # false = allow real engine containers per enabled API (default). true = no Docker; all engine containers forced off
       engines:
         startup: on-demand
         default-api: nosql
@@ -127,6 +129,7 @@ floci-az:
       consumer-groups: "$Default,my-consumer-group"
     sql:
       enabled: true
+      mocked: false         # false = back servers with a real azure-sql-edge container (needs accept-eula=Y). true = no Docker; servers are pure ARM state (no EULA)
       # accept-eula: "Y"     # Must be set to "Y" to accept the Microsoft SQL Server EULA
       image: "mcr.microsoft.com/azure-sql-edge:latest"
       sa-password: "FlociAz_Strong123!"
@@ -178,6 +181,10 @@ floci-az:
     # docker-network:  # optional: shared Docker network for sidecar containers
     email:
       enabled: true
+    arm:
+      enabled: true       # central management plane (/providers, /subscriptions, resource groups). Disabling turns OFF all ARM-based services.
+    network:
+      enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
 
   auth:
     # dev: accept any credentials without signature validation

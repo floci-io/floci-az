@@ -35,17 +35,23 @@ public class BannerLogger {
             sb.append(serviceStatus("table", true, getStorageMode("table")));
         }
         if (config.services().functions().enabled()) {
-            sb.append(serviceStatusDocker("functions", true, config.docker().dockerHost()));
+            String functionsInfo = config.services().functions().mocked()
+                    ? "mocked  (no docker)"
+                    : config.docker().dockerHost();
+            sb.append(serviceStatusDocker("functions", true, functionsInfo));
         }
         if (config.services().appConfig().enabled()) {
             sb.append(serviceStatus("appconfig", true, getStorageMode("appconfig")));
         }
         if (config.services().cosmos().enabled()) {
             sb.append(serviceStatus("cosmos", true, getStorageMode("cosmos")));
-            // Cosmos engine sub-APIs
+            // Cosmos engine sub-APIs — in mocked mode no engine containers are started.
             EmulatorConfig.CosmosEngineConfig cosmosEngines = config.services().cosmos().engines();
-            String startupMode = cosmosEngines.startup();
+            String startupMode = config.services().cosmos().mocked() ? "mocked" : cosmosEngines.startup();
             for (CosmosApi api : CosmosApi.values()) {
+                if (config.services().cosmos().mocked()) {
+                    break;
+                }
                 EmulatorConfig.CosmosApiConfig apiCfg = resolveCosmosApiConfig(cosmosEngines, api);
                 if (apiCfg.enabled()) {
                     boolean embedded = cosmosEngineRegistry.resolve(api)
@@ -115,6 +121,12 @@ public class BannerLogger {
                     + "  validate-tokens:" + config.services().entra().validateTokens();
             sb.append(String.format("   %-9s [%s]  %s\n", "entra", "enabled ", entraInfo));
         }
+        sb.append(String.format("   %-9s [%s]  %s\n", "arm",
+                config.services().arm().enabled() ? "enabled " : "disabled",
+                "management plane (/providers, /subscriptions, resource groups)"));
+        sb.append(String.format("   %-9s [%s]  %s\n", "network",
+                config.services().network().enabled() ? "enabled " : "disabled",
+                "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

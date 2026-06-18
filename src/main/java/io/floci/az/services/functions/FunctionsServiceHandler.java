@@ -301,6 +301,19 @@ public class FunctionsServiceHandler implements AzureServiceHandler {
                     "Function '" + funcName + "' not found in app '" + appName + "'", 404);
         }
 
+        if (config.services().functions().mocked()) {
+            // Mocked mode: no runtime container is launched, so user code cannot execute.
+            // Return a synthetic 200 stub so callers get a success shape.
+            return Response.ok(Map.of(
+                            "mocked", true,
+                            "app", appName,
+                            "function", funcName,
+                            "message", "floci-az functions mocked mode: invocation not executed "
+                                    + "(set floci-az.services.functions.mocked=false to run real functions)"))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+
         try {
             FunctionDefinition def = mapper.readValue(fnSo.get().data(), FunctionDefinition.class);
 

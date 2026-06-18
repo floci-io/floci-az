@@ -129,6 +129,8 @@ public interface EmulatorConfig {
         AcrConfig              acr();
         MonitorConfig          monitor();
         EntraConfig            entra();
+        ArmConfig              arm();
+        NetworkConfig          network();
 
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
@@ -139,6 +141,22 @@ public interface EmulatorConfig {
     }
 
     interface MonitorConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /**
+     * ARM (Azure Resource Manager) management plane — the entry point for all
+     * {@code /providers/...}, {@code /subscriptions}, and resource-group calls.
+     * Disabling it turns off every ARM-based service at once.
+     */
+    interface ArmConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Microsoft.Network — virtual networks, subnets, NICs, public IPs, NSGs, and DNS zones. */
+    interface NetworkConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -387,6 +405,14 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
+        /**
+         * When {@code true}, no Cosmos engine containers are started for any API
+         * (mongodb/postgresql/cassandra/gremlin) — equivalent to {@code engines.startup=disabled}.
+         * The in-process NoSQL/Table paths are unaffected. Useful for tests without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
         @WithName("engines")
         CosmosEngineConfig engines();
     }
@@ -430,6 +456,14 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /**
+         * When {@code true}, no SQL Server container is started; servers are created in state and
+         * transition immediately to {@code state=Ready} (no EULA required). The data plane is
+         * unavailable (no live JDBC endpoint). Useful for tests without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
+        /**
          * Must be set to "Y" to accept the Microsoft SQL Server EULA.
          * The service will return 503 until this is explicitly set.
          * Default is "N" (not accepted) — SmallRye Config treats empty string as null.
@@ -463,6 +497,14 @@ public interface EmulatorConfig {
     interface FunctionsConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * When {@code true}, no Functions runtime container is started; the management plane
+         * (deploy/list/get/delete) works from state and invocations return a synthetic 200 stub
+         * instead of executing user code. Useful for tests without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
 
         @WithDefault("${user.home}/.floci-az/functions")
         String codePath();

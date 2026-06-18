@@ -186,6 +186,13 @@ public class SqlHandler implements AzureServiceHandler {
                     null, 0, tags, databases, firewallRules, Instant.now());
                 state.putServer(entry);
 
+                if (config.services().sql().mocked()) {
+                    // Mocked mode: no SQL Server container (no Docker, no EULA). The server is
+                    // pure ARM state and reports state=Ready; the data plane is unavailable.
+                    state.putDatabase(serverName, SqlState.SqlDatabaseEntry.master(serverName));
+                    return Response.status(201).entity(serverResponse(entry)).build();
+                }
+
                 // Start container (may take 15-30s)
                 try {
                     Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
@@ -427,7 +434,7 @@ public class SqlHandler implements AzureServiceHandler {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("administratorLogin", s.administratorLogin());
         props.put("version", "12.0");
-        props.put("state", s.containerId() != null ? "Ready" : "Creating");
+        props.put("state", (config.services().sql().mocked() || s.containerId() != null) ? "Ready" : "Creating");
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("minimalTlsVersion", "None");
         props.put("publicNetworkAccess", "Enabled");

@@ -40,6 +40,11 @@ public class CosmosLifecycleManager {
     private final ConcurrentHashMap<CosmosApi, RunningEngine> running = new ConcurrentHashMap<>();
 
     void onStart(@Observes StartupEvent ev) {
+        if (config.services().cosmos().mocked()) {
+            LOG.info("Cosmos mocked mode — no engine containers will be started");
+            return;
+        }
+
         EmulatorConfig.CosmosEngineConfig cosmosConfig = config.services().cosmos().engines();
         String startupMode = cosmosConfig.startup();
 
@@ -69,6 +74,11 @@ public class CosmosLifecycleManager {
      * Returns connection info for the given API, starting the container on demand if needed.
      */
     public synchronized Optional<CosmosConnectionInfo> getOrStart(CosmosApi api) {
+        if (config.services().cosmos().mocked()) {
+            LOG.debugf("Cosmos mocked mode — engine %s unavailable", api);
+            return Optional.empty();
+        }
+
         RunningEngine existing = running.get(api);
         if (existing != null) {
             return Optional.of(existing.connectionInfo());

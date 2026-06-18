@@ -296,14 +296,21 @@ floci-az:
   services:
     sql:
       enabled: true
+      mocked: false                                 # false (default) = real azure-sql-edge container (needs accept-eula=Y). true = management plane only, no Docker, no EULA
       accept-eula: "Y"                              # Required to start containers
       image: "mcr.microsoft.com/azure-sql-edge:latest"
       startup-timeout-seconds: 60
 ```
 
+In **mocked** mode (`mocked: true`) servers are created in state and report
+`state=Ready` with no SQL Server container and no EULA required — useful for
+management-plane testing without Docker. The data plane is unavailable (no live
+JDBC endpoint), so the `/connect` endpoints return no usable port.
+
 | Environment Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SQL_ENABLED` | `true` | Enable or disable the SQL service |
+| `FLOCI_AZ_SERVICES_SQL_MOCKED` | `false` | Mocked mode (management plane only, no Docker, no EULA) |
 | `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA |
 | `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/azure-sql-edge:latest` | Docker image to use for SQL Server containers |
 | `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for the SQL Server engine to become ready |

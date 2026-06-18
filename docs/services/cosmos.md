@@ -258,6 +258,7 @@ environment:
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_COSMOS_ENABLED` | `true` | Enable or disable Cosmos DB |
+| `FLOCI_AZ_SERVICES_COSMOS_MOCKED` | `false` | Master switch — when `true`, no engine containers are started for any API (equivalent to `engines.startup=disabled`). The in-process NoSQL/Table paths are unaffected. |
 
 ## Multi-API engines
 
