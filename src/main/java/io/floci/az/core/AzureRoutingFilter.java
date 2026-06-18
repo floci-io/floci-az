@@ -118,6 +118,26 @@ public class AzureRoutingFilter {
             }
         }
 
+        // ACS Email: {account}.communication.azure.com
+        if (hostOnly != null && hostOnly.endsWith(".communication.azure.com")) {
+            String emailAccount = hostOnly.substring(0, hostOnly.length() - ".communication.azure.com".length());
+            Map<String, String> emailQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
+            AzureRequest emailRequest = new AzureRequest(
+                requestContext.getMethod(), emailAccount, "email",
+                path, headers, requestContext.getEntityStream(), emailQueryParams, null, secure);
+            AuthContext emailAuth = authPipeline.resolve(emailRequest);
+            emailRequest = new AzureRequest(
+                requestContext.getMethod(), emailAccount, "email",
+                path, headers, requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
+            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
+            if (emailHandler.isPresent()) {
+                LOGGER.infof("Dispatching communication.azure.com request to EmailHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, emailAccount);
+                return emailHandler.get().handle(emailRequest);
+            }
+        }
+
         // Blob Storage: {account}.blob.core.windows.net
         if (hostOnly != null && hostOnly.endsWith(".blob.core.windows.net")) {
             String blobAccount = hostOnly.substring(0, hostOnly.length() - ".blob.core.windows.net".length());
@@ -221,6 +241,31 @@ public class AzureRoutingFilter {
             if (kvHandler.isPresent()) {
                 LOGGER.infof("Routing ARM-base KV path to KeyVaultHandler: %s %s", requestContext.getMethod(), path);
                 return kvHandler.get().handle(kvRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // ACS Email data-plane paths arriving at the ARM base URL.
+        // SDKs may POST /emails:send or GET /emails/operations/{id}
+        // directly to the configured endpoint rather than via a
+        // *.communication.azure.com host header.
+        // Also handle /emailMessages inspection endpoints.
+        // ---------------------------------------------------------------
+        if (path.startsWith("emails:") || path.startsWith("emails/")
+                || path.startsWith("emailMessages")) {
+            Map<String, String> emailQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
+            AzureRequest emailRequest = new AzureRequest(
+                requestContext.getMethod(), "default", "email",
+                path, headers, requestContext.getEntityStream(), emailQueryParams, null, secure);
+            AuthContext emailAuth = authPipeline.resolve(emailRequest);
+            emailRequest = new AzureRequest(
+                requestContext.getMethod(), "default", "email",
+                path, headers, requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
+            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
+            if (emailHandler.isPresent()) {
+                LOGGER.infof("Routing email path to EmailHandler: %s %s", requestContext.getMethod(), path);
+                return emailHandler.get().handle(emailRequest);
             }
         }
 
@@ -331,6 +376,27 @@ public class AzureRoutingFilter {
             if (redisHandler.isPresent()) {
                 LOGGER.infof("Dispatching ARM Redis request to RedisHandler: %s %s", requestContext.getMethod(), path);
                 return redisHandler.get().handle(redisRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Azure Communication Services (Email) — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Communication/...
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Communication/")) {
+            Map<String, String> emailQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
+            AzureRequest emailRequest = new AzureRequest(
+                requestContext.getMethod(), "email", "email", path, headers,
+                requestContext.getEntityStream(), emailQueryParams, null, secure);
+            AuthContext emailAuth = authPipeline.resolve(emailRequest);
+            emailRequest = new AzureRequest(
+                requestContext.getMethod(), "email", "email", path, headers,
+                requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
+            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
+            if (emailHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM Communication request to EmailHandler: %s %s", requestContext.getMethod(), path);
+                return emailHandler.get().handle(emailRequest);
             }
         }
 
@@ -448,6 +514,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-apim")) {
             serviceType = "apim";
             accountName = accountName.substring(0, accountName.length() - 5);
+        } else if (accountName.endsWith("-email")) {
+            serviceType = "email";
+            accountName = accountName.substring(0, accountName.length() - 6);
         } else {
             serviceType = resolveServiceType(requestContext, resourcePath);
         }

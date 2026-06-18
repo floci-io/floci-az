@@ -167,6 +167,8 @@ floci-az:
       base-port: 5000
       max-port: 5099
     # docker-network:  # optional: shared Docker network for sidecar containers
+    email:
+      enabled: true
 
   auth:
     # dev: accept any credentials without signature validation

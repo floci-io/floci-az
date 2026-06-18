@@ -45,12 +45,14 @@ public class AzureServiceRegistry {
             case "apim"       -> config.services().apim().enabled();
             case "redis"      -> config.services().redis().enabled();
             case "acr"        -> config.services().acr().enabled();
+            case "email"      -> config.services().email().enabled();
             case "monitor"    -> config.services().monitor().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->
                 config.services().cosmos().enabled() &&
                 cosmosLifecycleManager.isEnabled(serviceType);
             default           -> true;
+
         };
     }
 

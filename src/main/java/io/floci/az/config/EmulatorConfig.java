@@ -106,6 +106,11 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface EmailServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ServicesConfig {
         BlobServiceConfig      blob();
         QueueServiceConfig     queue();
@@ -127,6 +132,9 @@ public interface EmulatorConfig {
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
+
+        // Added Email service configuration
+        EmailServiceConfig email();
     }
 
     interface MonitorConfig {
