@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-18
+
 ### Added
 
 - **vm:** Container-backed virtual machines (`floci-az.services.vm.mocked=false`). Each VM is backed by a long-lived Linux container (image resolved from `storageProfile.imageReference` via `VmImageResolver`, falling back to `ubuntu:22.04`) kept alive with `tail -f /dev/null`. Azure power actions map onto the container: `start` → docker start, `powerOff`/`deallocate` → docker stop (container retained), `restart`/`redeploy`/`reapply` → docker restart, delete → stop + remove. VMs provision asynchronously (`Creating` → `Succeeded` once the container is running, surfaced via a readiness poller) so SDK/Terraform LRO pollers complete. Docker failures degrade gracefully to mocked-style state and are never fatal. Mocked mode remains the default, so unit tests stay Docker-free.
 - **entra:** Microsoft Entra ID (Azure AD) emulation — phase 1: a local OpenID Connect provider that replaces the previous static, unsigned-token stub. Issues real **RS256-signed** JWTs from a stable signing key persisted across restarts, serves an OpenID discovery document (`/.well-known/openid-configuration`) and JWKS (`/discovery/v2.0/keys`) derived from the request base URL, and handles the non-interactive grants **client credentials** and **resource-owner password (ROPC)** in both v1.0 and v2.0 token shapes. For closer Entra parity, app-only tokens carry the `idtyp=app` claim and every token carries a unique `uti`, the JWKS publishes the signing key's self-signed cert chain (`x5c`/`x5t`) alongside `n`/`e`, and token-endpoint errors use Azure's shape (`error_codes`, `trace_id`, `correlation_id`, `timestamp`, `error_uri`, and the `AADSTS` code in `error_description`). Seeds a default tenant (`00000000-0000-0000-0000-000000000002`) and a well-known dev app registration so `ClientSecretCredential` works with zero setup. Tenant-rooted at the base URL (`/{tenant}/oauth2/v2.0/token`, where `{tenant}` may be a tenant id or `common`/`organizations`/`consumers`); the token response shape (`token_type`/`expires_in`/`ext_expires_in`/`access_token`) is preserved so existing Terraform/OpenTofu compatibility is unaffected. Enabled by default; incoming-token enforcement (`validate-tokens`) stays opt-in/off so existing services keep accepting any Bearer token in dev. App-registration management, Microsoft Graph CRUD, and interactive flows (device code, auth code + PKCE) follow in later phases ([#23](https://github.com/floci-io/floci-az/issues/23))
-
 - **compat (az cli):** new Azure CLI compatibility suite (`compatibility-tests/compat-azcli`, BATS) that registers a custom `az cloud` pointing at floci-az and runs `az login --service-principal` against the Entra token endpoint, then exercises resource group, storage account (+ blob data-plane), Key Vault (+ secret data-plane), virtual network/NIC, ACR, and Redis through the real `az` CLI. Wired into `make test-azcli`, `make compat-docker`, and the `compatibility.yml` CI matrix
 - **arm:** management-plane endpoints used by the `az` CLI during sign-in and resource creation — `GET /subscriptions` and `GET /tenants` (list), and `Microsoft.*/checkNameAvailability` (returns available)
 - **arm, network:** `enabled` true/false flags so every service can be toggled (closing the last config gaps). `FLOCI_AZ_SERVICES_NETWORK_ENABLED=false` gates all of Microsoft.Network (VNet, subnets, NIC, public IP, NSG, and DNS zones) — `/providers/Microsoft.Network/...` then returns `404` while the rest of ARM keeps working. `FLOCI_AZ_SERVICES_ARM_ENABLED=false` turns off the entire ARM management plane (and therefore every ARM-based service). Both default to `true`; the cosmetic `cosmos-engine` service type is now gated on `cosmos.enabled` as well
@@ -199,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) — native binary (`latest`) and JVM (`latest-jvm`) tags
 - Single unified port `4577` for all services
 
-[Unreleased]: https://github.com/floci-io/floci-az/compare/0.6.0...HEAD
+[Unreleased]: https://github.com/floci-io/floci-az/compare/0.7.0...HEAD
+[0.7.0]: https://github.com/floci-io/floci-az/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/floci-io/floci-az/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/floci-io/floci-az/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/floci-io/floci-az/compare/0.3.0...0.4.0
