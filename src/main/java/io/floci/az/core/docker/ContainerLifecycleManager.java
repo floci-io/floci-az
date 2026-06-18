@@ -181,6 +181,42 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /** Starts a previously-created (stopped) container in place, without removing it. */
+    public void start(String containerId) {
+        try {
+            dockerClient.startContainerCmd(containerId).exec();
+            LOG.infov("Started container {0}", containerId);
+        } catch (NotFoundException e) {
+            LOG.warnv("Container {0} not found; cannot start", containerId);
+        } catch (Exception e) {
+            LOG.warnv("Error starting container {0}: {1}", containerId, e.getMessage());
+        }
+    }
+
+    /** Stops a running container without removing it, so it can be started again later. */
+    public void stop(String containerId, int timeoutSeconds) {
+        try {
+            dockerClient.stopContainerCmd(containerId).withTimeout(timeoutSeconds).exec();
+            LOG.infov("Stopped container {0}", containerId);
+        } catch (NotFoundException e) {
+            LOG.debugv("Container {0} not found (already stopped/removed)", containerId);
+        } catch (Exception e) {
+            LOG.warnv("Error stopping container {0}: {1}", containerId, e.getMessage());
+        }
+    }
+
+    /** Restarts a container in place (stop + start), keeping it for further use. */
+    public void restart(String containerId, int timeoutSeconds) {
+        try {
+            dockerClient.restartContainerCmd(containerId).withTimeout(timeoutSeconds).exec();
+            LOG.infov("Restarted container {0}", containerId);
+        } catch (NotFoundException e) {
+            LOG.warnv("Container {0} not found; cannot restart", containerId);
+        } catch (Exception e) {
+            LOG.warnv("Error restarting container {0}: {1}", containerId, e.getMessage());
+        }
+    }
+
     public boolean isContainerRunning(String containerId) {
         try {
             InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();

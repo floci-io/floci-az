@@ -2,7 +2,7 @@ services:
   floci-az:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.native
     ports:
       - "4577:4577"
     volumes:

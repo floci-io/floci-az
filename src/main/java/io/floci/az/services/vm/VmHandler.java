@@ -12,6 +12,8 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.PowerState;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -26,6 +28,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * HTTP handler for Azure Virtual Machines (Microsoft.Compute/virtualMachines) management-plane
@@ -62,12 +67,42 @@ public class VmHandler implements AzureServiceHandler {
     private static final String API_VERSION = "2024-11-01";
 
     private final EmulatorConfig config;
+    private final VmContainerManager containerManager;
     private final StorageBackend<String, StoredObject> storage;
+    private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "vm-readiness-poller");
+        t.setDaemon(true);
+        return t;
+    });
 
     @Inject
-    public VmHandler(EmulatorConfig config, StorageFactory storageFactory) {
+    public VmHandler(EmulatorConfig config,
+                     VmContainerManager containerManager,
+                     StorageFactory storageFactory) {
         this.config = config;
+        this.containerManager = containerManager;
         this.storage = storageFactory.create("vm");
+    }
+
+    @PostConstruct
+    public void init() {
+        if (!config.services().vm().mocked()) {
+            startReadinessPoller();
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        poller.shutdownNow();
+        if (!config.services().vm().mocked()) {
+            scanAll().forEach(vm -> {
+                try {
+                    containerManager.removeVm(vm);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing container for VM {0}: {1}", vm.getName(), e.getMessage());
+                }
+            });
+        }
     }
 
     @Override
@@ -154,11 +189,27 @@ public class VmHandler implements AzureServiceHandler {
             vm.setTags(tags.isEmpty() ? null : tags);
             vm.setProperties(properties);
 
-            // Mocked mode: VM is provisioned and powered on immediately. Non-mocked Docker
-            // backing is wired in phase 2 (would set "Creating" + launch a container here).
-            vm.setProvisioningState("Succeeded");
-            if (isNew || vm.getPowerState() == null) {
-                vm.setPowerState(PowerState.RUNNING.code());
+            if (config.services().vm().mocked()) {
+                // Mocked mode: VM is provisioned and powered on immediately (no Docker).
+                vm.setProvisioningState("Succeeded");
+                if (isNew || vm.getPowerState() == null) {
+                    vm.setPowerState(PowerState.RUNNING.code());
+                }
+            } else if (isNew) {
+                // Real mode: launch a backing container; the readiness poller flips the VM to
+                // Succeeded once it is running. Docker failures degrade to mocked-style state.
+                vm.setProvisioningState("Creating");
+                vm.setPowerState(PowerState.STARTING.code());
+                try {
+                    containerManager.startVm(vm);
+                } catch (Exception e) {
+                    LOG.errorf(e, "Failed to start container for VM %s; degrading to mocked state", vmName);
+                    vm.setProvisioningState("Succeeded");
+                    vm.setPowerState(PowerState.RUNNING.code());
+                }
+            } else {
+                // Real mode update: keep the existing container and power state.
+                vm.setProvisioningState("Succeeded");
             }
 
             putVm(key, vm);
@@ -198,7 +249,17 @@ public class VmHandler implements AzureServiceHandler {
     }
 
     private Response handleDelete(String sub, String rg, String vmName) {
-        storage.delete(storageKey(sub, rg, vmName));
+        String key = storageKey(sub, rg, vmName);
+        if (!config.services().vm().mocked()) {
+            getVm(key).ifPresent(vm -> {
+                try {
+                    containerManager.removeVm(vm);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing container for VM {0}: {1}", vmName, e.getMessage());
+                }
+            });
+        }
+        storage.delete(key);
         // Delete synchronously with 204 No Content. The azurerm provider's virtualmachines
         // DeleteThenPoll treats a 202/200 as a long-running operation and polls the collection
         // forever against the emulator; a terminal 204 signals the delete is complete so
@@ -244,6 +305,21 @@ public class VmHandler implements AzureServiceHandler {
             case "deallocate" -> PowerState.DEALLOCATED;
             default           -> PowerState.RUNNING;  // start, restart, redeploy, reapply
         };
+
+        if (!config.services().vm().mocked()) {
+            // Map the Azure power action onto the backing container. Failures are non-fatal:
+            // the recorded power state still transitions so the control plane stays consistent.
+            try {
+                switch (action) {
+                    case "powerOff", "deallocate"        -> containerManager.stopContainer(vm);
+                    case "restart", "redeploy", "reapply" -> containerManager.restartContainer(vm);
+                    default                               -> containerManager.startContainer(vm);
+                }
+            } catch (Exception e) {
+                LOG.warnv("Power action {0} on VM {1} failed: {2}", action, vmName, e.getMessage());
+            }
+        }
+
         vm.setPowerState(target.code());
         vm.setProvisioningState("Succeeded");
         putVm(key, vm);
@@ -320,6 +396,25 @@ public class VmHandler implements AzureServiceHandler {
                 .header("Azure-AsyncOperation", url)
                 .header("Location", url)
                 .build();
+    }
+
+    // ── Readiness poller (non-mocked mode) ───────────────────────────────────────
+
+    private void startReadinessPoller() {
+        poller.scheduleAtFixedRate(() -> {
+            try {
+                scanAll().forEach(vm -> {
+                    if ("Creating".equals(vm.getProvisioningState()) && containerManager.isRunning(vm)) {
+                        vm.setProvisioningState("Succeeded");
+                        vm.setPowerState(PowerState.RUNNING.code());
+                        putVm(vm.storageKey(), vm);
+                        LOG.infov("VM {0} container is running; provisioningState=Succeeded", vm.getName());
+                    }
+                });
+            } catch (Exception e) {
+                LOG.error("Error in VM readiness poller", e);
+            }
+        }, 2, 3, TimeUnit.SECONDS);
     }
 
     // ── Storage helpers ────────────────────────────────────────────────────────

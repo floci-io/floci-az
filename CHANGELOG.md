@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **vm:** Container-backed virtual machines (`floci-az.services.vm.mocked=false`). Each VM is backed by a long-lived Linux container (image resolved from `storageProfile.imageReference` via `VmImageResolver`, falling back to `ubuntu:22.04`) kept alive with `tail -f /dev/null`. Azure power actions map onto the container: `start` → docker start, `powerOff`/`deallocate` → docker stop (container retained), `restart`/`redeploy`/`reapply` → docker restart, delete → stop + remove. VMs provision asynchronously (`Creating` → `Succeeded` once the container is running, surfaced via a readiness poller) so SDK/Terraform LRO pollers complete. Docker failures degrade gracefully to mocked-style state and are never fatal. Mocked mode remains the default, so unit tests stay Docker-free.
+
 ## [0.6.0] - 2026-06-09
 
 ### Added

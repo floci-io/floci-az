@@ -2,9 +2,14 @@
 
 Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azurerm_linux_virtual_machine`, and any ARM-speaking client.
 
-> **No Docker required** (mocked mode, the default). VMs are emulated as pure ARM control-plane
-> resources: they provision instantly and report power state. Real Docker-backed VMs are planned
-> (set `FLOCI_AZ_SERVICES_VM_MOCKED=false` once available).
+> **Mocked mode (default): no Docker required.** VMs are emulated as pure ARM control-plane
+> resources: they provision instantly and report power state.
+>
+> **Container-backed mode:** set `FLOCI_AZ_SERVICES_VM_MOCKED=false` to back each VM with a real
+> Linux container. The image is resolved from `storageProfile.imageReference` (falling back to
+> `ubuntu:22.04`), and power actions map onto Docker: `start` → start, `powerOff`/`deallocate` →
+> stop, `restart` → restart, delete → remove. VMs provision asynchronously (`Creating` →
+> `Succeeded` once the container is running).
 
 ---
 
@@ -100,7 +105,7 @@ floci-az:
   services:
     vm:
       enabled: true
-      mocked: true              # true = no Docker, pure ARM state. false = container-backed (planned)
+      mocked: true              # true = no Docker, pure ARM state. false = container-backed
       default-image: "ubuntu:22.04"
 ```
 
@@ -115,7 +120,8 @@ floci-az:
 ## Notes & limitations
 
 - Mocked mode does not run a real OS — there is no SSH, no guest agent, and `runCommand` is not executed.
-- Network resources are ARM control-plane emulation only. NIC private IPs and public IPs are
-  synthesized by the Network emulator, not allocated from a real address pool.
-- Real container-backed VMs (image resolution via `imageReference`, `docker start/stop/restart`)
-  are planned for a follow-up.
+- Container-backed mode (`mocked=false`) runs a stock base image kept alive with `tail -f /dev/null`;
+  it is a real Linux container, not a true VM/hypervisor — there is no separate kernel, no cloud-init,
+  and `osProfile.customData` / SSH key injection are not applied.
+- Network dependency shells echo submitted properties with `provisioningState = "Succeeded"`;
+  NIC private IPs and public IPs are synthesized, not allocated from a real address pool.
