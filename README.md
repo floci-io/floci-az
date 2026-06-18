@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), and Azure Container Registry (Microsoft.ContainerRegistry).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), and Microsoft Entra ID (OpenID Connect / OAuth2 token issuance).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -158,6 +158,7 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 | Virtual Machines    | ✅                         | ❌                                           | ❌                                                                           |
 | Azure Cache for Redis | ✅                       | ❌                                           | ❌                                                                           |
 | Container Registry  | ✅                         | ❌                                           | ❌                                                                           |
+| Microsoft Entra ID  | ✅                         | ❌                                           | ❌                                                                           |
 | Native binary       | ✅                         | ❌                                           | ✅                                                                           |
 | Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
 | Storage modes       | ✅ (persistent/WAL/Hybrid) | ❌                                           | ❌                                                                           |

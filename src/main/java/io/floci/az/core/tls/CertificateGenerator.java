@@ -82,6 +82,34 @@ public class CertificateGenerator {
         }
     }
 
+    /**
+     * Builds a self-signed X.509 certificate that wraps an <em>existing</em> keypair (unlike
+     * {@link #generateCertificate(List)}, which generates its own). Used to publish the Entra
+     * JWT signing key as {@code x5c}/{@code x5t} in a JWKS document.
+     */
+    public X509Certificate certify(KeyPair keyPair, String commonName) {
+        try {
+            Instant now = Instant.now();
+            X500Name name = new X500Name("CN=" + commonName);
+            BigInteger serial = new BigInteger(128, SECURE_RANDOM);
+
+            var certBuilder = new JcaX509v3CertificateBuilder(
+                    name, serial,
+                    Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
+                    name, keyPair.getPublic());
+
+            certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+            certBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+
+            ContentSigner signer = new JcaContentSignerBuilder("SHA256WithRSA")
+                    .build(keyPair.getPrivate());
+
+            return new JcaX509CertificateConverter().getCertificate(certBuilder.build(signer));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to build self-signed certificate for " + commonName, e);
+        }
+    }
+
     private static GeneralName toGeneralName(String san) {
         try {
             if (san.startsWith("*.")) {

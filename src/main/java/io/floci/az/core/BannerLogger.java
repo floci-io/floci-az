@@ -110,6 +110,11 @@ public class BannerLogger {
                             + "-" + config.services().acr().maxPort();
             sb.append(serviceStatusDocker("acr", true, acrInfo));
         }
+        if (config.services().entra().enabled()) {
+            String entraInfo = "oidc  tenant:" + config.services().entra().defaultTenantId()
+                    + "  validate-tokens:" + config.services().entra().validateTokens();
+            sb.append(String.format("   %-9s [%s]  %s\n", "entra", "enabled ", entraInfo));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

@@ -21,7 +21,9 @@ quarkus:
       --initialize-at-run-time=io.floci.az.core.tls.CertificateGenerator,
       --initialize-at-run-time=io.floci.az.services.eventhub.ArtemisTlsGenerator,
       --initialize-at-run-time=io.floci.az.services.acr.AcrHandler,
-      --initialize-at-run-time=io.floci.az.services.redis.RedisHandler
+      --initialize-at-run-time=io.floci.az.services.redis.RedisHandler,
+      --initialize-at-run-time=io.floci.az.services.entra.TokenIssuer,
+      --initialize-at-run-time=io.floci.az.services.entra.SigningKeyProvider
 
 floci-az:
   port: 4577
@@ -166,6 +168,13 @@ floci-az:
       default-image: "registry:2"
       base-port: 5000
       max-port: 5099
+    entra:
+      enabled: true                 # local OpenID Connect provider (signed RS256 tokens, JWKS, discovery)
+      default-tenant-id: "00000000-0000-0000-0000-000000000002"
+      # issuer:                     # optional override; default derived from request base URL as {baseUrl}/{tenant}/v2.0
+      token-lifetime-seconds: 3599
+      validate-tokens: false        # true = BearerTokenVerifier validates signature/claims (default off: permissive dev auth)
+      # signing-key-path:           # optional; default {storage.persistent-path}/entra
     # docker-network:  # optional: shared Docker network for sidecar containers
     email:
       enabled: true

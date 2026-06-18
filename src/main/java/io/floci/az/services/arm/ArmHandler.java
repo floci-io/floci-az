@@ -94,10 +94,35 @@ public class ArmHandler implements AzureServiceHandler {
             return networkHandler.handleArm(req, path, method, extractSub(path));
         }
 
+        // ── Tenant list ───────────────────────────────────────────────────────
+        // GET /tenants — the az CLI enumerates tenants during `az login`.
+        if (path.matches("tenants([?].*)?")) {
+            return Response.ok(Map.of("value", List.of(Map.of(
+                    "id",                "/tenants/" + TENANT_ID,
+                    "tenantId",          TENANT_ID,
+                    "displayName",       "floci-az local",
+                    "tenantCategory",    "Home",
+                    "defaultDomain",     "floci-az.local",
+                    "tenantType",        "AAD"
+            )))).build();
+        }
+
+        // ── Subscription list ─────────────────────────────────────────────────
+        // GET /subscriptions — the az CLI enumerates subscriptions during `az login`.
+        if (path.matches("subscriptions([?].*)?")) {
+            return Response.ok(Map.of("value", List.of(subscriptionBody(SUBSCRIPTION_ID)))).build();
+        }
+
         // ── Subscription ──────────────────────────────────────────────────────
         if (path.matches("subscriptions/[^/?]+") ||
             path.matches("subscriptions/[^/?]+\\?.*")) {
             return subscriptionResponse(extractSub(path));
+        }
+
+        // ── checkNameAvailability ──────────────────────────────────────────────
+        // az CLI probes this before creating storage accounts / key vaults / etc.
+        if (path.matches("subscriptions/[^/]+/providers/Microsoft\\.[^/]+/checkNameAvailability([?].*)?")) {
+            return Response.ok(Map.of("nameAvailable", true)).build();
         }
 
         // ── Cross-subscription storage account listing ─────────────────────────
@@ -617,13 +642,17 @@ public class ArmHandler implements AzureServiceHandler {
     // ── Subscription ─────────────────────────────────────────────────────────
 
     private Response subscriptionResponse(String sub) {
-        return Response.ok(Map.of(
+        return Response.ok(subscriptionBody(sub)).build();
+    }
+
+    private static Map<String, Object> subscriptionBody(String sub) {
+        return Map.of(
                 "id",             "/subscriptions/" + sub,
                 "subscriptionId", sub,
                 "displayName",    "floci-az local",
                 "state",          "Enabled",
                 "tenantId",       TENANT_ID
-        )).build();
+        );
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -1,11 +1,11 @@
 .PHONY: build run run-docker stop stop-docker require-emulator \
-        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image compat-terraform-image compat-opentofu-image \
+        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image compat-terraform-image compat-opentofu-image compat-azcli-image \
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
         test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql test-terraform-compat test-opentofu-compat test-iac-compat compat-docker test-compat clean
+        test-sql test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -15,6 +15,7 @@ JAVA_DIR       = compatibility-tests/sdk-test-java
 NODE_DIR       = compatibility-tests/sdk-test-node
 TERRAFORM_DIR  = compatibility-tests/compat-terraform
 OPENTOFU_DIR   = compatibility-tests/compat-opentofu
+AZCLI_DIR      = compatibility-tests/compat-azcli
 COMPAT_NETWORK = compat-net
 COMPAT_RESULTS = test-results
 FLOCI_AZ_IMAGE = floci-az:test
@@ -23,6 +24,7 @@ JAVA_IMAGE     = compat-sdk-test-java
 NODE_IMAGE     = compat-sdk-test-node
 TERRAFORM_IMAGE = compat-terraform
 OPENTOFU_IMAGE  = compat-opentofu
+AZCLI_IMAGE     = compat-azcli
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -101,6 +103,9 @@ compat-terraform-image:
 
 compat-opentofu-image:
 	docker build -t $(OPENTOFU_IMAGE) -f $(OPENTOFU_DIR)/Dockerfile $(OPENTOFU_DIR)/
+
+compat-azcli-image:
+	docker build -t $(AZCLI_IMAGE) -f $(AZCLI_DIR)/Dockerfile $(AZCLI_DIR)/
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
 
@@ -457,18 +462,35 @@ test-iac-compat:
 	$(MAKE) test-terraform-compat
 	$(MAKE) test-opentofu-compat
 
+test-azcli:
+	@echo "==> Azure CLI compatibility tests (Docker)"
+	@mkdir -p $(COMPAT_RESULTS)/azcli
+	$(MAKE) compat-build
+	$(MAKE) compat-run
+	@EXIT=0; \
+	$(MAKE) compat-azcli-image || EXIT=$$?; \
+	if [ $$EXIT -eq 0 ]; then \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/azcli:/results" \
+			$(AZCLI_IMAGE); \
+		EXIT=$$?; \
+	fi; \
+	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+
 # ── Full compatibility suite ──────────────────────────────────────────────────
 
 compat-docker:
 	$(MAKE) compat-build
 	$(MAKE) compat-run
-	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu
+	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-java-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-terraform-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-opentofu-image || EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-azcli-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Python SDK tests"; \
 		docker run --rm --network $(COMPAT_NETWORK) \
@@ -515,6 +537,14 @@ compat-docker:
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/opentofu:/results" \
 			$(OPENTOFU_IMAGE); \
+		EXIT=$$?; \
+	fi; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "==> Azure CLI tests"; \
+		docker run --rm --network $(COMPAT_NETWORK) \
+			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+			-v "$(CURDIR)/$(COMPAT_RESULTS)/azcli:/results" \
+			$(AZCLI_IMAGE); \
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT

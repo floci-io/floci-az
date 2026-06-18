@@ -20,22 +20,8 @@ public class AzureIdentityController {
         this.config = config;
     }
 
-    @POST
-    @Path("common/oauth2/v2.0/token")
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response tokenCommon() {
-        return tokenResponse();
-    }
-
-    // AzureRM Terraform provider calls /{tenantId}/oauth2/v2.0/token
-    @POST
-    @Path("{tenantId}/oauth2/v2.0/token")
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response tokenByTenant(@PathParam("tenantId") String tenantId) {
-        return tokenResponse();
-    }
+    // OAuth2 token endpoints (common/{tenant}/oauth2[/v2.0]/token), JWKS and OpenID discovery
+    // are served by EntraServiceHandler via AzureRoutingFilter's pre-matching dispatch.
 
     // ARM environment discovery — called by go-azure-sdk (Azure Stack mode via metadata_host).
     // Format follows the 2022-09-01 metadata schema used by hashicorp/go-azure-sdk.
@@ -69,15 +55,6 @@ public class AzureIdentityController {
                 "storage",     "core.windows.net",
                 "keyVaultDns", "vault.azure.net"
             )
-        )).build();
-    }
-
-    private Response tokenResponse() {
-        return Response.ok(Map.of(
-            "token_type",     "Bearer",
-            "expires_in",     3599,
-            "ext_expires_in", 3599,
-            "access_token",   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.t-46OS_I4B9mBqMzdN49xH16p02Y56K1YF_3-m2-y-U"
         )).build();
     }
 }

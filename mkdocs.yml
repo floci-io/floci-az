@@ -74,6 +74,7 @@ nav:
     - Azure Functions: services/functions.md
     - App Configuration: services/app-config.md
     - Key Vault: services/key-vault.md
+    - Microsoft Entra ID: services/entra.md
     - Event Hubs: services/event-hub.md
     - Service Bus: services/service-bus.md
     - Cosmos DB: services/cosmos.md

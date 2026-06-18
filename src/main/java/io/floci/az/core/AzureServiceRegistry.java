@@ -47,6 +47,7 @@ public class AzureServiceRegistry {
             case "acr"        -> config.services().acr().enabled();
             case "email"      -> config.services().email().enabled();
             case "monitor"    -> config.services().monitor().enabled();
+            case "entra"      -> config.services().entra().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->
                 config.services().cosmos().enabled() &&

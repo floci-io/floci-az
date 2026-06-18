@@ -178,8 +178,26 @@ public class AzureRoutingFilter {
             }
         }
 
-        // Identity bypass
-        if (path.contains("oauth2/v2.0/token")) {
+        // Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
+        //   {tenant}/oauth2/v2.0/token, {tenant}/oauth2/token,
+        //   {tenant}/discovery/v2.0/keys,
+        //   {tenant}[/v2.0]/.well-known/openid-configuration
+        // where {tenant} is a tenant id or common/organizations/consumers.
+        if (path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
+                || path.endsWith("discovery/v2.0/keys")
+                || path.endsWith(".well-known/openid-configuration")) {
+            Optional<AzureServiceHandler> entraHandler = serviceRegistry.resolve("entra");
+            if (entraHandler.isPresent()) {
+                Map<String, String> entraQueryParams = new HashMap<>();
+                requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> entraQueryParams.put(k, v.get(0)));
+                AzureRequest entraRequest = new AzureRequest(
+                    requestContext.getMethod(), "entra", "entra",
+                    path, headers, requestContext.getEntityStream(), entraQueryParams, null, secure);
+                LOGGER.infof("Dispatching Entra request to EntraServiceHandler: %s %s",
+                    requestContext.getMethod(), path);
+                return entraHandler.get().handle(entraRequest);
+            }
+            // Entra disabled: fall through to JAX-RS (these paths 404).
             return null;
         }
 
@@ -405,7 +423,10 @@ public class AzureRoutingFilter {
         // (resource groups, storage accounts, key vaults, etc. not served
         //  by the more-specific AKS and SQL handlers above)
         // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/")) {
+        if (path.startsWith("subscriptions/") || path.equals("subscriptions")
+                || path.startsWith("subscriptions?")
+                || path.startsWith("tenants/") || path.equals("tenants")
+                || path.startsWith("tenants?")) {
             Map<String, String> armQueryParams = new HashMap<>();
             requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> armQueryParams.put(k, v.get(0)));
             AzureRequest armRequest = new AzureRequest(

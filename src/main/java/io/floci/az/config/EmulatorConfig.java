@@ -128,6 +128,7 @@ public interface EmulatorConfig {
         RedisConfig            redis();
         AcrConfig              acr();
         MonitorConfig          monitor();
+        EntraConfig            entra();
 
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
@@ -140,6 +141,40 @@ public interface EmulatorConfig {
     interface MonitorConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */
+    interface EntraConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Tenant id returned in the {@code tid} claim and used as the default issuer tenant. */
+        @WithDefault("00000000-0000-0000-0000-000000000002")
+        String defaultTenantId();
+
+        /**
+         * When set, overrides the token {@code iss} (issuer) value. Otherwise the issuer is
+         * derived from the incoming request base URL as {@code {baseUrl}/{tenantId}/v2.0}.
+         */
+        Optional<String> issuer();
+
+        /** Access token lifetime in seconds (reflected in {@code expires_in} / {@code exp}). */
+        @WithDefault("3599")
+        long tokenLifetimeSeconds();
+
+        /**
+         * When {@code true}, {@code BearerTokenVerifier} validates the token signature and
+         * claims against the local signing key. Default {@code false} preserves the permissive
+         * dev behaviour so existing service tests keep working.
+         */
+        @WithDefault("false")
+        boolean validateTokens();
+
+        /**
+         * Directory holding the persisted RSA signing key. When empty, defaults to
+         * {@code {storage.persistent-path}/entra}.
+         */
+        Optional<String> signingKeyPath();
     }
 
     interface ApimConfig {
