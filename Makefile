@@ -1,11 +1,11 @@
 .PHONY: build run run-docker stop stop-docker require-emulator \
         compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image compat-terraform-image compat-opentofu-image \
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
-        test test-python test-python-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat test-appconfig \
+        test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql test-terraform test-opentofu test-iac compat-docker test-compat clean
+        test-sql test-terraform-compat test-opentofu-compat test-iac-compat compat-docker test-compat clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -142,7 +142,7 @@ run-sql:
 
 # ── SDK compatibility tests — Docker by default ───────────────────────────────
 
-test-python:
+test-python-compat:
 	@echo "==> Python SDK compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/python
 	$(MAKE) compat-build
@@ -198,7 +198,7 @@ test-node-compat:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
-test-python-local:
+test-python-compat-local:
 	@echo "==> Python SDK compatibility tests (all services, local emulator)"
 	@cd $(PYTHON_DIR) && \
 	if [ ! -d venv ]; then python3 -m venv venv; fi && \
@@ -421,7 +421,7 @@ test-sql:
 
 # ── IaC compatibility ─────────────────────────────────────────────────────────
 
-test-terraform:
+test-terraform-compat:
 	@echo "==> Terraform IaC compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/terraform
 	$(MAKE) compat-build
@@ -437,7 +437,7 @@ test-terraform:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
-test-opentofu:
+test-opentofu-compat:
 	@echo "==> OpenTofu IaC compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/opentofu
 	$(MAKE) compat-build
@@ -453,9 +453,9 @@ test-opentofu:
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
 
-test-iac:
-	$(MAKE) test-terraform
-	$(MAKE) test-opentofu
+test-iac-compat:
+	$(MAKE) test-terraform-compat
+	$(MAKE) test-opentofu-compat
 
 # ── Full compatibility suite ──────────────────────────────────────────────────
 

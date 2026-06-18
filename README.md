@@ -8,12 +8,13 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 -->
 
 <p align="center">
-  <img src="floci-azure-black.svg#gh-light-mode-only" alt="Floci Azure" width="500" />
-  <img src="floci-azure-white.svg#gh-dark-mode-only" alt="Floci Azure" width="500" />
-  <p align="center">
-    <strong>Light, fluffy, and always free</strong><br />
-    No account. No auth token. No feature gates. Just <code>docker compose up</code>.
-  </p>
+  <img src="docs/assets/floci-azure-black.svg#gh-light-mode-only" alt="Floci Azure" width="500" />
+  <img src="docs/assets/floci-azure-white.svg#gh-dark-mode-only" alt="Floci Azure" width="500" />
+</p>
+
+<p align="center">
+  <strong>Light, fluffy, and always free</strong><br />
+  No account. No auth token. No feature gates. Just <code>docker compose up</code>.
 </p>
 
 <p align="center">
@@ -24,13 +25,11 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 </p>
 
 <p align="center">
-  A free, open-source local Azure emulator — Storage, Cosmos DB, Functions, App Configuration, Key Vault, Event Hubs, API Management, and more. No account. No feature gates. Just&nbsp;<code>docker compose up</code>.
-</p>
-
-
-<p align="center">
+  <a href="#what-is-floci-az">What is Floci AZ?</a> ·
   <a href="#quick-start">Quick Start</a> ·
-  <a href="#what-is-floci-az">Features</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#why-floci-az">Why Floci AZ?</a> ·
+  <a href="#supported-services">Services</a> ·
   <a href="#sdk-integration">SDKs</a> ·
   <a href="#compatibility-testing">Compatibility</a> ·
   <a href="#configuration">Configuration</a> ·
@@ -39,11 +38,110 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 
 ---
 
-## What is floci-az?
+## What is Floci AZ?
 
-Floci AZ is a free, open-source local Azure emulator for development, testing, and CI. It gives you Azure-compatible services on your machine without requiring a cloud account, auth token, or paid feature gates. Point your Azure SDK or CLI at `http://localhost:4577` and keep your existing workflows.
+Floci AZ is a free, open-source local Azure emulator for development, testing, and CI.
 
-| Feature             | floci-az                  | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
+It gives you Azure-compatible services on your machine without requiring a cloud account, an auth token, or paid feature gates. Point your Azure SDK, CLI, or Terraform at `http://localhost:4577` and keep your existing workflows.
+
+Floci AZ is the Azure counterpart to [Floci](https://github.com/floci-io/floci), the AWS emulator.
+
+## Quick Start
+
+```yaml
+# docker-compose.yml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # required for Azure Functions
+```
+
+```bash
+docker compose up
+```
+
+Or run directly:
+
+```bash
+docker run -d --name floci-az \
+  -p 4577:4577 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  floci/floci-az:latest
+```
+
+All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are not validated.
+
+> **Azure Functions** requires access to the Docker socket so Floci AZ can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
+
+<details>
+<summary><strong>TLS (for the Cosmos DB Java SDK)</strong></summary>
+
+The Azure Cosmos DB Java SDK enforces TLS in gateway mode. Enable the built-in TLS proxy to serve HTTP and HTTPS on the same port:
+
+```yaml
+# docker-compose.yml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data        # persist generated cert across restarts
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+      FLOCI_AZ_HOSTNAME: floci-az   # add Docker service name to cert SANs
+```
+
+The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore — no static cert to bundle or import manually.
+
+</details>
+
+## Features
+
+<details open>
+<summary><strong>Local Azure without the cloud account</strong></summary>
+
+Run Azure-compatible services locally without an Azure account, auth token, or paid feature gates.
+
+</details>
+
+<details>
+<summary><strong>Real Docker where fidelity matters</strong></summary>
+
+Azure Functions, Event Hubs, and Cosmos DB engine APIs (MongoDB, PostgreSQL, Cassandra, Gremlin) use real Docker-backed execution instead of shallow mocks.
+
+</details>
+
+<details>
+<summary><strong>Drop-in Azure SDK compatibility</strong></summary>
+
+Point standard Azure SDK clients at `http://localhost:4577`. Existing connection strings, credentials, and SDK workflows stay unchanged.
+
+</details>
+
+<details>
+<summary><strong>Fast enough for CI</strong></summary>
+
+The native image starts in milliseconds and keeps idle memory low, making it practical for local development and test pipelines.
+
+</details>
+
+<details>
+<summary><strong>Configurable persistence</strong></summary>
+
+Choose from in-memory, persistent, hybrid, and write-ahead log storage depending on the durability profile you need.
+
+</details>
+
+## Why Floci AZ?
+
+Floci AZ gives you more services than the official local tools, consolidated on a single port, with a native image that starts in milliseconds.
+
+| Feature             | Floci AZ                  | [Azurite](https://github.com/Azure/Azurite) | [Functions Core Tools](https://github.com/Azure/azure-functions-core-tools) |
 |---------------------|---------------------------|---------------------------------------------|-----------------------------------------------------------------------------|
 | Blob Storage        | ✅                         | ✅                                           | ❌                                                                           |
 | Queue Storage       | ✅                         | ✅                                           | ❌                                                                           |
@@ -66,7 +164,8 @@ Floci AZ is a free, open-source local Azure emulator for development, testing, a
 | Startup time        | **<100ms** (native image) | Moderate                                    | Fast                                                                        |
 | License             | **MIT**                   | MIT                                         | MIT                                                                         |
 
-## 🆚 Azure Cosmos DB Emulator vs floci-az
+<details>
+<summary><strong>Azure Cosmos DB Emulator vs Floci AZ</strong></summary>
 
 ### What is the Azure Cosmos DB Emulator?
 
@@ -77,7 +176,7 @@ the cloud service — but it carries the full weight of that fidelity.
 
 ### Head-to-head
 
-| Feature                          | Azure Cosmos DB Emulator                                 | floci-az                                                                                 |
+| Feature                          | Azure Cosmos DB Emulator                                 | Floci AZ                                                                                 |
 |----------------------------------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
 | **Platform**                     | Windows-first (Windows containers historically required) | Linux-native containers — runs on Mac, Linux, and Windows                                |
 | **Docker image size**            | Heavy (~GBs depending on version/base image)             | Lightweight modular engines (~50 MB to a few hundred MB depending on selected APIs)      |
@@ -106,7 +205,7 @@ the cloud service — but it carries the full weight of that fidelity.
 | **Consistency semantics**        | Azure-oriented                                           | Best-effort compatibility depending on engine                                            |
 | **Recommended usage**            | Full local Cosmos-focused workflows                      | Fast local development, testing, CI/CD, and lightweight Azure integration workflows      |
 
-> floci-az does not aim to fully reproduce Azure Cosmos DB internals or cloud infrastructure behavior.
+> Floci AZ does not aim to fully reproduce Azure Cosmos DB internals or cloud infrastructure behavior.
 >
 > The goal is to provide high protocol and SDK compatibility through API-specific local engines optimized for:
 >
@@ -136,7 +235,7 @@ the cloud service — but it carries the full weight of that fidelity.
   RU/s governance, and multi-region topology simulation).
 - The Data Explorer UI for manual data inspection.
 
-**Use floci-az when you need:**
+**Use Floci AZ when you need:**
 
 - A lightweight, cross-platform dev/test environment that starts in milliseconds.
 - CI/CD pipelines on Linux runners (GitHub Actions, GitLab CI, CircleCI, etc.).
@@ -145,73 +244,39 @@ the cloud service — but it carries the full weight of that fidelity.
 - Cosmos DB SQL API coverage is sufficient (CRUD, SQL queries, PATCH, transactional batch, pagination, aggregates,
   string functions).
 
----
-
-## 🔌 Connection Strings
-
-AI agents and SDKs should use these exact templates to avoid endpoint resolution errors.
-
-**Standard Connection String:**
-
-```text
-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
-```
+</details>
 
 ## Architecture Overview
 
 ```mermaid
 flowchart LR
-    Client["☁️ Azure SDK / CLI"]
+    Client["Azure SDK / CLI"]
 
-    subgraph floci-az ["floci-az — port 4577"]
-        Proxy["TLS Proxy\n(optional, protocol-sniffing)\nHTTP + HTTPS on :4577"]
-        Router["HTTP Router\n(JAX-RS / Vert.x)"]
+    subgraph FlociAz ["floci-az, port 4577"]
+        Router["HTTP Router\nJAX-RS / Vert.x\nprotocol-sniffing TLS proxy"]
 
-        subgraph Services ["Services"]
-            A["Blob Storage\n/{account}/"]
-            B["Queue Storage\n/{account}-queue/"]
-            C["Table Storage\n/{account}-table/"]
-            D["Azure Functions\n/{account}-functions/"]
-            E["App Configuration\n/{account}-appconfig/"]
-            F["Key Vault\n/{account}-keyvault/"]
-            G["Event Hubs\nAMQP :5672 / Kafka :9093"]
-            H["Azure SQL\nMicrosoft.Sql"]
-            I["AKS\nMicrosoft.ContainerService"]
-            J["API Management\nMicrosoft.ApiManagement"]
-            K["Cosmos DB\n/{account}-cosmos/"]
-            L["Service Bus\n/{account}-servicebus/"]
-            M["Virtual Machines\nMicrosoft.Compute"]
-            N["Azure Cache for Redis\nMicrosoft.Cache"]
-            O["Container Registry\nMicrosoft.ContainerRegistry"]
+        subgraph Stateless ["Stateless Services"]
+            A["App Configuration · Key Vault\nAPI Management\nVirtual Network · Virtual Machines\nARM management plane"]
         end
 
-        Proxy -->|" route "| Router
-        Router --> A
-        Router --> B
-        Router --> C
-        Router --> D
-        Router --> E
-        Router --> F
-        Router --> G
-        Router --> H
-        Router --> I
-        Router --> J
-        Router --> K
-        Router --> L
-        Router --> M
-        Router --> N
-        Router --> O
-        A & B & C & E & F & K --> Store[("StorageBackend\nmemory · hybrid\npersistent · wal")]
-        D -->|" spawn / proxy "| Docker["🐳 Docker\n(function containers)"]
-        G & L -->|" manages "| Sidecars["🐳 Artemis (AMQP)\n🐳 Redpanda (Kafka)"]
-        H -->|" manages "| SqlContainers["🐳 azure-sql-edge\n(per server)"]
-        I -->|" manages "| K3s["🐳 k3s\n(per cluster)"]
-        K -->|" engines "| CosmosEngines["🐳 Cosmos engines\n(mongo · citus · scylla · …)"]
-        N -->|" manages "| RedisC["🐳 valkey\n(per cache)"]
-        O -->|" manages "| RegistryC["🐳 registry:2\n(shared)"]
+        subgraph Stateful ["Stateful Services"]
+            B["Blob · Queue · Table\nCosmos DB (NoSQL)"]
+        end
+
+        subgraph Containers ["Container Services"]
+            C["Azure Functions\nEvent Hubs\nService Bus\nAzure SQL\nAKS\nAzure Cache for Redis\nContainer Registry"]
+            D["Cosmos engines\nmongo · citus · scylla · gremlin"]
+        end
+
+        Router --> Stateless
+        Router --> Stateful
+        Router --> Containers
+        Stateless & Stateful --> Store[("StorageBackend\nmemory · hybrid · persistent · wal")]
     end
 
-    Client -->|" HTTP/HTTPS :4577\nAzure wire protocol "| Proxy
+    Docker["Docker Engine"]
+    Client -->|"HTTP/HTTPS :4577\nAzure wire protocol"| Router
+    Containers -->|"Docker API\nsidecars & function containers"| Docker
 ```
 
 ## Supported Services
@@ -236,9 +301,10 @@ flowchart LR
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, `listKeys`/`regenerateKey`; real `valkey/valkey:8-alpine` containers (data plane, primary key as password) or mocked; non-SSL port |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, `listCredentials`/`regenerateCredential`, `checkNameAvailability`; one shared `registry:2` (Docker Registry V2 push/pull, path-style `loginServer`, anonymous) or mocked |
 
-## API Management Scope
+<details>
+<summary><strong>API Management details</strong></summary>
 
-floci-az includes an **in-process API Management emulator** intended for local development, SDK compatibility tests, and CI workflows that need APIM-shaped ARM resources plus a lightweight gateway. It is not a full Azure APIM gateway implementation.
+Floci AZ includes an **in-process API Management emulator** intended for local development, SDK compatibility tests, and CI workflows that need APIM-shaped ARM resources plus a lightweight gateway. It is not a full Azure APIM gateway implementation.
 
 APIM is available through:
 
@@ -286,9 +352,40 @@ The APIM emulator is intentionally scoped. These features are not fully emulated
 
 The current goal is practical local parity for common APIM provisioning and gateway tests, not full Azure infrastructure simulation.
 
-## Persistence & Storage Modes
+</details>
 
-floci-az features the same flexible storage architecture as floci. Configure the storage mode globally via
+## Real Docker Integration
+
+Floci AZ uses real Docker containers when in-process emulation would reduce fidelity.
+
+| Service | Default image | What is real |
+|---|---|---|
+| Azure Functions | `mcr.microsoft.com/azure-functions/<runtime>` | Real Azure Functions runtime, warm container pool |
+| Event Hubs AMQP | `apache/activemq-artemis` | Full AMQP 1.0 broker |
+| Event Hubs Kafka | `redpandadata/redpanda` | Kafka-compatible broker (opt-in) |
+| Cosmos DB MongoDB | `mongo:7` | MongoDB Community Server, full wire protocol |
+| Cosmos DB PostgreSQL | `citusdata/citus` | Citus — the exact engine Azure runs |
+| Cosmos DB Cassandra | `scylladb/scylla:6.2` | CQL-compatible drop-in |
+| Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop — standard Gremlin traversals |
+| Azure SQL Database | `mcr.microsoft.com/azure-sql-edge` | SQL Server engine (per server) |
+| AKS | `rancher/k3s:latest` | Kubernetes API server via k3s |
+| Azure Cache for Redis | `valkey/valkey:8-alpine` | Redis / Valkey protocol (per cache) |
+| Azure Container Registry | `registry:2` | OCI-compatible registry for docker push and docker pull (shared) |
+
+Docker-backed services require the Docker socket:
+
+```bash
+docker run -d --name floci-az \
+  -p 4577:4577 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  floci/floci-az:latest
+```
+
+The Cosmos DB multi-API engines (MongoDB, PostgreSQL, Cassandra, Gremlin, plus the embedded NoSQL and Table engines) are disabled by default and configured separately — see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
+
+## Persistence and Storage Modes
+
+Floci AZ features the same flexible storage architecture as Floci. Configure the storage mode globally via
 `FLOCI_AZ_STORAGE_MODE` or override it per service.
 
 |            Mode            | Behavior                                                             | Best for...                               | Durability |
@@ -302,115 +399,9 @@ floci-az features the same flexible storage architecture as floci. Configure the
 > Use **`hybrid`** for a "it just works" experience that survives container restarts. For ephemeral integration tests
 > where state doesn't matter, keep the default **`memory`** mode for maximum performance.
 
-## Quick Start
-
-```yaml
-# docker-compose.yml
-services:
-  floci-az:
-    image: floci/floci-az:latest
-    ports:
-      - "4577:4577"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # required for Azure Functions
-```
-
-```bash
-docker compose up
-```
-
-Or run directly:
-
-```bash
-docker run -d --name floci-az \
-  -p 4577:4577 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  floci/floci-az:latest
-```
-
-All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are not validated.
-
-> **Azure Functions** requires access to the Docker socket so floci-az can spawn runtime containers on demand. Mount
-`/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
-
-### TLS (for the Cosmos DB Java SDK)
-
-The Azure Cosmos DB Java SDK enforces TLS in gateway mode. Enable the built-in TLS proxy to serve HTTP and HTTPS on the same port:
-
-```yaml
-# docker-compose.yml
-services:
-  floci-az:
-    image: floci/floci-az:latest
-    ports:
-      - "4577:4577"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data:/app/data        # persist generated cert across restarts
-    environment:
-      FLOCI_AZ_TLS_ENABLED: "true"
-      FLOCI_AZ_HOSTNAME: floci-az   # add Docker service name to cert SANs
-```
-
-The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore — no static cert to bundle or import manually.
-
-## CLI Usage (`azfloci`)
-
-The `azfloci` tool is a companion Python CLI that acts as a transparent proxy for the official Azure CLI (`az`). It
-dynamically injects the correct connection strings and disables SSL verification so you can use standard `az` commands
-against the local emulator.
-
-### Setup
-
-```bash
-# Optional: alias azfloci as az for a seamless experience
-alias az='python3 /path/to/floci-az/azfloci/azfloci.py'
-
-# Initialize or get connection string info
-az setup
-```
-
-### Examples
-
-When using `azfloci`, you don't need to pass `--connection-string` or set environment variables manually.
-
-#### Blob Storage
-
-```bash
-# Create a container
-az storage container create --name my-container
-
-# Upload a blob
-az storage blob upload --container-name my-container --name hello.txt --file hello.txt
-
-# List blobs
-az storage blob list --container-name my-container --output table
-```
-
-#### Queue Storage
-
-```bash
-# Create a queue
-az storage queue create --name my-queue
-
-# Send a message
-az storage message put --queue-name my-queue --content "Hello from CLI"
-```
-
-#### Table Storage
-
-```bash
-# Create a table
-az storage table create --name MyTable
-```
-
-> [!NOTE]
-> `azfloci` automatically detects the `--account-name` argument (defaulting to `devstoreaccount1`) and constructs the
-> appropriate local endpoint.
-
 ## SDK Integration
 
-floci-az uses path-style routing:
+Floci AZ uses path-style routing:
 
 | Service           | Endpoint                                              | Notes |
 |-------------------|-------------------------------------------------------|-------|
@@ -425,47 +416,9 @@ floci-az uses path-style routing:
 
 The standard development storage connection string works out of the box:
 
-<details>
-<summary>Standard development storage connection string</summary>
-
-```
+```text
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
 ```
-
-</details>
-
-<details>
-<summary>When your app runs in a separate container</summary>
-
-Set the service name as the hostname so returned URLs resolve correctly inside Docker Compose:
-
-```yaml
-services:
-  floci-az:
-    image: floci/floci-az:latest
-    ports:
-      - "4577:4577"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - app-net
-
-  my-app:
-    environment:
-      AZURE_BLOB_ENDPOINT: http://floci-az:4577/devstoreaccount1
-      AZURE_QUEUE_ENDPOINT: http://floci-az:4577/devstoreaccount1-queue
-      AZURE_TABLE_ENDPOINT: http://floci-az:4577/devstoreaccount1-table
-    depends_on:
-      floci-az:
-        condition: service_healthy
-    networks:
-      - app-net
-
-networks:
-  app-net:
-```
-
-</details>
 
 <details>
 <summary><strong>Python</strong></summary>
@@ -601,6 +554,9 @@ For example, Python 3.12 uses `{"runtime":"python","linuxFxVersion":"Python|3.12
 # Optional: alias azfloci as az for a seamless experience
 alias az='python3 /path/to/floci-az/azfloci/azfloci.py'
 
+# Initialize or get connection string info
+az setup
+
 # Blob Storage
 az storage container create --name my-container
 az storage blob upload --container-name my-container --name hello.txt --file hello.txt
@@ -618,112 +574,63 @@ az storage table create --name MyTable
 
 </details>
 
-## Features
-
-<details open>
-<summary><strong>Local Azure without the cloud account</strong></summary>
-
-Run Azure-compatible services locally without an Azure account, auth token, or paid feature gates.
-
-</details>
-
 <details>
-<summary><strong>Real Docker where fidelity matters</strong></summary>
+<summary><strong>When your app runs in a separate container</strong></summary>
 
-Azure Functions, Event Hubs, and Cosmos DB engine APIs (MongoDB, PostgreSQL, Cassandra, Gremlin) use real Docker-backed execution instead of shallow mocks.
+Set the service name as the hostname so returned URLs resolve correctly inside Docker Compose:
 
-</details>
+```yaml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    ports:
+      - "4577:4577"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app-net
 
-<details>
-<summary><strong>Drop-in Azure SDK compatibility</strong></summary>
+  my-app:
+    environment:
+      AZURE_BLOB_ENDPOINT: http://floci-az:4577/devstoreaccount1
+      AZURE_QUEUE_ENDPOINT: http://floci-az:4577/devstoreaccount1-queue
+      AZURE_TABLE_ENDPOINT: http://floci-az:4577/devstoreaccount1-table
+    depends_on:
+      floci-az:
+        condition: service_healthy
+    networks:
+      - app-net
 
-Point standard Azure SDK clients at `http://localhost:4577`. Existing connection strings, credentials, and SDK workflows stay unchanged.
-
-</details>
-
-<details>
-<summary><strong>Fast enough for CI</strong></summary>
-
-The native image starts in milliseconds and keeps idle memory low, making it practical for local development and test pipelines.
-
-</details>
-
-<details>
-<summary><strong>Configurable persistence</strong></summary>
-
-Choose from in-memory, persistent, hybrid, and write-ahead log storage depending on the durability profile you need.
-
-</details>
-
-## Real Docker Integration
-
-Floci AZ uses real Docker containers when in-process emulation would reduce fidelity.
-
-| Service | Default image | What is real |
-|---|---|---|
-| Azure Functions | `mcr.microsoft.com/azure-functions/<runtime>` | Real Azure Functions runtime, warm container pool |
-| Event Hubs AMQP | `apache/activemq-artemis` | Full AMQP 1.0 broker |
-| Event Hubs Kafka | `redpandadata/redpanda` | Kafka-compatible broker (opt-in) |
-| Cosmos DB MongoDB | `mongo:7` | MongoDB Community Server, full wire protocol |
-| Cosmos DB PostgreSQL | `citusdata/citus` | Citus — the exact engine Azure runs |
-| Cosmos DB Cassandra | `scylladb/scylla:6.2` | CQL-compatible drop-in |
-| Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop — standard Gremlin traversals |
-
-Docker-backed services require the Docker socket:
-
-```bash
-docker run -d --name floci-az \
-  -p 4577:4577 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  floci/floci-az:latest
+networks:
+  app-net:
 ```
 
-### Cosmos DB engine configuration
-
-All Cosmos DB engines are disabled by default — enable only the APIs your application uses.
-
-| Variable | Default | Engine |
-|---|---|---|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED` | `false` | `mongo:7` |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus` |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED` | `false` | `scylladb/scylla:6.2` |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED` | `false` | `tinkerpop/gremlin-server` |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED` | `false` | Embedded (no Docker) |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED` | `false` | Embedded (no Docker) |
-
-Each Docker-backed engine exposes a `/connect` endpoint that returns the connection string:
-
-```bash
-curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
-# → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
-```
-
-> Do not publish engine ports (`27017`, `5432`, etc.) on the `floci-az` service. Engines are launched as sibling containers by the host Docker daemon, so they bind ports directly on the host.
+</details>
 
 ## Compatibility Testing
 
-The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ across SDKs.
+The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ across SDKs and tooling workflows. Each directory is one suite — App Configuration, Key Vault, Event Hubs, and Service Bus are exercised inside the SDK suites rather than as standalone modules.
 
-| Module               | Language | SDK                                                                            | Tests |
-|----------------------|----------|--------------------------------------------------------------------------------|------:|
-| `sdk-test-python`    | Python 3 | azure-storage-blob / queue / data-tables / cosmos                              |    42 |
-| `sdk-test-java`      | Java 21  | Azure SDK for Java (BOM 1.2.28) + App Configuration + Functions management API |    92 |
-| `sdk-test-node`      | Node.js  | @azure/storage-blob / storage-queue / data-tables / cosmos                     |    41 |
-| `sdk-test-appconfig` | Python 3 | azure-appconfiguration 1.7.1                                                   |    36 |
-| `sdk-test-keyvault`  | Python 3 | azure-keyvault-secrets 4.11.0                                                  |    24 |
-| `sdk-test-eventhub`  | Python 3 | azure-eventhub 5.11.0                                                          |     7 |
-| Cosmos engines       | Java 21  | DataStax CQL · MongoDB driver · PostgreSQL JDBC · Gremlin driver (Docker)      |    36 |
+| Module              | Language / Tool | Coverage                                                                                                                       | Tests |
+|---------------------|-----------------|--------------------------------------------------------------------------------------------------------------------------------|------:|
+| `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis                                                            |   124 |
+| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, API Management, SQL | 242 |
+| `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
+| `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
+| `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`                                                                                                 |    12 |
+| `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login                                                                 |    13 |
 
-Run all compatibility tests against a running container:
+‡ Ships with the Entra ID feature ([#23](https://github.com/floci-io/floci-az/issues/23)).
+
+Run the suites against a running container:
 
 ```bash
+make test-python-compat
 make test-java-compat
-make test-python
 make test-node-compat
-make test-appconfig
-make test-keyvault
-make test-eventhub
 make test-cosmos-all    # Cosmos engine tests: MongoDB · PostgreSQL · Cassandra · Gremlin · Table · NoSQL (requires Docker)
+make test-iac-compat    # Terraform + OpenTofu
+make compat-docker      # full matrix
 ```
 
 ## Migrating from Azurite
@@ -742,69 +649,55 @@ The account name and key are the same. Floci AZ consolidates all services onto p
 
 ## Image Tags
 
+All images are native (multi-arch `linux/amd64` + `linux/arm64`).
+
 | Channel | Tag |
 |---|---|
-| Release, floating | `latest` (native) · `latest-jvm` |
-| Release, pinned | `x.y.z` · `x.y.z-jvm` |
-| Nightly | `edge` |
+| Release, floating | `latest` |
+| Release, pinned | `x.y.z` |
+| Nightly, floating | `nightly` |
+| Nightly, dated | `nightly-mmddyyyy` |
 
-Use `latest` for stable releases, a pinned version for reproducible builds, and `edge` to track `main`.
+Use `latest` for stable releases, a pinned version for reproducible builds, and `nightly` to track `main`.
 
 ```yaml
 image: floci/floci-az:latest      # recommended
-image: floci/floci-az:0.4.0       # pinned release
-image: floci/floci-az:edge        # track main
+image: floci/floci-az:0.6.0       # pinned release
+image: floci/floci-az:nightly     # track main
 ```
 
 ## Configuration
 
 All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 
-| Variable                               | Default                       | Description                                                     |
-|----------------------------------------|-------------------------------|-----------------------------------------------------------------|
-| `FLOCI_AZ_PORT`                        | `4577`                        | Port exposed by the API                                         |
-| `FLOCI_AZ_BASE_URL`                    | `http://localhost:4577`       | Base URL for the emulator                                       |
-| `FLOCI_AZ_HOSTNAME`                    | _(none)_                      | Additional hostname to include in the self-signed TLS certificate SANs (e.g. `floci-az` when running in Docker Compose) |
-| `FLOCI_AZ_TLS_ENABLED`                 | `false`                       | Enable HTTP+HTTPS on the same port via protocol-sniffing proxy  |
-| `FLOCI_AZ_TLS_SELF_SIGNED`             | `true`                        | Auto-generate a self-signed cert at runtime (cert persisted under `data/tls/`) |
-| `FLOCI_AZ_TLS_CERT_PATH`               | _(none)_                      | Path to a PEM certificate file (disables self-signed generation) |
-| `FLOCI_AZ_TLS_KEY_PATH`                | _(none)_                      | Path to a PEM private key file (pair with `FLOCI_AZ_TLS_CERT_PATH`) |
-| `FLOCI_AZ_STORAGE_MODE`                | `memory`                      | Global storage mode: `memory` · `persistent` · `hybrid` · `wal` |
-| `FLOCI_AZ_STORAGE_PATH`                | `/app/data`                   | Directory for persisted state                                   |
-| `FLOCI_AZ_DOCKER_DOCKER_HOST`          | `unix:///var/run/docker.sock` | Docker socket used to spawn function containers                 |
-| `FLOCI_AZ_DOCKER_LOG_MAX_SIZE`         | `10m`                         | Max log size for function containers                            |
-| `FLOCI_AZ_SERVICES_BLOB_ENABLED`       | `true`                        | Enable or disable Blob Storage                                  |
-| `FLOCI_AZ_SERVICES_QUEUE_ENABLED`      | `true`                        | Enable or disable Queue Storage                                 |
-| `FLOCI_AZ_SERVICES_TABLE_ENABLED`      | `true`                        | Enable or disable Table Storage                                 |
-| `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED`  | `true`                        | Enable or disable Azure Functions                               |
-| `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true`                        | Enable or disable App Configuration                             |
-| `FLOCI_AZ_SERVICES_COSMOS_ENABLED`     | `true`                        | Enable or disable Cosmos DB                                     |
+| Variable | Default | Description |
+|---|---|---|
+| `FLOCI_AZ_PORT` | `4577` | Port exposed by the API |
+| `FLOCI_AZ_BASE_URL` | `http://localhost:4577` | Base URL used when the emulator returns service URLs |
+| `FLOCI_AZ_HOSTNAME` | Unset | Hostname added to returned URLs and TLS cert SANs when running inside Docker Compose |
+| `FLOCI_AZ_TLS_ENABLED` | `false` | Enable HTTP+HTTPS on the same port via protocol-sniffing proxy |
+| `FLOCI_AZ_STORAGE_MODE` | `memory` | Storage mode: `memory`, `persistent`, `hybrid`, or `wal` |
+| `FLOCI_AZ_STORAGE_PATH` | `/app/data` | Directory used for persisted state |
+| `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker socket used to spawn function and sidecar containers |
 
-### Cosmos DB multi-API engines
+Per-service enable flags (`FLOCI_AZ_SERVICES_<SERVICE>_ENABLED`), TLS certificate paths, Cosmos engine settings, and the rest are documented in the full reference.
 
-All engines are **disabled by default** — enable only the APIs your application uses.
+Full reference: [configuration docs](https://floci.io/floci/configuration/environment-variables/)
 
-Four APIs are **Docker-backed** (MongoDB, PostgreSQL, Cassandra, Gremlin) — they launch a sidecar container on first
-request. Two APIs are **embedded** (NoSQL and Table) — in-process, no Docker pull, instant startup.
+### Per-service storage override
 
-#### Docker-backed engines
+You can set a different storage mode for each service independently:
 
-| Variable                                              | Default | Engine image                                                  | Native port |
-|-------------------------------------------------------|---------|---------------------------------------------------------------|-------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED`    | `false` | `mongo:7`                                                     | `27017`     |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED` | `false` | `citusdata/citus`                                             | `5432`      |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_CASSANDRA_ENABLED`  | `false` | `scylladb/scylla:6.2`                                         | `9042`      |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_GREMLIN_ENABLED`    | `false` | `tinkerpop/gremlin-server`                                    | `8182`      |
+```yaml
+# docker-compose.yml
+environment:
+  FLOCI_AZ_STORAGE_MODE: memory
+  FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE: wal
+```
 
-You can override the Docker image or host port for any Docker-backed engine:
+### Multi-container Docker Compose
 
-| Variable                                              | Description                       |
-|-------------------------------------------------------|-----------------------------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_IMAGE`      | Override the MongoDB image        |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_PORT`       | Override the MongoDB host port    |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_STARTUP`            | `on-demand` (default) or `eager`  |
-
-**docker-compose.yml example — enable MongoDB and PostgreSQL:**
+When your application runs in a separate container, use the service name as the hostname so returned URLs (such as blob/queue/table endpoints) resolve correctly:
 
 ```yaml
 services:
@@ -812,80 +705,32 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"
-      - "27017:27017"   # MongoDB (Cosmos MongoDB API)
-      - "5432:5432"     # PostgreSQL (Cosmos PostgreSQL API)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock  # required for Azure Functions
+    networks:
+      - app-net
+
+  my-app:
     environment:
-      FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_ENABLED: "true"
-      FLOCI_AZ_SERVICES_COSMOS_ENGINES_POSTGRESQL_ENABLED: "true"
+      AZURE_BLOB_ENDPOINT: http://floci-az:4577/devstoreaccount1
+      AZURE_QUEUE_ENDPOINT: http://floci-az:4577/devstoreaccount1-queue
+      AZURE_TABLE_ENDPOINT: http://floci-az:4577/devstoreaccount1-table
+      AZURE_FUNCTIONS_ENDPOINT: http://floci-az:4577/devstoreaccount1-functions
+      AZURE_APPCONFIG_ENDPOINT: https://floci-az:4577/devstoreaccount1-appconfig  # https required by App Config SDK (use ForceHttp transport in your client)
+    depends_on:
+      floci-az:
+        condition: service_healthy
+    networks:
+      - app-net
+
+networks:
+  app-net:
 ```
 
-**How it works (Docker-backed):** when you first send a request to `/{account}-cosmos-mongo/`, floci-az pulls `mongo:7` and starts the container. Subsequent requests go directly to the container's native port (`localhost:27017`). The `/connect` endpoint returns the connection string:
+For the **Cosmos DB multi-API engines** (MongoDB, PostgreSQL, Cassandra, Gremlin, and the embedded NoSQL and Table engines) — enable flags, image/port overrides, the `/connect` endpoint, and SDK examples — see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
 
-```bash
-curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
-# → {"api":"MONGODB","host":"localhost","port":27017,"connectionString":"mongodb://localhost:27017/","status":"running"}
-```
-
-#### Embedded engines — NoSQL and Table API (no Docker)
-
-Both engines run entirely inside floci-az — no Docker pull, no container boot time. Data lives in memory; restarting
-floci-az clears it.
-
-| Variable                                              | Default | Backend                                            |
-|-------------------------------------------------------|---------|----------------------------------------------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-process SQL engine — full Cosmos DB SQL dialect |
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory OData engine (ConcurrentHashMap)         |
-
-**NoSQL engine** — activating this endpoint enables the same embedded SQL engine already powering
-`/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4577` as the connection URL
-(Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`).
-
-**Table engine** — supported operations: create/delete table · insert/get/replace/merge/delete entity ·
-OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
-
-```bash
-# Enable the Table engine
-export FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED=true
-
-# Trigger engine activation and retrieve connection string
-curl http://localhost:4577/devstoreaccount1-cosmos-table/connect
-# → {"api":"TABLE","status":"running","connectionString":"DefaultEndpointsProtocol=http;...","notes":"..."}
-```
-
-Use the `host` and `port` from the `/connect` response to build the endpoint, then connect
-with `AzureNamedKeyCredential` — the **official Cosmos DB for Table pattern**
-([quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java)):
-
-```java
-// Java — official Cosmos DB for Table SDK pattern
-String endpoint = "http://" + host + ":" + port + "/devstoreaccount1-cosmos-table";
-
-TableServiceClient client = new TableServiceClientBuilder()
-    .endpoint(endpoint)
-    .credential(new AzureNamedKeyCredential(
-        "devstoreaccount1",
-        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="))
-    .buildClient();
-```
-
-```python
-# Python
-from azure.data.tables import TableServiceClient
-from azure.core.credentials import AzureNamedKeyCredential
-
-credential = AzureNamedKeyCredential("devstoreaccount1",
-    "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==")
-client = TableServiceClient(
-    endpoint=f"http://{host}:{port}/devstoreaccount1-cosmos-table",
-    credential=credential)
-```
-
-The `connectionString` field in the `/connect` response is also available for SDK clients
-that prefer the Azure Storage connection string format.
-
-#### API parity rationale
+<details>
+<summary><strong>Cosmos DB API parity rationale</strong></summary>
 
 Each engine's compatibility level is determined by how closely the underlying runtime matches
 what Azure Cosmos DB actually runs in production.
@@ -999,60 +844,17 @@ in-process:
 - **Known gaps**: JOIN with nested arrays, full-text / vector search, geospatial,
   multi-region and RU/s governance features.
 
----
+</details>
 
-### Per-service storage override
+## Non-Goals and Constraints
 
-You can set a different storage mode for each service independently:
-
-```yaml
-# docker-compose.yml
-environment:
-  FLOCI_AZ_STORAGE_MODE: memory
-  FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE: wal
-```
-
-## 🚧 Non-Goals & Constraints
-
-To prevent configuration errors, note what floci-az **does not** do:
+To prevent configuration errors, note what Floci AZ **does not** do:
 
 1. **HTTPS (most services):** All services run on plain HTTP on port `4577` by default. Do not use `DefaultEndpointsProtocol=https` unless you have explicitly enabled TLS. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
 2. **TLS (optional):** Set `FLOCI_AZ_TLS_ENABLED=true` to enable HTTP+HTTPS on the same port `4577` via a protocol-sniffing proxy. A self-signed certificate is generated at runtime and persisted under `data/tls/`; it regenerates automatically when `FLOCI_AZ_HOSTNAME` or `FLOCI_AZ_BASE_URL` changes. Fetch the active certificate PEM from `GET /_floci/tls-cert` to install it dynamically into your truststore. The **Azure Cosmos DB Java SDK** requires TLS — enable this when using it.
 3. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
 4. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
 5. **Production Scale:** Designed for dev/test. Not for high-availability storage.
-
-## Multi-container Docker Compose
-
-When your application runs in a separate container, use the service name as the hostname:
-
-```yaml
-services:
-  floci-az:
-    image: floci/floci-az:latest
-    ports:
-      - "4577:4577"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # required for Azure Functions
-    networks:
-      - app-net
-
-  my-app:
-    environment:
-      AZURE_BLOB_ENDPOINT: http://floci-az:4577/devstoreaccount1
-      AZURE_QUEUE_ENDPOINT: http://floci-az:4577/devstoreaccount1-queue
-      AZURE_TABLE_ENDPOINT: http://floci-az:4577/devstoreaccount1-table
-      AZURE_FUNCTIONS_ENDPOINT: http://floci-az:4577/devstoreaccount1-functions
-      AZURE_APPCONFIG_ENDPOINT: https://floci-az:4577/devstoreaccount1-appconfig  # https required by App Config SDK (use ForceHttp transport in your client)
-    depends_on:
-      floci-az:
-        condition: service_healthy
-    networks:
-      - app-net
-
-networks:
-  app-net:
-```
 
 ## Community
 

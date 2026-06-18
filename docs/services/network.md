@@ -55,8 +55,8 @@ DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/netw
 The compatibility suites exercise Network through the same local emulator path used in CI:
 
 ```bash
-make test-terraform
-make test-opentofu
+make test-terraform-compat
+make test-opentofu-compat
 ```
 
 If port `4577` is already in use, run the suites against another emulator port:
