@@ -119,6 +119,11 @@
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.azure.resourcemanager</groupId>
+            <artifactId>azure-resourcemanager-appcontainers</artifactId>
+            <version>1.0.0</version>
+        </dependency>
     </dependencies>
 
     <build>

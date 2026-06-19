@@ -5,6 +5,7 @@ import io.floci.az.services.cosmos.engine.CosmosLifecycleManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import io.floci.az.providers.azure.containerapps.ContainerAppsClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,12 +17,14 @@ public class AzureServiceRegistry {
     private final List<AzureServiceHandler> handlers;
     private final EmulatorConfig config;
     private final CosmosLifecycleManager cosmosLifecycleManager;
+private final ContainerAppsClient containerAppsClient;
 
     @Inject
     AzureServiceRegistry(Instance<AzureServiceHandler> all, EmulatorConfig config,
-                         CosmosLifecycleManager cosmosLifecycleManager) {
+                         CosmosLifecycleManager cosmosLifecycleManager, ContainerAppsClient containerAppsClient) {
         this.config = config;
         this.cosmosLifecycleManager = cosmosLifecycleManager;
+this.containerAppsClient = containerAppsClient;
         this.handlers = new ArrayList<>();
         for (AzureServiceHandler h : all) {
             this.handlers.add(h);
