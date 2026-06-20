@@ -5,8 +5,9 @@
   "scripts": {
     "test": "jest --testTimeout=30000 --reporters=default --reporters=jest-junit"
   },
+  "comment_app-configuration": "Pinned to exactly 1.11.0: 1.12.0's connection-string credential sets an invalid request header named 'Connection String' ('Header name must be a valid HTTP token'), breaking this suite. No lockfile is committed, so a caret range drifts to it on every build. Revisit when the SDK regression is fixed.",
   "dependencies": {
-    "@azure/app-configuration": "^1.11.0",
+    "@azure/app-configuration": "1.11.0",
     "@azure/cosmos": "^4.1.0",
     "@azure/data-tables": "^13.3.0",
     "@azure/keyvault-secrets": "^4.8.0",
