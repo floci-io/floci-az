@@ -127,6 +127,9 @@ public class BannerLogger {
         sb.append(String.format("   %-9s [%s]  %s\n", "network",
                 config.services().network().enabled() ? "enabled " : "disabled",
                 "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
+        if (config.services().eventGrid().enabled()) {
+            sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }

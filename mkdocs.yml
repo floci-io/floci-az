@@ -85,5 +85,6 @@ nav:
     - Virtual Machines: services/vm.md
     - Azure Cache for Redis: services/redis.md
     - Azure Container Registry: services/acr.md
+    - Event Grid: services/event-grid.md
   - Contributing: contributing.md
   - Changelog: changelog.md

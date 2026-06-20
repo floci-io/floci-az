@@ -22,6 +22,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | ✅ Cache CRUD, listKeys/regenerateKey; real Redis containers (data plane) or mocked |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | ✅ Registry CRUD, admin credentials, checkNameAvailability; one shared `registry:2` (Docker Registry V2 push/pull) or mocked |
 | **Microsoft Entra ID** | `/{tenant}/oauth2/...` + `/.well-known/openid-configuration` | ✅ OpenID Connect provider — RS256-signed tokens, JWKS, discovery; client-credentials + ROPC grants (app registration, Graph, interactive flows planned) |
+| **Event Grid** | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | ✅ Custom Topics, access keys, webhook event subscriptions with filters, publish (Event Grid + CloudEvents 1.0), async delivery with retry, subscription validation handshake |
 
 ## Unified Endpoint
 

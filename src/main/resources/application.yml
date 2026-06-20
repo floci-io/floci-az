@@ -23,7 +23,8 @@ quarkus:
       --initialize-at-run-time=io.floci.az.services.acr.AcrHandler,
       --initialize-at-run-time=io.floci.az.services.redis.RedisHandler,
       --initialize-at-run-time=io.floci.az.services.entra.TokenIssuer,
-      --initialize-at-run-time=io.floci.az.services.entra.SigningKeyProvider
+      --initialize-at-run-time=io.floci.az.services.entra.SigningKeyProvider,
+      --initialize-at-run-time=io.floci.az.services.eventgrid.EventGridService
 
 floci-az:
   port: 4577
@@ -185,6 +186,10 @@ floci-az:
       enabled: true       # central management plane (/providers, /subscriptions, resource groups). Disabling turns OFF all ARM-based services.
     network:
       enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
+    event-grid:
+      enabled: true       # Microsoft.EventGrid — Custom Topics + webhook event subscriptions (HTTP pub/push)
+      default-region: eastus
+      max-delivery-attempts: 30
 
   auth:
     # dev: accept any credentials without signature validation

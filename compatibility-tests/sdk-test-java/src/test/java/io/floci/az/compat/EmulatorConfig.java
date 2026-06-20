@@ -55,6 +55,11 @@ public final class EmulatorConfig {
     private static final String BASE =
         System.getenv().getOrDefault("FLOCI_AZ_ENDPOINT", "http://localhost:4577");
 
+    /** HTTP base URL of the running emulator (e.g. {@code http://localhost:4577}). */
+    static String httpBase() {
+        return BASE;
+    }
+
     static final String COSMOS_KEY =
         "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
 
