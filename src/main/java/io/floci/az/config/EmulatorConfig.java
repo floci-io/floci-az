@@ -121,6 +121,7 @@ public interface EmulatorConfig {
         KeyVaultConfig         keyVault();
         EventHubConfig         eventHub();
         SqlServiceConfig       sql();
+        PostgresServiceConfig  postgres();
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
         VmConfig               vm();
@@ -485,6 +486,43 @@ public interface EmulatorConfig {
         /**
          * Maximum seconds to wait for a SQL Server container to become ready.
          * SQL Server typically takes 10-20 s to initialise.
+         */
+        @WithDefault("60")
+        int startupTimeoutSeconds();
+
+        /** Default host port. 0 lets the OS pick a free port (recommended when running multiple servers). */
+        @WithDefault("0")
+        int defaultPort();
+    }
+
+    /**
+     * Azure Database for PostgreSQL (Flexible Server) — {@code Microsoft.DBforPostgreSQL/flexibleServers}.
+     *
+     * <p>Unlike Azure SQL there is <em>no EULA</em>: the {@code postgres} image is
+     * PostgreSQL-licensed. Each logical flexible server maps to one {@code postgres}
+     * container; the application connects to it directly using the host/port that
+     * floci-az allocates.
+     */
+    interface PostgresServiceConfig {
+        /** Enable or disable the Azure Database for PostgreSQL service. */
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no PostgreSQL container is started; servers are created in state and
+         * transition immediately to {@code state=Ready}. The data plane is unavailable (no live
+         * connection endpoint). Useful for fast {@code plan}/CI runs without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
+        /** Docker image for the PostgreSQL container. 17 is the current stable major. */
+        @WithDefault("postgres:17-alpine")
+        String image();
+
+        /**
+         * Maximum seconds to wait for a PostgreSQL container to become ready.
+         * PostgreSQL typically opens its port within a few seconds.
          */
         @WithDefault("60")
         int startupTimeoutSeconds();

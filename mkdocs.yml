@@ -79,6 +79,7 @@ nav:
     - Service Bus: services/service-bus.md
     - Cosmos DB: services/cosmos.md
     - Azure SQL Database: services/sql.md
+    - Azure Database for PostgreSQL: services/postgresql.md
     - Azure Kubernetes Service: services/aks.md
     - API Management: services/apim.md
     - Virtual Network: services/network.md

@@ -104,8 +104,42 @@ resource "azurerm_redis_cache" "redis" {
   minimum_tls_version = "1.2"
 }
 
+resource "azurerm_postgresql_flexible_server" "pg" {
+  name                          = "floci-test-pg"
+  resource_group_name           = azurerm_resource_group.rg.name
+  location                      = azurerm_resource_group.rg.location
+  version                       = "16"
+  administrator_login           = "psqladmin"
+  administrator_password        = "FlociAz_Strong123!"
+  storage_mb                    = 32768
+  sku_name                      = "B_Standard_B1ms"
+  public_network_access_enabled = true
+
+  lifecycle {
+    ignore_changes = [zone]
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_database" "pgdb" {
+  name      = "floci-test-db"
+  server_id = azurerm_postgresql_flexible_server.pg.id
+  charset   = "UTF8"
+  collation = "en_US.utf8"
+}
+
+resource "azurerm_postgresql_flexible_server_firewall_rule" "pgfw" {
+  name             = "AllowAll"
+  server_id        = azurerm_postgresql_flexible_server.pg.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "255.255.255.255"
+}
+
 output "vm_id" {
   value = azurerm_linux_virtual_machine.vm.id
+}
+
+output "postgres_fqdn" {
+  value = azurerm_postgresql_flexible_server.pg.fqdn
 }
 
 output "redis_hostname" {

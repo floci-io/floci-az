@@ -136,3 +136,17 @@ setup() {
     assert_output --partial "Succeeded"
     assert_output --partial "loginServer"
 }
+
+@test "OpenTofu: postgresql flexible server created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.DBforPostgreSQL/flexibleServers"
+    assert_output --partial "Succeeded"
+    assert_output --partial "fullyQualifiedDomainName"
+}
+
+@test "OpenTofu: postgresql flexible server database created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_NAME}/databases/${PG_DB_NAME}"
+    assert_success
+    assert_output --partial "$PG_DB_NAME"
+}

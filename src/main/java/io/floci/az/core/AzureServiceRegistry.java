@@ -39,6 +39,7 @@ public class AzureServiceRegistry {
             case "keyvault"   -> config.services().keyVault().enabled();
             case "eventhub"   -> config.services().eventHub().enabled();
             case "sql"        -> config.services().sql().enabled();
+            case "postgres"   -> config.services().postgres().enabled();
             case "servicebus" -> config.services().serviceBus().enabled();
             case "aks"        -> config.services().aks().enabled();
             case "vm"         -> config.services().vm().enabled();

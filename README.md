@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), and Microsoft Entra ID (OpenID Connect / OAuth2 token issuance).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), and Microsoft Entra ID (OpenID Connect / OAuth2 token issuance).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -153,6 +153,7 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 | Event Hubs          | ✅                         | ❌                                           | ❌                                                                           |
 | Service Bus         | ✅                         | ❌                                           | ❌                                                                           |
 | Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
+| Azure DB for PostgreSQL | ✅                     | ❌                                           | ❌                                                                           |
 | AKS (Kubernetes)    | ✅                         | ❌                                           | ❌                                                                           |
 | API Management      | ✅                         | ❌                                           | ❌                                                                           |
 | Virtual Machines    | ✅                         | ❌                                           | ❌                                                                           |
@@ -295,6 +296,7 @@ flowchart LR
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
 | **Service Bus**         | `/{account}-servicebus/` + AMQP `:5673` | Queues, topics, subscriptions (created dynamically); AMQP 1.0 data plane via Artemis sidecar, or mocked (management plane only)                                                                             |
 | **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed `azure-sql-edge` containers; dynamic port allocation                                                                                                               |
+| **Azure Database for PostgreSQL** | ARM path (`Microsoft.DBforPostgreSQL`) + `/{account}-postgres/` | Flexible servers, databases, firewall rules, configurations; Docker-backed `postgres:17-alpine` containers (no EULA), dynamic port allocation, or mocked |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
 | **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
 | **Virtual Network**     | ARM path (`Microsoft.Network`) | VNet, subnet, NIC, public IP, and NSG ARM resources; subnet listing is scoped to the parent VNet; NIC private IPs are synthesized for VM/Terraform compatibility |
@@ -369,6 +371,7 @@ Floci AZ uses real Docker containers when in-process emulation would reduce fide
 | Cosmos DB Cassandra | `scylladb/scylla:6.2` | CQL-compatible drop-in |
 | Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop — standard Gremlin traversals |
 | Azure SQL Database | `mcr.microsoft.com/azure-sql-edge` | SQL Server engine (per server) |
+| Azure Database for PostgreSQL | `postgres:17-alpine` | PostgreSQL engine (per flexible server) |
 | AKS | `rancher/k3s:latest` | Kubernetes API server via k3s |
 | Azure Cache for Redis | `valkey/valkey:8-alpine` | Redis / Valkey protocol (per cache) |
 | Azure Container Registry | `registry:2` | OCI-compatible registry for docker push and docker pull (shared) |
@@ -618,7 +621,7 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, API Management, SQL | 242 |
 | `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
 | `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
-| `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`                                                                                                 |    12 |
+| `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database)                                            |    14 |
 | `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login                                                                 |    13 |
 
 ‡ Ships with the Entra ID feature ([#23](https://github.com/floci-io/floci-az/issues/23)).

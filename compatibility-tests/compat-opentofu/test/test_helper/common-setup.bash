@@ -30,6 +30,8 @@ export NIC_NAME="floci-test-nic"
 export VM_NAME="floci-test-vm"
 export REDIS_NAME="floci-test-redis"
 export ACR_NAME="flocitestacr"
+export PG_NAME="floci-test-pg"
+export PG_DB_NAME="floci-test-db"
 export SUB_ID="${TF_VAR_subscription_id}"
 
 arm_get() {

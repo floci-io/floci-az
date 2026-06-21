@@ -355,6 +355,29 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Azure Database for PostgreSQL (Flexible Server) — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.DBforPostgreSQL/flexibleServers/...
+        //   subscriptions/{sub}/providers/Microsoft.DBforPostgreSQL/checkNameAvailability
+        // The api-version arrives only as a query param and is ignored here; routing is by namespace.
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.DBforPostgreSQL/")) {
+            Map<String, String> pgQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> pgQueryParams.put(k, v.get(0)));
+            AzureRequest pgRequest = new AzureRequest(
+                requestContext.getMethod(), "postgres", "postgres", path, headers,
+                requestContext.getEntityStream(), pgQueryParams, null, secure);
+            AuthContext pgAuth = authPipeline.resolve(pgRequest);
+            pgRequest = new AzureRequest(
+                requestContext.getMethod(), "postgres", "postgres", path, headers,
+                requestContext.getEntityStream(), pgQueryParams, pgAuth, secure);
+            Optional<AzureServiceHandler> pgHandler = serviceRegistry.resolve("postgres");
+            if (pgHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM PostgreSQL request to PostgresHandler: %s %s", requestContext.getMethod(), path);
+                return pgHandler.get().handle(pgRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Azure Virtual Machines — ARM management-plane paths:
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Compute/virtualMachines/...
         //   subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}
@@ -529,6 +552,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-sql")) {
             serviceType = "sql";
             accountName = accountName.substring(0, accountName.length() - 4);
+        } else if (accountName.endsWith("-postgres")) {
+            serviceType = "postgres";
+            accountName = accountName.substring(0, accountName.length() - 9);
         } else if (accountName.endsWith("-servicebus")) {
             serviceType = "servicebus";
             accountName = accountName.substring(0, accountName.length() - 11);
