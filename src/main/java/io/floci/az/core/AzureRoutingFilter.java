@@ -178,6 +178,26 @@ public class AzureRoutingFilter {
             }
         }
 
+        // Service Bus: {account}.servicebus.windows.net
+        if (hostOnly != null && hostOnly.endsWith(".servicebus.windows.net")) {
+            String sbAccount = hostOnly.substring(0, hostOnly.length() - ".servicebus.windows.net".length());
+            Map<String, String> sbQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sbQueryParams.put(k, v.get(0)));
+            AzureRequest sbRequest = new AzureRequest(
+                requestContext.getMethod(), sbAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), sbQueryParams, null, secure);
+            AuthContext sbAuth = authPipeline.resolve(sbRequest);
+            sbRequest = new AzureRequest(
+                requestContext.getMethod(), sbAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), sbQueryParams, sbAuth, secure);
+            Optional<AzureServiceHandler> sbHandler = serviceRegistry.resolve("servicebus");
+            if (sbHandler.isPresent()) {
+                LOGGER.infof("Dispatching servicebus.windows.net request to ServiceBusHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, sbAccount);
+                return sbHandler.get().handle(sbRequest);
+            }
+        }
+
         // Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
         //   {tenant}/oauth2/v2.0/token, {tenant}/oauth2/token,
         //   {tenant}/discovery/v2.0/keys,
@@ -444,6 +464,37 @@ public class AzureRoutingFilter {
         }
 
         String[] parts = path.split("/", 2);
+        String firstSegment = (parts.length > 0) ? parts[0] : "";
+        boolean hasServiceBusSuffix = firstSegment.endsWith("-servicebus");
+
+        // Service Bus root-level spec paths (like $namespaceinfo or $Resources/...) or AtomPub XML requests
+        String contentType = requestContext.getHeaderString(HttpHeaders.CONTENT_TYPE);
+        String accept = requestContext.getHeaderString(HttpHeaders.ACCEPT);
+        boolean isServiceBusRequest = !hasServiceBusSuffix && (
+                (contentType != null && contentType.contains("application/atom+xml"))
+                || (accept != null && accept.contains("application/atom+xml"))
+                || path.startsWith("$namespaceinfo")
+                || path.startsWith("$Resources")
+        );
+
+        if (isServiceBusRequest) {
+            String defaultAccount = "devstoreaccount1";
+            Map<String, String> queryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+            AzureRequest azureRequest = new AzureRequest(
+                requestContext.getMethod(), defaultAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), queryParams, null, secure);
+            AuthContext authContext = authPipeline.resolve(azureRequest);
+            azureRequest = new AzureRequest(
+                requestContext.getMethod(), defaultAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), queryParams, authContext, secure);
+            Optional<AzureServiceHandler> handler = serviceRegistry.resolve("servicebus");
+            if (handler.isPresent()) {
+                LOGGER.infof("Routing Service Bus AtomPub/spec request: %s %s → account=%s",
+                    requestContext.getMethod(), path, defaultAccount);
+                return handler.get().handle(azureRequest);
+            }
+        }
 
         // ---------------------------------------------------------------
         // Java Cosmos SDK compatibility: the SDK ignores the path component
@@ -452,7 +503,6 @@ public class AzureRoutingFilter {
         // (dbs, colls, docs, …) to the Cosmos handler using the default
         // account so the Java SDK can operate without path-based routing.
         // ---------------------------------------------------------------
-        String firstSegment = (parts.length > 0) ? parts[0] : "";
         if (firstSegment.isEmpty() || COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
             String defaultAccount = "devstoreaccount1";
             String resourcePath   = path; // e.g. "" | "dbs" | "dbs/mydb/colls/items"
