@@ -134,6 +134,52 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "pgfw" {
   end_ip_address   = "255.255.255.255"
 }
 
+resource "azurerm_subnet" "pe_subnet" {
+  name                 = "floci-test-pe-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.2.0/24"]
+}
+
+resource "azurerm_private_dns_zone" "pdz" {
+  name                = "privatelink.blob.core.windows.net"
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "pdzvnl" {
+  name                  = "floci-test-pdzvnl"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.pdz.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+}
+
+resource "azurerm_private_endpoint" "pe" {
+  name                = "floci-test-pe"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = azurerm_subnet.pe_subnet.id
+
+  private_service_connection {
+    name                           = "floci-test-psc"
+    private_connection_resource_id = azurerm_storage_account.sa.id
+    subresource_names              = ["blob"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "floci-test-pdzg"
+    private_dns_zone_ids = [azurerm_private_dns_zone.pdz.id]
+  }
+}
+
+output "private_dns_zone_id" {
+  value = azurerm_private_dns_zone.pdz.id
+}
+
+output "private_endpoint_id" {
+  value = azurerm_private_endpoint.pe.id
+}
+
 output "vm_id" {
   value = azurerm_linux_virtual_machine.vm.id
 }

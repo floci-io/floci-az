@@ -272,4 +272,300 @@ class NetworkHandlerTest {
         given().when().get(BASE + "/dnsZones/example.com/CNAME/alias" + API)
                 .then().statusCode(404);
     }
+
+    @Test
+    void privateDnsZoneAndRecordSetsLifecycle() {
+        String zoneBody = """
+                {
+                  "location": "global",
+                  "tags": {"project": "floci"}
+                }
+                """;
+
+        // 1. Create Private DNS Zone
+        given().contentType("application/json").body(zoneBody)
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("privatelink.blob.core.windows.net"))
+                .body("type", equalTo("Microsoft.Network/privateDnsZones"))
+                .body("location", equalTo("global"))
+                .body("tags.project", equalTo("floci"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.numberOfRecordSets", equalTo(1))
+                .body("properties.numberOfVirtualNetworkLinks", equalTo(0))
+                .body("properties.maxNumberOfVirtualNetworkLinks", equalTo(1000))
+                .body("properties.nameServers", equalTo(null));
+
+        // 2. Default SOA record is seeded (no NS root for private zones)
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/SOA/@" + API)
+                .then().statusCode(200)
+                .body("type", equalTo("Microsoft.Network/privateDnsZones/SOA"))
+                .body("properties.SOARecord.host", equalTo("azureprivatedns.net."));
+
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/NS/@" + API)
+                .then().statusCode(404);
+
+        // 3. Create A record
+        String etag = given().contentType("application/json")
+                .body("""
+                      { "properties": { "ttl": 10, "aRecords": [{"ipv4Address": "10.0.0.4"}] } }
+                      """)
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/A/myaccount" + API)
+                .then().statusCode(201)
+                .body("type", equalTo("Microsoft.Network/privateDnsZones/A"))
+                .body("properties.fqdn", equalTo("myaccount.privatelink.blob.core.windows.net."))
+                .body("properties.ARecords[0].ipv4Address", equalTo("10.0.0.4"))
+                .extract().path("etag");
+
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net" + API)
+                .then().statusCode(200)
+                .body("properties.numberOfRecordSets", equalTo(2));
+
+        // 4. ETag concurrency
+        given().contentType("application/json").body("{\"properties\":{\"ttl\":10}}")
+                .header("If-Match", "\"wrong\"")
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/A/myaccount" + API)
+                .then().statusCode(412);
+
+        given().contentType("application/json").body("{\"properties\":{\"ttl\":10}}")
+                .header("If-None-Match", "*")
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/A/myaccount" + API)
+                .then().statusCode(412);
+
+        // 5. PTR record (private-DNS specific type)
+        given().contentType("application/json")
+                .body("""
+                      { "properties": { "ttl": 3600, "ptrRecords": [{"ptrdname": "host.contoso.com."}] } }
+                      """)
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/PTR/4" + API)
+                .then().statusCode(201)
+                .body("type", equalTo("Microsoft.Network/privateDnsZones/PTR"));
+
+        // 6. NS is not a valid private-DNS record type -> not found via dispatch
+        given().contentType("application/json").body("{\"properties\":{\"ttl\":3600}}")
+                .when().put(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/NS/sub" + API)
+                .then().statusCode(404);
+
+        // 7. List all record sets (SOA@, A/myaccount, PTR/4)
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/recordsets" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(3));
+
+        // 8. Root SOA cannot be deleted
+        given().when().delete(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/SOA/@" + API)
+                .then().statusCode(400)
+                .body("error.code", equalTo("BadRequest"));
+
+        // 9. Delete A record -> count back to 1
+        given().when().delete(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/A/myaccount" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net" + API)
+                .then().statusCode(200)
+                .body("properties.numberOfRecordSets", equalTo(2)); // SOA@ + PTR/4
+
+        // 10. Delete zone cascades records
+        given().when().delete(BASE + "/privateDnsZones/privatelink.blob.core.windows.net" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/privateDnsZones/privatelink.blob.core.windows.net/PTR/4" + API)
+                .then().statusCode(404);
+    }
+
+    @Test
+    void privateDnsZoneVirtualNetworkLinkLifecycle() {
+        given().contentType("application/json").body("{\"location\":\"global\"}")
+                .when().put(BASE + "/privateDnsZones/contoso.internal" + API)
+                .then().statusCode(201);
+
+        String linkBody = """
+                {
+                  "location": "global",
+                  "properties": {
+                    "registrationEnabled": false,
+                    "virtualNetwork": {
+                      "id": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/virtualNetworks/vnet1"
+                    }
+                  }
+                }
+                """;
+
+        given().contentType("application/json").body(linkBody)
+                .when().put(BASE + "/privateDnsZones/contoso.internal/virtualNetworkLinks/link1" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("link1"))
+                .body("type", equalTo("Microsoft.Network/privateDnsZones/virtualNetworkLinks"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.virtualNetworkLinkState", equalTo("Completed"))
+                .body("properties.registrationEnabled", equalTo(false));
+
+        given().when().get(BASE + "/privateDnsZones/contoso.internal" + API)
+                .then().statusCode(200)
+                .body("properties.numberOfVirtualNetworkLinks", equalTo(1));
+
+        given().when().get(BASE + "/privateDnsZones/contoso.internal/virtualNetworkLinks" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("link1"));
+
+        given().when().delete(BASE + "/privateDnsZones/contoso.internal/virtualNetworkLinks/link1" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/privateDnsZones/contoso.internal" + API)
+                .then().statusCode(200)
+                .body("properties.numberOfVirtualNetworkLinks", equalTo(0));
+    }
+
+    @Test
+    void privateEndpointLifecycleAndNicSynthesis() {
+        String peBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "subnet": {
+                      "id": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/pe-subnet"
+                    },
+                    "privateLinkServiceConnections": [
+                      {
+                        "name": "conn1",
+                        "properties": {
+                          "privateLinkServiceId": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Storage/storageAccounts/sa1",
+                          "groupIds": ["blob"]
+                        }
+                      }
+                    ]
+                  }
+                }
+                """;
+
+        String nicId = given().contentType("application/json").body(peBody)
+                .when().put(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(201)
+                .body("name", equalTo("pe1"))
+                .body("type", equalTo("Microsoft.Network/privateEndpoints"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.privateLinkServiceConnections[0].id",
+                        equalTo("/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/privateEndpoints/pe1/privateLinkServiceConnections/conn1"))
+                .body("properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status", equalTo("Approved"))
+                .body("properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.actionsRequired", equalTo("None"))
+                .body("properties.networkInterfaces[0].id", org.hamcrest.Matchers.notNullValue())
+                .extract().path("properties.networkInterfaces[0].id");
+
+        // Synthesized NIC is retrievable and carries a private IP
+        String nicTail = nicId.substring(nicId.indexOf("/providers/Microsoft.Network/") + "/providers/Microsoft.Network/".length());
+        given().when().get(BASE + "/" + nicTail + API)
+                .then().statusCode(200)
+                .body("type", equalTo("Microsoft.Network/networkInterfaces"))
+                .body("properties.ipConfigurations[0].properties.privateIPAddress", equalTo("10.0.0.4"));
+
+        // Private DNS zone group
+        given().contentType("application/json")
+                .body("""
+                      {
+                        "properties": {
+                          "privateDnsZoneConfigs": [
+                            {
+                              "name": "config1",
+                              "properties": {
+                                "privateDnsZoneId": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                      """)
+                .when().put(BASE + "/privateEndpoints/pe1/privateDnsZoneGroups/default" + API)
+                .then().statusCode(201)
+                .body("type", equalTo("Microsoft.Network/privateEndpoints/privateDnsZoneGroups"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.privateDnsZoneConfigs[0].properties.privateDnsZoneId", org.hamcrest.Matchers.notNullValue());
+
+        given().when().get(BASE + "/privateEndpoints/pe1/privateDnsZoneGroups" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1));
+
+        // Delete endpoint cascades NIC + zone group
+        given().when().delete(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/" + nicTail + API)
+                .then().statusCode(404);
+
+        given().when().get(BASE + "/privateEndpoints/pe1/privateDnsZoneGroups/default" + API)
+                .then().statusCode(404);
+    }
+
+    @Test
+    void privateLinkServiceSynthesizesAlias() {
+        String plsBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "loadBalancerFrontendIpConfigurations": [
+                      {"id": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/loadBalancers/lb/frontendIPConfigurations/fe"}
+                    ]
+                  }
+                }
+                """;
+
+        given().contentType("application/json").body(plsBody)
+                .when().put(BASE + "/privateLinkServices/pls1" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("pls1"))
+                .body("type", equalTo("Microsoft.Network/privateLinkServices"))
+                .body("properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.alias", org.hamcrest.Matchers.notNullValue());
+
+        given().when().get(BASE + "/privateLinkServices" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("pls1"));
+    }
+
+    @Test
+    void privateEndpointUpdateReusesNicAndDoesNotLeak() {
+        String peBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "privateLinkServiceConnections": [
+                      {"name": "conn1", "properties": {
+                        "privateLinkServiceId": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Storage/storageAccounts/sa1",
+                        "groupIds": ["blob"]}}
+                    ]
+                  }
+                }
+                """;
+
+        // Create (201), then update twice (200) — Azure keeps a single stable NIC.
+        String firstNic = given().contentType("application/json").body(peBody)
+                .when().put(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(201)
+                .extract().path("properties.networkInterfaces[0].id");
+
+        for (int i = 0; i < 2; i++) {
+            given().contentType("application/json").body(peBody)
+                    .when().put(BASE + "/privateEndpoints/pe1" + API)
+                    .then().statusCode(200)
+                    .body("properties.networkInterfaces[0].id", equalTo(firstNic));
+        }
+
+        // Exactly one synthesized NIC exists — no per-update leak.
+        given().when().get(BASE + "/networkInterfaces" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].id", equalTo(firstNic));
+
+        // Cascade delete removes it — nothing orphaned.
+        given().when().delete(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/networkInterfaces" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(0));
+
+        given().when().get(BASE + "/privateEndpoints" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(0));
+    }
 }

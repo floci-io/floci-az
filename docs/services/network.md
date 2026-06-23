@@ -13,10 +13,14 @@ Compatible with ARM-speaking clients, Terraform's AzureRM provider, and OpenTofu
 - **Network interfaces** — CreateOrUpdate, Get, Delete, and List by resource group
 - **Public IP addresses** — CreateOrUpdate, Get, Delete, and List by resource group
 - **Network security groups** — CreateOrUpdate, Get, Delete, and List by resource group
-- **Terraform/OpenTofu compatibility** — supports the Network resources needed by `azurerm_linux_virtual_machine`
+- **Private DNS zones** — CreateOrUpdate, Get, Delete, and List, with record sets (A, AAAA, CNAME, MX, PTR, SOA, SRV, TXT); a default SOA record set is seeded on creation, record/link counts are tracked, and ETag (`If-Match` / `If-None-Match`) concurrency is enforced
+- **Private DNS virtual network links** — CreateOrUpdate, Get, Delete, and List under a private DNS zone; links report `virtualNetworkLinkState = "Completed"`
+- **Private endpoints** — CreateOrUpdate, Get, Delete, and List; `privateLinkServiceConnections` are auto-approved, a backing network interface with a synthesized private IP is created, and nested `privateDnsZoneGroups` are supported
+- **Private link services** — CreateOrUpdate, Get, Delete, and List, with a synthesized `alias`
+- **Terraform/OpenTofu compatibility** — supports the Network resources needed by `azurerm_linux_virtual_machine`, `azurerm_private_dns_zone`, `azurerm_private_dns_zone_virtual_network_link`, and `azurerm_private_endpoint`
 - **Resource group listing** — Network resources appear in ARM resource group resource listings
 
-Created resources return `properties.provisioningState = "Succeeded"`. NICs synthesize a dynamic private IP (`10.0.0.4`) when no private IP is supplied, and public IP resources synthesize a dynamic public IP (`20.0.0.4`) when no address is supplied.
+Created resources return `properties.provisioningState = "Succeeded"`. NICs synthesize a dynamic private IP (`10.0.0.4`) when no private IP is supplied, and public IP resources synthesize a dynamic public IP (`20.0.0.4`) when no address is supplied. Creating a private endpoint likewise synthesizes a backing network interface with a `10.0.0.4` private IP.
 
 ---
 
@@ -46,6 +50,26 @@ DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/publ
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/networkSecurityGroups/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/networkSecurityGroups/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/networkSecurityGroups/{name}
+
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}/{recordType}/{record}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}/recordsets
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}/virtualNetworkLinks/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}/virtualNetworkLinks/{name}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateDnsZones/{zone}/virtualNetworkLinks/{name}
+
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{name}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{name}
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{pe}/privateDnsZoneGroups/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{pe}/privateDnsZoneGroups/{name}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateEndpoints/{pe}/privateDnsZoneGroups/{name}
+
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateLinkServices/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateLinkServices/{name}
+DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/privateLinkServices/{name}
 ```
 
 ---
@@ -71,7 +95,7 @@ The Network coverage lives in:
 - `compatibility-tests/compat-terraform`
 - `compatibility-tests/compat-opentofu`
 
-The current Network scope is enough for Terraform/OpenTofu to create and destroy a resource group with VNet, subnet, NIC, public IP, NSG, and a VM that references the NIC.
+The current Network scope is enough for Terraform/OpenTofu to create and destroy a resource group with VNet, subnet, NIC, public IP, NSG, a VM that references the NIC, and a Private Link stack (private DNS zone + virtual network link + private endpoint with a private DNS zone group).
 
 ---
 
@@ -95,7 +119,8 @@ floci-az:
 
 - No real L2/L3 networking, routing, peering, DNS, packet forwarding, or service endpoints
 - No NSG rule enforcement; NSG resources are stored as ARM state only
-- No private endpoint, route table, NAT gateway, load balancer, or application gateway behavior
+- No route table, NAT gateway, load balancer, or application gateway behavior
+- Private endpoints and private DNS zones are ARM-state only — a backing NIC with a synthesized `10.0.0.4` is created and connections are auto-approved, but there is no real private-link traffic, name registration, or DNS resolution against the private zone records
 - No real IP address management; default private and public IPs are synthesized for SDK and provider compatibility
 - Deletes are state-only; deleting a VNet also removes its child subnets from the in-memory store
 
