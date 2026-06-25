@@ -227,6 +227,23 @@ public class BlobServiceTest {
     }
 
     @Test
+    void emptyBlobInvalidRangeIncludesContentRange() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-range", "bytes=0-0")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(416)
+            .header("Content-Range", "bytes */0")
+            .header("x-ms-error-code", "InvalidRange");
+    }
+
+    @Test
     void malformedRangeReturns416() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

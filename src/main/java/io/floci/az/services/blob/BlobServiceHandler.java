@@ -287,9 +287,11 @@ public class BlobServiceHandler implements AzureServiceHandler {
                 rangeEnd   = parts.length > 1 && !parts[1].isEmpty()
                         ? Long.parseLong(parts[1]) : totalSize - 1;
                 if (rangeStart < 0 || rangeStart >= totalSize) {
-                    return new AzureErrorResponse("InvalidRange",
+                    return Response.fromResponse(new AzureErrorResponse("InvalidRange",
                             "The range specified is invalid for the current size of the resource.")
-                            .toXmlResponse(416);
+                            .toXmlResponse(416))
+                            .header("Content-Range", "bytes */" + totalSize)
+                            .build();
                 }
                 rangeEnd   = Math.min(rangeEnd, totalSize - 1);
                 isRangeRequest = true;

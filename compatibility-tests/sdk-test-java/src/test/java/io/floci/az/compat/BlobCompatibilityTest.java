@@ -197,6 +197,24 @@ class BlobCompatibilityTest {
         client.deleteBlobContainer(name);
     }
 
+    @Test
+    @DisplayName("empty blob range download: invalid range includes content range")
+    void emptyBlobRangeDownloadReturnsContentRange() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("empty-range.txt");
+
+        blob.upload(new java.io.ByteArrayInputStream(new byte[0]), 0, true);
+
+        BlobStorageException ex = assertThrows(BlobStorageException.class,
+            () -> blob.downloadStreamWithResponse(new ByteArrayOutputStream(), new BlobRange(0, 1L), null, null, false, null, Context.NONE));
+        assertEquals(BlobErrorCode.INVALID_RANGE, ex.getErrorCode());
+        assertEquals(416, ex.getStatusCode());
+        assertEquals("bytes */0", ex.getResponse().getHeaders().getValue("Content-Range"));
+
+        client.deleteBlobContainer(name);
+    }
+
     // --- Block Blob ---
 
     @Test
