@@ -196,6 +196,29 @@ public class BlobServiceTest {
     }
 
     @Test
+    void listBlobsWithDelimiterReturnsBlobPrefixes() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("nested")
+            .put("/{account}/{container}/level0/file.txt", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("top")
+            .put("/{account}/{container}/other.txt", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&delimiter=/", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<Delimiter>/</Delimiter>"))
+            .body(containsString("<BlobPrefix><Name>level0/</Name></BlobPrefix>"))
+            .body(containsString("<Blob><Name>other.txt</Name>"))
+            .body(not(containsString("<Blob><Name>level0/file.txt</Name>")));
+    }
+
+    @Test
     void rangeRequestReturnsPartialContent() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

@@ -390,24 +390,37 @@ public class BlobServiceHandler implements AzureServiceHandler {
 
     private Response listBlobs(AzureRequest request, String containerName) {
         String prefix = request.queryParams().getOrDefault("prefix", "");
+        String delimiter = request.queryParams().getOrDefault("delimiter", "");
         String keyPrefix = objKey(request.accountName(), containerName, prefix);
 
-        List<BlobModels.BlobItem> blobs = store.scan(k -> k.startsWith(keyPrefix)).stream()
-                .map(so -> {
-                    String name = so.metadata().getOrDefault("Name", so.key());
-                    return new BlobModels.BlobItem(name, new BlobModels.BlobProperties(
-                            RFC1123_DATE_TIME.format(so.lastModified()),
-                            so.etag(),
-                            (long) so.data().length,
-                            so.metadata().getOrDefault("Content-Type", "application/octet-stream"),
-                            so.metadata().getOrDefault("BlobType", "BlockBlob")
-                    ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null);
-                })
-                .collect(Collectors.toList());
+        List<BlobModels.BlobPrefix> blobPrefixes = new ArrayList<>();
+        List<BlobModels.BlobItem> blobs = new ArrayList<>();
+        Set<String> seenPrefixes = new HashSet<>();
+        store.scan(k -> k.startsWith(keyPrefix)).forEach(so -> {
+            String name = so.metadata().getOrDefault("Name", so.key());
+            if (!delimiter.isEmpty()) {
+                String remaining = name.substring(prefix.length());
+                int delimiterIndex = remaining.indexOf(delimiter);
+                if (delimiterIndex >= 0) {
+                    String blobPrefix = name.substring(0, prefix.length() + delimiterIndex + delimiter.length());
+                    if (seenPrefixes.add(blobPrefix)) {
+                        blobPrefixes.add(new BlobModels.BlobPrefix(blobPrefix));
+                    }
+                    return;
+                }
+            }
+            blobs.add(new BlobModels.BlobItem(name, new BlobModels.BlobProperties(
+                    RFC1123_DATE_TIME.format(so.lastModified()),
+                    so.etag(),
+                    (long) so.data().length,
+                    so.metadata().getOrDefault("Content-Type", "application/octet-stream"),
+                    so.metadata().getOrDefault("BlobType", "BlockBlob")
+            ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null));
+        });
 
         BlobModels.BlobListResponse response = new BlobModels.BlobListResponse(
                 "http://localhost:4577/" + request.accountName(),
-                containerName, prefix, "", 1000, blobs, ""
+                containerName, prefix, delimiter, "", 1000, new BlobModels.BlobItems(blobPrefixes, blobs), ""
         );
 
         return Response.ok(XmlUtils.toXml(response)).type(MediaType.APPLICATION_XML).build();
