@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -17,11 +18,13 @@ public class AzureServiceRegistry {
     private final EmulatorConfig config;
     private final CosmosLifecycleManager cosmosLifecycleManager;
 
+
     @Inject
     AzureServiceRegistry(Instance<AzureServiceHandler> all, EmulatorConfig config,
                          CosmosLifecycleManager cosmosLifecycleManager) {
         this.config = config;
         this.cosmosLifecycleManager = cosmosLifecycleManager;
+
         this.handlers = new ArrayList<>();
         for (AzureServiceHandler h : all) {
             this.handlers.add(h);
@@ -50,6 +53,7 @@ public class AzureServiceRegistry {
             case "monitor"    -> config.services().monitor().enabled();
             case "entra"      -> config.services().entra().enabled();
             case "arm"        -> config.services().arm().enabled();
+            case "eventgrid"  -> config.services().eventGrid().enabled();
             case "cosmos-engine" -> config.services().cosmos().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->

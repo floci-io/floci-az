@@ -303,6 +303,7 @@ flowchart LR
 | **Virtual Machines**    | ARM path (`Microsoft.Compute`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state; mocked — no Docker (container backing planned) |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, `listKeys`/`regenerateKey`; real `valkey/valkey:8-alpine` containers (data plane, primary key as password) or mocked; non-SSL port |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, `listCredentials`/`regenerateCredential`, `checkNameAvailability`; one shared `registry:2` (Docker Registry V2 push/pull, path-style `loginServer`, anonymous) or mocked |
+| **Event Grid**          | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | Custom Topics, `listKeys`/`regenerateKey`, webhook `eventSubscriptions` with subject/eventType filters; publish in Event Grid + CloudEvents 1.0 schemas; async webhook delivery with retry; `SubscriptionValidationEvent` handshake; HTTP-only (no sidecar) |
 
 <details>
 <summary><strong>API Management details</strong></summary>

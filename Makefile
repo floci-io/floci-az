@@ -424,6 +424,12 @@ test-sql:
 	cd $(JAVA_DIR) && mvn test -Dtest=SqlCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
+test-eventgrid:
+	@echo "==> Azure Event Grid compatibility test (Java SDK, no Docker)"
+	$(MAKE) run
+	cd $(JAVA_DIR) && mvn test -Dtest=EventGridCompatibilityTest; \
+	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
+
 # ── IaC compatibility ─────────────────────────────────────────────────────────
 
 test-terraform-compat:

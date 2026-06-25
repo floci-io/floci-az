@@ -15,6 +15,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -178,6 +179,26 @@ public class AzureRoutingFilter {
             }
         }
 
+        // Service Bus: {account}.servicebus.windows.net
+        if (hostOnly != null && hostOnly.endsWith(".servicebus.windows.net")) {
+            String sbAccount = hostOnly.substring(0, hostOnly.length() - ".servicebus.windows.net".length());
+            Map<String, String> sbQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sbQueryParams.put(k, v.get(0)));
+            AzureRequest sbRequest = new AzureRequest(
+                requestContext.getMethod(), sbAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), sbQueryParams, null, secure);
+            AuthContext sbAuth = authPipeline.resolve(sbRequest);
+            sbRequest = new AzureRequest(
+                requestContext.getMethod(), sbAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), sbQueryParams, sbAuth, secure);
+            Optional<AzureServiceHandler> sbHandler = serviceRegistry.resolve("servicebus");
+            if (sbHandler.isPresent()) {
+                LOGGER.infof("Dispatching servicebus.windows.net request to ServiceBusHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, sbAccount);
+                return sbHandler.get().handle(sbRequest);
+            }
+        }
+
         // Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
         //   {tenant}/oauth2/v2.0/token, {tenant}/oauth2/token,
         //   {tenant}/discovery/v2.0/keys,
@@ -292,19 +313,9 @@ public class AzureRoutingFilter {
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ContainerService/...
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerService/")) {
-            Map<String, String> aksQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> aksQueryParams.put(k, v.get(0)));
-            AzureRequest aksRequest = new AzureRequest(
-                requestContext.getMethod(), "aks", "aks", path, headers,
-                requestContext.getEntityStream(), aksQueryParams, null, secure);
-            AuthContext aksAuth = authPipeline.resolve(aksRequest);
-            aksRequest = new AzureRequest(
-                requestContext.getMethod(), "aks", "aks", path, headers,
-                requestContext.getEntityStream(), aksQueryParams, aksAuth, secure);
-            Optional<AzureServiceHandler> aksHandler = serviceRegistry.resolve("aks");
-            if (aksHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM AKS request to AksHandler: %s %s", requestContext.getMethod(), path);
-                return aksHandler.get().handle(aksRequest);
+            Response response = dispatchManagementPlane(requestContext, "aks", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -314,19 +325,9 @@ public class AzureRoutingFilter {
         //   subscriptions/{sub}/providers/Microsoft.ContainerRegistry/checkNameAvailability
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerRegistry/")) {
-            Map<String, String> acrQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> acrQueryParams.put(k, v.get(0)));
-            AzureRequest acrRequest = new AzureRequest(
-                requestContext.getMethod(), "acr", "acr", path, headers,
-                requestContext.getEntityStream(), acrQueryParams, null, secure);
-            AuthContext acrAuth = authPipeline.resolve(acrRequest);
-            acrRequest = new AzureRequest(
-                requestContext.getMethod(), "acr", "acr", path, headers,
-                requestContext.getEntityStream(), acrQueryParams, acrAuth, secure);
-            Optional<AzureServiceHandler> acrHandler = serviceRegistry.resolve("acr");
-            if (acrHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM ACR request to AcrHandler: %s %s", requestContext.getMethod(), path);
-                return acrHandler.get().handle(acrRequest);
+            Response response = dispatchManagementPlane(requestContext, "acr", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -338,19 +339,9 @@ public class AzureRoutingFilter {
         // here we just detect the ARM prefix and dispatch the full path.
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Sql/")) {
-            Map<String, String> sqlQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sqlQueryParams.put(k, v.get(0)));
-            AzureRequest sqlRequest = new AzureRequest(
-                requestContext.getMethod(), "sql", "sql", path, headers,
-                requestContext.getEntityStream(), sqlQueryParams, null, secure);
-            AuthContext sqlAuth = authPipeline.resolve(sqlRequest);
-            sqlRequest = new AzureRequest(
-                requestContext.getMethod(), "sql", "sql", path, headers,
-                requestContext.getEntityStream(), sqlQueryParams, sqlAuth, secure);
-            Optional<AzureServiceHandler> sqlHandler = serviceRegistry.resolve("sql");
-            if (sqlHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM SQL request to SqlHandler: %s %s", requestContext.getMethod(), path);
-                return sqlHandler.get().handle(sqlRequest);
+            Response response = dispatchManagementPlane(requestContext, "sql", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -383,19 +374,9 @@ public class AzureRoutingFilter {
         //   subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Compute/")) {
-            Map<String, String> vmQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> vmQueryParams.put(k, v.get(0)));
-            AzureRequest vmRequest = new AzureRequest(
-                requestContext.getMethod(), "vm", "vm", path, headers,
-                requestContext.getEntityStream(), vmQueryParams, null, secure);
-            AuthContext vmAuth = authPipeline.resolve(vmRequest);
-            vmRequest = new AzureRequest(
-                requestContext.getMethod(), "vm", "vm", path, headers,
-                requestContext.getEntityStream(), vmQueryParams, vmAuth, secure);
-            Optional<AzureServiceHandler> vmHandler = serviceRegistry.resolve("vm");
-            if (vmHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM VM request to VmHandler: %s %s", requestContext.getMethod(), path);
-                return vmHandler.get().handle(vmRequest);
+            Response response = dispatchManagementPlane(requestContext, "vm", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -404,19 +385,9 @@ public class AzureRoutingFilter {
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Cache/redis/...
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Cache/")) {
-            Map<String, String> redisQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> redisQueryParams.put(k, v.get(0)));
-            AzureRequest redisRequest = new AzureRequest(
-                requestContext.getMethod(), "redis", "redis", path, headers,
-                requestContext.getEntityStream(), redisQueryParams, null, secure);
-            AuthContext redisAuth = authPipeline.resolve(redisRequest);
-            redisRequest = new AzureRequest(
-                requestContext.getMethod(), "redis", "redis", path, headers,
-                requestContext.getEntityStream(), redisQueryParams, redisAuth, secure);
-            Optional<AzureServiceHandler> redisHandler = serviceRegistry.resolve("redis");
-            if (redisHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM Redis request to RedisHandler: %s %s", requestContext.getMethod(), path);
-                return redisHandler.get().handle(redisRequest);
+            Response response = dispatchManagementPlane(requestContext, "redis", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -425,19 +396,21 @@ public class AzureRoutingFilter {
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Communication/...
         // ---------------------------------------------------------------
         if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Communication/")) {
-            Map<String, String> emailQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
-            AzureRequest emailRequest = new AzureRequest(
-                requestContext.getMethod(), "email", "email", path, headers,
-                requestContext.getEntityStream(), emailQueryParams, null, secure);
-            AuthContext emailAuth = authPipeline.resolve(emailRequest);
-            emailRequest = new AzureRequest(
-                requestContext.getMethod(), "email", "email", path, headers,
-                requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
-            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
-            if (emailHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM Communication request to EmailHandler: %s %s", requestContext.getMethod(), path);
-                return emailHandler.get().handle(emailRequest);
+            Response response = dispatchManagementPlane(requestContext, "email", path, headers, secure);
+            if (response != null) {
+                return response;
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Azure Event Grid — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.EventGrid/topics/...
+        //   {topicScope}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.EventGrid/")) {
+            Response response = dispatchManagementPlane(requestContext, "eventgrid", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
@@ -467,6 +440,37 @@ public class AzureRoutingFilter {
         }
 
         String[] parts = path.split("/", 2);
+        String firstSegment = (parts.length > 0) ? parts[0] : "";
+        boolean hasServiceBusSuffix = firstSegment.endsWith("-servicebus");
+
+        // Service Bus root-level spec paths (like $namespaceinfo or $Resources/...) or AtomPub XML requests
+        String contentType = requestContext.getHeaderString(HttpHeaders.CONTENT_TYPE);
+        String accept = requestContext.getHeaderString(HttpHeaders.ACCEPT);
+        boolean isServiceBusRequest = !hasServiceBusSuffix && (
+                (contentType != null && contentType.contains("application/atom+xml"))
+                || (accept != null && accept.contains("application/atom+xml"))
+                || path.startsWith("$namespaceinfo")
+                || path.startsWith("$Resources")
+        );
+
+        if (isServiceBusRequest) {
+            String defaultAccount = "devstoreaccount1";
+            Map<String, String> queryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+            AzureRequest azureRequest = new AzureRequest(
+                requestContext.getMethod(), defaultAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), queryParams, null, secure);
+            AuthContext authContext = authPipeline.resolve(azureRequest);
+            azureRequest = new AzureRequest(
+                requestContext.getMethod(), defaultAccount, "servicebus",
+                path, headers, requestContext.getEntityStream(), queryParams, authContext, secure);
+            Optional<AzureServiceHandler> handler = serviceRegistry.resolve("servicebus");
+            if (handler.isPresent()) {
+                LOGGER.infof("Routing Service Bus AtomPub/spec request: %s %s → account=%s",
+                    requestContext.getMethod(), path, defaultAccount);
+                return handler.get().handle(azureRequest);
+            }
+        }
 
         // ---------------------------------------------------------------
         // Java Cosmos SDK compatibility: the SDK ignores the path component
@@ -475,7 +479,6 @@ public class AzureRoutingFilter {
         // (dbs, colls, docs, …) to the Cosmos handler using the default
         // account so the Java SDK can operate without path-based routing.
         // ---------------------------------------------------------------
-        String firstSegment = (parts.length > 0) ? parts[0] : "";
         if (firstSegment.isEmpty() || COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
             String defaultAccount = "devstoreaccount1";
             String resourcePath   = path; // e.g. "" | "dbs" | "dbs/mydb/colls/items"
@@ -546,6 +549,9 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-keyvault")) {
             serviceType = "keyvault";
             accountName = accountName.substring(0, accountName.length() - 9);
+        } else if (accountName.endsWith("-eventgrid")) {
+            serviceType = "eventgrid";
+            accountName = accountName.substring(0, accountName.length() - 10);
         } else if (accountName.endsWith("-eventhub")) {
             serviceType = "eventhub";
             accountName = accountName.substring(0, accountName.length() - 9);
@@ -618,6 +624,35 @@ public class AzureRoutingFilter {
         LOGGER.warnf("No handler found for serviceType: %s", serviceType);
         return new AzureErrorResponse("ServiceNotImplemented", "The specified service is not implemented.")
                 .toXmlResponse(Response.Status.NOT_IMPLEMENTED.getStatusCode());
+    }
+
+    /**
+     * Builds an {@link AzureRequest} for a path-routed management-plane call (account name and
+     * service type are both {@code serviceType}), resolves auth, and dispatches it to the matching
+     * handler. Returns {@code null} when no handler is registered or the service is disabled, so the
+     * caller can fall through to the next route.
+     */
+    private Response dispatchManagementPlane(ContainerRequestContext requestContext, String serviceType,
+                                             String path, HttpHeaders headers, boolean secure) {
+        Map<String, String> queryParams = new HashMap<>();
+        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+        InputStream entityStream = requestContext.getEntityStream();
+
+        AzureRequest request = new AzureRequest(
+            requestContext.getMethod(), serviceType, serviceType, path, headers,
+            entityStream, queryParams, null, secure);
+        AuthContext auth = authPipeline.resolve(request);
+        request = new AzureRequest(
+            requestContext.getMethod(), serviceType, serviceType, path, headers,
+            entityStream, queryParams, auth, secure);
+
+        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
+        if (handler.isPresent()) {
+            LOGGER.infof("Dispatching ARM %s request to %s: %s %s", serviceType,
+                handler.get().getClass().getSimpleName(), requestContext.getMethod(), path);
+            return handler.get().handle(request);
+        }
+        return null;
     }
 
     private String resolveServiceType(ContainerRequestContext requestContext, String resourcePath) {

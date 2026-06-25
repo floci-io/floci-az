@@ -132,6 +132,7 @@ public interface EmulatorConfig {
         EntraConfig            entra();
         ArmConfig              arm();
         NetworkConfig          network();
+        EventGridConfig        eventGrid();
 
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
@@ -139,6 +140,23 @@ public interface EmulatorConfig {
 
         // Added Email service configuration
         EmailServiceConfig email();
+    }
+
+    /**
+     * Microsoft.EventGrid — Custom Topics and webhook event subscriptions. HTTP-only:
+     * events published to a topic endpoint are fanned out to subscriber webhooks.
+     */
+    interface EventGridConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Region label baked into the topic data-plane endpoint host returned by ARM. */
+        @WithDefault("eastus")
+        String defaultRegion();
+
+        /** Default maximum delivery attempts when a subscription omits its own retry policy. */
+        @WithDefault("30")
+        int maxDeliveryAttempts();
     }
 
     interface MonitorConfig {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **eventgrid:** Azure Event Grid emulation (`Microsoft.EventGrid/topics` + `eventSubscriptions`) — the Azure counterpart of EventBridge/SNS, HTTP-only with no Docker sidecar. Custom Topic lifecycle (CreateOrUpdate, Get, Delete, List by resource group and subscription) returning a data-plane `properties.endpoint`, plus `listKeys`/`regenerateKey` (`{key1,key2}`). Classic scoped webhook `eventSubscriptions` with a `WebHook` destination and `filter` (`subjectBeginsWith`/`subjectEndsWith`/`includedEventTypes`/`isSubjectCaseSensitive`); creating one runs the `Microsoft.EventGrid.SubscriptionValidationEvent` handshake (or the CloudEvents `OPTIONS` abuse-protection probe). The data plane accepts `POST /{topic}-eventgrid/api/events` in both the **Event Grid** and **CloudEvents 1.0** schemas and fans matching events out to subscriber webhooks asynchronously, retried per the subscription's `retryPolicy` with exponential backoff; delivered events carry `topic` set to the topic resource id and the `aeg-event-type: Notification` header. Enabled by default. Compatibility: a `@QuarkusTest` covering ARM + publish + filtered delivery + validation, and a Java SDK suite (`azure-messaging-eventgrid`) wired into `make test-eventgrid`. WebHook destinations only; dead-lettering is best-effort (logged, not written to blob) ([#58](https://github.com/floci-io/floci-az/issues/58))
+
 ## [0.7.0] - 2026-06-18
 
 ### Added

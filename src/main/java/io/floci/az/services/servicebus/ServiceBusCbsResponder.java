@@ -98,6 +98,7 @@ public class ServiceBusCbsResponder {
             conn.setContainer("floci-az-cbs-responder");
             conn.open();
             Session session = conn.session();
+            session.setProperties(new java.util.HashMap<>());
             session.open();
 
             Receiver receiver = session.receiver("cbs-receiver");
