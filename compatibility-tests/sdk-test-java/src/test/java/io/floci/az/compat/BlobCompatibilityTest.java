@@ -1,6 +1,7 @@
 package io.floci.az.compat;
 
 import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobClientBuilder;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
@@ -135,6 +136,27 @@ class BlobCompatibilityTest {
             () -> blob.downloadContent());
         assertEquals(BlobErrorCode.BLOB_NOT_FOUND, ex.getErrorCode());
         assertEquals(404, ex.getStatusCode());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("expired blob SAS: rejects request")
+    void expiredBlobSasRejectsRequest() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("sas.txt");
+
+        byte[] content = "sas".getBytes(StandardCharsets.UTF_8);
+        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+
+        BlobClient sasBlob = new BlobClientBuilder()
+                .endpoint(EmulatorConfig.httpBase() + "/" + EmulatorConfig.ACCOUNT + "/" + name
+                        + "/sas.txt?sv=2023-11-03&sr=b&sp=r&se=2020-01-01T00%3A00%3A00Z&sig=expired")
+                .buildClient();
+        BlobStorageException ex = assertThrows(BlobStorageException.class, sasBlob::downloadContent);
+        assertEquals(BlobErrorCode.AUTHENTICATION_FAILED, ex.getErrorCode());
+        assertEquals(403, ex.getStatusCode());
 
         client.deleteBlobContainer(name);
     }

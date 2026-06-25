@@ -80,6 +80,23 @@ public class BlobServiceTest {
     }
 
     @Test
+    void expiredSasReturnsAuthenticationFailed() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?se=2000-01-01T00%3A00Z&sp=r&sv=2026-04-06&sr=b&sig=ignored",
+                    ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed")
+            .body(containsString("AuthenticationFailed"));
+    }
+
+    @Test
     void setAndGetBlobMetadata() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

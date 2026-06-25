@@ -72,7 +72,12 @@ public class BlobServiceHandler implements AzureServiceHandler {
         LOGGER.infof("BlobService handling: %s %s", method, path);
 
         Response response;
-        if (path.isEmpty() || path.equals("/")) {
+        if (request.authContext() != null && !request.authContext().isValid()) {
+            response = new AzureErrorResponse("AuthenticationFailed",
+                    "Server failed to authenticate the request. Make sure the value of Authorization header "
+                            + "is formed correctly including the signature.")
+                    .toXmlResponse(Response.Status.FORBIDDEN.getStatusCode());
+        } else if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listContainers(request);
             } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
