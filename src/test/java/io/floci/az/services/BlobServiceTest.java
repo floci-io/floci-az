@@ -61,6 +61,25 @@ public class BlobServiceTest {
     }
 
     @Test
+    void createDfsFile() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-version", "2023-11-03")
+            .when().put("/{container}/dir/file.txt?resource=file", CONTAINER)
+            .then()
+            .statusCode(201)
+            .header("x-ms-request-server-encrypted", "true");
+
+        given()
+            .when().get("/{account}/{container}/dir/file.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(equalTo(""));
+    }
+
+    @Test
     void setAndGetBlobMetadata() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

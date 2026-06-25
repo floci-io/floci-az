@@ -159,6 +159,25 @@ public class AzureRoutingFilter {
             }
         }
 
+        if (hostOnly != null && hostOnly.endsWith(".dfs.core.windows.net")) {
+            String blobAccount = hostOnly.substring(0, hostOnly.length() - ".dfs.core.windows.net".length());
+            Map<String, String> blobQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> blobQueryParams.put(k, v.get(0)));
+            AzureRequest blobRequest = new AzureRequest(
+                requestContext.getMethod(), blobAccount, "blob",
+                path, headers, requestContext.getEntityStream(), blobQueryParams, null, secure);
+            AuthContext blobAuth = authPipeline.resolve(blobRequest);
+            blobRequest = new AzureRequest(
+                requestContext.getMethod(), blobAccount, "blob",
+                path, headers, requestContext.getEntityStream(), blobQueryParams, blobAuth, secure);
+            Optional<AzureServiceHandler> blobHandler = serviceRegistry.resolve("blob");
+            if (blobHandler.isPresent()) {
+                LOGGER.infof("Dispatching dfs.core.windows.net request to BlobServiceHandler: %s %s (account=%s)",
+                    requestContext.getMethod(), path, blobAccount);
+                return blobHandler.get().handle(blobRequest);
+            }
+        }
+
         // Queue Storage: {account}.queue.core.windows.net
         if (hostOnly != null && hostOnly.endsWith(".queue.core.windows.net")) {
             String queueAccount = hostOnly.substring(0, hostOnly.length() - ".queue.core.windows.net".length());
