@@ -393,6 +393,8 @@ public class BlobServiceHandler implements AzureServiceHandler {
     private Response listBlobs(AzureRequest request, String containerName) {
         String prefix = request.queryParams().getOrDefault("prefix", "");
         String delimiter = request.queryParams().getOrDefault("delimiter", "");
+        String marker = request.queryParams().getOrDefault("marker", "");
+        int maxResults = parseMaxResults(request.queryParams().get("maxresults"));
         String keyPrefix = objKey(request.accountName(), containerName, prefix);
 
         List<BlobModels.BlobPrefix> blobPrefixes = new ArrayList<>();
@@ -419,13 +421,29 @@ public class BlobServiceHandler implements AzureServiceHandler {
                     so.metadata().getOrDefault("BlobType", "BlockBlob")
             ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null));
         });
+        blobs.sort(Comparator.comparing(BlobModels.BlobItem::Name));
 
+        int start = 0;
+        if (!marker.isEmpty()) {
+            while (start < blobs.size() && blobs.get(start).Name().compareTo(marker) < 0) {
+                start++;
+            }
+        }
+        int end = Math.min(start + maxResults, blobs.size());
+        String nextMarker = end < blobs.size() ? blobs.get(end).Name() : "";
         BlobModels.BlobListResponse response = new BlobModels.BlobListResponse(
                 "http://localhost:4577/" + request.accountName(),
-                containerName, prefix, delimiter, "", 1000, new BlobModels.BlobItems(blobPrefixes, blobs), ""
+                containerName, prefix, delimiter, marker, maxResults, new BlobModels.BlobItems(blobPrefixes, blobs.subList(start, end)), nextMarker
         );
 
         return Response.ok(XmlUtils.toXml(response)).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private static int parseMaxResults(String value) {
+        if (value == null || value.isBlank()) {
+            return 1000;
+        }
+        return Integer.parseInt(value);
     }
 
     // ── Block Blob ────────────────────────────────────────────────────────────

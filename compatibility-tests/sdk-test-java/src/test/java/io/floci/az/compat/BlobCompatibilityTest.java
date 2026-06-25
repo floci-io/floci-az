@@ -122,6 +122,32 @@ class BlobCompatibilityTest {
         client.deleteBlobContainer(name);
     }
 
+    @Test
+    @DisplayName("blob listing pagination: follows continuation token")
+    void blobListingPaginationFollowsContinuationToken() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+
+        for (int i = 0; i < 5; i++) {
+            byte[] data = ("content-" + i).getBytes(StandardCharsets.UTF_8);
+            container.getBlobClient("file-" + i + ".txt")
+                .upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        }
+
+        var pages = container.listBlobs(new ListBlobsOptions().setMaxResultsPerPage(2), null)
+                .iterableByPage()
+                .iterator();
+        assertTrue(pages.hasNext());
+        List<String> firstPage = pages.next().getElements().stream().map(BlobItem::getName).toList();
+        assertTrue(pages.hasNext());
+        List<String> secondPage = pages.next().getElements().stream().map(BlobItem::getName).toList();
+
+        assertEquals(List.of("file-0.txt", "file-1.txt"), firstPage);
+        assertEquals(List.of("file-2.txt", "file-3.txt"), secondPage);
+
+        client.deleteBlobContainer(name);
+    }
+
     // --- Error cases ---
 
     @Test

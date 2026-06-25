@@ -4,7 +4,11 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @QuarkusTest
@@ -238,6 +242,46 @@ public class BlobServiceTest {
     }
 
     @Test
+    void listBlobsHonorsMaxResultsAndMarker() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String name : new String[] {"a.txt", "b.txt", "c.txt"}) {
+            given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .body(name)
+                .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, name);
+        }
+
+        String page1 = given()
+            .when().get("/{account}/{container}?restype=container&comp=list&maxresults=2", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .extract().asString();
+
+        assertThat(page1, containsString("<MaxResults>2</MaxResults>"));
+        assertThat(page1, containsString("<Blob><Name>a.txt</Name>"));
+        assertThat(page1, containsString("<Blob><Name>b.txt</Name>"));
+        assertThat(page1, not(containsString("<Blob><Name>c.txt</Name>")));
+
+        String marker = nextMarker(page1);
+        assertThat(marker, not(emptyString()));
+
+        String page2 = given()
+            .queryParam("marker", marker)
+            .when().get("/{account}/{container}?restype=container&comp=list&maxresults=2", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .extract().asString();
+
+        assertThat(page2, containsString("<Marker>" + marker + "</Marker>"));
+        assertThat(page2, not(containsString("<Blob><Name>a.txt</Name>")));
+        assertThat(page2, not(containsString("<Blob><Name>b.txt</Name>")));
+        assertThat(page2, containsString("<Blob><Name>c.txt</Name>"));
+        assertThat(nextMarker(page2), is(""));
+    }
+
+    @Test
     void rangeRequestReturnsPartialContent() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -298,5 +342,11 @@ public class BlobServiceTest {
             .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
             .then()
             .statusCode(416);
+    }
+
+    private static String nextMarker(String response) {
+        Matcher matcher = Pattern.compile("<NextMarker>(.*?)</NextMarker>").matcher(response);
+        assertThat(matcher.find(), is(true));
+        return matcher.group(1);
     }
 }
