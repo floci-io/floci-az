@@ -106,12 +106,15 @@ jobs:
         with:
           sparse-checkout: compatibility-tests
 
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v4.1.0
 
       - name: Build test image
         uses: docker/build-push-action@v7
         with:
           context: compatibility-tests/${{ matrix.test }}
+          platforms: linux/amd64
           load: true
           tags: compat-${{ matrix.test }}
           cache-from: type=gha,scope=${{ matrix.test }}
@@ -121,7 +124,7 @@ jobs:
         id: tests
         run: |
           mkdir -p test-results
-          docker run --rm --network compat-net \
+          docker run --rm --platform linux/amd64 --network compat-net \
             -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
             ${{ matrix.extra_env }} \
             -v "$(pwd)/test-results:/results" \
