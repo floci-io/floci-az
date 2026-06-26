@@ -130,6 +130,12 @@ public class BannerLogger {
         if (config.services().eventGrid().enabled()) {
             sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
         }
+        if (config.services().monitor().enabled()) {
+            sb.append(serviceStatus("monitor", true, getStorageMode("monitor")));
+        }
+        if (config.services().email().enabled()) {
+            sb.append(String.format("   %-9s [%s]  %s\n", "email", "enabled ", "ACS Email (captured in-memory; no delivery)"));
+        }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
