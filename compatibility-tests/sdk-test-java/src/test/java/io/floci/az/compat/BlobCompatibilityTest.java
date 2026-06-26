@@ -10,6 +10,7 @@ import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
@@ -98,6 +99,25 @@ class BlobCompatibilityTest {
 
         long count = container.listBlobs().stream().count();
         assertEquals(5, count);
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("blob hierarchy listing: returns common prefixes")
+    void blobHierarchyListingReturnsPrefixes() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+
+        byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+        container.getBlobClient("level0/file1.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("level0/file2.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("root.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+
+        List<BlobItem> items = container.listBlobsByHierarchy("/", new ListBlobsOptions(), null).stream().toList();
+        assertEquals(List.of("level0/", "root.txt"), items.stream().map(BlobItem::getName).sorted().toList());
+        assertTrue(items.stream().filter(BlobItem::isPrefix).map(BlobItem::getName).toList().contains("level0/"));
+        assertTrue(items.stream().filter(item -> !item.isPrefix()).map(BlobItem::getName).toList().contains("root.txt"));
 
         client.deleteBlobContainer(name);
     }
