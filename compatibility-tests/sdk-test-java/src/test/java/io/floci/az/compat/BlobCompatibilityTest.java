@@ -10,6 +10,7 @@ import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
@@ -98,6 +99,25 @@ class BlobCompatibilityTest {
 
         long count = container.listBlobs().stream().count();
         assertEquals(5, count);
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("blob hierarchy listing: returns common prefixes")
+    void blobHierarchyListingReturnsPrefixes() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+
+        byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+        container.getBlobClient("level0/file1.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("level0/file2.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("root.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+
+        List<BlobItem> items = container.listBlobsByHierarchy("/", new ListBlobsOptions(), null).stream().toList();
+        assertEquals(List.of("level0/", "root.txt"), items.stream().map(BlobItem::getName).sorted().toList());
+        assertTrue(items.stream().filter(BlobItem::isPrefix).map(BlobItem::getName).toList().contains("level0/"));
+        assertTrue(items.stream().filter(item -> !item.isPrefix()).map(BlobItem::getName).toList().contains("root.txt"));
 
         client.deleteBlobContainer(name);
     }
@@ -193,6 +213,24 @@ class BlobCompatibilityTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         blob.downloadStreamWithResponse(out, new BlobRange(2, 4L), null, null, false, null, Context.NONE);
         assertEquals("2345", out.toString(StandardCharsets.UTF_8));
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("empty blob range download: invalid range includes content range")
+    void emptyBlobRangeDownloadReturnsContentRange() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("empty-range.txt");
+
+        blob.upload(new java.io.ByteArrayInputStream(new byte[0]), 0, true);
+
+        BlobStorageException ex = assertThrows(BlobStorageException.class,
+            () -> blob.downloadStreamWithResponse(new ByteArrayOutputStream(), new BlobRange(0, 1L), null, null, false, null, Context.NONE));
+        assertEquals(BlobErrorCode.INVALID_RANGE, ex.getErrorCode());
+        assertEquals(416, ex.getStatusCode());
+        assertEquals("bytes */0", ex.getResponse().getHeaders().getValue("Content-Range"));
 
         client.deleteBlobContainer(name);
     }

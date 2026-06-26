@@ -61,6 +61,25 @@ public class BlobServiceTest {
     }
 
     @Test
+    void createDfsFile() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-version", "2023-11-03")
+            .when().put("/{container}/dir/file.txt?resource=file", CONTAINER)
+            .then()
+            .statusCode(201)
+            .header("x-ms-request-server-encrypted", "true");
+
+        given()
+            .when().get("/{account}/{container}/dir/file.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(equalTo(""));
+    }
+
+    @Test
     void setAndGetBlobMetadata() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -196,6 +215,29 @@ public class BlobServiceTest {
     }
 
     @Test
+    void listBlobsWithDelimiterReturnsBlobPrefixes() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("nested")
+            .put("/{account}/{container}/level0/file.txt", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("top")
+            .put("/{account}/{container}/other.txt", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&delimiter=/", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<Delimiter>/</Delimiter>"))
+            .body(containsString("<BlobPrefix><Name>level0/</Name></BlobPrefix>"))
+            .body(containsString("<Blob><Name>other.txt</Name>"))
+            .body(not(containsString("<Blob><Name>level0/file.txt</Name>")));
+    }
+
+    @Test
     void rangeRequestReturnsPartialContent() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -224,6 +266,23 @@ public class BlobServiceTest {
             .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
             .then()
             .statusCode(416);
+    }
+
+    @Test
+    void emptyBlobInvalidRangeIncludesContentRange() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-range", "bytes=0-0")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(416)
+            .header("Content-Range", "bytes */0")
+            .header("x-ms-error-code", "InvalidRange");
     }
 
     @Test
