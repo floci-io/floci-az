@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-25
+
 ### Added
 
 - **eventgrid:** Azure Event Grid emulation (`Microsoft.EventGrid/topics` + `eventSubscriptions`) — the Azure counterpart of EventBridge/SNS, HTTP-only with no Docker sidecar. Custom Topic lifecycle (CreateOrUpdate, Get, Delete, List by resource group and subscription) returning a data-plane `properties.endpoint`, plus `listKeys`/`regenerateKey` (`{key1,key2}`). Classic scoped webhook `eventSubscriptions` with a `WebHook` destination and `filter` (`subjectBeginsWith`/`subjectEndsWith`/`includedEventTypes`/`isSubjectCaseSensitive`); creating one runs the `Microsoft.EventGrid.SubscriptionValidationEvent` handshake (or the CloudEvents `OPTIONS` abuse-protection probe). The data plane accepts `POST /{topic}-eventgrid/api/events` in both the **Event Grid** and **CloudEvents 1.0** schemas and fans matching events out to subscriber webhooks asynchronously, retried per the subscription's `retryPolicy` with exponential backoff; delivered events carry `topic` set to the topic resource id and the `aeg-event-type: Notification` header. Enabled by default. Compatibility: a `@QuarkusTest` covering ARM + publish + filtered delivery + validation, and a Java SDK suite (`azure-messaging-eventgrid`) wired into `make test-eventgrid`. WebHook destinations only; dead-lettering is best-effort (logged, not written to blob) ([#58](https://github.com/floci-io/floci-az/issues/58))
+
+### Fixed
+
+- **blob (Data Lake / DFS):** route `{account}.dfs.core.windows.net` requests to the Blob handler so ADLS Gen2 / `azure-storage-file-datalake` clients resolve against the emulator ([#88](https://github.com/floci-io/floci-az/issues/88))
+- **blob:** `listBlobs` now honours the `delimiter` parameter, returning `<BlobPrefix>` elements for virtual directories (hierarchical listing) instead of a flat blob list ([#84](https://github.com/floci-io/floci-az/issues/84))
+- **blob:** invalid range requests now include the `Content-Range: bytes */{size}` header alongside the `416 InvalidRange` response, matching Azure ([#82](https://github.com/floci-io/floci-az/issues/82))
+- **servicebus:** resolve an index error and add host-based routing (`{account}.servicebus.windows.net`) plus root-level AtomPub / `$namespaceinfo` / `$Resources` request routing so Service Bus SDK management operations resolve ([#79](https://github.com/floci-io/floci-az/issues/79))
+- **banner:** list the Monitor and Email services in the startup banner's enabled-services output ([#92](https://github.com/floci-io/floci-az/issues/92))
 
 ## [0.7.0] - 2026-06-18
 
@@ -206,7 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) — native binary (`latest`) and JVM (`latest-jvm`) tags
 - Single unified port `4577` for all services
 
-[Unreleased]: https://github.com/floci-io/floci-az/compare/0.7.0...HEAD
+[Unreleased]: https://github.com/floci-io/floci-az/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/floci-io/floci-az/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/floci-io/floci-az/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/floci-io/floci-az/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/floci-io/floci-az/compare/0.4.0...0.5.0
