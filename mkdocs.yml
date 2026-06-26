@@ -86,5 +86,7 @@ nav:
     - Azure Cache for Redis: services/redis.md
     - Azure Container Registry: services/acr.md
     - Event Grid: services/event-grid.md
+    - Azure Monitor / Log Analytics: services/monitor.md
+    - Communication Services Email: services/email.md
   - Contributing: contributing.md
   - Changelog: changelog.md

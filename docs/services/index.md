@@ -23,6 +23,8 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | ✅ Registry CRUD, admin credentials, checkNameAvailability; one shared `registry:2` (Docker Registry V2 push/pull) or mocked |
 | **Microsoft Entra ID** | `/{tenant}/oauth2/...` + `/.well-known/openid-configuration` | ✅ OpenID Connect provider — RS256-signed tokens, JWKS, discovery; client-credentials + ROPC grants (app registration, Graph, interactive flows planned) |
 | **Event Grid** | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | ✅ Custom Topics, access keys, webhook event subscriptions with filters, publish (Event Grid + CloudEvents 1.0), async delivery with retry, subscription validation handshake |
+| **Azure Monitor / Log Analytics** | ARM path (`Microsoft.OperationalInsights` / `Microsoft.Insights`) + `/dataCollectionRules/...` + `/v1/workspaces/...` | ✅ Workspaces, Data Collection Endpoints/Rules; Logs Ingestion API; Log Analytics query with a KQL subset (`where`/`project`/`take`/`limit`, timespan) |
+| **Communication Services Email** | `/emails:send` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ✅ ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style); ARM communication/email services + domains. No real delivery |
 
 ## Unified Endpoint
 
