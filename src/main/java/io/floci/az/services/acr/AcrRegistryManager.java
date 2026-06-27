@@ -80,9 +80,7 @@ public class AcrRegistryManager {
 
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REGISTRY_PORT);
             if (containerDetector.isRunningInContainer()) {
-                this.internalEndpoint = ep != null
-                        ? ep.host() + ":" + ep.port()
-                        : SHARED_NAME + ":" + REGISTRY_PORT;
+                this.internalEndpoint = SHARED_NAME + ":" + REGISTRY_PORT;
             } else {
                 this.internalEndpoint = ep != null ? ep.host() + ":" + ep.port() : "localhost:" + chosenPort;
             }

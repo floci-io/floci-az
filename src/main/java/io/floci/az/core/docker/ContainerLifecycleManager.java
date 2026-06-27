@@ -91,7 +91,8 @@ public class ContainerLifecycleManager {
         dockerClient.startContainerCmd(containerId).exec();
         LOG.infov("Started container {0}", containerId);
 
-        if (spec.networkMode() != null && !spec.networkMode().isBlank() && spec.hasPortBindings()) {
+        if (spec.networkMode() != null && !spec.networkMode().isBlank()
+                && spec.hasPortBindings() && !containerDetector.isRunningInContainer()) {
             try {
                 dockerClient.connectToNetworkCmd()
                         .withContainerId(containerId)
@@ -310,7 +311,8 @@ public class ContainerLifecycleManager {
         // Only set networkMode during creation when there are no host port bindings;
         // containers with port bindings connect to the named network via connectToNetworkCmd()
         // after start to avoid suppressing port publishing on Docker Desktop (macOS).
-        if (spec.networkMode() != null && !spec.networkMode().isBlank() && !spec.hasPortBindings()) {
+        if (spec.networkMode() != null && !spec.networkMode().isBlank()
+                && (!spec.hasPortBindings() || containerDetector.isRunningInContainer())) {
             hostConfig.withNetworkMode(spec.networkMode());
         }
 

@@ -90,9 +90,7 @@ public class RedisCacheManager {
         if (containerDetector.isRunningInContainer()) {
             cache.setHostName(containerName);
             cache.setPort(REDIS_PORT);
-            cache.setInternalEndpoint(ep != null
-                    ? ep.host() + ":" + ep.port()
-                    : containerName + ":" + REDIS_PORT);
+            cache.setInternalEndpoint(containerName + ":" + REDIS_PORT);
         } else {
             cache.setHostName("localhost");
             cache.setPort(hostPort);
