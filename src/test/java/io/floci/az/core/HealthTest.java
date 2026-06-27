@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.containsString;
 
 @QuarkusTest
 public class HealthTest {
@@ -35,5 +36,17 @@ public class HealthTest {
           .then()
              .statusCode(200)
              .body("status", is("UP"));
+    }
+
+    @Test
+    public void testTlsCertWhenDisabledReturnsActionableError() {
+        // TLS is disabled by default in tests — the hint must tell the user how to enable it
+        // (this is what azurerm/Terraform users hit when metadata discovery fails over HTTPS).
+        given()
+          .when().get("/_floci/tls-cert")
+          .then()
+             .statusCode(404)
+             .body("tlsEnabled", is(false))
+             .body("message", containsString("FLOCI_AZ_TLS_ENABLED=true"));
     }
 }

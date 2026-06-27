@@ -98,6 +98,8 @@ services:
 
 The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore — no static cert to bundle or import manually.
 
+> **Terraform / OpenTofu (azurerm) also requires TLS** — the provider discovers the cloud over HTTPS (`GET https://<host>/metadata/endpoints`), so it fails against plain HTTP. See the [Terraform / OpenTofu guide](https://floci.io/floci-az/terraform/).
+
 </details>
 
 ## Features

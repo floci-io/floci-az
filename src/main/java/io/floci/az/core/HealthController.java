@@ -1,13 +1,18 @@
 package io.floci.az.core;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.tls.TlsConfigSource;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.Response;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Path("/")
 public class HealthController {
+
+    @Inject EmulatorConfig config;
 
     @GET
     @Path("{path:(health|_floci/health)}")
@@ -33,8 +38,26 @@ public class HealthController {
     public Response tlsCert() {
         String pem = TlsConfigSource.currentCertPem;
         if (pem == null || pem.isBlank()) {
+            boolean tlsEnabled = config.tls().enabled();
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("tlsEnabled", tlsEnabled);
+            if (!tlsEnabled) {
+                body.put("error", "TLS is not enabled");
+                body.put("message",
+                    "floci-az is serving plain HTTP only. Set FLOCI_AZ_TLS_ENABLED=true and "
+                    + "restart to serve HTTPS on the same port. The Terraform/OpenTofu azurerm "
+                    + "provider requires this, because it discovers the cloud over HTTPS "
+                    + "(GET https://<host>/metadata/endpoints). See "
+                    + "https://floci.io/floci-az/terraform/");
+            } else {
+                body.put("error", "TLS certificate not available yet");
+                body.put("message",
+                    "TLS is enabled but the certificate has not been generated yet. "
+                    + "Retry in a moment, or check the startup logs for certificate errors.");
+            }
             return Response.status(Response.Status.NOT_FOUND)
-                    .entity("{\"error\":\"TLS not enabled or certificate not available\"}")
+                    .entity(body)
                     .type("application/json")
                     .build();
         }

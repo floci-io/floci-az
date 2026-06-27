@@ -60,6 +60,7 @@ nav:
     - Quick Start: getting-started/quick-start.md
     - Installation: getting-started/installation.md
     - Azure CLI & SDK Setup: getting-started/azure-setup.md
+    - Terraform / OpenTofu: terraform.md
   - Configuration:
     - Docker Compose: configuration/docker-compose.md
     - Ports Reference: configuration/ports.md
