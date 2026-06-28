@@ -39,7 +39,7 @@ class PostgresStateTest {
             name, sub, rg, "eastus", "16",
             "psqladmin", "StrongPass1!",
             "Standard_B1ms", "Burstable", 32,
-            "container-abc", 54320,
+            "container-abc", 54320, "localhost",
             Map.of(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
             Instant.now());
     }
@@ -186,16 +186,19 @@ class PostgresStateTest {
     @DisplayName("ServerEntry.withContainer updates containerId and port immutably")
     void withContainer() {
         PostgresState.ServerEntry original = server("srv");
-        PostgresState.ServerEntry updated  = original.withContainer("new-container", 54444);
+        PostgresState.ServerEntry updated  = original.withContainer("new-container", 54444, "floci-az-pg-srv");
         assertEquals("new-container", updated.containerId());
         assertEquals(54444, updated.hostPort());
+        assertEquals("floci-az-pg-srv", updated.host());
         assertEquals("container-abc", original.containerId(), "original is immutable");
     }
 
     @Test
-    @DisplayName("fullyQualifiedDomainName is localhost in dev mode")
+    @DisplayName("fullyQualifiedDomainName reflects the reachable host")
     void fqdn() {
         assertEquals("localhost", server("srv").fullyQualifiedDomainName());
+        assertEquals("floci-az-pg-srv",
+            server("srv").withContainer("c", 5432, "floci-az-pg-srv").fullyQualifiedDomainName());
     }
 
     // ── Persistence cycle ─────────────────────────────────────────────────────

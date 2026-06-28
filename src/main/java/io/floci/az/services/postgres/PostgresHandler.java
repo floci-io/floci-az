@@ -180,7 +180,7 @@ public class PostgresHandler implements AzureServiceHandler {
                 PostgresState.ServerEntry entry = new PostgresState.ServerEntry(
                     serverName, sub, rg, location, version, login, password,
                     skuName, skuTier, storageGB,
-                    null, 0, tags,
+                    null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
                 state.putServer(entry);
@@ -225,7 +225,7 @@ public class PostgresHandler implements AzureServiceHandler {
                 existing.location(), version, existing.administratorLogin(),
                 password.isBlank() ? existing.administratorLoginPassword() : password,
                 skuName, skuTier, storageGB,
-                existing.containerId(), existing.hostPort(), mergedTags,
+                existing.containerId(), existing.hostPort(), existing.host(), mergedTags,
                 existing.databases(), existing.firewallRules(), existing.configurations(),
                 existing.createdAt());
             state.putServer(updated);

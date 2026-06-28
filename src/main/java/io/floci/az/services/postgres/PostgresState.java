@@ -217,7 +217,7 @@ public class PostgresState {
                         e.serverName(), e.subscriptionId(), e.resourceGroupName(),
                         e.location(), e.version(), e.administratorLogin(), e.administratorLoginPassword(),
                         e.skuName(), e.skuTier(), e.storageSizeGB(),
-                        null, 0,   // containerId / hostPort are always reset on load
+                        null, 0, "localhost",   // containerId / hostPort / host are always reset on load
                         new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
                         new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
                         new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
@@ -263,6 +263,7 @@ public class PostgresState {
             int storageSizeGB,
             String containerId,                   // null until container starts; not persisted
             int hostPort,                         // 0 until container starts; not persisted
+            String host,                          // reachable host: "localhost" or the container name on a shared Docker network; not persisted
             Map<String, String> tags,
             Map<String, DatabaseEntry> databases,
             Map<String, FirewallRule> firewallRules,
@@ -275,20 +276,22 @@ public class PostgresState {
                 subscriptionId, resourceGroupName, serverName);
         }
 
-        public ServerEntry withContainer(String id, int port) {
+        public ServerEntry withContainer(String id, int port, String reachableHost) {
             return new ServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
-                id, port, tags, databases, firewallRules, configurations, createdAt);
+                id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt);
         }
 
         /**
-         * The FQDN as Azure would expose it would be {@code {name}.postgres.database.azure.com},
-         * which does not resolve locally. floci-az returns {@code localhost}; the live host port
-         * is exposed separately (see the convenience {@code /connect} endpoint).
+         * The host an application uses to reach the data plane. Azure would expose
+         * {@code {name}.postgres.database.azure.com}, which does not resolve locally; floci-az
+         * returns the actually-reachable host instead — {@code localhost} for host networking,
+         * or the container name when floci-az runs inside Docker on a shared network. The live
+         * port is exposed separately (see the convenience {@code /connect} endpoint).
          */
         public String fullyQualifiedDomainName() {
-            return "localhost";
+            return host != null && !host.isBlank() ? host : "localhost";
         }
     }
 
