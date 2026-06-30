@@ -240,8 +240,10 @@ class SqlStateTest {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
         SqlState original = new SqlState(sharedBackend);
 
-        // Populate: server with containerId/hostPort set (as if a container is running)
-        original.putServer(server("persist-srv"));   // containerId="container-abc", hostPort=14330
+        // Populate: server with containerId/hostPort/host set (as if a container is running on a
+        // shared Docker network, so host is the container name rather than localhost).
+        original.putServer(server("persist-srv")
+            .withContainer("container-abc", 14330, "floci-az-sql-persist-srv"));
         original.putDatabase("persist-srv",
             SqlState.SqlDatabaseEntry.create("mydb", "persist-srv",
                 "SQL_Latin1_General_CP1_CI_AS", null, null));
@@ -264,6 +266,8 @@ class SqlStateTest {
             "containerId must be null after reload — container is gone");
         assertEquals(0, entry.get().hostPort(),
             "hostPort must be 0 after reload — container is gone");
+        assertEquals("localhost", entry.get().host(),
+            "host must reset to localhost after reload — the container's network name is gone");
 
         // ── Child resources are fully restored ────────────────────────────────
         assertTrue(reloaded.databaseExists("persist-srv", "mydb"), "database restored");

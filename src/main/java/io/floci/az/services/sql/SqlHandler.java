@@ -438,7 +438,9 @@ public class SqlHandler implements AzureServiceHandler {
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("minimalTlsVersion", "None");
         props.put("publicNetworkAccess", "Enabled");
-        // floci-az convenience — not in the real spec
+        // floci-az convenience — not in the real spec. This is the reachable port (the published
+        // host port for host networking, or the in-network container port when floci-az runs in a
+        // container). Prefer the /connect endpoint, which returns the matching reachable host.
         if (s.hostPort() > 0) props.put("localPort", s.hostPort());
 
         Map<String, Object> resp = new LinkedHashMap<>();
