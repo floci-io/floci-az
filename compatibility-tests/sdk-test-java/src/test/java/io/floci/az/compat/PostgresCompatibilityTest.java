@@ -95,6 +95,10 @@ class PostgresCompatibilityTest {
         assertNotNull(defaultJdbcUrl, "jdbcUrl missing from /connect response");
         // Derive the app-database URL from the default (.../postgres?...  ->  .../compat_db?...).
         appJdbcUrl = defaultJdbcUrl.replace("/postgres?", "/" + DB + "?");
+        // Fail loudly if the replace did not match (e.g. the connection-string format changed),
+        // rather than silently running the DDL/DML test against the default `postgres` database.
+        assertNotEquals(defaultJdbcUrl, appJdbcUrl,
+            "app JDBC URL derivation failed — '/postgres?' pattern not found in: " + defaultJdbcUrl);
     }
 
     @AfterAll
