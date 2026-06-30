@@ -53,8 +53,9 @@ public class HealthController {
             } else {
                 body.put("error", "TLS certificate not available yet");
                 body.put("message",
-                    "TLS is enabled but the certificate has not been generated yet. "
-                    + "Retry in a moment, or check the startup logs for certificate errors.");
+                    "TLS is enabled but no certificate is available. If floci-az has only just "
+                    + "started, the certificate is still being generated — retry shortly. "
+                    + "Otherwise check the startup logs for certificate generation/read errors.");
             }
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(body)
