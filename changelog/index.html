@@ -1,0 +1,2869 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fast, free, open-source local Azure emulator">
+      
+      
+      
+        <link rel="canonical" href="https://floci.io/floci-az/changelog/">
+      
+      
+        <link rel="prev" href="../contributing/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/floci.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Changelog - Floci-AZ</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Umami analytics — tracks docs visits (privacy-friendly, cookieless) -->
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="b2ab8ccd-4619-4b94-bfa6-e8870961d6eb"></script>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Floci-AZ" class="md-header__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../assets/floci-header.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Floci-AZ
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/quick-start/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/docker-compose/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../services/" class="md-tabs__link">
+          
+  
+  
+  Services
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Floci-AZ" class="md-nav__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../assets/floci-header.svg" alt="logo">
+
+    </a>
+    Floci-AZ
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/azure-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure CLI & SDK Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../terraform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terraform / OpenTofu
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/ports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ports Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/advanced/application-yml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    application.yml Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/blob/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blob Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/queue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Queue Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Table Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/functions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Functions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/app-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    App Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/key-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/entra/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra ID
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/event-hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Hubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/service-bus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Bus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cosmos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cosmos DB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure SQL Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/postgresql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/aks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Kubernetes Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/apim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Network
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/vm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Machines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/redis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Cache for Redis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/acr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/event-grid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Grid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/monitor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Monitor / Log Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/email/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Communication Services Email
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unreleased
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#080-2026-06-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.8.0 - 2026-06-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.8.0 - 2026-06-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-06-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.7.0 - 2026-06-18
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.7.0 - 2026-06-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-06-09" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.0 - 2026-06-09
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.0 - 2026-06-09">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-05-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5.0 - 2026-05-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5.0 - 2026-05-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2026-05-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.4.0 - 2026-05-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.4.0 - 2026-05-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-05-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3.0 - 2026-05-23
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.3.0 - 2026-05-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-05-15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2.0 - 2026-05-15
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.2.0 - 2026-05-15">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#014-2026-04-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.4 - 2026-04-26
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.4 - 2026-04-26">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#013-2026-04-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.3 - 2026-04-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.3 - 2026-04-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#012-2026-04-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.2 - 2026-04-23
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.2 - 2026-04-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.1 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.1 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#001-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.0.1 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.0.1 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unreleased
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#080-2026-06-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.8.0 - 2026-06-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.8.0 - 2026-06-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-06-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.7.0 - 2026-06-18
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.7.0 - 2026-06-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-06-09" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.0 - 2026-06-09
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.0 - 2026-06-09">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-05-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5.0 - 2026-05-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5.0 - 2026-05-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2026-05-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.4.0 - 2026-05-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.4.0 - 2026-05-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-05-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3.0 - 2026-05-23
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.3.0 - 2026-05-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-05-15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2.0 - 2026-05-15
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.2.0 - 2026-05-15">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#014-2026-04-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.4 - 2026-04-26
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.4 - 2026-04-26">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#013-2026-04-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.3 - 2026-04-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.3 - 2026-04-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#012-2026-04-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.2 - 2026-04-23
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.2 - 2026-04-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#011-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.1 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.1 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#001-2026-04-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.0.1 - 2026-04-22
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.0.1 - 2026-04-22">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="changelog">Changelog</h1>
+<p>All notable changes to this project will be documented in this file.</p>
+<p>The format is based on <a href="https://keepachangelog.com/en/1.0.0/">Keep a Changelog</a>,
+and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
+<h2 id="unreleased"><a href="https://github.com/floci-io/floci-az/compare/0.8.0...HEAD">Unreleased</a></h2>
+<h2 id="080-2026-06-25"><a href="https://github.com/floci-io/floci-az/compare/0.7.0...0.8.0">0.8.0</a> - 2026-06-25</h2>
+<h3 id="added">Added</h3>
+<ul>
+<li><strong>eventgrid:</strong> Azure Event Grid emulation (<code>Microsoft.EventGrid/topics</code> + <code>eventSubscriptions</code>) — the Azure counterpart of EventBridge/SNS, HTTP-only with no Docker sidecar. Custom Topic lifecycle (CreateOrUpdate, Get, Delete, List by resource group and subscription) returning a data-plane <code>properties.endpoint</code>, plus <code>listKeys</code>/<code>regenerateKey</code> (<code>{key1,key2}</code>). Classic scoped webhook <code>eventSubscriptions</code> with a <code>WebHook</code> destination and <code>filter</code> (<code>subjectBeginsWith</code>/<code>subjectEndsWith</code>/<code>includedEventTypes</code>/<code>isSubjectCaseSensitive</code>); creating one runs the <code>Microsoft.EventGrid.SubscriptionValidationEvent</code> handshake (or the CloudEvents <code>OPTIONS</code> abuse-protection probe). The data plane accepts <code>POST /{topic}-eventgrid/api/events</code> in both the <strong>Event Grid</strong> and <strong>CloudEvents 1.0</strong> schemas and fans matching events out to subscriber webhooks asynchronously, retried per the subscription's <code>retryPolicy</code> with exponential backoff; delivered events carry <code>topic</code> set to the topic resource id and the <code>aeg-event-type: Notification</code> header. Enabled by default. Compatibility: a <code>@QuarkusTest</code> covering ARM + publish + filtered delivery + validation, and a Java SDK suite (<code>azure-messaging-eventgrid</code>) wired into <code>make test-eventgrid</code>. WebHook destinations only; dead-lettering is best-effort (logged, not written to blob) (<a href="https://github.com/floci-io/floci-az/issues/58">#58</a>)</li>
+</ul>
+<h3 id="fixed">Fixed</h3>
+<ul>
+<li><strong>blob (Data Lake / DFS):</strong> route <code>{account}.dfs.core.windows.net</code> requests to the Blob handler so ADLS Gen2 / <code>azure-storage-file-datalake</code> clients resolve against the emulator (<a href="https://github.com/floci-io/floci-az/issues/88">#88</a>)</li>
+<li><strong>blob:</strong> <code>listBlobs</code> now honours the <code>delimiter</code> parameter, returning <code>&lt;BlobPrefix&gt;</code> elements for virtual directories (hierarchical listing) instead of a flat blob list (<a href="https://github.com/floci-io/floci-az/issues/84">#84</a>)</li>
+<li><strong>blob:</strong> invalid range requests now include the <code>Content-Range: bytes */{size}</code> header alongside the <code>416 InvalidRange</code> response, matching Azure (<a href="https://github.com/floci-io/floci-az/issues/82">#82</a>)</li>
+<li><strong>servicebus:</strong> resolve an index error and add host-based routing (<code>{account}.servicebus.windows.net</code>) plus root-level AtomPub / <code>$namespaceinfo</code> / <code>$Resources</code> request routing so Service Bus SDK management operations resolve (<a href="https://github.com/floci-io/floci-az/issues/79">#79</a>)</li>
+<li><strong>banner:</strong> list the Monitor and Email services in the startup banner's enabled-services output (<a href="https://github.com/floci-io/floci-az/issues/92">#92</a>)</li>
+</ul>
+<h2 id="070-2026-06-18"><a href="https://github.com/floci-io/floci-az/compare/0.6.0...0.7.0">0.7.0</a> - 2026-06-18</h2>
+<h3 id="added_1">Added</h3>
+<ul>
+<li><strong>monitor:</strong> Azure Monitor / Log Analytics emulation (<code>Microsoft.OperationalInsights/workspaces</code> + <code>Microsoft.Insights/dataCollectionEndpoints</code> + <code>dataCollectionRules</code>) — HTTP-only with no Docker sidecar. ARM CRUD for workspaces (generating a <code>customerId</code> GUID), Data Collection Endpoints, and Data Collection Rules (generating an <code>immutableId</code>). Implements the <strong>Logs Ingestion API</strong> (<code>POST /dataCollectionRules/{immutableId}/streams/{stream}</code>) which resolves the DCR's Log Analytics destination and stores each posted record against the destination workspace, and the <strong>Log Analytics query API</strong> (<code>POST /v1/workspaces/{workspaceId}/query</code>) which runs a KQL subset (<code>where</code> with <code>==</code>/<code>!=</code>/<code>&gt;</code>/<code>&lt;</code>/<code>&gt;=</code>/<code>&lt;=</code>, <code>project</code>, <code>take</code>/<code>limit</code>, plus request-level <code>timespan</code> filtering on <code>TimeGenerated</code>) and returns the standard <code>{tables:[{name,columns,rows}]}</code> shape with inferred column types. Compatible with the <code>azure-monitor-ingestion</code> / <code>azure-monitor-query</code> SDKs. Enabled by default (<a href="https://github.com/floci-io/floci-az/issues/68">#68</a>)</li>
+<li><strong>email:</strong> Azure Communication Services Email emulation (<code>Microsoft.Communication</code> ARM plane + ACS Email data plane) — HTTP-only with no Docker sidecar. <code>POST /emails:send</code> accepts the full ACS payload and returns <code>202</code> with an <code>Operation-Location</code> header; <code>GET /emails/operations/{id}</code> reports the operation as <code>Succeeded</code>. Every message is <strong>captured in-memory</strong> (Mailpit-style) for test inspection via <code>GET /emailMessages</code>, <code>GET /emailMessages/{operationId}</code>, and <code>DELETE /emailMessages</code>; no real email is delivered. ARM CRUD for <code>communicationServices</code>, <code>emailServices</code>, and <code>emailServices/{name}/domains/{domain}</code>. Routed via the ACS host form <code>*.communication.azure.com</code>, the <code>/{account}-email/</code> suffix, and the ARM base URL. Compatible with the <code>azure-communication-email</code> SDK. Enabled by default (<a href="https://github.com/floci-io/floci-az/issues/70">#70</a>)</li>
+<li><strong>vm:</strong> Container-backed virtual machines (<code>floci-az.services.vm.mocked=false</code>). Each VM is backed by a long-lived Linux container (image resolved from <code>storageProfile.imageReference</code> via <code>VmImageResolver</code>, falling back to <code>ubuntu:22.04</code>) kept alive with <code>tail -f /dev/null</code>. Azure power actions map onto the container: <code>start</code> → docker start, <code>powerOff</code>/<code>deallocate</code> → docker stop (container retained), <code>restart</code>/<code>redeploy</code>/<code>reapply</code> → docker restart, delete → stop + remove. VMs provision asynchronously (<code>Creating</code> → <code>Succeeded</code> once the container is running, surfaced via a readiness poller) so SDK/Terraform LRO pollers complete. Docker failures degrade gracefully to mocked-style state and are never fatal. Mocked mode remains the default, so unit tests stay Docker-free.</li>
+<li><strong>entra:</strong> Microsoft Entra ID (Azure AD) emulation — phase 1: a local OpenID Connect provider that replaces the previous static, unsigned-token stub. Issues real <strong>RS256-signed</strong> JWTs from a stable signing key persisted across restarts, serves an OpenID discovery document (<code>/.well-known/openid-configuration</code>) and JWKS (<code>/discovery/v2.0/keys</code>) derived from the request base URL, and handles the non-interactive grants <strong>client credentials</strong> and <strong>resource-owner password (ROPC)</strong> in both v1.0 and v2.0 token shapes. For closer Entra parity, app-only tokens carry the <code>idtyp=app</code> claim and every token carries a unique <code>uti</code>, the JWKS publishes the signing key's self-signed cert chain (<code>x5c</code>/<code>x5t</code>) alongside <code>n</code>/<code>e</code>, and token-endpoint errors use Azure's shape (<code>error_codes</code>, <code>trace_id</code>, <code>correlation_id</code>, <code>timestamp</code>, <code>error_uri</code>, and the <code>AADSTS</code> code in <code>error_description</code>). Seeds a default tenant (<code>00000000-0000-0000-0000-000000000002</code>) and a well-known dev app registration so <code>ClientSecretCredential</code> works with zero setup. Tenant-rooted at the base URL (<code>/{tenant}/oauth2/v2.0/token</code>, where <code>{tenant}</code> may be a tenant id or <code>common</code>/<code>organizations</code>/<code>consumers</code>); the token response shape (<code>token_type</code>/<code>expires_in</code>/<code>ext_expires_in</code>/<code>access_token</code>) is preserved so existing Terraform/OpenTofu compatibility is unaffected. Enabled by default; incoming-token enforcement (<code>validate-tokens</code>) stays opt-in/off so existing services keep accepting any Bearer token in dev. App-registration management, Microsoft Graph CRUD, and interactive flows (device code, auth code + PKCE) follow in later phases (<a href="https://github.com/floci-io/floci-az/issues/23">#23</a>)</li>
+<li><strong>compat (az cli):</strong> new Azure CLI compatibility suite (<code>compatibility-tests/compat-azcli</code>, BATS) that registers a custom <code>az cloud</code> pointing at floci-az and runs <code>az login --service-principal</code> against the Entra token endpoint, then exercises resource group, storage account (+ blob data-plane), Key Vault (+ secret data-plane), virtual network/NIC, ACR, and Redis through the real <code>az</code> CLI. Wired into <code>make test-azcli</code>, <code>make compat-docker</code>, and the <code>compatibility.yml</code> CI matrix</li>
+<li><strong>arm:</strong> management-plane endpoints used by the <code>az</code> CLI during sign-in and resource creation — <code>GET /subscriptions</code> and <code>GET /tenants</code> (list), and <code>Microsoft.*/checkNameAvailability</code> (returns available)</li>
+<li><strong>arm, network:</strong> <code>enabled</code> true/false flags so every service can be toggled (closing the last config gaps). <code>FLOCI_AZ_SERVICES_NETWORK_ENABLED=false</code> gates all of Microsoft.Network (VNet, subnets, NIC, public IP, NSG, and DNS zones) — <code>/providers/Microsoft.Network/...</code> then returns <code>404</code> while the rest of ARM keeps working. <code>FLOCI_AZ_SERVICES_ARM_ENABLED=false</code> turns off the entire ARM management plane (and therefore every ARM-based service). Both default to <code>true</code>; the cosmetic <code>cosmos-engine</code> service type is now gated on <code>cosmos.enabled</code> as well</li>
+<li><strong>sql, functions, cosmos:</strong> uniform <code>mocked</code> true/false flag so every Docker-backed service has the same explicit on/off switch (matching vm/acr/redis/aks/servicebus/eventhub). Default <code>false</code>. <code>FLOCI_AZ_SERVICES_SQL_MOCKED=true</code> creates servers in state with <code>state=Ready</code>, no <code>azure-sql-edge</code> container and no EULA required (data plane unavailable). <code>FLOCI_AZ_SERVICES_FUNCTIONS_MOCKED=true</code> keeps the management plane (deploy/list/get/delete) working with no runtime container; invocations return a synthetic <code>200</code> stub. <code>FLOCI_AZ_SERVICES_COSMOS_MOCKED=true</code> is a master switch that forces all engine containers off (equivalent to <code>engines.startup=disabled</code>); the in-process NoSQL/Table paths are unaffected</li>
+</ul>
+<h3 id="changed">Changed</h3>
+<ul>
+<li><strong>identity:</strong> the OAuth2 token endpoints (<code>/{tenant}/oauth2/v2.0/token</code>, <code>common/...</code>) now return a genuine signed JWT served by the Entra service instead of a fixed unsigned stub token; <code>metadata/endpoints</code> ARM environment discovery is unchanged</li>
+</ul>
+<h2 id="060-2026-06-09"><a href="https://github.com/floci-io/floci-az/compare/0.5.0...0.6.0">0.6.0</a> - 2026-06-09</h2>
+<h3 id="added_2">Added</h3>
+<ul>
+<li><strong>acr:</strong> Azure Container Registry emulation (<code>Microsoft.ContainerRegistry/registries</code>) — registry lifecycle (CreateOrUpdate, Get, Patch, List by subscription and resource group, Delete), <code>listCredentials</code> / <code>regenerateCredential</code>, <code>listUsages</code>, and <code>checkNameAvailability</code>. Non-mocked mode backs all registries with a single shared <code>registry:2</code> sidecar exposing the Docker Registry HTTP API V2; registries are isolated by an internal repository prefix, so <code>loginServer</code> is path-style (<code>localhost:{port}/{name}</code>, not <code>{name}.azurecr.io</code>) and standard <code>docker push</code>/<code>pull</code> work against it. The shared registry runs anonymous (admin credentials are issued but not enforced at the data plane). Registries provision asynchronously (<code>Creating</code> → <code>Succeeded</code> once <code>GET /v2/</code> answers); mocked mode (default in tests) is management-plane only. Compatibility: Terraform/OpenTofu <code>azurerm_container_registry</code> suites and a Python data-plane push/pull test</li>
+<li><strong>redis:</strong> Azure Cache for Redis emulation (<code>Microsoft.Cache/redis</code>) — cache lifecycle (CreateOrUpdate, Get, Patch, List by subscription and resource group, Delete) plus <code>listKeys</code> and <code>regenerateKey</code>. Non-mocked mode backs each cache with a real <code>valkey/valkey:8-alpine</code> sidecar container (a drop-in, RESP-compatible Redis fork) that standard Redis clients connect to; the primary access key is the Redis password (<code>--requirepass</code>) and both keys authenticate via a <code>default</code>-user ACL. Caches provision asynchronously (<code>Creating</code> → <code>Succeeded</code> once the container answers <code>PING</code>); mocked mode (default in tests) is management-plane only. Compatibility: Terraform/OpenTofu <code>azurerm_redis_cache</code> suites and a Python redis-py data-plane test</li>
+<li><strong>appconfig:</strong> 2024-09-01 data-plane parity for the behaviors SDK clients exercise — server-side pagination (<code>@nextLink</code> / <code>Link</code> header with opaque <code>after</code> continuation, 100 items per page), <code>$select</code> field projection, <code>tags</code> filtering (repeatable, AND semantics) on key-value and revision lists, <code>Accept-Datetime</code> time-travel resolved from revision history, a <code>Sync-Token</code> consistency header on every response, and true async snapshot provisioning (<code>PUT</code> returns <code>provisioning</code> + <code>Operation-Location</code>; <code>GET /operations</code> reports <code>Succeeded</code> and flips the snapshot to <code>ready</code>) plus conditional <code>If-Match</code>/<code>If-None-Match</code> on <code>GetSnapshot</code>. Adds a <code>queryParamsMulti</code> accessor to <code>AzureRequest</code> so repeated query params (<code>tags</code>) survive routing. Compatibility: extended Java and Python <code>azure-appconfiguration</code> suites and a new Node <code>@azure/app-configuration</code> suite</li>
+<li><strong>vm:</strong> Azure Virtual Machines emulation (<code>Microsoft.Compute/virtualMachines</code>) — VM lifecycle (CreateOrUpdate, Get, List by subscription and resource group, UpdateTags, Delete), power actions (<code>start</code>, <code>powerOff</code>, <code>deallocate</code>, <code>restart</code>, <code>redeploy</code>, <code>reapply</code>), <code>instanceView</code> reporting <code>ProvisioningState/*</code> and <code>PowerState/*</code>, and <code>?$expand=instanceView</code>. Power actions return <code>202</code> with an <code>Azure-AsyncOperation</code> header and a terminal operation-status endpoint for SDK LRO polling. Mocked mode (default) requires no Docker; container-backed VMs are planned (<a href="https://github.com/floci-io/floci-az/issues/19">#19</a>)</li>
+<li><strong>arm:</strong> <code>Microsoft.Network</code> dependency stubs — virtual networks, subnets, network interfaces (synthesized private IP), public IP addresses, and network security groups, so Terraform's <code>azurerm_linux_virtual_machine</code> and its dependencies apply end-to-end</li>
+<li><strong>arm:</strong> Terraform/OpenTofu compatibility suite extended with a Linux virtual machine and its network dependencies</li>
+</ul>
+<h3 id="changed_1">Changed</h3>
+<ul>
+<li><strong>acr, redis:</strong> Docker backing is now <strong>on by default</strong> (<code>mocked: false</code>) — creating a registry or cache starts a real container (a shared <code>registry:2</code> for ACR, a <code>valkey/valkey:8-alpine</code> container per cache for Redis). Set <code>FLOCI_AZ_SERVICES_ACR_MOCKED=true</code> / <code>FLOCI_AZ_SERVICES_REDIS_MOCKED=true</code> to restore management-plane-only mode. Unit tests pin <code>mocked=true</code> via test profiles and remain Docker-free.</li>
+</ul>
+<h2 id="050-2026-05-28"><a href="https://github.com/floci-io/floci-az/compare/0.4.0...0.5.0">0.5.0</a> - 2026-05-28</h2>
+<h3 id="added_3">Added</h3>
+<ul>
+<li><strong>arm:</strong> Azure Resource Manager management-plane emulation — ARM routing on <code>management.azure.com</code>-style paths; resource group CRUD (<code>Microsoft.Resources</code>); storage account + blob/queue/table endpoint resolution (<code>Microsoft.Storage</code>); Key Vault CRUD with vault URI (<code>Microsoft.KeyVault</code>); subscription and resource-group list endpoints; OAuth token endpoint (<code>/oauth2/token</code>) returning a synthetic bearer token accepted by the ARM routing layer (<a href="https://github.com/floci-io/floci-az/pull/40">#40</a>)</li>
+<li><strong>arm:</strong> Terraform compatibility — <code>azurerm</code> provider <code>~&gt; 4.0</code>; <code>make compat-terraform</code> target; BATS test suite covering resource group, storage account, storage container, storage queue, Key Vault, and Key Vault secret via Terraform apply/destroy (<a href="https://github.com/floci-io/floci-az/pull/40">#40</a>)</li>
+<li><strong>arm:</strong> OpenTofu compatibility — identical BATS suite against OpenTofu <code>tofu</code> CLI; <code>make compat-opentofu</code> target (<a href="https://github.com/floci-io/floci-az/pull/40">#40</a>)</li>
+</ul>
+<h3 id="fixed_1">Fixed</h3>
+<ul>
+<li><strong>blob:</strong> Large blob uploads beyond 20 MB now work correctly — raised Quarkus HTTP body limit to <code>2G</code> (<code>quarkus.http.limits.max-body-size</code>) and Jackson string-length limit to 512 MB; implemented block blob protocol (<code>PUT ?comp=block</code> / <code>PUT ?comp=blocklist</code>) so the Azure SDK's chunked multi-part upload path is fully supported (<a href="https://github.com/floci-io/floci-az/pull/41">#41</a>)</li>
+<li><strong>functions:</strong> All functions in a Function App now share a single container — pool keyed on <code>appKey</code> (<code>account/appName</code>) instead of per-function; <code>ContainerLauncher.launch()</code> injects every function's code at <code>wwwroot/{funcName}/</code> and writes a shared <code>host.json</code> before the container starts; previously N functions started N containers (<a href="https://github.com/floci-io/floci-az/pull/42">#42</a>)</li>
+</ul>
+<hr />
+<h2 id="040-2026-05-25"><a href="https://github.com/floci-io/floci-az/compare/0.3.0...0.4.0">0.4.0</a> - 2026-05-25</h2>
+<h3 id="added_4">Added</h3>
+<ul>
+<li><strong>tls:</strong> Dynamic self-signed certificate generation at runtime via BouncyCastle — no static cert bundled in the image; certs persist under <code>data/tls/</code> and regenerate automatically when hostname config changes (<code>FLOCI_AZ_HOSTNAME</code> or <code>FLOCI_AZ_BASE_URL</code>)</li>
+<li><strong>tls:</strong> Protocol-sniffing <code>TlsProxyServer</code> — both HTTP and HTTPS served on the same public port <code>4577</code>; first byte <code>0x16</code> routes to the HTTPS backend, anything else to HTTP</li>
+<li><strong>tls:</strong> <code>GET /_floci/tls-cert</code> endpoint — returns the active TLS certificate PEM so SDK clients and compat tests can dynamically install it into their truststores</li>
+<li><strong>tls:</strong> <code>CertificateGenerator</code> — dedicated class (matching aws-local structure) responsible for X.509 self-signed cert generation with configurable SANs (hostname, IP, wildcard)</li>
+<li><strong>tls:</strong> <code>BouncyCastleInitializer</code> — CDI <code>@Startup</code> bean that registers the BouncyCastle JCA provider at application startup</li>
+<li><strong>event-hubs:</strong> Mocked namespace mode — management API returns <code>"mocked":true</code> when no Artemis broker is running; compat tests skip AMQP data-plane assertions gracefully via <code>Assumptions.assumeTrue</code></li>
+<li><strong>compat (java):</strong> <code>CosmosCompatibilityTest</code> now works in Docker compat runs — <code>EmulatorConfig.installEmulatorTlsCert()</code> fetches the emulator cert at test setup and installs it into a temp PKCS12 truststore; Netty forced to JDK SSL via <code>-Dio.netty.handler.ssl.noOpenSsl=true</code></li>
+</ul>
+<h3 id="changed_2">Changed</h3>
+<ul>
+<li><strong>tls:</strong> Replaced static bundled certificates (<code>src/main/resources/certs/</code>) with runtime generation — removed <code>floci-az.crt</code>, <code>floci-az.key</code>, <code>floci-az.p12</code> from the image</li>
+<li><strong>tls:</strong> <code>TlsConfigSource</code> delegates cert generation to <code>CertificateGenerator</code> instead of inlining BouncyCastle calls</li>
+<li><strong>build:</strong> Added GraalVM <code>--initialize-at-run-time</code> flags for BouncyCastle classes (<code>DRBG</code>, <code>SP800SecureRandom</code>, <code>KeyPairGeneratorSpi</code>, <code>CertificateFactory</code>) and <code>CertificateGenerator</code> to support native image builds</li>
+<li><strong>ci:</strong> Compatibility workflow now starts the emulator with <code>FLOCI_AZ_TLS_ENABLED=true</code> and <code>FLOCI_AZ_HOSTNAME=floci-az</code> — required for Cosmos Java SDK which enforces HTTPS in gateway mode</li>
+<li><strong>compat (java):</strong> Removed static <code>floci-az.p12</code> truststore from test resources — truststore is now built dynamically from the live emulator cert</li>
+</ul>
+<h2 id="030-2026-05-23"><a href="https://github.com/floci-io/floci-az/compare/0.2.0...0.3.0">0.3.0</a> - 2026-05-23</h2>
+<h3 id="added_5">Added</h3>
+<ul>
+<li><strong>aks:</strong> Azure Kubernetes Service emulation — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags, agent pool CRUD, <code>listClusterAdminCredential</code> / <code>listClusterUserCredential</code>; ARM path routing on <code>Microsoft.ContainerService</code></li>
+<li><strong>aks:</strong> Real k3s mode — each cluster starts a privileged <code>rancher/k3s</code> container; background readiness poller transitions <code>provisioningState</code> from <code>Creating</code> → <code>Succeeded</code>; kubeconfig with real CA extracted from the container</li>
+<li><strong>aks:</strong> Mocked mode (<code>FLOCI_AZ_SERVICES_AKS_MOCKED=true</code>) — clusters immediately reach <code>Succeeded</code> with a synthetic kubeconfig; no Docker required; suitable for unit tests and CI without Docker</li>
+<li><strong>aks:</strong> <code>instanceId</code>-based container naming (<code>floci-az-aks-{instanceId}</code>) — 8-char UUID prefix per cluster prevents naming collisions when the same cluster name exists across resource groups</li>
+<li>
+<p><strong>aks:</strong> 10 unit tests (<code>AksHandlerTest</code>) covering full CRUD in mocked mode; 5 Docker integration tests (<code>AksDockerTest</code>) with <code>@TestProfile(mocked=false)</code> exercising real k3s start, readiness poll, kubeconfig extraction, and deletion</p>
+</li>
+<li>
+<p><strong>cosmos:</strong> Azure Cosmos DB SQL API emulator — always-on at <code>/{account}-cosmos/</code>; databases, containers, and document CRUD; full SQL dialect (<code>SELECT</code>, <code>WHERE</code>, <code>ORDER BY</code>, <code>GROUP BY</code>, <code>OFFSET LIMIT</code>, <code>SELECT TOP</code>, <code>SELECT DISTINCT</code>); aggregates (<code>COUNT</code>, <code>SUM</code>, <code>AVG</code>, <code>MIN</code>, <code>MAX</code>); string, math, array, and type-check functions; named parameters; <code>PATCH</code> document operations; transactional batch; server-side pagination with continuation tokens; system properties (<code>_rid</code>, <code>_self</code>, <code>_etag</code>, <code>_ts</code>) auto-generated on every write (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</p>
+</li>
+<li><strong>cosmos:</strong> Modular multi-API engine support — opt-in per API via environment variable; Docker-backed: MongoDB (<code>mongo:7</code>), PostgreSQL/Citus (<code>citusdata/citus</code>), Cassandra (<code>scylladb/scylla:6.2</code>), Gremlin (<code>tinkerpop/gremlin-server</code>); embedded (no Docker): NoSQL in-process SQL engine, Table in-memory OData; each engine exposes a <code>/connect</code> endpoint returning its connection string (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</li>
+<li><strong>cosmos:</strong> HTTPS proxy on port <code>4578</code> with bundled self-signed certificate (<code>CN=localhost</code>, valid 100 years) — required for the Azure Cosmos DB Java SDK which enforces TLS in gateway mode; no certificate import needed (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</li>
+<li><strong>cosmos:</strong> Java compatibility tests — <code>CosmosCompatibilityTest</code> (SQL API CRUD + queries), <code>CosmosNoSqlEngineCompatibilityTest</code> (embedded NoSQL engine), <code>CosmosMongoEngineCompatibilityTest</code>, <code>CosmosPostgresEngineCompatibilityTest</code>, <code>CosmosCassandraEngineCompatibilityTest</code>, <code>CosmosGremlinEngineCompatibilityTest</code>, <code>CosmosTableEngineCompatibilityTest</code> (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</li>
+<li><strong>table:</strong> OData <code>$filter</code> / <code>$select</code> / <code>$top</code> query support — operators <code>eq</code>, <code>ne</code>, <code>gt</code>, <code>ge</code>, <code>lt</code>, <code>le</code>, <code>and</code>, <code>or</code>, <code>not</code>; functions <code>startswith</code>, <code>endswith</code>, <code>substringof</code>; typed property annotations (<code>Edm.Int64</code>, <code>Edm.DateTime</code>, <code>Edm.Guid</code>, etc.)</li>
+<li><strong>table:</strong> ETag optimistic concurrency — <code>If-Match: *</code> and <code>If-Match: "&lt;etag&gt;"</code> honoured on <code>PUT</code>, <code>MERGE</code>, <code>PATCH</code>, and <code>DELETE</code>; <code>412 Precondition Failed</code> on mismatch</li>
+<li><strong>table:</strong> Entity Group Transactions (<code>$batch</code>) — atomic execution of multiple operations against a single partition key; full rollback on any failure; standard Azure <code>multipart/mixed</code> wire format</li>
+<li><strong>table:</strong> Server-side pagination with <code>NextPartitionKey</code> / <code>NextRowKey</code> continuation tokens</li>
+<li><strong>event-hubs:</strong> Multi-namespace support — each Event Hubs namespace gets its own isolated Artemis container with dynamically allocated ports; default namespace starts on-demand via <code>PUT /{account}-eventhub/namespaces/{ns}</code></li>
+<li><strong>event-hubs:</strong> Namespace management REST API — <code>GET/PUT/DELETE /{account}-eventhub/namespaces[/{ns}]</code>; <code>GET /{account}-eventhub/namespaces/{ns}/connection</code> returns AMQP/AMQPS ports and Kafka bootstrap when running; <code>GET /{account}-eventhub/namespaces/{ns}/tls-cert</code> returns TLS PEM</li>
+<li><strong>event-hubs:</strong> ANYCAST + exclusive divert topology embedded in <code>broker.xml</code> — durable queues per consumer group ensure messages persist before a receiver connects; Jolokia setup runs asynchronously after broker start</li>
+<li><strong>event-hubs:</strong> <code>ArtemisConfigGenerator</code> generates <code>broker.xml</code> per namespace; <code>ArtemisTlsGenerator</code> generates self-signed RSA-2048 cert + PKCS12 keystore per namespace for TLS AMQP</li>
+<li><strong>event-hubs:</strong> Java AMQP compatibility tests (<code>EventHubCompatibilityTest</code>, <code>EventHubNamespaceManagementTest</code>) replacing previous Python uamqp suite</li>
+<li><strong>event-hubs:</strong> Kafka (<code>EventHubsKafkaManager</code>) starts on-demand when a namespace is created with <code>kafkaEnabled: true</code>; idempotent, synchronized, resolves broker address correctly inside and outside Docker</li>
+<li><strong>docker:</strong> <code>ContainerSpec</code>, <code>ContainerBuilder</code>, <code>ContainerLifecycleManager</code>, <code>ImageCacheService</code>, <code>PortAllocator</code> ported from floci — shared container infrastructure for sidecar-based services</li>
+</ul>
+<h3 id="changed_3">Changed</h3>
+<ul>
+<li><strong>docs:</strong> README restructured to match floci (aws-local) format — nav links, "What is?", Features section, SDK examples collapsed per language, Migrating from Azurite, Star History, Contributors</li>
+<li><strong>docs:</strong> <code>mkdocs.yml</code> — added Cosmos DB service page; moved <code>application.yml Reference</code> under <code>Advanced</code> subsection</li>
+<li><strong>docker:</strong> Added OCI image labels (<code>org.opencontainers.image.*</code>, <code>io.k8s.*</code>, <code>io.openshift.*</code>) to <code>Dockerfile.jvm-package</code> and <code>Dockerfile.native-package</code></li>
+<li><strong>build:</strong> Removed stale <code>test-appconfig</code> Makefile target and <code>APPCONFIG_DIR</code> variable — AppConfig tests are covered by <code>test-python</code> and <code>test-java-compat</code></li>
+</ul>
+<h2 id="020-2026-05-15"><a href="https://github.com/floci-io/floci-az/compare/0.1.4...0.2.0">0.2.0</a> - 2026-05-15</h2>
+<h3 id="added_6">Added</h3>
+<ul>
+<li><strong>key-vault:</strong> Azure Key Vault Secrets service — CRUD, versioning (immutable versions with latest pointer), soft-delete lifecycle (delete → recover or purge), properties update (<code>content_type</code>, <code>tags</code>, <code>enabled</code>, <code>nbf</code>, <code>exp</code>), list secrets/versions/deleted, backup (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</li>
+<li><strong>key-vault:</strong> 24 Python (<code>azure-keyvault-secrets 4.11.0</code>) compatibility tests covering secrets CRUD, versioning, soft-delete, enabled attribute, and backup (<a href="https://github.com/floci-io/floci-az/pull/16">#16</a>)</li>
+<li><strong>app-config:</strong> Azure App Configuration service — key-values, labels, feature flags, snapshots (frozen KV sets), revisions, ETags, and optimistic-concurrency locks (<a href="https://github.com/floci-io/floci-az/pull/15">#15</a>)</li>
+<li><strong>app-config:</strong> Snapshot lifecycle — <code>PUT /snapshots/{name}</code> captures a frozen set of key-values; <code>GET /operations?snapshot={name}</code> returns the LRO result; <code>GET /kv?snapshot={name}</code> reads from the frozen set; supports <code>key</code> and <code>key_label</code> composition modes (<a href="https://github.com/floci-io/floci-az/pull/15">#15</a>)</li>
+<li><strong>app-config:</strong> 36 Python (<code>azure-appconfiguration 1.7.1</code>) and 36 Java compatibility tests covering KV, labels, feature flags, ETags, locks, and snapshots (<a href="https://github.com/floci-io/floci-az/pull/15">#15</a>)</li>
+<li><strong>docker:</strong> <code>CurrentContainerNetworkResolver</code> — detects which Docker network floci-az itself is on when running inside a container, improving function container IP resolution (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+<li><strong>docker:</strong> <code>DockerClientProducer</code> gains <code>normalizeDockerHost()</code> (prepends <code>tcp://</code> when scheme is missing) and <code>resolveEffectiveDockerHost()</code> (prefers <code>DOCKER_HOST</code> env over config default) — fixes connectivity in Bitbucket Pipelines and similar CI environments (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+<li><strong>functions:</strong> <code>FLOCI_AZ_SERVICES_FUNCTIONS_DOCKER_HOST_OVERRIDE</code> env var — explicitly override the hostname function containers use to reach floci-az (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+</ul>
+<h3 id="fixed_2">Fixed</h3>
+<ul>
+<li><strong>docker:</strong> <code>ContainerDetector.hasMountInfoMarkers()</code> now only checks lines where the filesystem is mounted at root (<code>/</code>), preventing false positives in some cgroup configurations (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+<li><strong>functions:</strong> <code>WarmPool</code> field renamed to <code>maxPoolSizePerFunction</code>; eviction scheduler renamed to <code>evictionScheduler</code>; idle timeout config key renamed from <code>idle-timeout-ms</code> to <code>container-idle-timeout-seconds</code> (value now in seconds, default <code>300</code>) (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+<li><strong>storage:</strong> <code>HybridStorage</code>, <code>PersistentStorage</code>, and <code>WalStorage</code> — replaced <code>.toList()</code> with <code>Collectors.toCollection(ArrayList::new)</code> for GraalVM native-image compatibility (<a href="https://github.com/floci-io/floci-az/pull/14">#14</a>)</li>
+</ul>
+<h3 id="dependencies">Dependencies</h3>
+<ul>
+<li>Bump <code>actions/setup-python</code> from 5 to 6</li>
+<li>Bump <code>actions/setup-java</code> from 4 to 5</li>
+<li>Bump <code>docker/login-action</code> from 3 to 4</li>
+<li>Bump Maven minor/patch group</li>
+</ul>
+<hr />
+<h2 id="014-2026-04-26"><a href="https://github.com/floci-io/floci-az/compare/0.1.3...0.1.4">0.1.4</a> - 2026-04-26</h2>
+<h3 id="fixed_3">Fixed</h3>
+<ul>
+<li>Release pipeline fix (version bump only; no functional changes)</li>
+</ul>
+<hr />
+<h2 id="013-2026-04-25"><a href="https://github.com/floci-io/floci-az/compare/0.1.2...0.1.3">0.1.3</a> - 2026-04-25</h2>
+<h3 id="added_7">Added</h3>
+<ul>
+<li><strong>docker:</strong> <code>docker/entrypoint.sh</code> — gosu-based Docker socket GID fix-up; the <code>floci</code> user (uid 1001) is granted access to the Docker socket at runtime, handling both Docker Desktop (macOS/Windows) and native Linux Docker without manual group configuration</li>
+</ul>
+<h3 id="changed_4">Changed</h3>
+<ul>
+<li><strong>ci:</strong> Release workflow restructured with SHA-pinned actions and a single multi-arch native build (replaces separate per-arch builds)</li>
+<li><strong>docker:</strong> Dockerfile aligned with floci structure — dedicated <code>floci</code> user, correct <code>/app/data</code> permissions, ENTRYPOINT wired through <code>docker/entrypoint.sh</code></li>
+</ul>
+<hr />
+<h2 id="012-2026-04-23"><a href="https://github.com/floci-io/floci-az/compare/0.1.1...0.1.2">0.1.2</a> - 2026-04-23</h2>
+<h3 id="fixed_4">Fixed</h3>
+<ul>
+<li><strong>functions:</strong> Stability improvements — container lifecycle edge cases, improved error handling on function invocation failures (<a href="https://github.com/floci-io/floci-az/pull/9">#9</a>)</li>
+<li><strong>core:</strong> Log output improvements — cleaner startup banner, structured service-status lines (<a href="https://github.com/floci-io/floci-az/pull/9">#9</a>)</li>
+<li><strong>docs:</strong> Corrected broken links in documentation</li>
+</ul>
+<h3 id="changed_5">Changed</h3>
+<ul>
+<li>Expanded compatibility test coverage across Blob, Queue, Table, and Functions suites (<a href="https://github.com/floci-io/floci-az/pull/9">#9</a>)</li>
+</ul>
+<hr />
+<h2 id="011-2026-04-22"><a href="https://github.com/floci-io/floci-az/compare/0.1.0...0.1.1">0.1.1</a> - 2026-04-22</h2>
+<h3 id="fixed_5">Fixed</h3>
+<ul>
+<li>Docker image deployment issue in release workflow (multi-arch manifest push)</li>
+</ul>
+<hr />
+<h2 id="010-2026-04-22"><a href="https://github.com/floci-io/floci-az/compare/0.0.1...0.1.0">0.1.0</a> - 2026-04-22</h2>
+<h3 id="fixed_6">Fixed</h3>
+<ul>
+<li>GitHub Actions Java version configuration in release workflow</li>
+</ul>
+<hr />
+<h2 id="001-2026-04-22"><a href="https://github.com/floci-io/floci-az/releases/tag/0.0.1">0.0.1</a> - 2026-04-22</h2>
+<h3 id="added_8">Added</h3>
+<ul>
+<li><strong>blob:</strong> Azure Blob Storage — create/delete containers; upload, download, delete, and list blobs; ETag support</li>
+<li><strong>queue:</strong> Azure Queue Storage — create/delete queues; send, receive, peek, and delete messages; visibility timeout</li>
+<li><strong>table:</strong> Azure Table Storage — create/delete tables; insert, get, update, upsert, delete, and list entities; OData filter support</li>
+<li><strong>functions:</strong> Azure Functions emulation — deploy HTTP-triggered functions via ZIP upload; warm-container pool (LIFO, one container per function); supports <code>node</code>, <code>python</code>, <code>java</code>, and <code>dotnet</code> runtimes; Docker-in-Docker via mounted Docker socket</li>
+<li><strong>storage:</strong> Four pluggable storage backends — <code>memory</code> (default), <code>persistent</code>, <code>hybrid</code>, and <code>wal</code>; configurable globally or per service</li>
+<li><strong>auth:</strong> <code>dev</code> mode (accept any credentials) and <code>strict</code> mode (validate HMAC-SHA256 shared-key signatures)</li>
+<li><strong>azfloci:</strong> Companion Python CLI that proxies <code>az</code> commands to the local emulator, injecting connection strings automatically</li>
+<li><strong>compat:</strong> Python (<code>azure-storage-blob</code>, <code>azure-storage-queue</code>, <code>azure-data-tables</code>), Java (Azure SDK BOM 1.2.28), and Node.js (<code>@azure/storage-blob</code>, <code>@azure/storage-queue</code>, <code>@azure/data-tables</code>) compatibility test suites</li>
+<li>Multi-arch Docker image (<code>linux/amd64</code>, <code>linux/arm64</code>) — native binary (<code>latest</code>) and JVM (<code>latest-jvm</code>) tags</li>
+<li>Single unified port <code>4577</code> for all services</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
