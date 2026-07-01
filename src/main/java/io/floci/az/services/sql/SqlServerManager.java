@@ -2,6 +2,7 @@ package io.floci.az.services.sql;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
+import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import jakarta.annotation.PreDestroy;
@@ -37,6 +38,7 @@ public class SqlServerManager {
     @Inject EmulatorConfig config;
     @Inject ContainerLifecycleManager containerManager;
     @Inject ContainerBuilder containerBuilder;
+    @Inject ContainerDetector containerDetector;
 
     /** containerId → container name, for cleanup on shutdown. */
     private final ConcurrentHashMap<String, String> managedContainers = new ConcurrentHashMap<>();
@@ -64,7 +66,8 @@ public class SqlServerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
-            .withDynamicPort(SQL_CONTAINER_PORT)   // OS picks host port
+            .withDynamicPort(SQL_CONTAINER_PORT)   // OS picks host port (used for host networking)
+            .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("ACCEPT_EULA", "Y")
             .withEnv("MSSQL_SA_PASSWORD", password)
             .withEnv("SA_PASSWORD", password)       // azure-sql-edge uses SA_PASSWORD
@@ -79,14 +82,27 @@ public class SqlServerManager {
             .orElseThrow(() -> new RuntimeException(
                 "Could not resolve host port for SQL Server container " + containerName));
 
+        // Pick the address an application can actually reach (mirrors RedisCacheManager):
+        // when floci-az runs inside a container, clients on the shared Docker network reach the
+        // sidecar by its container name on the container port; otherwise via localhost:hostPort.
+        String reachableHost;
+        int reachablePort;
+        if (containerDetector.isRunningInContainer()) {
+            reachableHost = containerName;
+            reachablePort = SQL_CONTAINER_PORT;
+        } else {
+            reachableHost = "localhost";
+            reachablePort = hostPort;
+        }
+
         managedContainers.put(containerId, containerName);
-        LOG.infof("SQL Server container started: server=%s containerId=%s port=%d",
-            entry.serverName(), containerId, hostPort);
+        LOG.infof("SQL Server container started: server=%s containerId=%s endpoint=%s:%d",
+            entry.serverName(), containerId, reachableHost, reachablePort);
 
-        waitForReady(hostPort, sqlConfig.startupTimeoutSeconds());
-        LOG.infof("SQL Server ready: server=%s port=%d", entry.serverName(), hostPort);
+        waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
+        LOG.infof("SQL Server ready: server=%s endpoint=%s:%d", entry.serverName(), reachableHost, reachablePort);
 
-        return entry.withContainer(containerId, hostPort);
+        return entry.withContainer(containerId, reachablePort, reachableHost);
     }
 
     /**
@@ -121,14 +137,14 @@ public class SqlServerManager {
      * clients.  A brief post-TCP sleep covers the remaining boot window without
      * requiring a JDBC driver on the main runtime classpath.
      */
-    private void waitForReady(int port, int timeoutSeconds) {
-        LOG.infof("Waiting for SQL Server to be ready on port %d (timeout=%ds)…", port, timeoutSeconds);
+    private void waitForReady(String host, int port, int timeoutSeconds) {
+        LOG.infof("Waiting for SQL Server to be ready on %s:%d (timeout=%ds)…", host, port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
 
         // Phase 1 — wait for the port to accept TCP connections
         while (System.currentTimeMillis() < deadline) {
-            try (Socket s = new Socket("localhost", port)) {
-                LOG.infof("SQL Server TCP port %d is open — waiting for engine init…", port);
+            try (Socket s = new Socket(host, port)) {
+                LOG.infof("SQL Server TCP %s:%d is open — waiting for engine init…", host, port);
                 break;
             } catch (Exception e) {
                 sleep(1000);
@@ -143,7 +159,7 @@ public class SqlServerManager {
             sleep(postTcpMs);
         }
 
-        LOG.infof("SQL Server ready: port=%d", port);
+        LOG.infof("SQL Server ready: %s:%d", host, port);
     }
 
     private static void sleep(long ms) {

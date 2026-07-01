@@ -34,7 +34,7 @@ class SqlStateTest {
         return new SqlState.SqlServerEntry(
             name, "sub-001", "rg-test", "eastus",
             "sa", "StrongPass1!",
-            "container-abc", 14330,
+            "container-abc", 14330, "localhost",
             Map.of(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now());
     }
 
@@ -86,7 +86,7 @@ class SqlStateTest {
         state.putServer(server("b"));
         state.putServer(new SqlState.SqlServerEntry(
             "c", "sub-other", "rg-test", "eastus",
-            "sa", "pass", null, 0, Map.of(),
+            "sa", "pass", null, 0, "localhost", Map.of(),
             new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
 
         List<SqlState.SqlServerEntry> result = state.listServersBySubscription("sub-001");
@@ -101,7 +101,7 @@ class SqlStateTest {
         state.putServer(server("x"));
         state.putServer(new SqlState.SqlServerEntry(
             "y", "sub-001", "rg-other", "westus",
-            "sa", "pass", null, 0, Map.of(),
+            "sa", "pass", null, 0, "localhost", Map.of(),
             new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
 
         List<SqlState.SqlServerEntry> result =
@@ -213,9 +213,11 @@ class SqlStateTest {
     @DisplayName("SqlServerEntry.withContainer updates containerId and port")
     void withContainer() {
         SqlState.SqlServerEntry original = server("srv");
-        SqlState.SqlServerEntry updated  = original.withContainer("new-container", 14444);
+        SqlState.SqlServerEntry updated  = original.withContainer("new-container", 14444, "floci-az-sql-srv");
         assertEquals("new-container", updated.containerId());
         assertEquals(14444, updated.hostPort());
+        assertEquals("floci-az-sql-srv", updated.host());
+        assertEquals("floci-az-sql-srv", updated.fullyQualifiedDomainName());
         // original is immutable
         assertEquals("container-abc", original.containerId());
     }
@@ -238,8 +240,10 @@ class SqlStateTest {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
         SqlState original = new SqlState(sharedBackend);
 
-        // Populate: server with containerId/hostPort set (as if a container is running)
-        original.putServer(server("persist-srv"));   // containerId="container-abc", hostPort=14330
+        // Populate: server with containerId/hostPort/host set (as if a container is running on a
+        // shared Docker network, so host is the container name rather than localhost).
+        original.putServer(server("persist-srv")
+            .withContainer("container-abc", 14330, "floci-az-sql-persist-srv"));
         original.putDatabase("persist-srv",
             SqlState.SqlDatabaseEntry.create("mydb", "persist-srv",
                 "SQL_Latin1_General_CP1_CI_AS", null, null));
@@ -262,6 +266,8 @@ class SqlStateTest {
             "containerId must be null after reload — container is gone");
         assertEquals(0, entry.get().hostPort(),
             "hostPort must be 0 after reload — container is gone");
+        assertEquals("localhost", entry.get().host(),
+            "host must reset to localhost after reload — the container's network name is gone");
 
         // ── Child resources are fully restored ────────────────────────────────
         assertTrue(reloaded.databaseExists("persist-srv", "mydb"), "database restored");

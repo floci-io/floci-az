@@ -208,7 +208,7 @@ public class SqlState {
                     SqlServerEntry restored = new SqlServerEntry(
                         e.serverName(), e.subscriptionId(), e.resourceGroupName(),
                         e.location(), e.administratorLogin(), e.administratorLoginPassword(),
-                        null, 0,   // containerId / hostPort are always reset on load
+                        null, 0, "localhost",   // containerId / hostPort / host are always reset on load
                         new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
                         new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
                         new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
@@ -249,6 +249,7 @@ public class SqlState {
             String administratorLoginPassword,   // stored, never returned in GET responses
             String containerId,                   // null until container starts; not persisted
             int hostPort,                         // 0 until container starts; not persisted
+            String host,                          // reachable host: "localhost" or the container name on a shared Docker network; not persisted
             Map<String, String> tags,
             Map<String, SqlDatabaseEntry> databases,
             Map<String, SqlFirewallRule> firewallRules,
@@ -260,15 +261,20 @@ public class SqlState {
                 subscriptionId, resourceGroupName, serverName);
         }
 
-        public SqlServerEntry withContainer(String id, int port) {
+        public SqlServerEntry withContainer(String id, int port, String reachableHost) {
             return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, administratorLogin, administratorLoginPassword,
-                id, port, tags, databases, firewallRules, createdAt);
+                id, port, reachableHost, tags, databases, firewallRules, createdAt);
         }
 
-        /** Returns the FQDN as Azure would expose it. In local dev this is always localhost. */
+        /**
+         * The host an application uses to reach the data plane. Azure would expose
+         * {@code {name}.database.windows.net}; floci-az returns the actually-reachable host —
+         * {@code localhost} for host networking, or the container name when floci-az runs
+         * inside Docker on a shared network.
+         */
         public String fullyQualifiedDomainName() {
-            return "localhost";
+            return host != null && !host.isBlank() ? host : "localhost";
         }
     }
 

@@ -183,7 +183,7 @@ public class SqlHandler implements AzureServiceHandler {
                 var firewallRules = new java.util.concurrent.ConcurrentHashMap<String, SqlState.SqlFirewallRule>();
                 entry = new SqlState.SqlServerEntry(
                     serverName, sub, rg, location, login, password,
-                    null, 0, tags, databases, firewallRules, Instant.now());
+                    null, 0, "localhost", tags, databases, firewallRules, Instant.now());
                 state.putServer(entry);
 
                 if (config.services().sql().mocked()) {
@@ -226,7 +226,7 @@ public class SqlHandler implements AzureServiceHandler {
                 state.putServer(new SqlState.SqlServerEntry(
                     serverName, sub, rg, location, login,
                     password.isBlank() ? entry.administratorLoginPassword() : password,
-                    entry.containerId(), entry.hostPort(), tags,
+                    entry.containerId(), entry.hostPort(), entry.host(), tags,
                     entry.databases(), entry.firewallRules(), entry.createdAt()));
                 entry = state.getServer(serverName).get();
             }
@@ -438,7 +438,9 @@ public class SqlHandler implements AzureServiceHandler {
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("minimalTlsVersion", "None");
         props.put("publicNetworkAccess", "Enabled");
-        // floci-az convenience — not in the real spec
+        // floci-az convenience — not in the real spec. This is the reachable port (the published
+        // host port for host networking, or the in-network container port when floci-az runs in a
+        // container). Prefer the /connect endpoint, which returns the matching reachable host.
         if (s.hostPort() > 0) props.put("localPort", s.hostPort());
 
         Map<String, Object> resp = new LinkedHashMap<>();
