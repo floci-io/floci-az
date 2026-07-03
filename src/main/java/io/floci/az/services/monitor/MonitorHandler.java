@@ -542,7 +542,6 @@ public class MonitorHandler implements AzureServiceHandler {
     // DSF uses them to route database audit logs to Event Hubs.
     // -------------------------------------------------------------------------
 
-    @SuppressWarnings("unchecked")
     private Response handleDiagnosticSettingsArm(AzureRequest req, String path, String method) {
         Matcher m = DIAG_SETTINGS_PATTERN.matcher(path);
         if (!m.find()) {
@@ -574,8 +573,12 @@ public class MonitorHandler implements AzureServiceHandler {
         return switch (method) {
             case "PUT" -> {
                 Map<String, Object> body = parseBody(req);
-                Map<String, Object> props = body.containsKey("properties")
-                    ? (Map<String, Object>) body.get("properties") : new LinkedHashMap<>();
+                Object rawProps = body.get("properties");
+                if (rawProps != null && !(rawProps instanceof Map<?, ?>)) {
+                    yield Response.status(400).entity("'properties' must be an object").build();
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> props = rawProps instanceof Map<?, ?> ? (Map<String, Object>) rawProps : new LinkedHashMap<>();
 
                 Map<String, Object> setting = new LinkedHashMap<>();
                 setting.put("id", "/" + path);
@@ -628,8 +631,11 @@ public class MonitorHandler implements AzureServiceHandler {
 
         // Log categories — preserve as-is, defaulting to audit-log categories per resource type
         List<Map<String, Object>> logs;
-        if (inputProps.containsKey("logs")) {
-            logs = (List<Map<String, Object>>) inputProps.get("logs");
+        Object rawLogs = inputProps.get("logs");
+        if (rawLogs instanceof List<?> l) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> typed = (List<Map<String, Object>>) l;
+            logs = typed;
         } else {
             logs = defaultLogCategories(resourceUri);
         }

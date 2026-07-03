@@ -51,7 +51,7 @@ public class MariaDbServerManager {
             .withEnv("MARIADB_ROOT_PASSWORD", entry.administratorLoginPassword())
             .withEnv("MARIADB_USER", entry.administratorLogin())
             .withEnv("MARIADB_PASSWORD", entry.administratorLoginPassword())
-            .withEnv("MARIADB_DATABASE", "mysql")
+            .withEnv("MARIADB_DATABASE", "floci")
             .withLogRotation()
             .build();
 

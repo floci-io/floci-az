@@ -51,7 +51,7 @@ public class MySqlServerManager {
             .withEnv("MYSQL_ROOT_PASSWORD", entry.administratorLoginPassword())
             .withEnv("MYSQL_USER", entry.administratorLogin())
             .withEnv("MYSQL_PASSWORD", entry.administratorLoginPassword())
-            .withEnv("MYSQL_DATABASE", "mysql")
+            .withEnv("MYSQL_DATABASE", "floci")
             .withLogRotation()
             .build();
 
