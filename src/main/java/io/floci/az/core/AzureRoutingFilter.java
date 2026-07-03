@@ -365,6 +365,76 @@ public class AzureRoutingFilter {
         }
 
         // ---------------------------------------------------------------
+        // Diagnostic Settings — extension resource on any managed resource:
+        //   {resourceUri}/providers/microsoft.insights/diagnosticSettings[/{name}]
+        // DSF uses these to route database audit logs to Event Hubs.
+        // This check must come BEFORE the database-specific provider checks because
+        // the path also contains the parent resource's provider namespace.
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") &&
+                io.floci.az.services.monitor.MonitorHandler.isDiagnosticSettingsPath(path)) {
+            Map<String, String> diagQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> diagQueryParams.put(k, v.get(0)));
+            AzureRequest diagRequest = new AzureRequest(
+                requestContext.getMethod(), "monitor", "monitor", path, headers,
+                requestContext.getEntityStream(), diagQueryParams, null, secure);
+            AuthContext diagAuth = authPipeline.resolve(diagRequest);
+            diagRequest = new AzureRequest(
+                requestContext.getMethod(), "monitor", "monitor", path, headers,
+                requestContext.getEntityStream(), diagQueryParams, diagAuth, secure);
+            Optional<AzureServiceHandler> diagHandler = serviceRegistry.resolve("monitor");
+            if (diagHandler.isPresent()) {
+                LOGGER.infof("Dispatching diagnostic settings request to MonitorHandler: %s %s",
+                    requestContext.getMethod(), path);
+                return diagHandler.get().handle(diagRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Azure Database for MySQL (Flexible Server) — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.DBforMySQL/...
+        //   subscriptions/{sub}/providers/Microsoft.DBforMySQL/checkNameAvailability
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.DBforMySQL/")) {
+            Map<String, String> mysqlQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> mysqlQueryParams.put(k, v.get(0)));
+            AzureRequest mysqlRequest = new AzureRequest(
+                requestContext.getMethod(), "mysql", "mysql", path, headers,
+                requestContext.getEntityStream(), mysqlQueryParams, null, secure);
+            AuthContext mysqlAuth = authPipeline.resolve(mysqlRequest);
+            mysqlRequest = new AzureRequest(
+                requestContext.getMethod(), "mysql", "mysql", path, headers,
+                requestContext.getEntityStream(), mysqlQueryParams, mysqlAuth, secure);
+            Optional<AzureServiceHandler> mysqlHandler = serviceRegistry.resolve("mysql");
+            if (mysqlHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM MySQL request to MySqlHandler: %s %s", requestContext.getMethod(), path);
+                return mysqlHandler.get().handle(mysqlRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Azure Database for MariaDB — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.DBforMariaDB/...
+        //   subscriptions/{sub}/providers/Microsoft.DBforMariaDB/checkNameAvailability
+        // ---------------------------------------------------------------
+        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.DBforMariaDB/")) {
+            Map<String, String> mariadbQueryParams = new HashMap<>();
+            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> mariadbQueryParams.put(k, v.get(0)));
+            AzureRequest mariadbRequest = new AzureRequest(
+                requestContext.getMethod(), "mariadb", "mariadb", path, headers,
+                requestContext.getEntityStream(), mariadbQueryParams, null, secure);
+            AuthContext mariadbAuth = authPipeline.resolve(mariadbRequest);
+            mariadbRequest = new AzureRequest(
+                requestContext.getMethod(), "mariadb", "mariadb", path, headers,
+                requestContext.getEntityStream(), mariadbQueryParams, mariadbAuth, secure);
+            Optional<AzureServiceHandler> mariadbHandler = serviceRegistry.resolve("mariadb");
+            if (mariadbHandler.isPresent()) {
+                LOGGER.infof("Dispatching ARM MariaDB request to MariaDbHandler: %s %s", requestContext.getMethod(), path);
+                return mariadbHandler.get().handle(mariadbRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Azure Database for PostgreSQL (Flexible Server) — ARM management-plane paths:
         //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.DBforPostgreSQL/flexibleServers/...
         //   subscriptions/{sub}/providers/Microsoft.DBforPostgreSQL/checkNameAvailability
@@ -580,6 +650,12 @@ public class AzureRoutingFilter {
         } else if (accountName.endsWith("-postgres")) {
             serviceType = "postgres";
             accountName = accountName.substring(0, accountName.length() - 9);
+        } else if (accountName.endsWith("-mysql")) {
+            serviceType = "mysql";
+            accountName = accountName.substring(0, accountName.length() - 6);
+        } else if (accountName.endsWith("-mariadb")) {
+            serviceType = "mariadb";
+            accountName = accountName.substring(0, accountName.length() - 8);
         } else if (accountName.endsWith("-servicebus")) {
             serviceType = "servicebus";
             accountName = accountName.substring(0, accountName.length() - 11);

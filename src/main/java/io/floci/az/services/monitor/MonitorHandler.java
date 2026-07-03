@@ -36,6 +36,11 @@ public class MonitorHandler implements AzureServiceHandler {
     private static final Pattern DCR_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.Insights/dataCollectionRules/([^/?]+)", Pattern.CASE_INSENSITIVE);
 
+    /** Matches any resource path with a diagnostic-settings extension resource appended. */
+    private static final Pattern DIAG_SETTINGS_PATTERN = Pattern.compile(
+        "(.+)/providers/microsoft\\.insights/diagnosticsettings(?:/([^/?]+))?",
+        Pattern.CASE_INSENSITIVE);
+
     private final StorageBackend<String, StoredObject> store;
     private final EmulatorConfig config;
 
@@ -60,12 +65,17 @@ public class MonitorHandler implements AzureServiceHandler {
         String path = request.resourcePath();
         String method = request.method().toUpperCase();
 
-        LOG.debugf("MonitorHandler data-plane %s /%s", method, path);
+        LOG.debugf("MonitorHandler %s /%s", method, path);
 
         if (path.startsWith("dataCollectionRules/")) {
             return handleIngestion(request);
         } else if (path.startsWith("v1/workspaces/")) {
             return handleQuery(request);
+        }
+
+        // ARM-plane calls routed via AzureRoutingFilter with serviceType=monitor
+        if (isDiagnosticSettingsPath(path)) {
+            return handleDiagnosticSettingsArm(request, path, method.toUpperCase());
         }
 
         return Response.status(404).entity("Not Found").build();
@@ -80,8 +90,20 @@ public class MonitorHandler implements AzureServiceHandler {
             return handleDceArm(req, path, method, sub);
         } else if (path.contains("/providers/Microsoft.Insights/dataCollectionRules/")) {
             return handleDcrArm(req, path, method, sub);
+        } else if (isDiagnosticSettingsPath(path)) {
+            return handleDiagnosticSettingsArm(req, path, method.toUpperCase());
         }
         return Response.status(404).entity("Provider resource not found").build();
+    }
+
+    /**
+     * Returns true when the path contains an Azure diagnostic-settings extension resource
+     * ({@code /providers/microsoft.insights/diagnosticSettings[/{name}]}).
+     * The check is case-insensitive to match both the az CLI and SDKs.
+     */
+    public static boolean isDiagnosticSettingsPath(String path) {
+        if (path == null) return false;
+        return DIAG_SETTINGS_PATTERN.matcher(path).find();
     }
 
     // -------------------------------------------------------------------------
@@ -510,6 +532,139 @@ public class MonitorHandler implements AzureServiceHandler {
         } catch (IOException e) {
             return Map.of();
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Diagnostic Settings ARM CRUD
+    // -------------------------------------------------------------------------
+    // Azure diagnostic settings are an extension resource on any resource:
+    //   {resourceUri}/providers/microsoft.insights/diagnosticSettings[/{name}]
+    // DSF uses them to route database audit logs to Event Hubs.
+    // -------------------------------------------------------------------------
+
+    @SuppressWarnings("unchecked")
+    private Response handleDiagnosticSettingsArm(AzureRequest req, String path, String method) {
+        Matcher m = DIAG_SETTINGS_PATTERN.matcher(path);
+        if (!m.find()) {
+            return Response.status(400).entity("Invalid diagnosticSettings path").build();
+        }
+        String resourceUri = m.group(1);
+        String settingsName = m.group(2);
+
+        String resourceKey = resourceUri.toLowerCase();
+
+        if ("GET".equals(method) && settingsName == null) {
+            // List all diagnostic settings for the resource
+            final String prefix = "diag/" + resourceKey + "/";
+            List<Map<String, Object>> settings = new ArrayList<>();
+            for (String k : store.keys()) {
+                if (k.startsWith(prefix)) {
+                    store.get(k).ifPresent(obj -> settings.add(parseStoredData(obj)));
+                }
+            }
+            return Response.ok(Map.of("value", settings)).type(MediaType.APPLICATION_JSON).build();
+        }
+
+        if (settingsName == null) {
+            return Response.status(400).entity("diagnosticSettings name is required for this operation").build();
+        }
+
+        String storeKey = "diag/" + resourceKey + "/" + settingsName.toLowerCase();
+
+        return switch (method) {
+            case "PUT" -> {
+                Map<String, Object> body = parseBody(req);
+                Map<String, Object> props = body.containsKey("properties")
+                    ? (Map<String, Object>) body.get("properties") : new LinkedHashMap<>();
+
+                Map<String, Object> setting = new LinkedHashMap<>();
+                setting.put("id", "/" + path);
+                setting.put("name", settingsName);
+                setting.put("type", "Microsoft.Insights/diagnosticSettings");
+                setting.put("properties", buildDiagnosticSettingsProperties(props, resourceUri));
+
+                store.put(storeKey, new StoredObject(storeKey, toBytes(setting), Map.of(), Instant.now(),
+                    UUID.randomUUID().toString()));
+
+                LOG.infof("Diagnostic settings configured: resource=%s name=%s", resourceUri, settingsName);
+                yield Response.ok(setting).type(MediaType.APPLICATION_JSON).build();
+            }
+            case "GET" -> {
+                Optional<StoredObject> obj = store.get(storeKey);
+                if (obj.isEmpty()) {
+                    yield Response.status(404)
+                        .entity(Map.of("error", Map.of("code", "ResourceNotFound",
+                            "message", "Diagnostic settings '" + settingsName + "' not found")))
+                        .build();
+                }
+                yield Response.ok(parseStoredData(obj.get())).type(MediaType.APPLICATION_JSON).build();
+            }
+            case "DELETE" -> {
+                store.delete(storeKey);
+                yield Response.ok().build();
+            }
+            default -> Response.status(405).build();
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildDiagnosticSettingsProperties(Map<String, Object> inputProps,
+                                                                   String resourceUri) {
+        Map<String, Object> props = new LinkedHashMap<>();
+
+        // Event Hub destination — the primary DSF audit log sink
+        Object ehRuleId = inputProps.get("eventHubAuthorizationRuleId");
+        if (ehRuleId != null) props.put("eventHubAuthorizationRuleId", ehRuleId);
+        Object ehName = inputProps.get("eventHubName");
+        if (ehName != null) props.put("eventHubName", ehName);
+
+        // Log Analytics workspace destination
+        Object workspaceId = inputProps.get("workspaceId");
+        if (workspaceId != null) props.put("workspaceId", workspaceId);
+
+        // Storage account destination
+        Object storageAccountId = inputProps.get("storageAccountId");
+        if (storageAccountId != null) props.put("storageAccountId", storageAccountId);
+
+        // Log categories — preserve as-is, defaulting to audit-log categories per resource type
+        List<Map<String, Object>> logs;
+        if (inputProps.containsKey("logs")) {
+            logs = (List<Map<String, Object>>) inputProps.get("logs");
+        } else {
+            logs = defaultLogCategories(resourceUri);
+        }
+        props.put("logs", logs);
+
+        // Metrics — preserve as-is (DSF only uses logs)
+        Object metrics = inputProps.get("metrics");
+        props.put("metrics", metrics != null ? metrics : List.of());
+
+        return props;
+    }
+
+    private List<Map<String, Object>> defaultLogCategories(String resourceUri) {
+        String lc = resourceUri.toLowerCase();
+        List<String> categories;
+        if (lc.contains("microsoft.dbformysql")) {
+            categories = List.of("MySqlAuditLogs", "MySqlSlowLogs");
+        } else if (lc.contains("microsoft.dbformariadb")) {
+            categories = List.of("MySqlAuditLogs", "MySqlSlowLogs");
+        } else if (lc.contains("microsoft.dbforpostgresql")) {
+            categories = List.of("PostgreSQLLogs");
+        } else if (lc.contains("microsoft.sql")) {
+            categories = List.of("SQLSecurityAuditEvents", "SQLInsights", "AutomaticTuning");
+        } else {
+            categories = List.of("AuditEvent");
+        }
+        return categories.stream()
+            .map(cat -> {
+                Map<String, Object> log = new LinkedHashMap<>();
+                log.put("category", cat);
+                log.put("enabled", true);
+                log.put("retentionPolicy", Map.of("enabled", false, "days", 0));
+                return log;
+            })
+            .toList();
     }
 
     public void clearAll() {

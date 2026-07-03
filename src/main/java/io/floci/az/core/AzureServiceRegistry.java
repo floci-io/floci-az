@@ -43,6 +43,8 @@ public class AzureServiceRegistry {
             case "eventhub"   -> config.services().eventHub().enabled();
             case "sql"        -> config.services().sql().enabled();
             case "postgres"   -> config.services().postgres().enabled();
+            case "mysql"      -> config.services().mysql().enabled();
+            case "mariadb"    -> config.services().mariaDb().enabled();
             case "servicebus" -> config.services().serviceBus().enabled();
             case "aks"        -> config.services().aks().enabled();
             case "vm"         -> config.services().vm().enabled();

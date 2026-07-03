@@ -122,6 +122,8 @@ public interface EmulatorConfig {
         EventHubConfig         eventHub();
         SqlServiceConfig       sql();
         PostgresServiceConfig  postgres();
+        MySqlServiceConfig     mysql();
+        MariaDbServiceConfig   mariaDb();
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
         VmConfig               vm();
@@ -546,6 +548,60 @@ public interface EmulatorConfig {
         int startupTimeoutSeconds();
 
         /** Default host port. 0 lets the OS pick a free port (recommended when running multiple servers). */
+        @WithDefault("0")
+        int defaultPort();
+    }
+
+    /**
+     * Azure Database for MySQL (Flexible Server) — {@code Microsoft.DBforMySQL/flexibleServers}.
+     */
+    interface MySqlServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no MySQL container is started; servers are created in state and
+         * transition immediately to {@code state=Ready}. Useful for fast CI runs without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
+        /** Docker image for the MySQL container. */
+        @WithDefault("mysql:8.0")
+        String image();
+
+        /** Maximum seconds to wait for a MySQL container to become ready. */
+        @WithDefault("60")
+        int startupTimeoutSeconds();
+
+        /** Default host port. 0 lets the OS pick a free port. */
+        @WithDefault("0")
+        int defaultPort();
+    }
+
+    /**
+     * Azure Database for MariaDB — {@code Microsoft.DBforMariaDB/servers}.
+     */
+    interface MariaDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no MariaDB container is started; servers are created in state and
+         * transition immediately to {@code userVisibleState=Ready}. Useful for fast CI runs without Docker.
+         */
+        @WithDefault("false")
+        boolean mocked();
+
+        /** Docker image for the MariaDB container. */
+        @WithDefault("mariadb:10.11")
+        String image();
+
+        /** Maximum seconds to wait for a MariaDB container to become ready. */
+        @WithDefault("60")
+        int startupTimeoutSeconds();
+
+        /** Default host port. 0 lets the OS pick a free port. */
         @WithDefault("0")
         int defaultPort();
     }
