@@ -30,7 +30,7 @@ public record MariaDbConnectionInfo(
     public static MariaDbConnectionInfo of(String host, int port,
                                             String login, String password,
                                             String database) {
-        String db = (database != null && !database.isBlank()) ? database : "mysql";
+        String db = (database != null && !database.isBlank()) ? database : "floci";
 
         String jdbc = String.format(
             "jdbc:mariadb://%s:%d/%s?user=%s&password=%s&useSSL=false",

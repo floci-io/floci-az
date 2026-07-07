@@ -31,7 +31,7 @@ public record MySqlConnectionInfo(
     public static MySqlConnectionInfo of(String host, int port,
                                          String login, String password,
                                          String database) {
-        String db = (database != null && !database.isBlank()) ? database : "mysql";
+        String db = (database != null && !database.isBlank()) ? database : "floci";
 
         String jdbc = String.format(
             "jdbc:mysql://%s:%d/%s?user=%s&password=%s&useSSL=false&allowPublicKeyRetrieval=true",
