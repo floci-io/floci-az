@@ -1,6 +1,8 @@
 package io.floci.az.services.apim;
 
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -396,9 +398,8 @@ public class ApiManagementGateway {
         return request.headers().getHeaderString(name);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object value) {
-        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(value);
     }
 
     private static String stringValue(Object value) {
@@ -410,10 +411,7 @@ public class ApiManagementGateway {
     }
 
     private Response notFound(String message) {
-        return Response.status(404).entity(Map.of("error", Map.of(
-                "code", "ResourceNotFound",
-                "message", message
-        ))).build();
+        return ArmErrors.notFound(message);
     }
 
     private Response unauthorized(String message) {

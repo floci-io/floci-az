@@ -10,6 +10,8 @@ import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.RetryPolicy;
 import io.floci.az.services.eventgrid.EventGridModels.Topic;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -382,21 +384,12 @@ public class EventGridService {
 
     // ── Generic parsing helpers ──────────────────────────────────────────────────
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest req) {
-        try {
-            if (req.bodyStream() == null || req.bodyStream().available() == 0) {
-                return Map.of();
-            }
-            return MAPPER.readValue(req.bodyStream(), Map.class);
-        } catch (IOException e) {
-            return Map.of();
-        }
+        return ArmJson.parseBodyLenient(req);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object value) {
-        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(value);
     }
 
     private static String stringOr(Object value, String fallback) {
@@ -456,14 +449,10 @@ public class EventGridService {
     }
 
     private static Response notFound(String resource) {
-        return Response.status(404).entity(Map.of("error", Map.of(
-                "code", "ResourceNotFound",
-                "message", "Resource not found: " + resource))).build();
+        return ArmErrors.notFound("Resource not found: " + resource);
     }
 
     private static Response badRequest(String message) {
-        return Response.status(400).entity(Map.of("error", Map.of(
-                "code", "InvalidRequest",
-                "message", message))).build();
+        return ArmErrors.error(400, "InvalidRequest", message);
     }
 }

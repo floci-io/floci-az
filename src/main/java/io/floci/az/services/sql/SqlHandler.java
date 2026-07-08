@@ -7,6 +7,8 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -528,21 +530,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String extractSubscriptionId(String fullPath) {
-        if (fullPath == null) return "default";
-        String[] parts = fullPath.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("subscriptions".equalsIgnoreCase(parts[i])) return parts[i + 1];
-        }
-        return "default";
+        return ArmPaths.segmentAfter(fullPath, "subscriptions", "default");
     }
 
     private static String extractResourceGroup(String fullPath) {
-        if (fullPath == null) return "default";
-        String[] parts = fullPath.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("resourcegroups".equalsIgnoreCase(parts[i])) return parts[i + 1];
-        }
-        return "default";
+        return ArmPaths.resourceGroup(fullPath, "default");
     }
 
     private static String serverArmId(String fullPath, String serverName) {
@@ -579,13 +571,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     // ── Standard error responses ──────────────────────────────────────────────
 
     private static Response notFound(String message) {
-        return Response.status(404).entity(Map.of(
-            "error", Map.of("code", "ResourceNotFound", "message", message))).build();
+        return ArmErrors.notFound(message);
     }
 
     private static Response badRequest(String message) {
-        return Response.status(400).entity(Map.of(
-            "error", Map.of("code", "InvalidRequest", "message", message))).build();
+        return ArmErrors.error(400, "InvalidRequest", message);
     }
 
     private static Response methodNotAllowed() {

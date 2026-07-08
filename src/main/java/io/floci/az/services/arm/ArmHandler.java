@@ -1,6 +1,5 @@
 package io.floci.az.services.arm;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
@@ -11,16 +10,17 @@ import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.network.NetworkHandler;
 import io.floci.az.services.monitor.MonitorHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * ARM management-plane handler for Azure Resource Manager paths that are not
@@ -41,7 +41,6 @@ import java.util.regex.Pattern;
 public class ArmHandler implements AzureServiceHandler {
 
     private static final Logger LOG = Logger.getLogger(ArmHandler.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     static final String FAKE_STORAGE_KEY =
             "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
@@ -666,33 +665,19 @@ public class ArmHandler implements AzureServiceHandler {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static String extractSub(String path) {
-        String[] parts = path.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("subscriptions".equals(parts[i])) return parts[i + 1];
-        }
-        return "unknown";
+        return ArmPaths.subscription(path, "unknown");
     }
 
     private static String extractRg(String path) {
-        String[] parts = path.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("resourcegroups".equalsIgnoreCase(parts[i])) return parts[i + 1];
-        }
-        return "unknown";
+        return ArmPaths.resourceGroup(path, "unknown");
     }
 
     private static String extractResourceName(String path, String resourceType) {
-        Pattern p = Pattern.compile("/" + Pattern.quote(resourceType) + "/([^/?]+)");
-        Matcher m = p.matcher(path);
-        return m.find() ? m.group(1) : "unknown";
+        return ArmPaths.resourceName(path, resourceType, "unknown");
     }
 
     private static String extractAfter(String path, String marker) {
-        int idx = path.lastIndexOf(marker);
-        if (idx < 0) return "unknown";
-        String rest = path.substring(idx + marker.length());
-        int q = rest.indexOf('?');
-        return q >= 0 ? rest.substring(0, q) : rest;
+        return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
     private static String rgKey(String sub, String rg)               { return sub + "/" + rg; }
@@ -700,33 +685,20 @@ public class ArmHandler implements AzureServiceHandler {
     private static String kvKey(String sub, String rg, String name)  { return sub + "/" + rg + "/kv/" + name; }
     private static String webAppKey(String sub, String rg, String name) { return sub + "/" + rg + "/web/" + name; }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object o) {
-        return o instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(o);
     }
 
     private static String bodyString(Map<String, Object> map, String key, String defaultValue) {
-        Object v = map.get(key);
-        return v instanceof String s ? s : defaultValue;
+        return ArmJson.string(map, key, defaultValue);
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest req) {
-        try {
-            if (req.bodyStream() == null || req.bodyStream().available() == 0) {
-                return Map.of();
-            }
-            return MAPPER.readValue(req.bodyStream(), Map.class);
-        } catch (IOException e) {
-            return Map.of();
-        }
+        return ArmJson.parseBodyLenient(req);
     }
 
     private static Map<String, Object> stripInternal(Map<String, Object> resource) {
-        Map<String, Object> copy = new LinkedHashMap<>(resource);
-        copy.remove("_sub");
-        copy.remove("_rg");
-        return copy;
+        return ArmResources.stripInternal(resource);
     }
 
     /**
@@ -758,9 +730,6 @@ public class ArmHandler implements AzureServiceHandler {
     }
 
     private Response armNotFound(String path) {
-        return Response.status(404).entity(Map.of("error", Map.of(
-                "code",    "ResourceNotFound",
-                "message", "Resource not found: " + path
-        ))).build();
+        return ArmErrors.notFound("Resource not found: " + path);
     }
 }

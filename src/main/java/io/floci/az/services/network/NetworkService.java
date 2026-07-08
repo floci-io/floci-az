@@ -1,12 +1,14 @@
 package io.floci.az.services.network;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +17,6 @@ import java.util.Map;
 @ApplicationScoped
 public class NetworkService {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Map<String, Map<String, Object>> resources;
 
@@ -171,59 +172,31 @@ public class NetworkService {
     }
 
     private static String extractRg(String path) {
-        String[] parts = path.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("resourcegroups".equalsIgnoreCase(parts[i])) {
-                return parts[i + 1];
-            }
-        }
-        return "unknown";
+        return ArmPaths.resourceGroup(path, "unknown");
     }
 
     private static String extractAfter(String path, String marker) {
-        int idx = path.lastIndexOf(marker);
-        if (idx < 0) {
-            return "unknown";
-        }
-        String rest = path.substring(idx + marker.length());
-        int q = rest.indexOf('?');
-        return q >= 0 ? rest.substring(0, q) : rest;
+        return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest request) {
-        try {
-            if (request.bodyStream() == null || request.bodyStream().available() == 0) {
-                return Map.of();
-            }
-            return MAPPER.readValue(request.bodyStream(), Map.class);
-        } catch (IOException e) {
-            return Map.of();
-        }
+        return ArmJson.parseBodyLenient(request);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object o) {
-        return o instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(o);
     }
 
     private static String bodyString(Map<String, Object> map, String key, String defaultValue) {
-        Object v = map.get(key);
-        return v instanceof String s ? s : defaultValue;
+        return ArmJson.string(map, key, defaultValue);
     }
 
     private static Map<String, Object> stripInternal(Map<String, Object> resource) {
-        Map<String, Object> copy = new LinkedHashMap<>(resource);
-        copy.remove("_sub");
-        copy.remove("_rg");
-        return copy;
+        return ArmResources.stripInternal(resource);
     }
 
     private Response notFound(String path) {
-        return Response.status(404).entity(Map.of("error", Map.of(
-                "code", "ResourceNotFound",
-                "message", "Resource not found: " + path
-        ))).build();
+        return ArmErrors.notFound("Resource not found: " + path);
     }
 
     // ── Azure DNS Support ───────────────────────────────────────────────────

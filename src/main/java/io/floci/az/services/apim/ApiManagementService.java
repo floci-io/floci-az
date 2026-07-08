@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -637,33 +640,19 @@ public class ApiManagementService {
     }
 
     private static String extractRg(String path) {
-        String[] parts = path.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("resourcegroups".equalsIgnoreCase(parts[i])) {
-                return parts[i + 1];
-            }
-        }
-        return "unknown";
+        return ArmPaths.resourceGroup(path, "unknown");
     }
 
     private static String extractAfter(String path, String marker) {
-        int idx = path.lastIndexOf(marker);
-        if (idx < 0) {
-            return "unknown";
-        }
-        String rest = path.substring(idx + marker.length());
-        int q = rest.indexOf('?');
-        return q >= 0 ? rest.substring(0, q) : rest;
+        return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> cast(Object value) {
-        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(value);
     }
 
     private static String bodyString(Map<String, Object> map, String key, String defaultValue) {
-        Object value = map.get(key);
-        return value instanceof String s ? s : defaultValue;
+        return ArmJson.string(map, key, defaultValue);
     }
 
     private static String stringValue(Object value) {
@@ -689,16 +678,8 @@ public class ApiManagementService {
         return method.toLowerCase() + (cleanPath.isBlank() ? "" : "-" + cleanPath);
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest request) {
-        try {
-            if (request.bodyStream() == null || request.bodyStream().available() == 0) {
-                return Map.of();
-            }
-            return MAPPER.readValue(request.bodyStream(), Map.class);
-        } catch (IOException e) {
-            return Map.of();
-        }
+        return ArmJson.parseBodyLenient(request);
     }
 
     private static Map<String, Object> stripInternal(Map<String, Object> resource) {
@@ -719,10 +700,7 @@ public class ApiManagementService {
     }
 
     private Response notFound(String message) {
-        return Response.status(404).entity(Map.of("error", Map.of(
-                "code", "ResourceNotFound",
-                "message", message
-        ))).build();
+        return ArmErrors.notFound(message);
     }
 
     private static String serviceKey(String sub, String rg, String serviceName) {

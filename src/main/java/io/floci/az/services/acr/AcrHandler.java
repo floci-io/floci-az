@@ -12,6 +12,8 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.acr.AcrModels.Registry;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -488,21 +490,11 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String extractSubscriptionId(String fullPath) {
-        if (fullPath == null) { return "default"; }
-        String[] parts = fullPath.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("subscriptions".equalsIgnoreCase(parts[i])) { return parts[i + 1]; }
-        }
-        return "default";
+        return ArmPaths.segmentAfter(fullPath, "subscriptions", "default");
     }
 
     private static String extractResourceGroup(String fullPath) {
-        if (fullPath == null) { return "default"; }
-        String[] parts = fullPath.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("resourcegroups".equalsIgnoreCase(parts[i])) { return parts[i + 1]; }
-        }
-        return "default";
+        return ArmPaths.resourceGroup(fullPath, "default");
     }
 
     private static String segment(String path, int index) {
@@ -534,15 +526,11 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
     // ── Standard error responses ─────────────────────────────────────────────────
 
     private static Response notFound(String message) {
-        return Response.status(404).entity(Map.of(
-                "error", Map.of("code", "ResourceNotFound", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.notFound(message);
     }
 
     private static Response badRequest(String message) {
-        return Response.status(400).entity(Map.of(
-                "error", Map.of("code", "InvalidRequest", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.error(400, "InvalidRequest", message);
     }
 
     private static Response methodNotAllowed() {
