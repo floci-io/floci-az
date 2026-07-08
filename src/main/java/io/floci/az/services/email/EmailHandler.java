@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
@@ -47,7 +48,7 @@ import java.util.regex.Pattern;
  * <p>Emails are captured in-memory for local inspection; no actual delivery occurs.
  */
 @ApplicationScoped
-public class EmailHandler implements AzureServiceHandler {
+public class EmailHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(EmailHandler.class);
 

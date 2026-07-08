@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -20,7 +21,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
-public class KeyVaultHandler implements AzureServiceHandler {
+public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(KeyVaultHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();

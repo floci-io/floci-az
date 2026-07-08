@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -45,7 +46,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * which the azurerm long-running-operation poller accepts as a terminal result.
  */
 @ApplicationScoped
-public class PostgresHandler implements AzureServiceHandler {
+public class PostgresHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(PostgresHandler.class);
 

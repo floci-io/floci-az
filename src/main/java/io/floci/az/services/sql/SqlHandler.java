@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -42,7 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  */
 @ApplicationScoped
-public class SqlHandler implements AzureServiceHandler {
+public class SqlHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(SqlHandler.class);
 

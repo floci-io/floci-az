@@ -7,6 +7,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -29,7 +30,7 @@ import java.util.stream.Collectors;
  *   Invocation  — /{account}-functions/api/{appName}/{funcName}
  */
 @ApplicationScoped
-public class FunctionsServiceHandler implements AzureServiceHandler {
+public class FunctionsServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(FunctionsServiceHandler.class);
 

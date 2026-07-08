@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -22,7 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class MonitorHandler implements AzureServiceHandler {
+public class MonitorHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(MonitorHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();

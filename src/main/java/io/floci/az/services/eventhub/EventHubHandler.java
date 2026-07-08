@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -42,7 +43,7 @@ import java.util.Optional;
  * </pre>
  */
 @ApplicationScoped
-public class EventHubHandler implements AzureServiceHandler {
+public class EventHubHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(EventHubHandler.class);
 
