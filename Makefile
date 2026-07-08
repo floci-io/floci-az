@@ -26,6 +26,18 @@ TERRAFORM_IMAGE = compat-terraform
 OPENTOFU_IMAGE  = compat-opentofu
 AZCLI_IMAGE     = compat-azcli
 
+# ── Per-suite container env — single source of truth ─────────────────────────
+# Every docker run for a suite (individual test-*-compat targets AND compat-docker)
+# must use its SUITE_ENV_* variable; the CI matrix extra_env in
+# .github/workflows/compatibility.yml mirrors these (see the sync table in CLAUDE.md).
+# Suite-internal defaults (FLOCI_AZ_ENDPOINT, EVENTHUB_*, JEST_JUNIT_*) are baked as
+# ENV in each suite's Dockerfile — only network-topology overrides belong here.
+SUITE_ENV_PYTHON =
+SUITE_ENV_JAVA   = -e SERVICEBUS_HOST=floci-az-servicebus-default \
+	-e SERVICEBUS_AMQPS_PORT=5671 \
+	-e SERVICEBUS_NAMESPACE=default
+SUITE_ENV_NODE   =
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 build:
@@ -158,8 +170,7 @@ test-python-compat:
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQPS_PORT=5671 \
+			$(SUITE_ENV_PYTHON) \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/python:/results" \
 			$(PYTHON_IMAGE); \
 		EXIT=$$?; \
@@ -176,9 +187,7 @@ test-java-compat:
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e SERVICEBUS_HOST=floci-az-servicebus-default \
-			-e SERVICEBUS_AMQPS_PORT=5671 \
-			-e SERVICEBUS_NAMESPACE=default \
+			$(SUITE_ENV_JAVA) \
 			-v /var/run/docker.sock:/var/run/docker.sock \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/java:/results" \
 			$(JAVA_IMAGE); \
@@ -196,8 +205,7 @@ test-node-compat:
 	if [ $$EXIT -eq 0 ]; then \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQP_PORT=5672 \
+			$(SUITE_ENV_NODE) \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/node:/results" \
 			$(NODE_IMAGE); \
 		EXIT=$$?; \
@@ -502,8 +510,7 @@ compat-docker:
 		echo "==> Python SDK tests"; \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQPS_PORT=5671 \
+			$(SUITE_ENV_PYTHON) \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/python:/results" \
 			$(PYTHON_IMAGE); \
 		EXIT=$$?; \
@@ -512,8 +519,7 @@ compat-docker:
 		echo "==> Node.js SDK tests"; \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQP_PORT=5672 \
+			$(SUITE_ENV_NODE) \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/node:/results" \
 			$(NODE_IMAGE); \
 		EXIT=$$?; \
@@ -522,9 +528,7 @@ compat-docker:
 		echo "==> Java SDK tests"; \
 		docker run --rm --network $(COMPAT_NETWORK) \
 			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e SERVICEBUS_HOST=floci-az-servicebus-default \
-			-e SERVICEBUS_AMQPS_PORT=5671 \
-			-e SERVICEBUS_NAMESPACE=default \
+			$(SUITE_ENV_JAVA) \
 			-v /var/run/docker.sock:/var/run/docker.sock \
 			-v "$(CURDIR)/$(COMPAT_RESULTS)/java:/results" \
 			$(JAVA_IMAGE); \
