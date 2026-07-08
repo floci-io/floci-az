@@ -276,7 +276,7 @@ public class QueueServiceHandler implements AzureServiceHandler {
             metadata.put("MessageText", msgReq.MessageText());
             metadata.put("PopReceipt", popReceipt);
             metadata.put("DequeueCount", "0");
-            metadata.put("_visibleAt", String.valueOf(visibleAt.getEpochSecond()));
+            metadata.put("_visibleAt", String.valueOf(visibleAt.toEpochMilli()));
 
             String key = System.currentTimeMillis() + "-" + messageId;
             store.put(objKey(request.accountName(), queueName, key),
@@ -339,7 +339,7 @@ public class QueueServiceHandler implements AzureServiceHandler {
             Instant hiddenUntil = now.plusSeconds(visibilityTimeoutSecs);
             for (StoredObject so : visible) {
                 Map<String, String> meta = new HashMap<>(so.metadata());
-                meta.put("_visibleAt", String.valueOf(hiddenUntil.getEpochSecond()));
+                meta.put("_visibleAt", String.valueOf(hiddenUntil.toEpochMilli()));
                 int dequeueCount = Integer.parseInt(meta.getOrDefault("DequeueCount", "0")) + 1;
                 meta.put("DequeueCount", String.valueOf(dequeueCount));
                 meta.put("PopReceipt", UUID.randomUUID().toString());
@@ -381,7 +381,7 @@ public class QueueServiceHandler implements AzureServiceHandler {
         String visibleAt = so.metadata().get("_visibleAt");
         if (visibleAt == null) return true;
         try {
-            return Instant.ofEpochSecond(Long.parseLong(visibleAt)).isBefore(now);
+            return Instant.ofEpochMilli(Long.parseLong(visibleAt)).isBefore(now);
         } catch (NumberFormatException e) {
             return true;
         }
@@ -458,7 +458,7 @@ public class QueueServiceHandler implements AzureServiceHandler {
             Map<String, String> meta = new HashMap<>(existing.get().metadata());
             meta.put("MessageText", msgReq.MessageText());
             meta.put("PopReceipt", newPopReceipt);
-            meta.put("_visibleAt", String.valueOf(visibleAt.getEpochSecond()));
+            meta.put("_visibleAt", String.valueOf(visibleAt.toEpochMilli()));
 
             store.put(objKey(request.accountName(), queueName, existing.get().key()),
                     new StoredObject(existing.get().key(), msgReq.MessageText().getBytes(), meta,
