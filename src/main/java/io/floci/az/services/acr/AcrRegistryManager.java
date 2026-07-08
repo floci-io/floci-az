@@ -55,10 +55,19 @@ public class AcrRegistryManager {
         this.config = config;
     }
 
-    /** Lazily starts (once) the shared {@code registry:2} container. Idempotent and thread-safe. */
+    /**
+     * Lazily starts the shared {@code registry:2} container. Idempotent and thread-safe.
+     * Self-healing: if the container died or was removed externally after a successful
+     * start, it is started again instead of handing out a dead endpoint forever.
+     */
     public synchronized void ensureStarted() {
         if (started) {
-            return;
+            if (lifecycleManager.isContainerRunning(containerId)) {
+                return;
+            }
+            LOG.warnv("Shared ACR registry {0} is no longer running; restarting it", SHARED_NAME);
+            started = false;
+            containerId = null;
         }
         EmulatorConfig.AcrConfig acrConfig = config.services().acr();
         lifecycleManager.removeIfExists(SHARED_NAME);

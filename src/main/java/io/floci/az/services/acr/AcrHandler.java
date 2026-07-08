@@ -356,10 +356,26 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
         poller.scheduleAtFixedRate(() -> {
             try {
                 scanAll().forEach(reg -> {
-                    if ("Creating".equals(reg.getProvisioningState()) && registryManager.isReady()) {
-                        LOG.infov("ACR registry {0} is now ready", reg.getName());
-                        reg.setProvisioningState("Succeeded");
-                        putRegistry(reg.storageKey(), reg);
+                    if ("Creating".equals(reg.getProvisioningState())) {
+                        // Recovers the shared registry if it died after its initial start,
+                        // so a pending registry cannot stay Creating forever.
+                        registryManager.ensureStarted();
+                        if (registryManager.isReady()) {
+                            LOG.infov("ACR registry {0} is now ready", reg.getName());
+                            reg.setLoginServer(registryManager.loginServer(reg.getName()));
+                            reg.setProvisioningState("Succeeded");
+                            putRegistry(reg.storageKey(), reg);
+                        }
+                    } else if ("Succeeded".equals(reg.getProvisioningState()) && registryManager.isStarted()) {
+                        // A recovery restart may have moved the shared registry to a new
+                        // host port; converge stored records to the live endpoint.
+                        String liveLoginServer = registryManager.loginServer(reg.getName());
+                        if (!liveLoginServer.equals(reg.getLoginServer())) {
+                            LOG.infov("ACR registry {0} loginServer refreshed to {1}",
+                                    reg.getName(), liveLoginServer);
+                            reg.setLoginServer(liveLoginServer);
+                            putRegistry(reg.storageKey(), reg);
+                        }
                     }
                 });
             } catch (Exception e) {
