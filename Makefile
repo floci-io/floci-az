@@ -68,6 +68,7 @@ require-emulator:
 compat-network:
 	@docker network inspect $(COMPAT_NETWORK) >/dev/null 2>&1 || docker network create $(COMPAT_NETWORK)
 
+# JVM image for the local dev loop; CI builds the native image via docker/Dockerfile.native-package.
 compat-build:
 	$(MVN) clean package -DskipTests -q
 	docker build -f docker/Dockerfile.jvm-package -t $(FLOCI_AZ_IMAGE) .
