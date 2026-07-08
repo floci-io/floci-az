@@ -29,7 +29,7 @@ AZCLI_IMAGE     = compat-azcli
 # ── Per-suite container env — single source of truth ─────────────────────────
 # Every docker run for a suite (individual test-*-compat targets AND compat-docker)
 # must use its SUITE_ENV_* variable; the CI matrix extra_env in
-# .github/workflows/compatibility.yml mirrors these (see the sync table in CLAUDE.md).
+# .github/workflows/compatibility.yml mirrors these (see the sync table in AGENTS.md).
 # Suite-internal defaults (FLOCI_AZ_ENDPOINT, EVENTHUB_*, JEST_JUNIT_*) are baked as
 # ENV in each suite's Dockerfile — only network-topology overrides belong here.
 SUITE_ENV_PYTHON =
