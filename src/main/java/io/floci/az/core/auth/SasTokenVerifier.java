@@ -13,7 +13,7 @@ import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
 @ApplicationScoped
-public class SasTokenParser implements AuthVerifier {
+public class SasTokenVerifier implements AuthVerifier {
     @Override
     public Optional<AuthContext> verify(AzureRequest request) {
         if (request.queryParams().containsKey("sig") && request.queryParams().containsKey("sv")) {
