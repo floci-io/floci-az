@@ -9,6 +9,7 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -501,16 +502,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> parseBody(AzureRequest req) {
-        try {
-            if (req.bodyStream() == null || req.bodyStream().available() == 0) {
-                return Map.of();
-            }
-            return MAPPER.readValue(req.bodyStream(), Map.class);
-        } catch (IOException e) {
-            return Map.of();
-        }
+        return ArmJson.parseBodyLenient(req);
     }
 
     public void clearAll() {

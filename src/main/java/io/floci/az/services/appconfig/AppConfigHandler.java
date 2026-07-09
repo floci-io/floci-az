@@ -11,6 +11,7 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.appconfig.AppConfigModels.OperationDetails;
 import io.floci.az.services.appconfig.AppConfigModels.Page;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -954,11 +955,7 @@ public class AppConfigHandler implements AzureServiceHandler, Resettable {
     }
 
     private Map<String, Object> parseBody(AzureRequest req) {
-        try {
-            return MAPPER.readValue(req.bodyStream(), new TypeReference<>() {});
-        } catch (IOException e) {
-            return new LinkedHashMap<>();
-        }
+        return ArmJson.parseBodyMutable(req);
     }
 
     private byte[] toBytes(Object obj) {

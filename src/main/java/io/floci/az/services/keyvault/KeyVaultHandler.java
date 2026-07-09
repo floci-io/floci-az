@@ -10,6 +10,7 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -604,11 +605,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     }
 
     private Map<String, Object> parseBody(AzureRequest req) {
-        try {
-            return MAPPER.readValue(req.bodyStream(), new TypeReference<>() {});
-        } catch (IOException e) {
-            return new LinkedHashMap<>();
-        }
+        return ArmJson.parseBodyMutable(req);
     }
 
     private byte[] toBytes(Object obj) {

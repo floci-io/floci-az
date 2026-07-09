@@ -13,6 +13,8 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.PowerState;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -470,12 +472,7 @@ public class VmHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String segmentAfter(String fullPath, String marker) {
-        if (fullPath == null) { return "default"; }
-        String[] parts = fullPath.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            if (marker.equalsIgnoreCase(parts[i])) { return parts[i + 1]; }
-        }
-        return "default";
+        return ArmPaths.segmentAfter(fullPath, marker, "default");
     }
 
     private static String segment(String path, int index) {
@@ -524,21 +521,15 @@ public class VmHandler implements AzureServiceHandler, Resettable {
     // ── Standard ARM error responses ──────────────────────────────────────────────
 
     private static Response armNotFound(String message) {
-        return Response.status(404).entity(Map.of(
-                "error", Map.of("code", "ResourceNotFound", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.notFound(message);
     }
 
     private static Response badRequest(String message) {
-        return Response.status(400).entity(Map.of(
-                "error", Map.of("code", "InvalidRequest", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.error(400, "InvalidRequest", message);
     }
 
     private static Response methodNotAllowed() {
-        return Response.status(405).entity(Map.of(
-                "error", Map.of("code", "MethodNotAllowed", "message", "Method not allowed")))
-                .type("application/json").build();
+        return ArmErrors.error(405, "MethodNotAllowed", "Method not allowed");
     }
 
     /** Wipes all VM data — used by {@code POST /_admin/reset}. */

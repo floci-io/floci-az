@@ -6,6 +6,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.Topic;
+import io.floci.az.core.arm.ArmErrors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -184,7 +185,6 @@ public class EventGridPublisher {
     }
 
     private static Response error(int status, String code, String message) {
-        return Response.status(status).entity(Map.of("error", Map.of(
-                "code", code, "message", message))).build();
+        return ArmErrors.error(status, code, message);
     }
 }

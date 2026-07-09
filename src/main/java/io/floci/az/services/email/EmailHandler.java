@@ -13,6 +13,8 @@ import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.services.email.EmailModels.CapturedEmail;
 import io.floci.az.services.email.EmailModels.EmailSendRequest;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -437,34 +439,25 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String bodyString(Map<String, Object> map, String key, String defaultValue) {
-        Object v = map.get(key);
-        return v instanceof String s ? s : defaultValue;
+        return ArmJson.string(map, key, defaultValue);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> bodyMap(Map<String, Object> map, String key) {
-        Object v = map.get(key);
-        return v instanceof Map<?,?> m ? (Map<String, Object>) m : Map.of();
+        return ArmJson.cast(map.get(key));
     }
 
     // ── Standard error responses ─────────────────────────────────────────────
 
     private static Response notFound(String message) {
-        return Response.status(404).entity(Map.of(
-                "error", Map.of("code", "ResourceNotFound", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.notFound(message);
     }
 
     private static Response badRequest(String message) {
-        return Response.status(400).entity(Map.of(
-                "error", Map.of("code", "InvalidRequest", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.error(400, "InvalidRequest", message);
     }
 
     private static Response serverError(String message) {
-        return Response.status(500).entity(Map.of(
-                "error", Map.of("code", "InternalError", "message", message)))
-                .type("application/json").build();
+        return ArmErrors.error(500, "InternalError", message);
     }
 
     /** Wipes all email data — used by {@code POST /_admin/reset}. */
