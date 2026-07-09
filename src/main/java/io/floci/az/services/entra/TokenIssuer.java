@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Base64;
+import java.util.UUID;
 
 /**
  * Mints RS256-signed Entra ID JWTs without a JWT library — JCA {@code Signature("SHA256withRSA")}
@@ -55,6 +56,11 @@ public class TokenIssuer {
         String idtyp,
         long lifetimeSeconds
     ) {}
+
+    /** Stable GUID derived from an arbitrary seed, for synthetic directory object ids. */
+    public static String deterministicGuid(String seed) {
+        return UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
+    }
 
     /** Returns the compact serialised, signed JWT. */
     public String issue(TokenSpec spec) {

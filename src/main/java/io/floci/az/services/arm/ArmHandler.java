@@ -7,6 +7,7 @@ import io.floci.az.services.apim.ApiManagementHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
+import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.network.NetworkHandler;
 import io.floci.az.services.monitor.MonitorHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
@@ -61,11 +62,13 @@ public class ArmHandler implements AzureServiceHandler {
     private final ApiManagementHandler apiManagementHandler;
     private final NetworkHandler networkHandler;
     private final MonitorHandler monitorHandler;
+    private final ManagedIdentityHandler managedIdentityHandler;
 
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
-                      NetworkHandler networkHandler, MonitorHandler monitorHandler) {
+                      NetworkHandler networkHandler, MonitorHandler monitorHandler,
+                      ManagedIdentityHandler managedIdentityHandler) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -73,6 +76,7 @@ public class ArmHandler implements AzureServiceHandler {
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
         this.monitorHandler       = monitorHandler;
+        this.managedIdentityHandler = managedIdentityHandler;
     }
 
     @Override
@@ -221,6 +225,9 @@ public class ArmHandler implements AzureServiceHandler {
                 resources.addAll(networkHandler.listResources(sub, rg));
             }
             resources.addAll(apiManagementHandler.listServices(sub, rg));
+            if (config.services().managedIdentity().enabled()) {
+                resources.addAll(managedIdentityHandler.listResources(sub, rg));
+            }
             return Response.ok(Map.of("value", resources)).build();
         }
 

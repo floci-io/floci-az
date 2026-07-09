@@ -54,6 +54,7 @@ public class AzureServiceRegistry {
             case "entra"      -> config.services().entra().enabled();
             case "arm"        -> config.services().arm().enabled();
             case "eventgrid"  -> config.services().eventGrid().enabled();
+            case "managedidentity" -> config.services().managedIdentity().enabled();
             case "cosmos-engine" -> config.services().cosmos().enabled();
             case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
                  "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->

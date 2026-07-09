@@ -90,5 +90,6 @@ nav:
     - Event Grid: services/event-grid.md
     - Azure Monitor / Log Analytics: services/monitor.md
     - Communication Services Email: services/email.md
+    - Managed Identity: services/managed-identity.md
   - Contributing: contributing.md
   - Changelog: changelog.md

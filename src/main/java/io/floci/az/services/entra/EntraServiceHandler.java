@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.services.entra.EntraModels.AppRegistration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -70,7 +71,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
     @Override
     public Response handle(AzureRequest request) {
         String path = stripSlashes(request.resourcePath());
-        String baseUrl = resolveBaseUrl(request);
+        String baseUrl = RequestUrls.resolveBaseUrl(request, config);
         LOG.infof("EntraService: %s %s", request.method(), path);
 
         if (path.endsWith(".well-known/openid-configuration")) {
@@ -102,7 +103,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
         String oid   = app != null
                 ? store.findServicePrincipalByAppId(appId).map(EntraModels.ServicePrincipal::objectId)
                        .orElse(app.objectId())
-                : deterministicGuid(appId);
+                : TokenIssuer.deterministicGuid(appId);
 
         String issuer = config.services().entra().issuer().orElse(
                 v2 ? baseUrl + "/" + effectiveTenant + "/v2.0"
@@ -119,7 +120,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
             }
             case "password" -> {
                 String username = form.getOrDefault("username", "dev-user@floci-az.local");
-                String userOid  = deterministicGuid(username);
+                String userOid  = TokenIssuer.deterministicGuid(username);
                 String audience = v2 ? appId : firstScopeResource(scope, baseUrl);
                 String scp = normalizeScopes(scope);
                 String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
@@ -222,20 +223,6 @@ public class EntraServiceHandler implements AzureServiceHandler {
     private String tenantSegment(String path) {
         int slash = path.indexOf('/');
         return slash < 0 ? path : path.substring(0, slash);
-    }
-
-    private String resolveBaseUrl(AzureRequest request) {
-        String host = request.headers() == null ? null : request.headers().getHeaderString("Host");
-        if (host == null || host.isBlank()) {
-            return config.effectiveBaseUrl();
-        }
-        String scheme = request.secure() ? "https" : "http";
-        return scheme + "://" + host;
-    }
-
-    /** Stable GUID derived from an arbitrary identity string, for synthetic oid claims. */
-    private static String deterministicGuid(String seed) {
-        return UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static String stripSlashes(String path) {
