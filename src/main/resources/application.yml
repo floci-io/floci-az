@@ -190,6 +190,11 @@ floci-az:
       enabled: true       # Microsoft.EventGrid — Custom Topics + webhook event subscriptions (HTTP pub/push)
       default-region: eastus
       max-delivery-attempts: 30
+    managed-identity:
+      enabled: true       # Microsoft.ManagedIdentity — user-assigned identities + IMDS token endpoint (tokens signed with the entra key)
+      # ARM scope that seeds the system-assigned IMDS identity; set it to your resource's
+      # scope so IMDS tokens match GET {scope}/.../identities/default reads.
+      system-assigned-scope: subscriptions/00000000-0000-0000-0000-000000000001
 
   auth:
     # dev: accept any credentials without signature validation

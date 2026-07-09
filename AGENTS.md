@@ -233,12 +233,13 @@ make stop
 ```
 compatibility-tests/
   sdk-test-python/      — Azure SDK for Python (pytest): blob/queue/table, cosmos, vm, redis, acr,
-                          plus appconfig/ and keyvault/ sub-suites
+                          managed identity, plus appconfig/ and keyvault/ sub-suites
   sdk-test-java/        — Azure SDK for Java (BOM; the primary compat target): blob/queue/table,
                           cosmos + all engines, functions, keyvault, appconfig, eventhub,
-                          servicebus, eventgrid, apim, sql, postgres, vm, datalake
+                          servicebus, eventgrid, apim, sql, postgres, vm, datalake,
+                          managed identity
   sdk-test-node/        — Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
-                          keyvault, eventhub
+                          keyvault, eventhub, managed identity
   compat-terraform/     — hashicorp/azurerm Terraform provider (BATS)
   compat-opentofu/      — OpenTofu with the azurerm provider (BATS)
   compat-azcli/         — real `az` CLI against a custom registered cloud (BATS)
@@ -266,6 +267,9 @@ Current per-suite env vars that must stay in sync:
 | `sdk-test-java` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_AMQPS_PORT=5671` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
+| `sdk-test-java` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
+| `sdk-test-python` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
+| `sdk-test-node` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.
 

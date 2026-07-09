@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **managedidentity:** Managed Identity emulation (`Microsoft.ManagedIdentity/userAssignedIdentities` + IMDS token endpoint) — HTTP-only with no Docker sidecar. ARM CRUD for user-assigned identities (server-generated `principalId`/`clientId`/`tenantId` GUIDs that stay stable across updates), `federatedIdentityCredentials` children (`issuer`/`subject`/`audiences`, as used by `azurerm_federated_identity_credential`), and the system-assigned read `GET /{scope}/providers/Microsoft.ManagedIdentity/identities/default` with deterministic per-scope GUIDs. Implements the **IMDS token endpoint** (`GET /metadata/identity/oauth2/token`, imds spec 2023-07-01): requires the `Metadata: true` header, resolves an identity by `client_id`/`object_id`/`msi_res_id` (or synthesizes the system-assigned identity when no selector is given), and returns the all-string IMDS response shape with a v1.0 JWT (`appid`, `oid`, `idtyp=app`) signed by the Entra key — verifiable against the emulator JWKS. Compatible with the `azure-identity` `ManagedIdentityCredential` (Java, Python, Node.js) by pointing `AZURE_POD_IDENTITY_AUTHORITY_HOST` at the emulator. The system-assigned IMDS identity's scope is configurable via `services.managed-identity.system-assigned-scope` so token `oid` claims can match `identities/default` reads, and identities appear in the resource group's `/resources` listing for azurerm's pre-delete emptiness check. Enabled by default; Java + Python + Node.js compatibility suites wired into `compat-docker` and CI
+
 ## [0.8.0] - 2026-06-25
 
 ### Added

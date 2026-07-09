@@ -127,6 +127,9 @@ public class BannerLogger {
         sb.append(String.format("   %-9s [%s]  %s\n", "network",
                 config.services().network().enabled() ? "enabled " : "disabled",
                 "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
+        sb.append(String.format("   %-9s [%s]  %s\n", "managedid",
+                config.services().managedIdentity().enabled() ? "enabled " : "disabled",
+                "Microsoft.ManagedIdentity (user-assigned identities + IMDS token endpoint)"));
         if (config.services().eventGrid().enabled()) {
             sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
         }

@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), and Microsoft Entra ID (OpenID Connect / OAuth2 token issuance).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), Managed Identity (Microsoft.ManagedIdentity + IMDS token endpoint), and Microsoft Entra ID (OpenID Connect / OAuth2 token issuance).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -164,6 +164,7 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 | Event Grid          | ✅                         | ❌                                           | ❌                                                                           |
 | Azure Monitor / Logs | ✅                        | ❌                                           | ❌                                                                           |
 | Communication Email | ✅                         | ❌                                           | ❌                                                                           |
+| Managed Identity    | ✅                         | ❌                                           | ❌                                                                           |
 | Microsoft Entra ID  | ✅                         | ❌                                           | ❌                                                                           |
 | Native binary       | ✅                         | ❌                                           | ✅                                                                           |
 | Unified port        | ✅ (4577)                  | ❌                                           | ❌                                                                           |
@@ -263,7 +264,7 @@ flowchart LR
         Router["HTTP Router\nJAX-RS / Vert.x\nprotocol-sniffing TLS proxy"]
 
         subgraph Stateless ["Stateless Services"]
-            A["App Configuration · Key Vault\nAPI Management · Event Grid\nVirtual Network · Virtual Machines\nMonitor / Log Analytics · Communication Email\nMicrosoft Entra ID · ARM management plane"]
+            A["App Configuration · Key Vault\nAPI Management · Event Grid\nVirtual Network · Virtual Machines\nMonitor / Log Analytics · Communication Email\nManaged Identity · Microsoft Entra ID · ARM management plane"]
         end
 
         subgraph Stateful ["Stateful Services"]
@@ -311,6 +312,7 @@ flowchart LR
 | **Event Grid**          | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | Custom Topics, `listKeys`/`regenerateKey`, webhook `eventSubscriptions` with subject/eventType filters; publish in Event Grid + CloudEvents 1.0 schemas; async webhook delivery with retry; `SubscriptionValidationEvent` handshake; HTTP-only (no sidecar) |
 | **Azure Monitor / Log Analytics** | ARM path (`Microsoft.OperationalInsights` / `Microsoft.Insights`) + `/dataCollectionRules/{id}/streams/{stream}` + `/v1/workspaces/{id}/query` | Workspaces, Data Collection Endpoints/Rules; Logs Ingestion API; Log Analytics query with a KQL subset (`where`/`project`/`take`/`limit` + timespan); HTTP-only (no sidecar) |
 | **Communication Services Email** | `/emails:send` + `/emails/operations/{id}` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style `GET /emailMessages`); communication/email services + domains via ARM; captures messages locally — no real delivery; HTTP-only (no sidecar) |
+| **Managed Identity**    | ARM path (`Microsoft.ManagedIdentity`) + `/metadata/identity/oauth2/token` | User-assigned identities (server-generated `principalId`/`clientId`), federated identity credentials, system-assigned `identities/default`; IMDS token endpoint for `ManagedIdentityCredential` (point the SDK at the emulator with `AZURE_POD_IDENTITY_AUTHORITY_HOST`); v1.0 JWTs signed with the Entra key, verifiable via JWKS; HTTP-only (no sidecar) |
 
 <details>
 <summary><strong>API Management details</strong></summary>

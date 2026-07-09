@@ -133,6 +133,7 @@ public interface EmulatorConfig {
         ArmConfig              arm();
         NetworkConfig          network();
         EventGridConfig        eventGrid();
+        ManagedIdentityConfig  managedIdentity();
 
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
@@ -178,6 +179,21 @@ public interface EmulatorConfig {
     interface NetworkConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    /** Microsoft.ManagedIdentity — user-assigned identities + IMDS token endpoint. */
+    interface ManagedIdentityConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * ARM scope that seeds the system-assigned IMDS identity's principalId/clientId.
+         * The emulator is not attached to a real Azure resource, so the "own" identity
+         * scope is configurable; point it at a resource's scope to make IMDS tokens match
+         * {@code GET {scope}/providers/Microsoft.ManagedIdentity/identities/default}.
+         */
+        @WithDefault("subscriptions/00000000-0000-0000-0000-000000000001")
+        String systemAssignedScope();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

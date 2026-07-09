@@ -32,11 +32,13 @@ AZCLI_IMAGE     = compat-azcli
 # .github/workflows/compatibility.yml mirrors these (see the sync table in AGENTS.md).
 # Suite-internal defaults (FLOCI_AZ_ENDPOINT, EVENTHUB_*, JEST_JUNIT_*) are baked as
 # ENV in each suite's Dockerfile — only network-topology overrides belong here.
-SUITE_ENV_PYTHON =
-SUITE_ENV_JAVA   = -e SERVICEBUS_HOST=floci-az-servicebus-default \
+POD_IDENTITY_ENV = -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
+SUITE_ENV_PYTHON = $(POD_IDENTITY_ENV)
+SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
+	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQPS_PORT=5671 \
 	-e SERVICEBUS_NAMESPACE=default
-SUITE_ENV_NODE   =
+SUITE_ENV_NODE   = $(POD_IDENTITY_ENV)
 
 # Per-suite build context and image tag, keyed by suite name.
 SUITES = python java node terraform opentofu azcli

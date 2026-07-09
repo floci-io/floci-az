@@ -217,6 +217,28 @@ public class AzureRoutingFilter {
             }
         }
 
+        // IMDS (Instance Metadata Service) — managed identity token endpoint:
+        //   metadata/identity/oauth2/token?resource=...   (header Metadata: true)
+        // Reached by azure-identity ManagedIdentityCredential when
+        // AZURE_POD_IDENTITY_AUTHORITY_HOST points at the emulator. Must precede the
+        // Entra block (the path also ends with oauth2/token). Skips the auth pipeline:
+        // IMDS requests carry no Authorization header.
+        if (path.startsWith("metadata/identity/")) {
+            Optional<AzureServiceHandler> miHandler = serviceRegistry.resolve("managedidentity");
+            if (miHandler.isPresent()) {
+                Map<String, String> miQueryParams = new HashMap<>();
+                requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> miQueryParams.put(k, v.get(0)));
+                AzureRequest miRequest = new AzureRequest(
+                    requestContext.getMethod(), "managedidentity", "managedidentity",
+                    path, headers, requestContext.getEntityStream(), miQueryParams, null, secure);
+                LOGGER.infof("Dispatching IMDS request to ManagedIdentityHandler: %s %s",
+                    requestContext.getMethod(), path);
+                return miHandler.get().handle(miRequest);
+            }
+            // Managed Identity disabled: fall through to JAX-RS (404).
+            return null;
+        }
+
         // Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
         //   {tenant}/oauth2/v2.0/token, {tenant}/oauth2/token,
         //   {tenant}/discovery/v2.0/keys,
@@ -323,6 +345,25 @@ public class AzureRoutingFilter {
             if (emailHandler.isPresent()) {
                 LOGGER.infof("Routing email path to EmailHandler: %s %s", requestContext.getMethod(), path);
                 return emailHandler.get().handle(emailRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Managed Identity — ARM management-plane paths:
+        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ManagedIdentity/userAssignedIdentities/...
+        //   {scope}/providers/Microsoft.ManagedIdentity/identities/default
+        // Checked before the other providers: the identities/default scope may itself
+        // be a Compute/ContainerService/... resource, and the ManagedIdentity provider
+        // segment is always the last one in the path. Nested children scoped to an
+        // identity (role assignments, locks, ...) have a later /providers/ segment and
+        // must keep falling through to ArmHandler.
+        // ---------------------------------------------------------------
+        int managedIdentityMarker = path.indexOf("/providers/Microsoft.ManagedIdentity/");
+        if (path.startsWith("subscriptions/") && managedIdentityMarker >= 0
+                && path.indexOf("/providers/", managedIdentityMarker + 1) < 0) {
+            Response response = dispatchManagementPlane(requestContext, "managedidentity", path, headers, secure);
+            if (response != null) {
+                return response;
             }
         }
 
