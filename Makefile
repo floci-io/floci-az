@@ -26,6 +26,60 @@ TERRAFORM_IMAGE = compat-terraform
 OPENTOFU_IMAGE  = compat-opentofu
 AZCLI_IMAGE     = compat-azcli
 
+# ── Per-suite container env — single source of truth ─────────────────────────
+# Every docker run for a suite (individual test-*-compat targets AND compat-docker)
+# must use its SUITE_ENV_* variable; the CI matrix extra_env in
+# .github/workflows/compatibility.yml mirrors these (see the sync table in CLAUDE.md).
+# Suite-internal defaults (FLOCI_AZ_ENDPOINT, EVENTHUB_*, JEST_JUNIT_*) are baked as
+# ENV in each suite's Dockerfile — only network-topology overrides belong here.
+SUITE_ENV_PYTHON =
+SUITE_ENV_JAVA   = -e SERVICEBUS_HOST=floci-az-servicebus-default \
+	-e SERVICEBUS_AMQPS_PORT=5671 \
+	-e SERVICEBUS_NAMESPACE=default
+SUITE_ENV_NODE   =
+
+# Per-suite build context and image tag, keyed by suite name.
+SUITES = python java node terraform opentofu azcli
+SUITE_DIR_python    = $(PYTHON_DIR)
+SUITE_DIR_java      = $(JAVA_DIR)
+SUITE_DIR_node      = $(NODE_DIR)
+SUITE_DIR_terraform = $(TERRAFORM_DIR)
+SUITE_DIR_opentofu  = $(OPENTOFU_DIR)
+SUITE_DIR_azcli     = $(AZCLI_DIR)
+SUITE_IMAGE_python    = $(PYTHON_IMAGE)
+SUITE_IMAGE_java      = $(JAVA_IMAGE)
+SUITE_IMAGE_node      = $(NODE_IMAGE)
+SUITE_IMAGE_terraform = $(TERRAFORM_IMAGE)
+SUITE_IMAGE_opentofu  = $(OPENTOFU_IMAGE)
+SUITE_IMAGE_azcli     = $(AZCLI_IMAGE)
+
+# ── Canned recipes for Docker compat sessions ─────────────────────────────────
+# One docker run for a suite container against the running emulator.
+# $(call RUN_SUITE,<suite>,<results-subdir>,<env args>,<late args e.g. --entrypoint>,<container cmd>)
+define RUN_SUITE
+docker run --rm --network $(COMPAT_NETWORK) \
+	-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
+	$(3) \
+	-v "$(CURDIR)/$(COMPAT_RESULTS)/$(2):/results" \
+	$(4) \
+	$(SUITE_IMAGE_$(1)) $(5)
+endef
+
+# Full session: build + start emulator, build suite image, run suite, always stop.
+# $(call COMPAT_SESSION,<suite>,<results-subdir>,<env args>,<late args>,<container cmd>)
+define COMPAT_SESSION
+@mkdir -p $(COMPAT_RESULTS)/$(2)
+$(MAKE) compat-build
+$(MAKE) compat-run
+@EXIT=0; \
+$(MAKE) compat-$(1)-image || EXIT=$$?; \
+if [ $$EXIT -eq 0 ]; then \
+	$(call RUN_SUITE,$(1),$(2),$(3),$(4),$(5)); \
+	EXIT=$$?; \
+fi; \
+$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+endef
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 build:
@@ -90,55 +144,50 @@ compat-stop:
 	@docker rm -f floci-az >/dev/null 2>&1 || true
 	@docker network rm $(COMPAT_NETWORK) >/dev/null 2>&1 || true
 
-compat-python-image:
-	docker build -t $(PYTHON_IMAGE) -f $(PYTHON_DIR)/Dockerfile $(PYTHON_DIR)/
-
-compat-java-image:
-	docker build -t $(JAVA_IMAGE) -f $(JAVA_DIR)/Dockerfile $(JAVA_DIR)/
-
-compat-node-image:
-	docker build -t $(NODE_IMAGE) -f $(NODE_DIR)/Dockerfile $(NODE_DIR)/
-
-compat-terraform-image:
-	docker build -t $(TERRAFORM_IMAGE) -f $(TERRAFORM_DIR)/Dockerfile $(TERRAFORM_DIR)/
-
-compat-opentofu-image:
-	docker build -t $(OPENTOFU_IMAGE) -f $(OPENTOFU_DIR)/Dockerfile $(OPENTOFU_DIR)/
-
-compat-azcli-image:
-	docker build -t $(AZCLI_IMAGE) -f $(AZCLI_DIR)/Dockerfile $(AZCLI_DIR)/
+define IMAGE_RULE
+compat-$(1)-image:
+	docker build -t $$(SUITE_IMAGE_$(1)) -f $$(SUITE_DIR_$(1))/Dockerfile $$(SUITE_DIR_$(1))/
+endef
+$(foreach s,$(SUITES),$(eval $(call IMAGE_RULE,$(s))))
 
 # ── Emulator: start with a specific Cosmos engine enabled ─────────────────────
 
-run-cosmos-mongo:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.mongodb.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (MongoDB engine enabled)"
+COSMOS_ENGINES = mongo postgresql cassandra gremlin table nosql
+COSMOS_PROP_mongo = mongodb
+COSMOS_RUNLABEL_mongo = MongoDB
+COSMOS_RUNLABEL_postgresql = PostgreSQL
+COSMOS_RUNLABEL_cassandra = Cassandra
+COSMOS_RUNLABEL_gremlin = Gremlin
+COSMOS_RUNLABEL_table = Table
+COSMOS_RUNLABEL_nosql = NoSQL
+COSMOS_TEST_mongo = CosmosMongoEngineCompatibilityTest
+COSMOS_TEST_postgresql = CosmosPostgresEngineCompatibilityTest
+COSMOS_TEST_cassandra = CosmosCassandraEngineCompatibilityTest
+COSMOS_TEST_gremlin = CosmosGremlinEngineCompatibilityTest
+COSMOS_TEST_table = CosmosTableEngineCompatibilityTest
+COSMOS_TEST_nosql = CosmosNoSqlEngineCompatibilityTest
+COSMOS_TESTHDR_mongo = MongoDB engine test
+COSMOS_TESTHDR_postgresql = PostgreSQL engine test
+COSMOS_TESTHDR_cassandra = Cassandra engine test (ScyllaDB may take ~60s to boot)
+COSMOS_TESTHDR_gremlin = Gremlin engine test
+COSMOS_TESTHDR_table = Table engine test
+COSMOS_TESTHDR_nosql = NoSQL engine test (embedded)
 
-run-cosmos-postgresql:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.postgresql.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (PostgreSQL engine enabled)"
+# run-cosmos-<engine> starts quarkus:dev with that engine enabled;
+# test-cosmos-<engine> runs its Java suite against it and always stops.
+define COSMOS_RULES
+run-cosmos-$(1):
+	$$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.$$(or $$(COSMOS_PROP_$(1)),$(1)).enabled=true" > emulator.log 2>&1 & echo $$$$! > $$(PID_FILE)
+	@until curl -s http://localhost:$$(PORT)/health > /dev/null; do sleep 1; done
+	@echo "Emulator is up! ($$(COSMOS_RUNLABEL_$(1)) engine enabled)"
 
-run-cosmos-cassandra:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.cassandra.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (Cassandra engine enabled)"
-
-run-cosmos-gremlin:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.gremlin.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (Gremlin engine enabled)"
-
-run-cosmos-table:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.table.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (Table engine enabled)"
-
-run-cosmos-nosql:
-	$(MVN) quarkus:dev -Dno-color "-Dfloci-az.services.cosmos.engines.nosql.enabled=true" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
-	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
-	@echo "Emulator is up! (NoSQL engine enabled)"
+test-cosmos-$(1):
+	@echo "==> Cosmos $$(COSMOS_TESTHDR_$(1))"
+	$$(MAKE) run-cosmos-$(1)
+	cd $$(JAVA_DIR) && mvn test -Dtest=$$(COSMOS_TEST_$(1)); \
+	EXIT=$$$$?; $$(MAKE) -C $$(CURDIR) stop; exit $$$$EXIT
+endef
+$(foreach e,$(COSMOS_ENGINES),$(eval $(call COSMOS_RULES,$(e))))
 
 run-sql:
 	$(MVN) quarkus:dev -Dno-color \
@@ -150,59 +199,15 @@ run-sql:
 
 test-python-compat:
 	@echo "==> Python SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/python
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-python-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQPS_PORT=5671 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/python:/results" \
-			$(PYTHON_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,python,python,$(SUITE_ENV_PYTHON),,)
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/java
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-java-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e SERVICEBUS_HOST=floci-az-servicebus-default \
-			-e SERVICEBUS_AMQPS_PORT=5671 \
-			-e SERVICEBUS_NAMESPACE=default \
-			-v /var/run/docker.sock:/var/run/docker.sock \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/java:/results" \
-			$(JAVA_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,)
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/node
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-node-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQP_PORT=5672 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/node:/results" \
-			$(NODE_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,node,node,$(SUITE_ENV_NODE),,)
 
 test-python-compat-local:
 	@echo "==> Python SDK compatibility tests (all services, local emulator)"
@@ -229,73 +234,19 @@ test-servicebus-compat:
 
 test-blob-python:
 	@echo "==> Blob Storage Python SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/blob-python
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-python-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-python:/results" \
-			--entrypoint pytest \
-			$(PYTHON_IMAGE) tests/test_blob.py -q --junit-xml=/results/junit.xml; \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,python,blob-python,,--entrypoint pytest,tests/test_blob.py -q --junit-xml=/results/junit.xml)
 
 test-blob-java:
 	@echo "==> Blob Storage Java SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/blob-java
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-java-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-java:/results" \
-			--entrypoint bash \
-			$(JAVA_IMAGE) -c 'mvn test -Dtest=BlobCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status'; \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,java,blob-java,,--entrypoint bash,-c 'mvn test -Dtest=BlobCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status')
 
 test-blob-node:
 	@echo "==> Blob Storage Node.js SDK compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/blob-node
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-node-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e JEST_JUNIT_OUTPUT_DIR=/results \
-			-e JEST_JUNIT_OUTPUT_NAME=junit.xml \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-node:/results" \
-			--entrypoint npm \
-			$(NODE_IMAGE) test -- --runTestsByPath tests/blob.test.ts; \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,node,blob-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts)
 
 test-apim-java:
 	@echo "==> API Management Java compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/apim-java
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-java-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/apim-java:/results" \
-			--entrypoint bash \
-			$(JAVA_IMAGE) -c 'mvn test -Dtest=ApiManagementCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status'; \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,java,apim-java,,--entrypoint bash,-c 'mvn test -Dtest=ApiManagementCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status')
 
 test-blob:
 	@echo "==> Blob Storage SDK compatibility tests (Docker)"
@@ -307,29 +258,15 @@ test-blob:
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-java-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-python:/results" \
-			--entrypoint pytest \
-			$(PYTHON_IMAGE) tests/test_blob.py -q --junit-xml=/results/junit.xml; \
+		$(call RUN_SUITE,python,blob-python,,--entrypoint pytest,tests/test_blob.py -q --junit-xml=/results/junit.xml); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e JEST_JUNIT_OUTPUT_DIR=/results \
-			-e JEST_JUNIT_OUTPUT_NAME=junit.xml \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-node:/results" \
-			--entrypoint npm \
-			$(NODE_IMAGE) test -- --runTestsByPath tests/blob.test.ts; \
+		$(call RUN_SUITE,node,blob-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/blob-java:/results" \
-			--entrypoint bash \
-			$(JAVA_IMAGE) -c 'mvn test -Dtest=BlobCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status'; \
+		$(call RUN_SUITE,java,blob-java,,--entrypoint bash,-c 'mvn test -Dtest=BlobCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status'); \
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
@@ -374,42 +311,6 @@ test-cosmos:
 	npm install --silent && \
 	npx jest cosmos.test --testTimeout=30000
 
-test-cosmos-mongo:
-	@echo "==> Cosmos MongoDB engine test"
-	$(MAKE) run-cosmos-mongo
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosMongoEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
-test-cosmos-postgresql:
-	@echo "==> Cosmos PostgreSQL engine test"
-	$(MAKE) run-cosmos-postgresql
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosPostgresEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
-test-cosmos-cassandra:
-	@echo "==> Cosmos Cassandra engine test (ScyllaDB may take ~60s to boot)"
-	$(MAKE) run-cosmos-cassandra
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosCassandraEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
-test-cosmos-gremlin:
-	@echo "==> Cosmos Gremlin engine test"
-	$(MAKE) run-cosmos-gremlin
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosGremlinEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
-test-cosmos-table:
-	@echo "==> Cosmos Table engine test"
-	$(MAKE) run-cosmos-table
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosTableEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
-test-cosmos-nosql:
-	@echo "==> Cosmos NoSQL engine test (embedded)"
-	$(MAKE) run-cosmos-nosql
-	cd $(JAVA_DIR) && mvn test -Dtest=CosmosNoSqlEngineCompatibilityTest; \
-	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
-
 test-cosmos-all:
 	@echo "==> All Cosmos engine tests (runs one by one, requires Docker)"
 	$(MAKE) test-cosmos-mongo
@@ -435,35 +336,11 @@ test-eventgrid:
 
 test-terraform-compat:
 	@echo "==> Terraform IaC compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/terraform
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-terraform-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/terraform:/results" \
-			$(TERRAFORM_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,terraform,terraform,,,)
 
 test-opentofu-compat:
 	@echo "==> OpenTofu IaC compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/opentofu
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-opentofu-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/opentofu:/results" \
-			$(OPENTOFU_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,opentofu,opentofu,,,)
 
 test-iac-compat:
 	$(MAKE) test-terraform-compat
@@ -471,19 +348,7 @@ test-iac-compat:
 
 test-azcli:
 	@echo "==> Azure CLI compatibility tests (Docker)"
-	@mkdir -p $(COMPAT_RESULTS)/azcli
-	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@EXIT=0; \
-	$(MAKE) compat-azcli-image || EXIT=$$?; \
-	if [ $$EXIT -eq 0 ]; then \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/azcli:/results" \
-			$(AZCLI_IMAGE); \
-		EXIT=$$?; \
-	fi; \
-	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
+	$(call COMPAT_SESSION,azcli,azcli,,,)
 
 # ── Full compatibility suite ──────────────────────────────────────────────────
 
@@ -500,58 +365,32 @@ compat-docker:
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-azcli-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Python SDK tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQPS_PORT=5671 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/python:/results" \
-			$(PYTHON_IMAGE); \
+		$(call RUN_SUITE,python,python,$(SUITE_ENV_PYTHON),,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Node.js SDK tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e EVENTHUB_HOST=floci-az-artemis-emulatorNs1 \
-			-e EVENTHUB_AMQP_PORT=5672 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/node:/results" \
-			$(NODE_IMAGE); \
+		$(call RUN_SUITE,node,node,$(SUITE_ENV_NODE),,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Java SDK tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-e SERVICEBUS_HOST=floci-az-servicebus-default \
-			-e SERVICEBUS_AMQPS_PORT=5671 \
-			-e SERVICEBUS_NAMESPACE=default \
-			-v /var/run/docker.sock:/var/run/docker.sock \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/java:/results" \
-			$(JAVA_IMAGE); \
+		$(call RUN_SUITE,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Terraform IaC tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/terraform:/results" \
-			$(TERRAFORM_IMAGE); \
+		$(call RUN_SUITE,terraform,terraform,,,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> OpenTofu IaC tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/opentofu:/results" \
-			$(OPENTOFU_IMAGE); \
+		$(call RUN_SUITE,opentofu,opentofu,,,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Azure CLI tests"; \
-		docker run --rm --network $(COMPAT_NETWORK) \
-			-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-			-v "$(CURDIR)/$(COMPAT_RESULTS)/azcli:/results" \
-			$(AZCLI_IMAGE); \
+		$(call RUN_SUITE,azcli,azcli,,,); \
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT
