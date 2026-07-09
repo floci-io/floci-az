@@ -30,6 +30,9 @@ export NIC_NAME="floci-test-nic"
 export VM_NAME="floci-test-vm"
 export REDIS_NAME="floci-test-redis"
 export ACR_NAME="flocitestacr"
+export PDZ_NAME="privatelink.blob.core.windows.net"
+export PDZ_LINK_NAME="floci-test-pdzvnl"
+export PE_NAME="floci-test-pe"
 export SUB_ID="${TF_VAR_subscription_id}"
 
 arm_get() {

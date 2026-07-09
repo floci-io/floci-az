@@ -150,3 +150,26 @@ setup() {
     assert_success
     assert_output --partial "$PG_DB_NAME"
 }
+
+@test "OpenTofu: private DNS zone created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateDnsZones"
+    assert_output --partial "Succeeded"
+}
+
+@test "OpenTofu: private DNS zone virtual network link reports Completed" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}/virtualNetworkLinks/${PDZ_LINK_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateDnsZones/virtualNetworkLinks"
+    assert_output --partial "Completed"
+}
+
+@test "OpenTofu: private endpoint created with synthesized NIC and approved connection" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateEndpoints/${PE_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateEndpoints"
+    assert_output --partial "privateLinkServiceConnections"
+    assert_output --partial "networkInterfaces"
+    assert_output --partial "Succeeded"
+}

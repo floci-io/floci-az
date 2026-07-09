@@ -136,3 +136,26 @@ setup() {
     assert_output --partial "Succeeded"
     assert_output --partial "loginServer"
 }
+
+@test "Terraform: private DNS zone created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateDnsZones"
+    assert_output --partial "Succeeded"
+}
+
+@test "Terraform: private DNS zone virtual network link reports Completed" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}/virtualNetworkLinks/${PDZ_LINK_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateDnsZones/virtualNetworkLinks"
+    assert_output --partial "Completed"
+}
+
+@test "Terraform: private endpoint created with synthesized NIC and approved connection" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateEndpoints/${PE_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/privateEndpoints"
+    assert_output --partial "privateLinkServiceConnections"
+    assert_output --partial "networkInterfaces"
+    assert_output --partial "Succeeded"
+}
