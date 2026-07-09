@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -23,7 +24,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
-public class TableServiceHandler implements AzureServiceHandler {
+public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOGGER = Logger.getLogger(TableServiceHandler.class);
 

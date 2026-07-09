@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -27,7 +28,7 @@ import java.util.stream.Collectors;
 import static io.floci.az.services.appconfig.AppConfigModels.*;
 
 @ApplicationScoped
-public class AppConfigHandler implements AzureServiceHandler {
+public class AppConfigHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(AppConfigHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();

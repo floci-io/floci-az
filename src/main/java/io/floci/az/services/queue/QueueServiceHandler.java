@@ -4,6 +4,7 @@ import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
@@ -23,7 +24,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
-public class QueueServiceHandler implements AzureServiceHandler {
+public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOGGER = Logger.getLogger(QueueServiceHandler.class);
     private static final DateTimeFormatter RFC1123_DATE_TIME = DateTimeFormatter

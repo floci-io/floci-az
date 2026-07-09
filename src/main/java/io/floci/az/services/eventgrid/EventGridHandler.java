@@ -2,6 +2,7 @@ package io.floci.az.services.eventgrid;
 
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -17,7 +18,7 @@ import org.jboss.logging.Logger;
  * </ul>
  */
 @ApplicationScoped
-public class EventGridHandler implements AzureServiceHandler {
+public class EventGridHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(EventGridHandler.class);
     private static final String ARM_MARKER = "/providers/Microsoft.EventGrid/";

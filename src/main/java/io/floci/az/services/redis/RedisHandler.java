@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -56,7 +57,7 @@ import java.util.concurrent.TimeUnit;
  * standard Redis clients can connect to the sidecar.</p>
  */
 @ApplicationScoped
-public class RedisHandler implements AzureServiceHandler {
+public class RedisHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(RedisHandler.class);
 

@@ -765,4 +765,16 @@ public class ApiManagementService {
         return UUID.nameUUIDFromBytes((subscriptionId + ":" + suffix).getBytes(StandardCharsets.UTF_8))
                 .toString().replace("-", "");
     }
+
+    public void clearAll() {
+        services.clear();
+        apis.clear();
+        operations.clear();
+        policies.clear();
+        products.clear();
+        subscriptions.clear();
+        namedValues.clear();
+        backends.clear();
+        productApis.clear();
+    }
 }

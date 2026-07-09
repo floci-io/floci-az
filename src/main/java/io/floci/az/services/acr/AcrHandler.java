@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -58,7 +59,7 @@ import java.util.concurrent.TimeUnit;
  * and {@code loginServer} is the cosmetic {@code {name}.azurecr.io} for management-plane fidelity.</p>
  */
 @ApplicationScoped
-public class AcrHandler implements AzureServiceHandler {
+public class AcrHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(AcrHandler.class);
 

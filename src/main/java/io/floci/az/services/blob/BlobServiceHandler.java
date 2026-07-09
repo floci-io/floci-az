@@ -3,6 +3,7 @@ package io.floci.az.services.blob;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
@@ -26,7 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
-public class BlobServiceHandler implements AzureServiceHandler {
+public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOGGER = Logger.getLogger(BlobServiceHandler.class);
     private static final DateTimeFormatter RFC1123_DATE_TIME = DateTimeFormatter

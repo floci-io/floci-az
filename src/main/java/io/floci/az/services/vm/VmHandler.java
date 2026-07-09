@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -55,7 +56,7 @@ import java.util.concurrent.TimeUnit;
  * Power actions are pure state transitions. This keeps the service usable in CI without Docker.</p>
  */
 @ApplicationScoped
-public class VmHandler implements AzureServiceHandler {
+public class VmHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(VmHandler.class);
 

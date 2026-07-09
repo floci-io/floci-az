@@ -2,6 +2,7 @@ package io.floci.az.services.apim;
 
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -10,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 @ApplicationScoped
-public class ApiManagementHandler implements AzureServiceHandler {
+public class ApiManagementHandler implements AzureServiceHandler, Resettable {
 
     private final ApiManagementGateway gateway;
     private final ApiManagementService service;
@@ -46,5 +47,10 @@ public class ApiManagementHandler implements AzureServiceHandler {
 
     public List<Map<String, Object>> listSubscriptionServices(String sub) {
         return service.listSubscriptionServices(sub);
+    }
+
+    @Override
+    public void clearAll() {
+        service.clearAll();
     }
 }
