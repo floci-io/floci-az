@@ -9,7 +9,9 @@ import jakarta.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class AzureServiceRegistry {
@@ -18,6 +20,13 @@ public class AzureServiceRegistry {
     private final EmulatorConfig config;
     private final CosmosLifecycleManager cosmosLifecycleManager;
 
+    /**
+     * serviceType → handler, memoised. Handler selection is a pure function of the service type (the
+     * sole multi-type handler, {@code CosmosEngineHandler}, matches on the string alone), so the first
+     * answer for a given type is the answer forever. Keys are bounded: every service type originates in
+     * a routing table or in the blob/queue storage fallback, never in raw request data.
+     */
+    private final Map<String, Optional<AzureServiceHandler>> handlerByServiceType = new ConcurrentHashMap<>();
 
     @Inject
     AzureServiceRegistry(Instance<AzureServiceHandler> all, EmulatorConfig config,
@@ -25,10 +34,11 @@ public class AzureServiceRegistry {
         this.config = config;
         this.cosmosLifecycleManager = cosmosLifecycleManager;
 
-        this.handlers = new ArrayList<>();
+        List<AzureServiceHandler> discovered = new ArrayList<>();
         for (AzureServiceHandler h : all) {
-            this.handlers.add(h);
+            discovered.add(h);
         }
+        this.handlers = List.copyOf(discovered);
     }
 
     public boolean isEnabled(String serviceType) {
@@ -65,22 +75,31 @@ public class AzureServiceRegistry {
         };
     }
 
+    /** True when some handler implements {@code serviceType}, regardless of whether it is enabled. */
     public boolean isKnown(String serviceType) {
-        for (AzureServiceHandler h : handlers) {
-            if (h.handlesServiceType(serviceType)) return true;
-        }
-        return false;
+        return lookup(serviceType).isPresent();
     }
 
+    /**
+     * The handler for {@code serviceType}, or empty when none is registered <em>or</em> the service is
+     * disabled. Callers that need to tell those two cases apart — to answer {@code 503 ServiceDisabled}
+     * rather than falling through — must consult {@link #isKnown} and {@link #isEnabled} separately.
+     */
     public Optional<AzureServiceHandler> resolve(String serviceType) {
-        if (!isEnabled(serviceType)) return Optional.empty();
-        // First try exact service type match
+        return isEnabled(serviceType) ? lookup(serviceType) : Optional.empty();
+    }
+
+    private Optional<AzureServiceHandler> lookup(String serviceType) {
+        return handlerByServiceType.computeIfAbsent(serviceType, this::findHandler);
+    }
+
+    private Optional<AzureServiceHandler> findHandler(String serviceType) {
         for (AzureServiceHandler handler : handlers) {
             if (handler.getServiceType().equals(serviceType)) {
                 return Optional.of(handler);
             }
         }
-        // Fallback: use handlesServiceType for handlers that serve multiple service types
+        // Handlers that serve several service types (Cosmos engines) only answer handlesServiceType.
         for (AzureServiceHandler handler : handlers) {
             if (handler.handlesServiceType(serviceType)) {
                 return Optional.of(handler);
