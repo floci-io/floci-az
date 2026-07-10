@@ -29,4 +29,14 @@ public record AzureRequest(
         this(method, accountName, serviceType, resourcePath, headers, bodyStream,
              queryParams, Map.of(), authContext, secure);
     }
+
+    /**
+     * Returns a copy of this request carrying the resolved {@link AuthContext}. The routing filter
+     * builds a request with a {@code null} auth context, feeds it to the auth pipeline, then rebuilds
+     * it with the result; this keeps that rebuild from restating all ten components positionally.
+     */
+    public AzureRequest withAuthContext(AuthContext resolved) {
+        return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
+             queryParams, queryParamsMulti, resolved, secure);
+    }
 }

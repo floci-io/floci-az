@@ -1,6 +1,5 @@
 package io.floci.az.core;
 
-import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.auth.AuthPipeline;
 import io.floci.az.services.arm.ArmHandler;
 import io.smallrye.mutiny.Uni;
@@ -14,11 +13,15 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 
-import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 @ApplicationScoped
 public class AzureRoutingFilter {
@@ -27,19 +30,85 @@ public class AzureRoutingFilter {
 
     private final AuthPipeline authPipeline;
     private final AzureServiceRegistry serviceRegistry;
-    private final EmulatorConfig config;
     private final ArmHandler armHandler;
     private final Vertx vertx;
 
+    /**
+     * The routing chain, in priority order. Each stage either handles the request, hands it to
+     * JAX-RS, or declines so the next stage can try. Order is behaviour: the ARM stages must run
+     * after the more specific provider stages, and the account-suffix terminal runs only once every
+     * stage has declined.
+     */
+    private final List<Function<RoutingContext, Outcome>> stages;
+
     @Inject
     public AzureRoutingFilter(AuthPipeline authPipeline, AzureServiceRegistry serviceRegistry,
-            EmulatorConfig config, ArmHandler armHandler, Vertx vertx) {
+            ArmHandler armHandler, Vertx vertx) {
         this.authPipeline = authPipeline;
         this.serviceRegistry = serviceRegistry;
-        this.config = config;
         this.armHandler = armHandler;
         this.vertx = vertx;
+        this.stages = List.of(
+            this::routeByHostSuffix,
+            this::routeImds,
+            this::routeEntra,
+            this::routeArmMetadataEndpoints,
+            this::routeMicrosoftGraph,
+            this::routeMonitor,
+            this::routeKeyVaultAtArmBase,
+            this::routeEmailAtArmBase,
+            this::routeArmProviders,
+            this::routeArmGeneric,
+            this::routeServiceBusAtomPub,
+            this::routeCosmosRoot
+        );
     }
+
+    // ── Routing outcome ─────────────────────────────────────────────────────────
+
+    /**
+     * What a routing stage decided. Replaces the overloaded {@code null} return of the original
+     * filter, where "no route matched, keep going" and "matched, but deliberately let JAX-RS answer"
+     * were the same value.
+     */
+    private sealed interface Outcome permits Handled, Fallthrough {}
+
+    /** A handler produced a response; routing stops here. */
+    private record Handled(Response response) implements Outcome {}
+
+    private enum Fallthrough implements Outcome {
+        /** Decline: try the next routing stage. */
+        TO_NEXT_STAGE,
+        /** Stop routing and let JAX-RS answer (normally a 404). */
+        TO_JAX_RS
+    }
+
+    /** Everything a routing stage needs, captured once per request. */
+    private record RoutingContext(
+        ContainerRequestContext requestContext,
+        String path,
+        HttpHeaders headers,
+        String host,
+        boolean secure
+    ) {
+        String method() {
+            return requestContext.getMethod();
+        }
+
+        /** First path segment ({@code ""} for a root request). */
+        String firstSegment() {
+            int slash = path.indexOf('/');
+            return slash < 0 ? path : path.substring(0, slash);
+        }
+
+        /** Everything after the first path segment, without the separating slash. */
+        String resourcePath() {
+            int slash = path.indexOf('/');
+            return slash < 0 ? "" : path.substring(slash + 1);
+        }
+    }
+
+    // ── Routing tables ──────────────────────────────────────────────────────────
 
     /**
      * Cosmos DB top-level path segments that are used by the Java SDK when it
@@ -53,9 +122,128 @@ public class AzureRoutingFilter {
      * produce.  We intercept these root-level Cosmos paths here and re-route
      * them to the Cosmos handler with the default account name.</p>
      */
-    private static final java.util.Set<String> COSMOS_ROOT_SEGMENTS = java.util.Set.of(
+    private static final Set<String> COSMOS_ROOT_SEGMENTS = Set.of(
         "dbs", "colls", "docs", "pkranges", "offers", "sprocs", "triggers", "udfs"
     );
+
+    /** Well-known Key Vault data-plane path prefixes, as sent to the ARM base URL by azurerm v3. */
+    private static final Set<String> KEY_VAULT_COLLECTIONS = Set.of(
+        "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys"
+    );
+
+    /** A suffix of a host name or of an account name that identifies a service. */
+    private record SuffixRoute(String suffix, String serviceType) {}
+
+    // Host-suffix → serviceType for data-plane requests reaching {account}.<suffix>.
+    // Suffixes are mutually exclusive, so match order is irrelevant. DFS maps to blob.
+    private static final List<SuffixRoute> HOST_ROUTES = List.of(
+        new SuffixRoute(".vault.azure.net", "keyvault"),
+        new SuffixRoute(".communication.azure.com", "email"),
+        new SuffixRoute(".blob.core.windows.net", "blob"),
+        new SuffixRoute(".dfs.core.windows.net", "blob"),
+        new SuffixRoute(".queue.core.windows.net", "queue"),
+        new SuffixRoute(".servicebus.windows.net", "servicebus")
+    );
+
+    // Account-name suffix → serviceType (e.g. {account}-queue → queue). Sorted longest-suffix-first
+    // at class init: any suffix that is a string-suffix of another is always shorter, so
+    // length-descending preserves the required most-specific-first match without hand-coded ordering.
+    private static final List<SuffixRoute> ACCOUNT_SUFFIX_ROUTES = longestFirst(
+        new SuffixRoute("-cosmos-mongo", "cosmos-mongo"),
+        new SuffixRoute("-cosmos-table", "cosmos-table"),
+        new SuffixRoute("-cosmos-cassandra", "cosmos-cassandra"),
+        new SuffixRoute("-cosmos-gremlin", "cosmos-gremlin"),
+        new SuffixRoute("-cosmos-postgresql", "cosmos-postgresql"),
+        new SuffixRoute("-cosmos-nosql", "cosmos-nosql"),
+        new SuffixRoute("-cosmos", "cosmos"),
+        new SuffixRoute("-queue", "queue"),
+        new SuffixRoute("-table", "table"),
+        new SuffixRoute("-functions", "functions"),
+        new SuffixRoute("-appconfig", "appconfig"),
+        new SuffixRoute("-keyvault", "keyvault"),
+        new SuffixRoute("-eventgrid", "eventgrid"),
+        new SuffixRoute("-eventhub", "eventhub"),
+        new SuffixRoute("-sql", "sql"),
+        new SuffixRoute("-postgres", "postgres"),
+        new SuffixRoute("-servicebus", "servicebus"),
+        new SuffixRoute("-apim", "apim"),
+        new SuffixRoute("-email", "email")
+    );
+
+    private static List<SuffixRoute> longestFirst(SuffixRoute... routes) {
+        List<SuffixRoute> sorted = new ArrayList<>(List.of(routes));
+        sorted.sort(Comparator.comparingInt((SuffixRoute r) -> r.suffix().length()).reversed());
+        return List.copyOf(sorted);
+    }
+
+    /** Returns the route whose suffix {@code value} ends with, or {@code null} if none matches. */
+    private static SuffixRoute matchSuffix(List<SuffixRoute> routes, String value) {
+        for (SuffixRoute route : routes) {
+            if (value.endsWith(route.suffix())) {
+                return route;
+            }
+        }
+        return null;
+    }
+
+    private static String stripSuffix(String value, SuffixRoute route) {
+        return value.substring(0, value.length() - route.suffix().length());
+    }
+
+    /**
+     * An ARM management-plane provider route. {@code marker} is the pre-built
+     * {@code /providers/<namespace>/} path fragment; {@code guard} is an extra condition beyond the
+     * marker being present.
+     */
+    private record ProviderRoute(String marker, String serviceType, Predicate<String> guard) {
+        static ProviderRoute of(String namespace, String serviceType, Predicate<String> guard) {
+            return new ProviderRoute("/providers/" + namespace + "/", serviceType, guard);
+        }
+    }
+
+    private static final Predicate<String> ALWAYS = path -> true;
+
+    // Managed Identity is checked before the other providers: an identities/default scope may itself
+    // be a Compute/ContainerService/... resource, and the ManagedIdentity segment is always the last
+    // /providers/ segment. Nested children scoped to an identity (role assignments, locks) have a
+    // LATER /providers/ segment and must fall through to ArmHandler instead of being captured here.
+    private static final Predicate<String> MANAGED_IDENTITY_IS_LEAF = path -> {
+        int marker = path.indexOf("/providers/Microsoft.ManagedIdentity/");
+        return marker >= 0 && path.indexOf("/providers/", marker + 1) < 0;
+    };
+
+    private static final List<ProviderRoute> PROVIDER_ROUTES = List.of(
+        ProviderRoute.of("Microsoft.ManagedIdentity", "managedidentity", MANAGED_IDENTITY_IS_LEAF),
+        ProviderRoute.of("Microsoft.ContainerService", "aks", ALWAYS),
+        ProviderRoute.of("Microsoft.ContainerRegistry", "acr", ALWAYS),
+        ProviderRoute.of("Microsoft.Sql", "sql", ALWAYS),
+        ProviderRoute.of("Microsoft.DBforPostgreSQL", "postgres", ALWAYS),
+        ProviderRoute.of("Microsoft.Compute", "vm", ALWAYS),
+        ProviderRoute.of("Microsoft.Cache", "redis", ALWAYS),
+        ProviderRoute.of("Microsoft.Communication", "email", ALWAYS),
+        ProviderRoute.of("Microsoft.EventGrid", "eventgrid", ALWAYS)
+    );
+
+    /** Service types dispatched by a stage directly rather than named in a routing table. */
+    private static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of(
+        "managedidentity", "entra", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
+        "blob", "queue" // the storage fallback in resolveStorageServiceType
+    );
+
+    /**
+     * Every service type the routing tables and stages can produce. Exposed for the drift test that
+     * asserts each one actually resolves to a registered handler — a typo in a table would otherwise
+     * surface only as a puzzling {@code 501 NotImplemented} at runtime.
+     */
+    static Set<String> routedServiceTypes() {
+        Set<String> types = new java.util.TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
+        HOST_ROUTES.forEach(route -> types.add(route.serviceType()));
+        ACCOUNT_SUFFIX_ROUTES.forEach(route -> types.add(route.serviceType()));
+        PROVIDER_ROUTES.forEach(route -> types.add(route.serviceType()));
+        return types;
+    }
+
+    // ── Filter entry point ──────────────────────────────────────────────────────
 
     @ServerRequestFilter(preMatching = true)
     public Uni<Response> filter(ContainerRequestContext requestContext, @Context HttpHeaders httpHeaders) {
@@ -65,7 +253,9 @@ public class AzureRoutingFilter {
         // Capture Host header now (JAX-RS request scope may not propagate to the blocking thread).
         // Try both canonical and lowercase forms since HTTP header names are case-insensitive.
         String h = requestContext.getHeaders().getFirst("Host");
-        if (h == null) h = requestContext.getHeaders().getFirst("host");
+        if (h == null) {
+            h = requestContext.getHeaders().getFirst("host");
+        }
         final String capturedHost = h;
 
         return Uni.createFrom().completionStage(
@@ -74,663 +264,358 @@ public class AzureRoutingFilter {
         );
     }
 
+    private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers,
+                              String capturedHost) {
+        String path = rawPath.startsWith("/") ? rawPath.substring(1) : rawPath;
 
-    private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers, String capturedHost) {
-        boolean secure = requestContext.getSecurityContext().isSecure();
-        String path = rawPath;
-
-        if (path.startsWith("/")) {
-            path = path.substring(1);
-        }
-
-        // Health and admin endpoints bypass
-        if (path.equals("health") || path.startsWith("_floci/") || path.equals("ready") || path.startsWith("_admin")) {
+        if (isEmulatorAdminPath(path)) {
             return null;
         }
 
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
-        // Host-based routing for Azure data-plane services.
-        // capturedHost is extracted in filter() before executeBlocking because the JAX-RS
-        // request scope may not propagate to the Vert.x blocking thread.
-        String hostOnly = null;
-        if (capturedHost != null) {
-            hostOnly = capturedHost.contains(":") ? capturedHost.split(":")[0] : capturedHost;
-        }
+        RoutingContext ctx = new RoutingContext(requestContext, path, headers, hostWithoutPort(capturedHost),
+            requestContext.getSecurityContext().isSecure());
 
-        // Key Vault: {vaultName}.vault.azure.net
-        if (hostOnly != null && hostOnly.endsWith(".vault.azure.net")) {
-            String kvAccount = hostOnly.substring(0, hostOnly.length() - ".vault.azure.net".length());
-            Map<String, String> kvQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> kvQueryParams.put(k, v.get(0)));
-            AzureRequest kvRequest = new AzureRequest(
-                requestContext.getMethod(), kvAccount, "keyvault",
-                path, headers, requestContext.getEntityStream(), kvQueryParams, null, secure);
-            AuthContext kvAuth = authPipeline.resolve(kvRequest);
-            kvRequest = new AzureRequest(
-                requestContext.getMethod(), kvAccount, "keyvault",
-                path, headers, requestContext.getEntityStream(), kvQueryParams, kvAuth, secure);
-            Optional<AzureServiceHandler> kvHandler = serviceRegistry.resolve("keyvault");
-            if (kvHandler.isPresent()) {
-                LOGGER.infof("Dispatching vault.azure.net request to KeyVaultHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, kvAccount);
-                return kvHandler.get().handle(kvRequest);
+        for (Function<RoutingContext, Outcome> stage : stages) {
+            Outcome outcome = stage.apply(ctx);
+            if (outcome instanceof Handled handled) {
+                return handled.response();
+            }
+            if (outcome == Fallthrough.TO_JAX_RS) {
+                return null;
             }
         }
 
-        // ACS Email: {account}.communication.azure.com
-        if (hostOnly != null && hostOnly.endsWith(".communication.azure.com")) {
-            String emailAccount = hostOnly.substring(0, hostOnly.length() - ".communication.azure.com".length());
-            Map<String, String> emailQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
-            AzureRequest emailRequest = new AzureRequest(
-                requestContext.getMethod(), emailAccount, "email",
-                path, headers, requestContext.getEntityStream(), emailQueryParams, null, secure);
-            AuthContext emailAuth = authPipeline.resolve(emailRequest);
-            emailRequest = new AzureRequest(
-                requestContext.getMethod(), emailAccount, "email",
-                path, headers, requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
-            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
-            if (emailHandler.isPresent()) {
-                LOGGER.infof("Dispatching communication.azure.com request to EmailHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, emailAccount);
-                return emailHandler.get().handle(emailRequest);
-            }
-        }
+        return dispatchByAccountSuffix(ctx);
+    }
 
-        // Blob Storage: {account}.blob.core.windows.net
-        if (hostOnly != null && hostOnly.endsWith(".blob.core.windows.net")) {
-            String blobAccount = hostOnly.substring(0, hostOnly.length() - ".blob.core.windows.net".length());
-            Map<String, String> blobQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> blobQueryParams.put(k, v.get(0)));
-            AzureRequest blobRequest = new AzureRequest(
-                requestContext.getMethod(), blobAccount, "blob",
-                path, headers, requestContext.getEntityStream(), blobQueryParams, null, secure);
-            AuthContext blobAuth = authPipeline.resolve(blobRequest);
-            blobRequest = new AzureRequest(
-                requestContext.getMethod(), blobAccount, "blob",
-                path, headers, requestContext.getEntityStream(), blobQueryParams, blobAuth, secure);
-            Optional<AzureServiceHandler> blobHandler = serviceRegistry.resolve("blob");
-            if (blobHandler.isPresent()) {
-                LOGGER.infof("Dispatching blob.core.windows.net request to BlobServiceHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, blobAccount);
-                return blobHandler.get().handle(blobRequest);
-            }
-        }
+    /** Health and admin endpoints bypass routing entirely. */
+    private static boolean isEmulatorAdminPath(String path) {
+        return path.equals("health") || path.equals("ready")
+            || path.startsWith("_floci/") || path.startsWith("_admin");
+    }
 
-        if (hostOnly != null && hostOnly.endsWith(".dfs.core.windows.net")) {
-            String blobAccount = hostOnly.substring(0, hostOnly.length() - ".dfs.core.windows.net".length());
-            Map<String, String> blobQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> blobQueryParams.put(k, v.get(0)));
-            AzureRequest blobRequest = new AzureRequest(
-                requestContext.getMethod(), blobAccount, "blob",
-                path, headers, requestContext.getEntityStream(), blobQueryParams, null, secure);
-            AuthContext blobAuth = authPipeline.resolve(blobRequest);
-            blobRequest = new AzureRequest(
-                requestContext.getMethod(), blobAccount, "blob",
-                path, headers, requestContext.getEntityStream(), blobQueryParams, blobAuth, secure);
-            Optional<AzureServiceHandler> blobHandler = serviceRegistry.resolve("blob");
-            if (blobHandler.isPresent()) {
-                LOGGER.infof("Dispatching dfs.core.windows.net request to BlobServiceHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, blobAccount);
-                return blobHandler.get().handle(blobRequest);
-            }
-        }
-
-        // Queue Storage: {account}.queue.core.windows.net
-        if (hostOnly != null && hostOnly.endsWith(".queue.core.windows.net")) {
-            String queueAccount = hostOnly.substring(0, hostOnly.length() - ".queue.core.windows.net".length());
-            Map<String, String> queueQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queueQueryParams.put(k, v.get(0)));
-            AzureRequest queueRequest = new AzureRequest(
-                requestContext.getMethod(), queueAccount, "queue",
-                path, headers, requestContext.getEntityStream(), queueQueryParams, null, secure);
-            AuthContext queueAuth = authPipeline.resolve(queueRequest);
-            queueRequest = new AzureRequest(
-                requestContext.getMethod(), queueAccount, "queue",
-                path, headers, requestContext.getEntityStream(), queueQueryParams, queueAuth, secure);
-            Optional<AzureServiceHandler> queueHandler = serviceRegistry.resolve("queue");
-            if (queueHandler.isPresent()) {
-                LOGGER.infof("Dispatching queue.core.windows.net request to QueueServiceHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, queueAccount);
-                return queueHandler.get().handle(queueRequest);
-            }
-        }
-
-        // Service Bus: {account}.servicebus.windows.net
-        if (hostOnly != null && hostOnly.endsWith(".servicebus.windows.net")) {
-            String sbAccount = hostOnly.substring(0, hostOnly.length() - ".servicebus.windows.net".length());
-            Map<String, String> sbQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> sbQueryParams.put(k, v.get(0)));
-            AzureRequest sbRequest = new AzureRequest(
-                requestContext.getMethod(), sbAccount, "servicebus",
-                path, headers, requestContext.getEntityStream(), sbQueryParams, null, secure);
-            AuthContext sbAuth = authPipeline.resolve(sbRequest);
-            sbRequest = new AzureRequest(
-                requestContext.getMethod(), sbAccount, "servicebus",
-                path, headers, requestContext.getEntityStream(), sbQueryParams, sbAuth, secure);
-            Optional<AzureServiceHandler> sbHandler = serviceRegistry.resolve("servicebus");
-            if (sbHandler.isPresent()) {
-                LOGGER.infof("Dispatching servicebus.windows.net request to ServiceBusHandler: %s %s (account=%s)",
-                    requestContext.getMethod(), path, sbAccount);
-                return sbHandler.get().handle(sbRequest);
-            }
-        }
-
-        // IMDS (Instance Metadata Service) — managed identity token endpoint:
-        //   metadata/identity/oauth2/token?resource=...   (header Metadata: true)
-        // Reached by azure-identity ManagedIdentityCredential when
-        // AZURE_POD_IDENTITY_AUTHORITY_HOST points at the emulator. Must precede the
-        // Entra block (the path also ends with oauth2/token). Skips the auth pipeline:
-        // IMDS requests carry no Authorization header.
-        if (path.startsWith("metadata/identity/")) {
-            Optional<AzureServiceHandler> miHandler = serviceRegistry.resolve("managedidentity");
-            if (miHandler.isPresent()) {
-                Map<String, String> miQueryParams = new HashMap<>();
-                requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> miQueryParams.put(k, v.get(0)));
-                AzureRequest miRequest = new AzureRequest(
-                    requestContext.getMethod(), "managedidentity", "managedidentity",
-                    path, headers, requestContext.getEntityStream(), miQueryParams, null, secure);
-                LOGGER.infof("Dispatching IMDS request to ManagedIdentityHandler: %s %s",
-                    requestContext.getMethod(), path);
-                return miHandler.get().handle(miRequest);
-            }
-            // Managed Identity disabled: fall through to JAX-RS (404).
+    private static String hostWithoutPort(String capturedHost) {
+        if (capturedHost == null) {
             return null;
         }
+        int colon = capturedHost.indexOf(':');
+        return colon < 0 ? capturedHost : capturedHost.substring(0, colon);
+    }
 
-        // Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
-        //   {tenant}/oauth2/v2.0/token, {tenant}/oauth2/token,
-        //   {tenant}/discovery/v2.0/keys,
-        //   {tenant}[/v2.0]/.well-known/openid-configuration
-        // where {tenant} is a tenant id or common/organizations/consumers.
-        if (path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
-                || path.endsWith("discovery/v2.0/keys")
-                || path.endsWith(".well-known/openid-configuration")) {
-            Optional<AzureServiceHandler> entraHandler = serviceRegistry.resolve("entra");
-            if (entraHandler.isPresent()) {
-                Map<String, String> entraQueryParams = new HashMap<>();
-                requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> entraQueryParams.put(k, v.get(0)));
-                AzureRequest entraRequest = new AzureRequest(
-                    requestContext.getMethod(), "entra", "entra",
-                    path, headers, requestContext.getEntityStream(), entraQueryParams, null, secure);
-                LOGGER.infof("Dispatching Entra request to EntraServiceHandler: %s %s",
-                    requestContext.getMethod(), path);
-                return entraHandler.get().handle(entraRequest);
+    // ── Routing stages, in chain order ──────────────────────────────────────────
+
+    /**
+     * Host-based data-plane routing: {@code {account}.<host-suffix>} → serviceType. The host header is
+     * extracted in {@link #filter} before {@code executeBlocking} because the JAX-RS request scope may
+     * not propagate to the Vert.x blocking thread.
+     */
+    private Outcome routeByHostSuffix(RoutingContext ctx) {
+        if (ctx.host() == null) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        SuffixRoute route = matchSuffix(HOST_ROUTES, ctx.host());
+        if (route == null) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        // Suffixes are mutually exclusive: on an absent handler, fall through rather than retry.
+        return dispatchOrServiceDisabled(ctx, stripSuffix(ctx.host(), route), route.serviceType(), ctx.path());
+    }
+
+    /**
+     * IMDS (Instance Metadata Service) — managed identity token endpoint:
+     * {@code metadata/identity/oauth2/token?resource=...} (header {@code Metadata: true}).
+     *
+     * <p>Reached by azure-identity ManagedIdentityCredential when {@code AZURE_POD_IDENTITY_AUTHORITY_HOST}
+     * points at the emulator. Must precede {@link #routeEntra} (the path also ends with
+     * {@code oauth2/token}). Skips the auth pipeline: IMDS requests carry no Authorization header.
+     */
+    private Outcome routeImds(RoutingContext ctx) {
+        if (!ctx.path().startsWith("metadata/identity/")) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        // Managed Identity disabled: fall through to JAX-RS (404) rather than misrouting the path.
+        return dispatchWithoutAuth(ctx, "managedidentity", "IMDS");
+    }
+
+    /**
+     * Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
+     * {@code {tenant}/oauth2/v2.0/token}, {@code {tenant}/oauth2/token},
+     * {@code {tenant}/discovery/v2.0/keys}, {@code {tenant}[/v2.0]/.well-known/openid-configuration},
+     * where {@code {tenant}} is a tenant id or common/organizations/consumers.
+     */
+    private Outcome routeEntra(RoutingContext ctx) {
+        String path = ctx.path();
+        boolean isEntraPath = path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
+            || path.endsWith("discovery/v2.0/keys")
+            || path.endsWith(".well-known/openid-configuration");
+        if (!isEntraPath) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        // Entra disabled: fall through to JAX-RS (these paths 404).
+        return dispatchWithoutAuth(ctx, "entra", "Entra");
+    }
+
+    /**
+     * ARM metadata endpoint — called by go-azure-sdk for environment discovery. Hand it to JAX-RS so it
+     * 404s and the azurerm provider falls back to defaults. Implementing the metadata response causes
+     * the provider to detect Azure Stack and reject the configuration as an unsupported environment.
+     */
+    private Outcome routeArmMetadataEndpoints(RoutingContext ctx) {
+        return ctx.path().startsWith("metadata/endpoints") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
+    }
+
+    /** Microsoft Graph API — called by the azurerm provider for service principal discovery. */
+    private Outcome routeMicrosoftGraph(RoutingContext ctx) {
+        return ctx.path().startsWith("v1.0/") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
+    }
+
+    private Outcome routeMonitor(RoutingContext ctx) {
+        if (!ctx.path().startsWith("dataCollectionRules/") && !ctx.path().startsWith("v1/workspaces/")) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, "monitor", "monitor", ctx.path());
+    }
+
+    /**
+     * Key Vault data-plane paths arriving at the ARM base URL. The azurerm v3 provider (when
+     * {@code metadata/endpoints} returns 404) sends all key vault data-plane requests directly to the
+     * ARM base URL rather than to {@code *.vault.azure.net}. Route them to the Key Vault handler with a
+     * fixed account name so both the provider and {@code kv_get} in the BATS tests share a namespace.
+     */
+    private Outcome routeKeyVaultAtArmBase(RoutingContext ctx) {
+        if (!KEY_VAULT_COLLECTIONS.contains(ctx.firstSegment())) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, armHandler.getDefaultKvAccount(), "keyvault", ctx.path());
+    }
+
+    /**
+     * ACS Email data-plane paths arriving at the ARM base URL. SDKs may POST {@code /emails:send} or GET
+     * {@code /emails/operations/{id}} directly to the configured endpoint rather than via a
+     * {@code *.communication.azure.com} host header. Also handles {@code /emailMessages} inspection.
+     */
+    private Outcome routeEmailAtArmBase(RoutingContext ctx) {
+        String path = ctx.path();
+        if (!path.startsWith("emails:") && !path.startsWith("emails/") && !path.startsWith("emailMessages")) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, "default", "email", path);
+    }
+
+    /**
+     * ARM management-plane provider routing: {@code subscriptions/{sub}/.../providers/Microsoft.X/...}.
+     * Iterated in {@link #PROVIDER_ROUTES} order: Managed Identity is first and guarded so its provider
+     * segment must be the last {@code /providers/} in the path — identity-scoped children (role
+     * assignments, locks, ...) have a later segment and fall through to {@link #routeArmGeneric}. All of
+     * these must precede the generic ARM stage, which would otherwise swallow every path.
+     */
+    private Outcome routeArmProviders(RoutingContext ctx) {
+        if (!ctx.path().startsWith("subscriptions/")) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        for (ProviderRoute route : PROVIDER_ROUTES) {
+            if (!ctx.path().contains(route.marker()) || !route.guard().test(ctx.path())) {
+                continue;
             }
-            // Entra disabled: fall through to JAX-RS (these paths 404).
+            // A disabled provider service declines, letting a later provider (or generic ARM) claim it.
+            Outcome outcome = dispatch(ctx, route.serviceType(), route.serviceType(), ctx.path());
+            if (outcome instanceof Handled) {
+                return outcome;
+            }
+        }
+        return Fallthrough.TO_NEXT_STAGE;
+    }
+
+    /**
+     * ARM general management-plane paths ({@code subscriptions/{sub}/...}, {@code tenants/...}):
+     * resource groups, storage accounts, key vaults, etc. that the more specific provider stages above
+     * did not claim.
+     */
+    private Outcome routeArmGeneric(RoutingContext ctx) {
+        String path = ctx.path();
+        boolean isArmPath = path.startsWith("subscriptions/") || path.equals("subscriptions")
+            || path.startsWith("tenants/") || path.equals("tenants");
+        if (!isArmPath) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, "arm", "arm", path);
+    }
+
+    /** Service Bus root-level spec paths (e.g. {@code $namespaceinfo}, {@code $Resources/...}) or AtomPub XML. */
+    private Outcome routeServiceBusAtomPub(RoutingContext ctx) {
+        if (ctx.firstSegment().endsWith("-servicebus")) {
+            return Fallthrough.TO_NEXT_STAGE; // account-suffix routing owns it
+        }
+        ContainerRequestContext rc = ctx.requestContext();
+        String contentType = rc.getHeaderString(HttpHeaders.CONTENT_TYPE);
+        String accept = rc.getHeaderString(HttpHeaders.ACCEPT);
+        boolean isServiceBusRequest = (contentType != null && contentType.contains("application/atom+xml"))
+            || (accept != null && accept.contains("application/atom+xml"))
+            || ctx.path().startsWith("$namespaceinfo")
+            || ctx.path().startsWith("$Resources");
+        if (!isServiceBusRequest) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, "devstoreaccount1", "servicebus", ctx.path());
+    }
+
+    /**
+     * Java Cosmos SDK compatibility: the SDK ignores the path component of the configured endpoint and
+     * sends requests to the server root. Route empty paths (DatabaseAccount GET) and known Cosmos
+     * segments (dbs, colls, docs, …) to the Cosmos handler using the default account so the Java SDK can
+     * operate without path-based routing.
+     */
+    private Outcome routeCosmosRoot(RoutingContext ctx) {
+        String firstSegment = ctx.firstSegment();
+        if (!firstSegment.isEmpty() && !COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        LOGGER.infof("Java-SDK cosmos root route: %s %s", ctx.method(), ctx.path());
+        Outcome outcome = dispatch(ctx, "devstoreaccount1", "cosmos", ctx.path());
+        if (outcome instanceof Handled) {
+            return outcome;
+        }
+        // A root request with no first segment cannot be resolved by the account-suffix terminal.
+        return firstSegment.isEmpty() ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
+    }
+
+    // ── Terminal: account-name routing ──────────────────────────────────────────
+
+    /**
+     * Terminal stage: {@code /{account}[-suffix]/{resourcePath}}. Unlike the stages above, an unknown or
+     * disabled service produces an Azure error response here rather than declining — this is the last
+     * chance to answer, so silence would surface as a bare 404.
+     */
+    private Response dispatchByAccountSuffix(RoutingContext ctx) {
+        String accountName = ctx.firstSegment();
+        if (accountName.isEmpty()) {
             return null;
         }
+        String resourcePath = ctx.resourcePath();
 
-        // ARM metadata endpoint — called by go-azure-sdk for environment discovery.
-        // Return null so JAX-RS returns 404; the azurerm provider falls back to defaults.
-        // Implementing the metadata response causes the provider to detect Azure Stack
-        // and reject the configuration with an unsupported-environment error.
-        if (path.startsWith("metadata/endpoints")) {
-            return null;
-        }
-
-        // Microsoft Graph API — called by azurerm provider for service principal discovery
-        if (path.startsWith("v1.0/")) {
-            return null;
-        }
-
-        if (path.startsWith("dataCollectionRules/") || path.startsWith("v1/workspaces/")) {
-            Map<String, String> monitorQueryParams = new HashMap<>();
-            Map<String, List<String>> monitorQueryParamsMulti = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> {
-                monitorQueryParams.put(k, v.get(0));
-                monitorQueryParamsMulti.put(k, List.copyOf(v));
-            });
-            AzureRequest monitorRequest = new AzureRequest(
-                requestContext.getMethod(), "monitor", "monitor", path, headers,
-                requestContext.getEntityStream(), monitorQueryParams, monitorQueryParamsMulti, null, secure);
-            AuthContext monitorAuth = authPipeline.resolve(monitorRequest);
-            monitorRequest = new AzureRequest(
-                requestContext.getMethod(), "monitor", "monitor", path, headers,
-                requestContext.getEntityStream(), monitorQueryParams, monitorQueryParamsMulti, monitorAuth, secure);
-            Optional<AzureServiceHandler> monitorHandler = serviceRegistry.resolve("monitor");
-            if (monitorHandler.isPresent()) {
-                LOGGER.infof("Dispatching Monitor request: %s %s", requestContext.getMethod(), path);
-                return monitorHandler.get().handle(monitorRequest);
-            }
-        }
-
-        // Key Vault data-plane paths arriving at the ARM base URL.
-        // The azurerm v3 provider (when metadata/endpoints returns 404) sends all key vault
-        // data-plane requests directly to the ARM base URL rather than to *.vault.azure.net.
-        // Intercept well-known KV API path prefixes and route to KeyVaultHandler with a fixed
-        // account name so both the provider and kv_get in BATS tests use the same namespace.
-        if (path.startsWith("secrets/") || path.equals("secrets")
-                || path.startsWith("certificates/") || path.equals("certificates")
-                || path.startsWith("keys/") || path.equals("keys")
-                || path.startsWith("deletedsecrets/") || path.startsWith("deletedcertificates/")
-                || path.startsWith("deletedkeys/")) {
-            String kvAccount = armHandler.getDefaultKvAccount();
-            Map<String, String> kvQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> kvQueryParams.put(k, v.get(0)));
-            AzureRequest kvRequest = new AzureRequest(
-                requestContext.getMethod(), kvAccount, "keyvault",
-                path, headers, requestContext.getEntityStream(), kvQueryParams, null, secure);
-            AuthContext kvAuth = authPipeline.resolve(kvRequest);
-            kvRequest = new AzureRequest(
-                requestContext.getMethod(), kvAccount, "keyvault",
-                path, headers, requestContext.getEntityStream(), kvQueryParams, kvAuth, secure);
-            Optional<AzureServiceHandler> kvHandler = serviceRegistry.resolve("keyvault");
-            if (kvHandler.isPresent()) {
-                LOGGER.infof("Routing ARM-base KV path to KeyVaultHandler: %s %s", requestContext.getMethod(), path);
-                return kvHandler.get().handle(kvRequest);
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // ACS Email data-plane paths arriving at the ARM base URL.
-        // SDKs may POST /emails:send or GET /emails/operations/{id}
-        // directly to the configured endpoint rather than via a
-        // *.communication.azure.com host header.
-        // Also handle /emailMessages inspection endpoints.
-        // ---------------------------------------------------------------
-        if (path.startsWith("emails:") || path.startsWith("emails/")
-                || path.startsWith("emailMessages")) {
-            Map<String, String> emailQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> emailQueryParams.put(k, v.get(0)));
-            AzureRequest emailRequest = new AzureRequest(
-                requestContext.getMethod(), "default", "email",
-                path, headers, requestContext.getEntityStream(), emailQueryParams, null, secure);
-            AuthContext emailAuth = authPipeline.resolve(emailRequest);
-            emailRequest = new AzureRequest(
-                requestContext.getMethod(), "default", "email",
-                path, headers, requestContext.getEntityStream(), emailQueryParams, emailAuth, secure);
-            Optional<AzureServiceHandler> emailHandler = serviceRegistry.resolve("email");
-            if (emailHandler.isPresent()) {
-                LOGGER.infof("Routing email path to EmailHandler: %s %s", requestContext.getMethod(), path);
-                return emailHandler.get().handle(emailRequest);
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Managed Identity — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ManagedIdentity/userAssignedIdentities/...
-        //   {scope}/providers/Microsoft.ManagedIdentity/identities/default
-        // Checked before the other providers: the identities/default scope may itself
-        // be a Compute/ContainerService/... resource, and the ManagedIdentity provider
-        // segment is always the last one in the path. Nested children scoped to an
-        // identity (role assignments, locks, ...) have a later /providers/ segment and
-        // must keep falling through to ArmHandler.
-        // ---------------------------------------------------------------
-        int managedIdentityMarker = path.indexOf("/providers/Microsoft.ManagedIdentity/");
-        if (path.startsWith("subscriptions/") && managedIdentityMarker >= 0
-                && path.indexOf("/providers/", managedIdentityMarker + 1) < 0) {
-            Response response = dispatchManagementPlane(requestContext, "managedidentity", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Kubernetes Service — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ContainerService/...
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerService/")) {
-            Response response = dispatchManagementPlane(requestContext, "aks", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Container Registry — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.ContainerRegistry/...
-        //   subscriptions/{sub}/providers/Microsoft.ContainerRegistry/checkNameAvailability
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.ContainerRegistry/")) {
-            Response response = dispatchManagementPlane(requestContext, "acr", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure SQL Database — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Sql/...
-        //   subscriptions/{sub}/providers/Microsoft.Sql/checkNameAvailability
-        // The subscriptionId and resourceGroupName are parsed by SqlHandler;
-        // here we just detect the ARM prefix and dispatch the full path.
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Sql/")) {
-            Response response = dispatchManagementPlane(requestContext, "sql", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Database for PostgreSQL (Flexible Server) — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.DBforPostgreSQL/flexibleServers/...
-        //   subscriptions/{sub}/providers/Microsoft.DBforPostgreSQL/checkNameAvailability
-        // The api-version arrives only as a query param and is ignored here; routing is by namespace.
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.DBforPostgreSQL/")) {
-            Map<String, String> pgQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> pgQueryParams.put(k, v.get(0)));
-            AzureRequest pgRequest = new AzureRequest(
-                requestContext.getMethod(), "postgres", "postgres", path, headers,
-                requestContext.getEntityStream(), pgQueryParams, null, secure);
-            AuthContext pgAuth = authPipeline.resolve(pgRequest);
-            pgRequest = new AzureRequest(
-                requestContext.getMethod(), "postgres", "postgres", path, headers,
-                requestContext.getEntityStream(), pgQueryParams, pgAuth, secure);
-            Optional<AzureServiceHandler> pgHandler = serviceRegistry.resolve("postgres");
-            if (pgHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM PostgreSQL request to PostgresHandler: %s %s", requestContext.getMethod(), path);
-                return pgHandler.get().handle(pgRequest);
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Virtual Machines — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Compute/virtualMachines/...
-        //   subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Compute/")) {
-            Response response = dispatchManagementPlane(requestContext, "vm", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Cache for Redis — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Cache/redis/...
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Cache/")) {
-            Response response = dispatchManagementPlane(requestContext, "redis", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Communication Services (Email) — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.Communication/...
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.Communication/")) {
-            Response response = dispatchManagementPlane(requestContext, "email", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Azure Event Grid — ARM management-plane paths:
-        //   subscriptions/{sub}/[resourceGroups/{rg}/]providers/Microsoft.EventGrid/topics/...
-        //   {topicScope}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") && path.contains("/providers/Microsoft.EventGrid/")) {
-            Response response = dispatchManagementPlane(requestContext, "eventgrid", path, headers, secure);
-            if (response != null) {
-                return response;
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // ARM general management-plane paths: subscriptions/{sub}/...
-        // (resource groups, storage accounts, key vaults, etc. not served
-        //  by the more-specific AKS and SQL handlers above)
-        // ---------------------------------------------------------------
-        if (path.startsWith("subscriptions/") || path.equals("subscriptions")
-                || path.startsWith("subscriptions?")
-                || path.startsWith("tenants/") || path.equals("tenants")
-                || path.startsWith("tenants?")) {
-            Map<String, String> armQueryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> armQueryParams.put(k, v.get(0)));
-            AzureRequest armRequest = new AzureRequest(
-                requestContext.getMethod(), "arm", "arm", path, headers,
-                requestContext.getEntityStream(), armQueryParams, null, secure);
-            AuthContext armAuth = authPipeline.resolve(armRequest);
-            armRequest = new AzureRequest(
-                requestContext.getMethod(), "arm", "arm", path, headers,
-                requestContext.getEntityStream(), armQueryParams, armAuth, secure);
-            Optional<AzureServiceHandler> armHandler = serviceRegistry.resolve("arm");
-            if (armHandler.isPresent()) {
-                LOGGER.infof("Dispatching ARM request to ArmHandler: %s %s", requestContext.getMethod(), path);
-                return armHandler.get().handle(armRequest);
-            }
-        }
-
-        String[] parts = path.split("/", 2);
-        String firstSegment = (parts.length > 0) ? parts[0] : "";
-        boolean hasServiceBusSuffix = firstSegment.endsWith("-servicebus");
-
-        // Service Bus root-level spec paths (like $namespaceinfo or $Resources/...) or AtomPub XML requests
-        String contentType = requestContext.getHeaderString(HttpHeaders.CONTENT_TYPE);
-        String accept = requestContext.getHeaderString(HttpHeaders.ACCEPT);
-        boolean isServiceBusRequest = !hasServiceBusSuffix && (
-                (contentType != null && contentType.contains("application/atom+xml"))
-                || (accept != null && accept.contains("application/atom+xml"))
-                || path.startsWith("$namespaceinfo")
-                || path.startsWith("$Resources")
-        );
-
-        if (isServiceBusRequest) {
-            String defaultAccount = "devstoreaccount1";
-            Map<String, String> queryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
-            AzureRequest azureRequest = new AzureRequest(
-                requestContext.getMethod(), defaultAccount, "servicebus",
-                path, headers, requestContext.getEntityStream(), queryParams, null, secure);
-            AuthContext authContext = authPipeline.resolve(azureRequest);
-            azureRequest = new AzureRequest(
-                requestContext.getMethod(), defaultAccount, "servicebus",
-                path, headers, requestContext.getEntityStream(), queryParams, authContext, secure);
-            Optional<AzureServiceHandler> handler = serviceRegistry.resolve("servicebus");
-            if (handler.isPresent()) {
-                LOGGER.infof("Routing Service Bus AtomPub/spec request: %s %s → account=%s",
-                    requestContext.getMethod(), path, defaultAccount);
-                return handler.get().handle(azureRequest);
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Java Cosmos SDK compatibility: the SDK ignores the path component
-        // of the configured endpoint and sends requests to the server root.
-        // Route empty paths (DatabaseAccount GET) and known Cosmos segments
-        // (dbs, colls, docs, …) to the Cosmos handler using the default
-        // account so the Java SDK can operate without path-based routing.
-        // ---------------------------------------------------------------
-        if (firstSegment.isEmpty() || COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
-            String defaultAccount = "devstoreaccount1";
-            String resourcePath   = path; // e.g. "" | "dbs" | "dbs/mydb/colls/items"
-            LOGGER.infof("Java-SDK cosmos root route: %s %s → account=%s resourcePath=%s",
-                requestContext.getMethod(), path, defaultAccount, resourcePath);
-
-            Map<String, String> queryParams = new HashMap<>();
-            requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
-            AzureRequest azureRequest = new AzureRequest(
-                requestContext.getMethod(), defaultAccount, "cosmos",
-                resourcePath, headers, requestContext.getEntityStream(),
-                queryParams, null, secure);
-            AuthContext authContext = authPipeline.resolve(azureRequest);
-            azureRequest = new AzureRequest(
-                requestContext.getMethod(), defaultAccount, "cosmos",
-                resourcePath, headers, requestContext.getEntityStream(),
-                queryParams, authContext, secure);
-            Optional<AzureServiceHandler> handler = serviceRegistry.resolve("cosmos");
-            if (handler.isPresent()) {
-                LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
-                return handler.get().handle(azureRequest);
-            }
-        }
-
-        if (parts.length < 1 || parts[0].isEmpty()) {
-            return null;
-        }
-
-        String accountName = parts[0];
-        String resourcePath = parts.length > 1 ? parts[1] : "";
-
-        // NOTE: longer/more-specific suffixes must be checked before shorter ones that are
-        // a suffix of them (e.g. "-cosmos-table" before "-table", "-cosmos-mongo" before "-cosmos").
-        String serviceType = "blob";
-        if (accountName.endsWith("-cosmos-mongo")) {
-            serviceType = "cosmos-mongo";
-            accountName = accountName.substring(0, accountName.length() - 13);
-        } else if (accountName.endsWith("-cosmos-table")) {
-            serviceType = "cosmos-table";
-            accountName = accountName.substring(0, accountName.length() - 13);
-        } else if (accountName.endsWith("-cosmos-cassandra")) {
-            serviceType = "cosmos-cassandra";
-            accountName = accountName.substring(0, accountName.length() - 17);
-        } else if (accountName.endsWith("-cosmos-gremlin")) {
-            serviceType = "cosmos-gremlin";
-            accountName = accountName.substring(0, accountName.length() - 15);
-        } else if (accountName.endsWith("-cosmos-postgresql")) {
-            serviceType = "cosmos-postgresql";
-            accountName = accountName.substring(0, accountName.length() - 18);
-        } else if (accountName.endsWith("-cosmos-nosql")) {
-            serviceType = "cosmos-nosql";
-            accountName = accountName.substring(0, accountName.length() - 13);
-        } else if (accountName.endsWith("-cosmos")) {
-            serviceType = "cosmos";
-            accountName = accountName.substring(0, accountName.length() - 7);
-        } else if (accountName.endsWith("-queue")) {
-            serviceType = "queue";
-            accountName = accountName.substring(0, accountName.length() - 6);
-        } else if (accountName.endsWith("-table")) {
-            serviceType = "table";
-            accountName = accountName.substring(0, accountName.length() - 6);
-        } else if (accountName.endsWith("-functions")) {
-            serviceType = "functions";
-            accountName = accountName.substring(0, accountName.length() - 10);
-        } else if (accountName.endsWith("-appconfig")) {
-            serviceType = "appconfig";
-            accountName = accountName.substring(0, accountName.length() - 10);
-        } else if (accountName.endsWith("-keyvault")) {
-            serviceType = "keyvault";
-            accountName = accountName.substring(0, accountName.length() - 9);
-        } else if (accountName.endsWith("-eventgrid")) {
-            serviceType = "eventgrid";
-            accountName = accountName.substring(0, accountName.length() - 10);
-        } else if (accountName.endsWith("-eventhub")) {
-            serviceType = "eventhub";
-            accountName = accountName.substring(0, accountName.length() - 9);
-        } else if (accountName.endsWith("-sql")) {
-            serviceType = "sql";
-            accountName = accountName.substring(0, accountName.length() - 4);
-        } else if (accountName.endsWith("-postgres")) {
-            serviceType = "postgres";
-            accountName = accountName.substring(0, accountName.length() - 9);
-        } else if (accountName.endsWith("-servicebus")) {
-            serviceType = "servicebus";
-            accountName = accountName.substring(0, accountName.length() - 11);
-        } else if (accountName.endsWith("-apim")) {
-            serviceType = "apim";
-            accountName = accountName.substring(0, accountName.length() - 5);
-        } else if (accountName.endsWith("-email")) {
-            serviceType = "email";
-            accountName = accountName.substring(0, accountName.length() - 6);
+        String serviceType;
+        SuffixRoute route = matchSuffix(ACCOUNT_SUFFIX_ROUTES, accountName);
+        if (route != null) {
+            serviceType = route.serviceType();
+            accountName = stripSuffix(accountName, route);
         } else {
-            serviceType = resolveServiceType(requestContext, resourcePath);
+            serviceType = resolveStorageServiceType(ctx.requestContext(), resourcePath);
         }
-        LOGGER.infof("Resolved accountName: %s, serviceType: %s, resourcePath: %s", accountName, serviceType, resourcePath);
+
+        LOGGER.infof("Resolved accountName: %s, serviceType: %s, resourcePath: %s",
+            accountName, serviceType, resourcePath);
+
+        if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {
+            LOGGER.warnf("Service disabled: %s", serviceType);
+            return serviceDisabledResponse(serviceType);
+        }
+
+        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
+        if (handler.isEmpty()) {
+            LOGGER.warnf("No handler found for serviceType: %s", serviceType);
+            return new AzureErrorResponse("ServiceNotImplemented", "The specified service is not implemented.")
+                    .toXmlResponse(Response.Status.NOT_IMPLEMENTED.getStatusCode());
+        }
+
+        LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
+        return handler.get().handle(buildRequest(ctx, accountName, serviceType, resourcePath));
+    }
+
+    /** Distinguishes blob from queue when the account name carries no service suffix. */
+    private String resolveStorageServiceType(ContainerRequestContext requestContext, String resourcePath) {
+        if (requestContext.getHeaderString("x-ms-blob-type") != null) {
+            return "blob";
+        }
+        if (resourcePath.contains("/messages") || resourcePath.endsWith("/messages")) {
+            return "queue";
+        }
+        List<String> restype = requestContext.getUriInfo().getQueryParameters().get("restype");
+        if (restype != null && restype.contains("queue")) {
+            return "queue";
+        }
+        if (requestContext.getHeaderString("x-ms-queue-message-count") != null) {
+            return "queue";
+        }
+        return "blob";
+    }
+
+    // ── Dispatch helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Dispatches a request whose URL <em>unambiguously</em> names its service (a {@code .vault.azure.net}
+     * host, a {@code /emails:send} path, ...). A disabled service answers {@code 503 ServiceDisabled}
+     * rather than declining, because declining would let a later stage reinterpret the URL — a disabled
+     * Key Vault would otherwise see {@code /secrets/foo} fall through to the account-suffix terminal,
+     * which reads {@code secrets} as a storage account name and hands the request to the blob handler.
+     */
+    private Outcome dispatchOrServiceDisabled(RoutingContext ctx, String account, String serviceType, String path) {
+        if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {
+            LOGGER.warnf("Service disabled: %s (%s %s)", serviceType, ctx.method(), path);
+            return new Handled(serviceDisabledResponse(serviceType));
+        }
+        return dispatch(ctx, account, serviceType, path);
+    }
+
+    /**
+     * Resolves auth and dispatches to the handler for {@code serviceType}. Declines
+     * ({@link Fallthrough#TO_NEXT_STAGE}) when no handler is registered or the service is disabled, so
+     * the caller can try the next route. Use this only where that fallthrough is intended — the ARM
+     * provider stages fall back to the generic {@link ArmHandler}, and the Cosmos root stage must not
+     * claim {@code GET /} for Cosmos when Cosmos is off.
+     */
+    private Outcome dispatch(RoutingContext ctx, String account, String serviceType, String path) {
+        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
+        if (handler.isEmpty()) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        LOGGER.infof("Dispatching %s request to %s: %s %s (account=%s)", serviceType,
+            handler.get().getClass().getSimpleName(), ctx.method(), path, account);
+        return new Handled(handler.get().handle(buildRequest(ctx, account, serviceType, path)));
+    }
+
+    private static Response serviceDisabledResponse(String serviceType) {
+        return new AzureErrorResponse("ServiceDisabled",
+                "The " + serviceType + " service is disabled on this emulator.")
+                .toXmlResponse(Response.Status.SERVICE_UNAVAILABLE.getStatusCode());
+    }
+
+    /**
+     * Dispatches without running the auth pipeline, for endpoints whose callers carry no Authorization
+     * header (IMDS, Entra). A disabled service hands the request to JAX-RS instead of declining: these
+     * paths must 404 rather than be reinterpreted as {@code /{account}/...} by a later stage.
+     */
+    private Outcome dispatchWithoutAuth(RoutingContext ctx, String serviceType, String label) {
+        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
+        if (handler.isEmpty()) {
+            return Fallthrough.TO_JAX_RS;
+        }
+        AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
+            ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
+            null, ctx.secure());
+        LOGGER.infof("Dispatching %s request to %s: %s %s", label,
+            handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
+        return new Handled(handler.get().handle(request));
+    }
+
+    /** Builds an authenticated {@link AzureRequest}: construct, resolve auth, re-stamp. */
+    private AzureRequest buildRequest(RoutingContext ctx, String account, String serviceType, String path) {
         Map<String, String> queryParams = new HashMap<>();
         Map<String, List<String>> queryParamsMulti = new HashMap<>();
-        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> {
+        ctx.requestContext().getUriInfo().getQueryParameters().forEach((k, v) -> {
             queryParams.put(k, v.get(0));
             queryParamsMulti.put(k, List.copyOf(v));
         });
 
-        AzureRequest azureRequest = new AzureRequest(
-            requestContext.getMethod(),
-            accountName,
-            serviceType,
-            resourcePath,
-            headers,
-            requestContext.getEntityStream(),
-            queryParams,
-            queryParamsMulti,
-            null,
-            secure
-        );
-
-        AuthContext authContext = authPipeline.resolve(azureRequest);
-        azureRequest = new AzureRequest(
-            requestContext.getMethod(),
-            accountName,
-            serviceType,
-            resourcePath,
-            headers,
-            requestContext.getEntityStream(),
-            queryParams,
-            queryParamsMulti,
-            authContext,
-            secure
-        );
-
-        if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {
-            LOGGER.warnf("Service disabled: %s", serviceType);
-            return new AzureErrorResponse("ServiceDisabled",
-                    "The " + serviceType + " service is disabled on this emulator.")
-                    .toXmlResponse(Response.Status.SERVICE_UNAVAILABLE.getStatusCode());
-        }
-
-        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
-        if (handler.isPresent()) {
-            LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
-            return handler.get().handle(azureRequest);
-        }
-
-        LOGGER.warnf("No handler found for serviceType: %s", serviceType);
-        return new AzureErrorResponse("ServiceNotImplemented", "The specified service is not implemented.")
-                .toXmlResponse(Response.Status.NOT_IMPLEMENTED.getStatusCode());
+        AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
+            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure());
+        return request.withAuthContext(authPipeline.resolve(request));
     }
 
-    /**
-     * Builds an {@link AzureRequest} for a path-routed management-plane call (account name and
-     * service type are both {@code serviceType}), resolves auth, and dispatches it to the matching
-     * handler. Returns {@code null} when no handler is registered or the service is disabled, so the
-     * caller can fall through to the next route.
-     */
-    private Response dispatchManagementPlane(ContainerRequestContext requestContext, String serviceType,
-                                             String path, HttpHeaders headers, boolean secure) {
+    private static Map<String, String> singleValueQueryParams(ContainerRequestContext requestContext) {
         Map<String, String> queryParams = new HashMap<>();
         requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
-        InputStream entityStream = requestContext.getEntityStream();
-
-        AzureRequest request = new AzureRequest(
-            requestContext.getMethod(), serviceType, serviceType, path, headers,
-            entityStream, queryParams, null, secure);
-        AuthContext auth = authPipeline.resolve(request);
-        request = new AzureRequest(
-            requestContext.getMethod(), serviceType, serviceType, path, headers,
-            entityStream, queryParams, auth, secure);
-
-        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
-        if (handler.isPresent()) {
-            LOGGER.infof("Dispatching ARM %s request to %s: %s %s", serviceType,
-                handler.get().getClass().getSimpleName(), requestContext.getMethod(), path);
-            return handler.get().handle(request);
-        }
-        return null;
-    }
-
-    private String resolveServiceType(ContainerRequestContext requestContext, String resourcePath) {
-        String blobType = requestContext.getHeaderString("x-ms-blob-type");
-        if (blobType != null) return "blob";
-
-        if (resourcePath.contains("/messages") || resourcePath.endsWith("/messages")) {
-            return "queue";
-        }
-
-        Map<String, List<String>> queryParams = requestContext.getUriInfo().getQueryParameters();
-        List<String> restype = queryParams.get("restype");
-        if (restype != null && restype.contains("queue")) {
-            return "queue";
-        }
-
-        String queueMessageCount = requestContext.getHeaderString("x-ms-queue-message-count");
-        if (queueMessageCount != null) return "queue";
-
-        return "blob";
+        return queryParams;
     }
 }

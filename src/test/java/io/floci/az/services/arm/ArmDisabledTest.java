@@ -9,8 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.anyOf;
-import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.containsString;
 
 /**
  * Verifies that {@code floci-az.services.arm.enabled=false} turns off the ARM management plane,
@@ -30,12 +29,15 @@ class ArmDisabledTest {
     }
 
     @Test
-    @DisplayName("GET subscription is not served when ARM disabled")
+    @DisplayName("GET subscription reports ServiceDisabled when ARM disabled")
     void subscriptionGatedOff() {
-        // With ARM enabled this returns 200; disabled, resolve("arm") is empty and the request
-        // falls through unserved (404/501).
+        // With ARM enabled this returns 200. Disabled, the ARM stage now answers 503 ServiceDisabled.
+        // It previously declined and let the request fall through to the account-suffix terminal, which
+        // read "subscriptions" as a storage account name and let the blob handler answer 501 — the same
+        // mis-routing that made a disabled Key Vault return a storage error. See DisabledServiceRoutingTest.
         given()
                 .when().get("/subscriptions/test-sub-armoff?api-version=2021-04-01")
-                .then().statusCode(anyOf(equalTo(404), equalTo(501)));
+                .then().statusCode(503)
+                .body(containsString("ServiceDisabled"));
     }
 }
