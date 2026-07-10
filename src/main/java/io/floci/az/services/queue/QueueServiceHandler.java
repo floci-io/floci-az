@@ -2,8 +2,10 @@ package io.floci.az.services.queue;
 
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import io.floci.az.core.AzureErrorResponse;
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
@@ -41,14 +43,34 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     private final StorageBackend<String, StoredObject> store;
     private final XmlMapper xmlMapper = new XmlMapper();
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public QueueServiceHandler(StorageFactory storageFactory) {
+    public QueueServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
+        this.config = config;
         this.store = storageFactory.create("queue");
     }
 
     @Override
     public String getServiceType() {
         return "queue";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().queue().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .host(".queue.core.windows.net")
+                .account("-queue", "queue")
+                .build();
+
     }
 
     @Override

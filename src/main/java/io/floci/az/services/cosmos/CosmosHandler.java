@@ -3,8 +3,10 @@ package io.floci.az.services.cosmos;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -46,12 +48,28 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private final StorageBackend<String, StoredObject> store;
     private final CosmosQueryEngine queryEngine = new CosmosQueryEngine();
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public CosmosHandler(StorageFactory factory) {
+    public CosmosHandler(StorageFactory factory, EmulatorConfig config) {
+        this.config = config;
         this.store = factory.create("cosmos");
     }
 
     @Override public String getServiceType()              { return "cosmos"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().cosmos().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-cosmos", "cosmos")
+                .build();
+    }
     @Override public boolean canHandle(AzureRequest req)  { return "cosmos".equals(req.serviceType()); }
 
     @Override

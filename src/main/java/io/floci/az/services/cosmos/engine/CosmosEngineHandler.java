@@ -1,7 +1,11 @@
 package io.floci.az.services.cosmos.engine;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
+
+import java.util.List;
 import io.floci.az.services.cosmos.CosmosHandler;
 import io.floci.az.services.cosmos.table.CosmosTableApiHandler;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -36,14 +40,63 @@ public class CosmosEngineHandler implements AzureServiceHandler {
 
     private static final Logger LOG = Logger.getLogger(CosmosEngineHandler.class);
 
-    @Inject CosmosLifecycleManager  lifecycleManager;
-    @Inject CosmosEngineRegistry    registry;
-    @Inject CosmosTableApiHandler   tableApiHandler;
-    @Inject CosmosHandler           cosmosHandler;
+    /** The engine service types this handler serves, one per {@code -cosmos-<engine>} account suffix. */
+    private static final List<String> ENGINE_SERVICE_TYPES = List.of(
+        "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
+        "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql"
+    );
+
+    private final CosmosLifecycleManager lifecycleManager;
+    private final CosmosEngineRegistry registry;
+    private final CosmosTableApiHandler tableApiHandler;
+    private final CosmosHandler cosmosHandler;
+    private final EmulatorConfig config;
+
+    @Inject
+    public CosmosEngineHandler(CosmosLifecycleManager lifecycleManager, CosmosEngineRegistry registry,
+                               CosmosTableApiHandler tableApiHandler, CosmosHandler cosmosHandler,
+                               EmulatorConfig config) {
+        this.lifecycleManager = lifecycleManager;
+        this.registry = registry;
+        this.tableApiHandler = tableApiHandler;
+        this.cosmosHandler = cosmosHandler;
+        this.config = config;
+    }
 
     @Override
     public String getServiceType() {
         return "cosmos-engine";
+    }
+
+    /**
+     * Enablement is per engine, not per handler: {@code cosmos-mongo} may be up while
+     * {@code cosmos-gremlin} is not, and the lifecycle manager's answer changes while the emulator
+     * runs. This is why {@link AzureServiceHandler#enabled(String)} takes the service type and why
+     * {@link io.floci.az.core.AzureServiceRegistry} must never cache the result.
+     *
+     * <p>{@code cosmos-engine} is this handler's own {@code getServiceType()} and is not a routable
+     * engine — it is gated on the Cosmos service flag alone, matching the pre-A5 registry switch.</p>
+     */
+    @Override
+    public boolean enabled(String serviceType) {
+        if (!config.services().cosmos().enabled()) {
+            return false;
+        }
+        return getServiceType().equals(serviceType) || lifecycleManager.isEnabled(serviceType);
+    }
+
+    /**
+     * The one multi-type handler: each {@code -cosmos-<engine>} account suffix resolves to its own
+     * service type, which {@link #getServiceType()} cannot express. Ordering against the plain
+     * {@code -cosmos} suffix is handled by the filter, which sorts all account suffixes longest-first.
+     */
+    @Override
+    public ServiceRoutes routes() {
+        ServiceRoutes.Builder routes = ServiceRoutes.builder();
+        for (String engine : ENGINE_SERVICE_TYPES) {
+            routes.account("-" + engine, engine);
+        }
+        return routes.build();
     }
 
     @Override

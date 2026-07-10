@@ -53,6 +53,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
+    public boolean enabled(String serviceType) {
+        return config.services().monitor().enabled();
+    }
+
+    @Override
     public boolean canHandle(AzureRequest request) {
         return "monitor".equals(request.serviceType());
     }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
@@ -64,6 +65,19 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
     @Override public String getServiceType()           { return "postgres"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().postgres().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-postgres", "postgres")
+                .provider("Microsoft.DBforPostgreSQL")
+                .build();
+    }
     @Override public boolean canHandle(AzureRequest r) { return "postgres".equals(r.serviceType()); }
 
     @Override

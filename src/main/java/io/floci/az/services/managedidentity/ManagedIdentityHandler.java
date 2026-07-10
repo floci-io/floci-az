@@ -3,6 +3,7 @@ package io.floci.az.services.managedidentity;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
@@ -61,6 +62,31 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "managedidentity";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().managedIdentity().enabled();
+    }
+
+    /**
+     * Managed Identity is the only guarded provider route. An {@code identities/default} scope may
+     * itself sit under a Compute/ContainerService resource, and this provider's segment is always the
+     * last {@code /providers/} segment. Nested children scoped to an identity (role assignments, locks)
+     * carry a LATER {@code /providers/} segment and must fall through to the generic ARM handler rather
+     * than be captured here. The guard also makes this route win over broader providers in the same
+     * path — the filter orders guarded routes ahead of unguarded ones.
+     */
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .provider("Microsoft.ManagedIdentity", ManagedIdentityHandler::isLeafProviderSegment)
+                .build();
+    }
+
+    private static boolean isLeafProviderSegment(String path) {
+        int marker = path.indexOf(PROVIDER_MARKER);
+        return marker >= 0 && path.indexOf("/providers/", marker + 1) < 0;
     }
 
     @Override

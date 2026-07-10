@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -65,6 +66,21 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "eventhub";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().eventHub().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-eventhub", "eventhub")
+                .build();
+
     }
 
     @Override

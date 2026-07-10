@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -88,6 +89,22 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "servicebus";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().serviceBus().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .host(".servicebus.windows.net")
+                .account("-servicebus", "servicebus")
+                .build();
+
     }
 
     @Override
