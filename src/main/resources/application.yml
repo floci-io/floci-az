@@ -60,6 +60,8 @@ floci-az:
         flush-interval-ms: 5000
       service-bus:
         flush-interval-ms: 5000
+      sql:
+        flush-interval-ms: 5000
       monitor:
         flush-interval-ms: 5000
 
@@ -134,6 +136,12 @@ floci-az:
       # accept-eula: "Y"     # Must be set to "Y" to accept the Microsoft SQL Server EULA
       image: "mcr.microsoft.com/azure-sql-edge:latest"
       sa-password: "FlociAz_Strong123!"
+      startup-timeout-seconds: 60
+      default-port: 0        # 0 = OS picks a free port per server (recommended)
+    postgres:               # Azure Database for PostgreSQL (Flexible Server). No EULA (postgres image is PostgreSQL-licensed).
+      enabled: true
+      mocked: false         # false = back servers with a real postgres container. true = no Docker; servers are pure ARM state (no live endpoint)
+      image: "postgres:17-alpine"
       startup-timeout-seconds: 60
       default-port: 0        # 0 = OS picks a free port per server (recommended)
     service-bus:
