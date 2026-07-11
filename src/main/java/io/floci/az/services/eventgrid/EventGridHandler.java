@@ -1,7 +1,9 @@
 package io.floci.az.services.eventgrid;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -26,8 +28,12 @@ public class EventGridHandler implements AzureServiceHandler, Resettable {
     private final EventGridService service;
     private final EventGridPublisher publisher;
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public EventGridHandler(EventGridService service, EventGridPublisher publisher) {
+    public EventGridHandler(EventGridService service, EventGridPublisher publisher, EmulatorConfig config) {
+        this.config = config;
         this.service = service;
         this.publisher = publisher;
     }
@@ -35,6 +41,22 @@ public class EventGridHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "eventgrid";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().eventGrid().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-eventgrid", "eventgrid")
+                .provider("Microsoft.EventGrid")
+                .build();
+
     }
 
     @Override

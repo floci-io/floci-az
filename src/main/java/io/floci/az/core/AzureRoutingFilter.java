@@ -4,6 +4,7 @@ import io.floci.az.core.auth.AuthPipeline;
 import io.floci.az.services.arm.ArmHandler;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -22,6 +23,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+
+import io.floci.az.core.ServiceRoutes.SuffixRoute;
 
 @ApplicationScoped
 public class AzureRoutingFilter {
@@ -131,49 +134,109 @@ public class AzureRoutingFilter {
         "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys"
     );
 
-    /** A suffix of a host name or of an account name that identifies a service. */
-    private record SuffixRoute(String suffix, String serviceType) {}
+    /**
+     * A resolved ARM provider route: the pre-built {@code /providers/<namespace>/} marker, the service
+     * type of the handler that claimed it, and the handler's guard.
+     */
+    record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {}
 
-    // Host-suffix → serviceType for data-plane requests reaching {account}.<suffix>.
-    // Suffixes are mutually exclusive, so match order is irrelevant. DFS maps to blob.
-    private static final List<SuffixRoute> HOST_ROUTES = List.of(
-        new SuffixRoute(".vault.azure.net", "keyvault"),
-        new SuffixRoute(".communication.azure.com", "email"),
-        new SuffixRoute(".blob.core.windows.net", "blob"),
-        new SuffixRoute(".dfs.core.windows.net", "blob"),
-        new SuffixRoute(".queue.core.windows.net", "queue"),
-        new SuffixRoute(".servicebus.windows.net", "servicebus")
+    // ── Routing tables, assembled from the handlers at startup ──────────────────
+
+    /** Host-suffix → serviceType. Suffixes are mutually exclusive; DFS maps to blob. */
+    private volatile List<SuffixRoute> hostRoutes = List.of();
+
+    /**
+     * Account-name suffix → serviceType (e.g. {@code {account}-queue → queue}), sorted longest-first.
+     * Any suffix that is a string-suffix of another is always shorter, so length-descending gives the
+     * required most-specific-first match ({@code -cosmos-table} must beat {@code -table}).
+     */
+    private volatile List<SuffixRoute> accountSuffixRoutes = List.of();
+
+    /**
+     * ARM provider routes, guarded routes first. Managed Identity is the only guarded route, and it
+     * must be tried before the broader providers: an {@code identities/default} scope may itself be a
+     * Compute/ContainerService resource, and Managed Identity's {@code /providers/} segment is always
+     * the last one. Handler discovery order is arbitrary, so guarded-first is what makes this
+     * deterministic; the namespace tiebreak keeps the rest stable.
+     */
+    private volatile List<ResolvedProvider> providerRoutes = List.of();
+
+    /** Service types dispatched by a stage directly rather than named in a handler's routing table. */
+    private static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of(
+        "managedidentity", "entra", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
+        "blob", "queue" // the storage fallback in resolveStorageServiceType
     );
 
-    // Account-name suffix → serviceType (e.g. {account}-queue → queue). Sorted longest-suffix-first
-    // at class init: any suffix that is a string-suffix of another is always shorter, so
-    // length-descending preserves the required most-specific-first match without hand-coded ordering.
-    private static final List<SuffixRoute> ACCOUNT_SUFFIX_ROUTES = longestFirst(
-        new SuffixRoute("-cosmos-mongo", "cosmos-mongo"),
-        new SuffixRoute("-cosmos-table", "cosmos-table"),
-        new SuffixRoute("-cosmos-cassandra", "cosmos-cassandra"),
-        new SuffixRoute("-cosmos-gremlin", "cosmos-gremlin"),
-        new SuffixRoute("-cosmos-postgresql", "cosmos-postgresql"),
-        new SuffixRoute("-cosmos-nosql", "cosmos-nosql"),
-        new SuffixRoute("-cosmos", "cosmos"),
-        new SuffixRoute("-queue", "queue"),
-        new SuffixRoute("-table", "table"),
-        new SuffixRoute("-functions", "functions"),
-        new SuffixRoute("-appconfig", "appconfig"),
-        new SuffixRoute("-keyvault", "keyvault"),
-        new SuffixRoute("-eventgrid", "eventgrid"),
-        new SuffixRoute("-eventhub", "eventhub"),
-        new SuffixRoute("-sql", "sql"),
-        new SuffixRoute("-postgres", "postgres"),
-        new SuffixRoute("-servicebus", "servicebus"),
-        new SuffixRoute("-apim", "apim"),
-        new SuffixRoute("-email", "email")
-    );
+    /**
+     * Assembles the dispatch tables from every registered handler's {@link ServiceRoutes}. Two handlers
+     * claiming the same host or account suffix is a wiring bug that would otherwise resolve by
+     * discovery order — fail fast at startup instead.
+     */
+    @PostConstruct
+    void buildRoutingTables() {
+        List<SuffixRoute> hosts = new ArrayList<>();
+        List<SuffixRoute> accounts = new ArrayList<>();
+        List<ResolvedProvider> providers = new ArrayList<>();
 
-    private static List<SuffixRoute> longestFirst(SuffixRoute... routes) {
-        List<SuffixRoute> sorted = new ArrayList<>(List.of(routes));
-        sorted.sort(Comparator.comparingInt((SuffixRoute r) -> r.suffix().length()).reversed());
-        return List.copyOf(sorted);
+        for (AzureServiceHandler handler : serviceRegistry.handlers()) {
+            ServiceRoutes routes = handler.routes();
+            for (String hostSuffix : routes.hostSuffixes()) {
+                hosts.add(new SuffixRoute(hostSuffix, handler.getServiceType()));
+            }
+            accounts.addAll(routes.accountSuffixes());
+            for (ServiceRoutes.ProviderRoute provider : routes.providers()) {
+                providers.add(new ResolvedProvider(provider.marker(), handler.getServiceType(), provider.guard()));
+            }
+        }
+
+        rejectDuplicateSuffixes("host", hosts);
+        rejectDuplicateSuffixes("account", accounts);
+        rejectDuplicateProviders(providers);
+
+        hosts.sort(LONGEST_SUFFIX_FIRST);
+        accounts.sort(LONGEST_SUFFIX_FIRST);
+        providers.sort(GUARDED_FIRST_THEN_MARKER);
+
+        this.hostRoutes = List.copyOf(hosts);
+        this.accountSuffixRoutes = List.copyOf(accounts);
+        this.providerRoutes = List.copyOf(providers);
+
+        LOGGER.infof("Routing tables: %d host, %d account-suffix, %d ARM provider routes",
+            hostRoutes.size(), accountSuffixRoutes.size(), providerRoutes.size());
+    }
+
+    private static final Comparator<SuffixRoute> LONGEST_SUFFIX_FIRST =
+        Comparator.comparingInt((SuffixRoute route) -> route.suffix().length()).reversed();
+
+    private static final Comparator<ResolvedProvider> GUARDED_FIRST_THEN_MARKER =
+        Comparator.comparing((ResolvedProvider route) -> route.guard() == ServiceRoutes.ProviderRoute.ALWAYS)
+                  .thenComparing(ResolvedProvider::marker);
+
+    static void rejectDuplicateSuffixes(String kind, List<SuffixRoute> routes) {
+        Map<String, String> claimedBy = new HashMap<>();
+        for (SuffixRoute route : routes) {
+            String previous = claimedBy.putIfAbsent(route.suffix(), route.serviceType());
+            if (previous != null) {
+                throw new IllegalStateException("Two handlers claim the same " + kind + " suffix '"
+                    + route.suffix() + "': " + previous + " and " + route.serviceType());
+            }
+        }
+    }
+
+    /**
+     * Fails fast when two handlers claim the same ARM provider namespace — the provider counterpart of
+     * {@link #rejectDuplicateSuffixes}. Without this, a duplicate would resolve silently by the
+     * guarded-first / marker sort order instead of surfacing the wiring bug.
+     */
+    static void rejectDuplicateProviders(List<ResolvedProvider> providers) {
+        Map<String, String> claimedBy = new HashMap<>();
+        for (ResolvedProvider provider : providers) {
+            String previous = claimedBy.putIfAbsent(provider.marker(), provider.serviceType());
+            if (previous != null) {
+                throw new IllegalStateException("Two handlers claim the same ARM provider '"
+                    + provider.marker() + "': " + previous + " and " + provider.serviceType());
+            }
+        }
     }
 
     /** Returns the route whose suffix {@code value} ends with, or {@code null} if none matches. */
@@ -190,56 +253,32 @@ public class AzureRoutingFilter {
         return value.substring(0, value.length() - route.suffix().length());
     }
 
-    /**
-     * An ARM management-plane provider route. {@code marker} is the pre-built
-     * {@code /providers/<namespace>/} path fragment; {@code guard} is an extra condition beyond the
-     * marker being present.
-     */
-    private record ProviderRoute(String marker, String serviceType, Predicate<String> guard) {
-        static ProviderRoute of(String namespace, String serviceType, Predicate<String> guard) {
-            return new ProviderRoute("/providers/" + namespace + "/", serviceType, guard);
-        }
+    // ── Table accessors (package-private, for the equivalence/drift tests) ──────
+
+    List<SuffixRoute> hostRoutes() {
+        return hostRoutes;
     }
 
-    private static final Predicate<String> ALWAYS = path -> true;
+    List<SuffixRoute> accountSuffixRoutes() {
+        return accountSuffixRoutes;
+    }
 
-    // Managed Identity is checked before the other providers: an identities/default scope may itself
-    // be a Compute/ContainerService/... resource, and the ManagedIdentity segment is always the last
-    // /providers/ segment. Nested children scoped to an identity (role assignments, locks) have a
-    // LATER /providers/ segment and must fall through to ArmHandler instead of being captured here.
-    private static final Predicate<String> MANAGED_IDENTITY_IS_LEAF = path -> {
-        int marker = path.indexOf("/providers/Microsoft.ManagedIdentity/");
-        return marker >= 0 && path.indexOf("/providers/", marker + 1) < 0;
-    };
-
-    private static final List<ProviderRoute> PROVIDER_ROUTES = List.of(
-        ProviderRoute.of("Microsoft.ManagedIdentity", "managedidentity", MANAGED_IDENTITY_IS_LEAF),
-        ProviderRoute.of("Microsoft.ContainerService", "aks", ALWAYS),
-        ProviderRoute.of("Microsoft.ContainerRegistry", "acr", ALWAYS),
-        ProviderRoute.of("Microsoft.Sql", "sql", ALWAYS),
-        ProviderRoute.of("Microsoft.DBforPostgreSQL", "postgres", ALWAYS),
-        ProviderRoute.of("Microsoft.Compute", "vm", ALWAYS),
-        ProviderRoute.of("Microsoft.Cache", "redis", ALWAYS),
-        ProviderRoute.of("Microsoft.Communication", "email", ALWAYS),
-        ProviderRoute.of("Microsoft.EventGrid", "eventgrid", ALWAYS)
-    );
-
-    /** Service types dispatched by a stage directly rather than named in a routing table. */
-    private static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of(
-        "managedidentity", "entra", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
-        "blob", "queue" // the storage fallback in resolveStorageServiceType
-    );
+    /** ARM provider routes as {@code marker → serviceType}, in match order. */
+    List<Map.Entry<String, String>> providerRoutesInMatchOrder() {
+        return providerRoutes.stream()
+                .map(route -> Map.entry(route.marker(), route.serviceType()))
+                .toList();
+    }
 
     /**
      * Every service type the routing tables and stages can produce. Exposed for the drift test that
-     * asserts each one actually resolves to a registered handler — a typo in a table would otherwise
-     * surface only as a puzzling {@code 501 NotImplemented} at runtime.
+     * asserts each one actually resolves to a registered handler.
      */
-    static Set<String> routedServiceTypes() {
+    Set<String> routedServiceTypes() {
         Set<String> types = new java.util.TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
-        HOST_ROUTES.forEach(route -> types.add(route.serviceType()));
-        ACCOUNT_SUFFIX_ROUTES.forEach(route -> types.add(route.serviceType()));
-        PROVIDER_ROUTES.forEach(route -> types.add(route.serviceType()));
+        hostRoutes.forEach(route -> types.add(route.serviceType()));
+        accountSuffixRoutes.forEach(route -> types.add(route.serviceType()));
+        providerRoutes.forEach(route -> types.add(route.serviceType()));
         return types;
     }
 
@@ -315,7 +354,7 @@ public class AzureRoutingFilter {
         if (ctx.host() == null) {
             return Fallthrough.TO_NEXT_STAGE;
         }
-        SuffixRoute route = matchSuffix(HOST_ROUTES, ctx.host());
+        SuffixRoute route = matchSuffix(hostRoutes, ctx.host());
         if (route == null) {
             return Fallthrough.TO_NEXT_STAGE;
         }
@@ -406,7 +445,7 @@ public class AzureRoutingFilter {
 
     /**
      * ARM management-plane provider routing: {@code subscriptions/{sub}/.../providers/Microsoft.X/...}.
-     * Iterated in {@link #PROVIDER_ROUTES} order: Managed Identity is first and guarded so its provider
+     * Iterated in {@link #providerRoutes} order (guarded first): Managed Identity is guarded so its provider
      * segment must be the last {@code /providers/} in the path — identity-scoped children (role
      * assignments, locks, ...) have a later segment and fall through to {@link #routeArmGeneric}. All of
      * these must precede the generic ARM stage, which would otherwise swallow every path.
@@ -415,7 +454,7 @@ public class AzureRoutingFilter {
         if (!ctx.path().startsWith("subscriptions/")) {
             return Fallthrough.TO_NEXT_STAGE;
         }
-        for (ProviderRoute route : PROVIDER_ROUTES) {
+        for (ResolvedProvider route : providerRoutes) {
             if (!ctx.path().contains(route.marker()) || !route.guard().test(ctx.path())) {
                 continue;
             }
@@ -496,7 +535,7 @@ public class AzureRoutingFilter {
         String resourcePath = ctx.resourcePath();
 
         String serviceType;
-        SuffixRoute route = matchSuffix(ACCOUNT_SUFFIX_ROUTES, accountName);
+        SuffixRoute route = matchSuffix(accountSuffixRoutes, accountName);
         if (route != null) {
             serviceType = route.serviceType();
             accountName = stripSuffix(accountName, route);

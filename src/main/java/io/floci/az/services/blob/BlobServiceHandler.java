@@ -1,8 +1,10 @@
 package io.floci.az.services.blob;
 
 import io.floci.az.core.AzureErrorResponse;
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
@@ -49,14 +51,34 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private final StorageBackend<String, StoredObject> store;
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public BlobServiceHandler(StorageFactory storageFactory) {
+    public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
+        this.config = config;
         this.store = storageFactory.create("blob");
     }
 
     @Override
     public String getServiceType() {
         return "blob";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().blob().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .host(".blob.core.windows.net")
+                .host(".dfs.core.windows.net")   // Data Lake Gen2 shares the blob handler
+                .build();
+
     }
 
     @Override

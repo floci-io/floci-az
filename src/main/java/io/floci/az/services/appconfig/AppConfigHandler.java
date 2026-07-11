@@ -3,8 +3,10 @@ package io.floci.az.services.appconfig;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -53,8 +55,12 @@ public class AppConfigHandler implements AzureServiceHandler, Resettable {
     private final StorageBackend<String, StoredObject> store;
     private final SyncTokens syncTokens;
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public AppConfigHandler(StorageFactory factory, SyncTokens syncTokens) {
+    public AppConfigHandler(StorageFactory factory, SyncTokens syncTokens, EmulatorConfig config) {
+        this.config = config;
         this.store = factory.create("appconfig");
         this.syncTokens = syncTokens;
     }
@@ -62,6 +68,21 @@ public class AppConfigHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "appconfig";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().appConfig().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-appconfig", "appconfig")
+                .build();
+
     }
 
     @Override

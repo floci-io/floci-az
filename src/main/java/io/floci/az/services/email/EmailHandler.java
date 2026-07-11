@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
@@ -75,6 +76,20 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public String getServiceType() { return "email"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().email().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .host(".communication.azure.com")
+                .account("-email", "email")
+                .provider("Microsoft.Communication")
+                .build();
+    }
 
     @Override
     public boolean canHandle(AzureRequest req) { return "email".equals(req.serviceType()); }

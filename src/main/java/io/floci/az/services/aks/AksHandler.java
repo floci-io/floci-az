@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -104,6 +105,18 @@ public class AksHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public String getServiceType() { return "aks"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().aks().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .provider("Microsoft.ContainerService")
+                .build();
+    }
 
     @Override
     public boolean canHandle(AzureRequest req) { return "aks".equals(req.serviceType()); }

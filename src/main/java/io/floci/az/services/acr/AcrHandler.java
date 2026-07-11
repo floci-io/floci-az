@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -109,6 +110,18 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public String getServiceType() { return "acr"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().acr().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .provider("Microsoft.ContainerRegistry")
+                .build();
+    }
 
     @Override
     public boolean canHandle(AzureRequest req) { return "acr".equals(req.serviceType()); }

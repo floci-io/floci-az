@@ -1,7 +1,5 @@
 package io.floci.az.core;
 
-import io.floci.az.config.EmulatorConfig;
-import io.floci.az.services.cosmos.engine.CosmosLifecycleManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -17,8 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AzureServiceRegistry {
 
     private final List<AzureServiceHandler> handlers;
-    private final EmulatorConfig config;
-    private final CosmosLifecycleManager cosmosLifecycleManager;
 
     /**
      * serviceType → handler, memoised. Handler selection is a pure function of the service type (the
@@ -29,11 +25,7 @@ public class AzureServiceRegistry {
     private final Map<String, Optional<AzureServiceHandler>> handlerByServiceType = new ConcurrentHashMap<>();
 
     @Inject
-    AzureServiceRegistry(Instance<AzureServiceHandler> all, EmulatorConfig config,
-                         CosmosLifecycleManager cosmosLifecycleManager) {
-        this.config = config;
-        this.cosmosLifecycleManager = cosmosLifecycleManager;
-
+    AzureServiceRegistry(Instance<AzureServiceHandler> all) {
         List<AzureServiceHandler> discovered = new ArrayList<>();
         for (AzureServiceHandler h : all) {
             discovered.add(h);
@@ -41,38 +33,21 @@ public class AzureServiceRegistry {
         this.handlers = List.copyOf(discovered);
     }
 
+    /**
+     * Whether {@code serviceType} is currently served. Delegates to the owning handler, so enablement
+     * lives next to the service rather than in a central switch.
+     *
+     * <p>Deliberately NOT memoised, unlike {@link #lookup}: Cosmos engine enablement changes while the
+     * emulator runs. An unknown service type has no handler and is therefore not enabled — callers that
+     * need to tell "unknown" from "disabled" apart use {@link #isKnown}.</p>
+     */
     public boolean isEnabled(String serviceType) {
-        return switch (serviceType) {
-            case "blob"      -> config.services().blob().enabled();
-            case "queue"     -> config.services().queue().enabled();
-            case "table"     -> config.services().table().enabled();
-            case "functions"  -> config.services().functions().enabled();
-            case "appconfig"  -> config.services().appConfig().enabled();
-            case "cosmos"     -> config.services().cosmos().enabled();
-            case "keyvault"   -> config.services().keyVault().enabled();
-            case "eventhub"   -> config.services().eventHub().enabled();
-            case "sql"        -> config.services().sql().enabled();
-            case "postgres"   -> config.services().postgres().enabled();
-            case "servicebus" -> config.services().serviceBus().enabled();
-            case "aks"        -> config.services().aks().enabled();
-            case "vm"         -> config.services().vm().enabled();
-            case "apim"       -> config.services().apim().enabled();
-            case "redis"      -> config.services().redis().enabled();
-            case "acr"        -> config.services().acr().enabled();
-            case "email"      -> config.services().email().enabled();
-            case "monitor"    -> config.services().monitor().enabled();
-            case "entra"      -> config.services().entra().enabled();
-            case "arm"        -> config.services().arm().enabled();
-            case "eventgrid"  -> config.services().eventGrid().enabled();
-            case "managedidentity" -> config.services().managedIdentity().enabled();
-            case "cosmos-engine" -> config.services().cosmos().enabled();
-            case "cosmos-mongo", "cosmos-table", "cosmos-cassandra",
-                 "cosmos-gremlin", "cosmos-postgresql", "cosmos-nosql" ->
-                config.services().cosmos().enabled() &&
-                cosmosLifecycleManager.isEnabled(serviceType);
-            default           -> true;
+        return lookup(serviceType).map(handler -> handler.enabled(serviceType)).orElse(false);
+    }
 
-        };
+    /** Every discovered handler, in CDI discovery order. Used to assemble the routing tables. */
+    public List<AzureServiceHandler> handlers() {
+        return handlers;
     }
 
     /** True when some handler implements {@code serviceType}, regardless of whether it is enabled. */

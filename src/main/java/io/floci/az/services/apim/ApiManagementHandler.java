@@ -1,7 +1,9 @@
 package io.floci.az.services.apim;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -16,8 +18,12 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable {
     private final ApiManagementGateway gateway;
     private final ApiManagementService service;
 
+    private final EmulatorConfig config;
+
+
     @Inject
-    public ApiManagementHandler(ApiManagementGateway gateway, ApiManagementService service) {
+    public ApiManagementHandler(ApiManagementGateway gateway, ApiManagementService service, EmulatorConfig config) {
+        this.config = config;
         this.gateway = gateway;
         this.service = service;
     }
@@ -25,6 +31,21 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable {
     @Override
     public String getServiceType() {
         return "apim";
+    }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().apim().enabled();
+    }
+
+
+    @Override
+
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-apim", "apim")
+                .build();
+
     }
 
     @Override

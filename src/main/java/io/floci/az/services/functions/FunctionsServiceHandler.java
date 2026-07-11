@@ -7,6 +7,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
@@ -60,6 +61,18 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
     }
 
     @Override public String getServiceType() { return "functions"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().functions().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-functions", "functions")
+                .build();
+    }
 
     @Override public boolean canHandle(AzureRequest request) {
         return "functions".equals(request.serviceType());

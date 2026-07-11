@@ -83,6 +83,11 @@ public class ArmHandler implements AzureServiceHandler {
     public String getServiceType() { return "arm"; }
 
     @Override
+    public boolean enabled(String serviceType) {
+        return config.services().arm().enabled();
+    }
+
+    @Override
     public boolean canHandle(AzureRequest req) { return "arm".equals(req.serviceType()); }
 
     @Override

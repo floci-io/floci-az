@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
@@ -59,6 +60,19 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
     @Override public String getServiceType()           { return "sql"; }
+
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().sql().enabled();
+    }
+
+    @Override
+    public ServiceRoutes routes() {
+        return ServiceRoutes.builder()
+                .account("-sql", "sql")
+                .provider("Microsoft.Sql")
+                .build();
+    }
     @Override public boolean canHandle(AzureRequest r) { return "sql".equals(r.serviceType()); }
 
     @Override

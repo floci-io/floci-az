@@ -20,6 +20,9 @@ class AzureServiceRegistryTest {
     @Inject
     AzureServiceRegistry registry;
 
+    @Inject
+    AzureRoutingFilter filter;
+
     /**
      * Guards against drift between the routing tables and the handler set. {@code isEnabled} ends in
      * {@code default -> true}, so a service type that no handler implements is reported as "enabled"
@@ -28,7 +31,7 @@ class AzureServiceRegistryTest {
      */
     @Test
     void everyRoutedServiceTypeHasARegisteredHandler() {
-        Set<String> routed = AzureRoutingFilter.routedServiceTypes();
+        Set<String> routed = filter.routedServiceTypes();
         // Without this the loop below would pass vacuously if the tables ever came back empty.
         assertTrue(routed.size() > 20, "expected the full routing surface, got " + routed);
 
@@ -58,6 +61,29 @@ class AzureServiceRegistryTest {
         assertTrue(!registry.isKnown("no-such-service"));
         // Repeat: the negative answer is memoised as an empty Optional, not recomputed into a NPE.
         assertTrue(registry.resolve("no-such-service").isEmpty());
+    }
+
+    /**
+     * {@code AzureServiceHandler.enabled} defaults to {@code true}. That default is a convenience for
+     * the interface, not a licence to skip it: a handler that forgets to override it can never be turned
+     * off by config, silently reinstating the {@code default -> true} wart that A5 removed from the
+     * registry switch. Every registered handler must state its own enablement.
+     */
+    @Test
+    void everyHandlerOverridesEnabled() throws Exception {
+        List<String> inheriting = new ArrayList<>();
+        for (AzureServiceHandler handler : registry.handlers()) {
+            // Unwrap the Arc client proxy to reach the real handler class.
+            Class<?> actual = handler.getClass().getSuperclass() != null
+                    && handler.getClass().getSimpleName().endsWith("_ClientProxy")
+                    ? handler.getClass().getSuperclass()
+                    : handler.getClass();
+            if (actual.getMethod("enabled", String.class).getDeclaringClass() == AzureServiceHandler.class) {
+                inheriting.add(actual.getSimpleName());
+            }
+        }
+        assertEquals(List.of(), inheriting,
+            "these handlers inherit the permissive default enabled(): " + inheriting);
     }
 
     /** Memoised lookup must return the same handler instance every time. */

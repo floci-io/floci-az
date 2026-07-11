@@ -64,6 +64,11 @@ public class EntraServiceHandler implements AzureServiceHandler {
 
     @Override public String getServiceType() { return "entra"; }
 
+    @Override
+    public boolean enabled(String serviceType) {
+        return config.services().entra().enabled();
+    }
+
     @Override public boolean canHandle(AzureRequest request) {
         return "entra".equals(request.serviceType());
     }
