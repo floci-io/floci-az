@@ -9,7 +9,6 @@ import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.network.NetworkHandler;
-import io.floci.az.services.monitor.MonitorHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
@@ -64,7 +63,6 @@ public class ArmHandler implements AzureServiceHandler {
     private final FunctionsServiceHandler functionsHandler;
     private final ApiManagementHandler apiManagementHandler;
     private final NetworkHandler networkHandler;
-    private final MonitorHandler monitorHandler;
     private final ManagedIdentityHandler managedIdentityHandler;
 
     /** provider namespace → owning ArmProviderService, assembled from CDI at startup. */
@@ -74,8 +72,7 @@ public class ArmHandler implements AzureServiceHandler {
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
-                      NetworkHandler networkHandler, MonitorHandler monitorHandler,
-                      ManagedIdentityHandler managedIdentityHandler,
+                      NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices) {
         this.config               = config;
         this.blobHandler          = blobHandler;
@@ -83,7 +80,6 @@ public class ArmHandler implements AzureServiceHandler {
         this.functionsHandler     = functionsHandler;
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
-        this.monitorHandler       = monitorHandler;
         this.managedIdentityHandler = managedIdentityHandler;
         this.providerServices     = providerServices;
     }
@@ -136,6 +132,9 @@ public class ArmHandler implements AzureServiceHandler {
         LOG.debugf("ArmHandler %s %s", method, path);
 
         // ── Network Provider (subscription & resource-group levels) ───────────
+        // Network is dispatched here, NOT via the providerLane map: subscription-scoped Network list
+        // paths (no /resourceGroups/) must be caught before the resource-group branch below, and the
+        // map lane is reached only from inside that branch. This block owns Network's enabled-guard.
         if (path.contains("/providers/Microsoft.Network/")) {
             if (!config.services().network().enabled()) {
                 return armNotFound(path);
