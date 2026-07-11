@@ -156,6 +156,34 @@ class RoutingTableAssemblyTest {
             List.of(new SuffixRoute("-queue", "queue"), new SuffixRoute("-table", "table")));
     }
 
+    /**
+     * The provider counterpart of the suffix guard. Two handlers claiming the same {@code Microsoft.X}
+     * namespace must fail loudly at startup rather than resolve silently by sort order — otherwise the
+     * ARM provider table reintroduces the exact nondeterminism the suffix guards remove.
+     */
+    @Test
+    void duplicateProviderNamespaceFailsFast() {
+        var always = ServiceRoutes.ProviderRoute.ALWAYS;
+        List<AzureRoutingFilter.ResolvedProvider> clashing = List.of(
+            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
+            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "someOtherService", always)
+        );
+        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> AzureRoutingFilter.rejectDuplicateProviders(clashing));
+        assertTrue(failure.getMessage().contains("Microsoft.Cache"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("someOtherService"), failure.getMessage());
+    }
+
+    /** Distinct provider namespaces must pass — otherwise the guard above would be vacuous. */
+    @Test
+    void distinctProvidersPassTheDuplicateCheck() {
+        var always = ServiceRoutes.ProviderRoute.ALWAYS;
+        AzureRoutingFilter.rejectDuplicateProviders(List.of(
+            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
+            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Sql/", "sql", always)));
+    }
+
     private static int indexOfSuffix(List<SuffixRoute> routes, String suffix) {
         for (int i = 0; i < routes.size(); i++) {
             if (routes.get(i).suffix().equals(suffix)) {

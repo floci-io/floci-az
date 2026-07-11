@@ -138,7 +138,7 @@ public class AzureRoutingFilter {
      * A resolved ARM provider route: the pre-built {@code /providers/<namespace>/} marker, the service
      * type of the handler that claimed it, and the handler's guard.
      */
-    private record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {}
+    record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {}
 
     // ── Routing tables, assembled from the handlers at startup ──────────────────
 
@@ -191,6 +191,7 @@ public class AzureRoutingFilter {
 
         rejectDuplicateSuffixes("host", hosts);
         rejectDuplicateSuffixes("account", accounts);
+        rejectDuplicateProviders(providers);
 
         hosts.sort(LONGEST_SUFFIX_FIRST);
         accounts.sort(LONGEST_SUFFIX_FIRST);
@@ -218,6 +219,22 @@ public class AzureRoutingFilter {
             if (previous != null) {
                 throw new IllegalStateException("Two handlers claim the same " + kind + " suffix '"
                     + route.suffix() + "': " + previous + " and " + route.serviceType());
+            }
+        }
+    }
+
+    /**
+     * Fails fast when two handlers claim the same ARM provider namespace — the provider counterpart of
+     * {@link #rejectDuplicateSuffixes}. Without this, a duplicate would resolve silently by the
+     * guarded-first / marker sort order instead of surfacing the wiring bug.
+     */
+    static void rejectDuplicateProviders(List<ResolvedProvider> providers) {
+        Map<String, String> claimedBy = new HashMap<>();
+        for (ResolvedProvider provider : providers) {
+            String previous = claimedBy.putIfAbsent(provider.marker(), provider.serviceType());
+            if (previous != null) {
+                throw new IllegalStateException("Two handlers claim the same ARM provider '"
+                    + provider.marker() + "': " + previous + " and " + provider.serviceType());
             }
         }
     }
