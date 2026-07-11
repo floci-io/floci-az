@@ -4,6 +4,7 @@ Floci-AZ provides emulation for several core Azure services.
 
 | Service | Endpoint | Implementation Status |
 |---|---|---|
+| **Azure Resource Manager** | `/subscriptions/...` + `/providers/...` | ✅ Subscriptions, resource groups, resource/provider listing; management-plane fallthrough for the `Microsoft.*` providers |
 | **Blob Storage** | `/{account}/` | ✅ Full CRUD |
 | **Queue Storage** | `/{account}-queue/` | ✅ Full CRUD |
 | **Table Storage** | `/{account}-table/` | ✅ Full CRUD |
