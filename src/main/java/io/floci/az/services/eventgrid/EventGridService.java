@@ -56,7 +56,7 @@ public class EventGridService {
 
     // ── ARM dispatch ──────────────────────────────────────────────────────────
 
-    public Response handleArm(AzureRequest req, String path, String method) {
+    public Response handleArm(AzureRequest req, String path, String method, String sub) {
         int esIdx = path.indexOf(ES_MARKER);
         if (esIdx >= 0) {
             String scope = normalizeId(path.substring(0, esIdx));
@@ -73,7 +73,6 @@ public class EventGridService {
             return notFound(path);
         }
 
-        String sub = extractSegment(path, "subscriptions");
         String rg = extractSegment(path, "resourceGroups");
 
         if (seg.length == 1) {
@@ -385,7 +384,7 @@ public class EventGridService {
     // ── Generic parsing helpers ──────────────────────────────────────────────────
 
     private Map<String, Object> parseBody(AzureRequest req) {
-        return ArmJson.parseBodyLenient(req);
+        return ArmJson.parseBodyStrict(req);
     }
 
     private static Map<String, Object> cast(Object value) {

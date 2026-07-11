@@ -65,7 +65,11 @@ class RoutingTableAssemblyTest {
         Map.entry("-email", "email")
     );
 
-    /** A4's PROVIDER_ROUTES, verbatim, as marker → serviceType. */
+    /**
+     * A4's PROVIDER_ROUTES minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
+     * of the filter's provider lane into the ArmHandler lane (it implements {@code ArmProviderService}),
+     * so it is no longer a filter provider route. Every other entry is unchanged from A4.
+     */
     private static final Set<Map.Entry<String, String>> GOLDEN_PROVIDER_ROUTES = Set.of(
         Map.entry("/providers/Microsoft.ManagedIdentity/", "managedidentity"),
         Map.entry("/providers/Microsoft.ContainerService/", "aks"),
@@ -74,8 +78,7 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.DBforPostgreSQL/", "postgres"),
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
-        Map.entry("/providers/Microsoft.Communication/", "email"),
-        Map.entry("/providers/Microsoft.EventGrid/", "eventgrid")
+        Map.entry("/providers/Microsoft.Communication/", "email")
     );
 
     private static Set<Map.Entry<String, String>> asEntries(List<SuffixRoute> routes) {

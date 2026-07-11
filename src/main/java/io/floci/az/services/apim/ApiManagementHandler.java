@@ -5,15 +5,17 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.arm.ArmProviderService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @ApplicationScoped
-public class ApiManagementHandler implements AzureServiceHandler, Resettable {
+public class ApiManagementHandler implements AzureServiceHandler, Resettable, ArmProviderService {
 
     private final ApiManagementGateway gateway;
     private final ApiManagementService service;
@@ -54,10 +56,16 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
+    public Set<String> providerNamespaces() {
+        return Set.of("Microsoft.ApiManagement");
+    }
+
+    @Override
     public Response handle(AzureRequest request) {
         return gateway.handle(request);
     }
 
+    @Override
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
         return service.handleArm(request, path, method, sub);
     }

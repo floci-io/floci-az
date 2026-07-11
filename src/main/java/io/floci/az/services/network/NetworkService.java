@@ -195,7 +195,7 @@ public class NetworkService {
     }
 
     private Map<String, Object> parseBody(AzureRequest request) {
-        return ArmJson.parseBodyLenient(request);
+        return ArmJson.parseBodyStrict(request);
     }
 
     private static Map<String, Object> cast(Object o) {

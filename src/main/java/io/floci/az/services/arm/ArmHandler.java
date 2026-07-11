@@ -9,13 +9,15 @@ import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.network.NetworkHandler;
-import io.floci.az.services.monitor.MonitorHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResources;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -61,22 +63,43 @@ public class ArmHandler implements AzureServiceHandler {
     private final FunctionsServiceHandler functionsHandler;
     private final ApiManagementHandler apiManagementHandler;
     private final NetworkHandler networkHandler;
-    private final MonitorHandler monitorHandler;
     private final ManagedIdentityHandler managedIdentityHandler;
+
+    /** provider namespace → owning ArmProviderService, assembled from CDI at startup. */
+    private final Instance<ArmProviderService> providerServices;
+    private final Map<String, ArmProviderService> providerLane = new HashMap<>();
 
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
-                      NetworkHandler networkHandler, MonitorHandler monitorHandler,
-                      ManagedIdentityHandler managedIdentityHandler) {
+                      NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
+                      Instance<ArmProviderService> providerServices) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
         this.functionsHandler     = functionsHandler;
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
-        this.monitorHandler       = monitorHandler;
         this.managedIdentityHandler = managedIdentityHandler;
+        this.providerServices     = providerServices;
+    }
+
+    /**
+     * Builds the provider-namespace → service map. Two services claiming the same namespace is a wiring
+     * bug that would otherwise resolve by arbitrary CDI order — fail fast at startup.
+     */
+    @PostConstruct
+    void buildProviderLane() {
+        for (ArmProviderService service : providerServices) {
+            for (String namespace : service.providerNamespaces()) {
+                ArmProviderService previous = providerLane.putIfAbsent(namespace, service);
+                if (previous != null) {
+                    throw new IllegalStateException("Two ArmProviderService beans claim " + namespace
+                        + ": " + previous.getClass().getSimpleName() + " and " + service.getClass().getSimpleName());
+                }
+            }
+        }
+        LOG.infof("ARM provider lane: %d namespaces → %s", providerLane.size(), providerLane.keySet());
     }
 
     @Override
@@ -92,12 +115,26 @@ public class ArmHandler implements AzureServiceHandler {
 
     @Override
     public Response handle(AzureRequest req) {
+        // ARM-plane handlers (Network/APIM/Monitor/EventGrid) parse the body strictly; a malformed
+        // body surfaces here as the real ARM 400 InvalidRequestContent rather than a lenient no-op.
+        try {
+            return dispatch(req);
+        } catch (ArmJson.InvalidBodyException e) {
+            return ArmErrors.error(400, "InvalidRequestContent",
+                    "The request content was invalid and could not be deserialized.");
+        }
+    }
+
+    private Response dispatch(AzureRequest req) {
         String path   = req.resourcePath();
         String method = req.method().toUpperCase();
 
         LOG.debugf("ArmHandler %s %s", method, path);
 
         // ── Network Provider (subscription & resource-group levels) ───────────
+        // Network is dispatched here, NOT via the providerLane map: subscription-scoped Network list
+        // paths (no /resourceGroups/) must be caught before the resource-group branch below, and the
+        // map lane is reached only from inside that branch. This block owns Network's enabled-guard.
         if (path.contains("/providers/Microsoft.Network/")) {
             if (!config.services().network().enabled()) {
                 return armNotFound(path);
@@ -247,6 +284,8 @@ public class ArmHandler implements AzureServiceHandler {
     // ── Provider-level routing ────────────────────────────────────────────────
 
     private Response handleProviders(AzureRequest req, String path, String method, String sub) {
+        // Inline ARM shells that bridge to data-plane handlers (Storage/KeyVault) or functions
+        // provisioning (Web) — coupled to those subsystems, so they stay here rather than in the lane.
         if (path.contains("/providers/Microsoft.Storage/")) {
             return handleStorage(req, path, method, sub);
         }
@@ -256,22 +295,23 @@ public class ArmHandler implements AzureServiceHandler {
         if (path.contains("/providers/Microsoft.Web/")) {
             return handleWeb(req, path, method, sub);
         }
-        if (path.contains("/providers/Microsoft.Network/")) {
-            if (!config.services().network().enabled()) {
-                return armNotFound(path);
-            }
-            return networkHandler.handleArm(req, path, method, sub);
-        }
-        if (path.contains("/providers/Microsoft.ApiManagement/")) {
-            return apiManagementHandler.handleArm(req, path, method, sub);
-        }
-        if (path.contains("/providers/Microsoft.OperationalInsights/")) {
-            return monitorHandler.handleArm(req, path, method, sub);
-        }
-        if (path.contains("/providers/Microsoft.Insights/")) {
-            return monitorHandler.handleArm(req, path, method, sub);
+        // Delegating providers (Network/APIM/Monitor/EventGrid), via the ArmProviderService lane.
+        ArmProviderService provider = providerLane.get(providerNamespace(path));
+        if (provider != null) {
+            return provider.armEnabled() ? provider.handleArm(req, path, method, sub) : armNotFound(path);
         }
         return armNotFound(path);
+    }
+
+    /** The {@code Microsoft.X} namespace segment immediately after {@code /providers/}, or "" if none. */
+    private static String providerNamespace(String path) {
+        int marker = path.indexOf("/providers/");
+        if (marker < 0) {
+            return "";
+        }
+        String rest = path.substring(marker + "/providers/".length());
+        int slash = rest.indexOf('/');
+        return slash < 0 ? rest : rest.substring(0, slash);
     }
 
     // ── Function Apps ────────────────────────────────────────────────────────

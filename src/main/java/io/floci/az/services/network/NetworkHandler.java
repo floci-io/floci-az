@@ -9,6 +9,13 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Network is intentionally NOT an {@link io.floci.az.core.arm.ArmProviderService}. It is dispatched by
+ * the dedicated early block in {@code ArmHandler.dispatch()} rather than the provider-lane map, because
+ * subscription-scoped Network list paths (no {@code /resourceGroups/}) must be intercepted before the
+ * resource-group branch — which the map lane, reached only from that branch, cannot do. {@code ArmHandler}
+ * calls {@link #handleArm} directly and applies the {@code network().enabled()} guard there.
+ */
 @ApplicationScoped
 public class NetworkHandler implements Resettable {
 

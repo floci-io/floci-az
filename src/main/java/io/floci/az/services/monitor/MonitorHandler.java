@@ -10,6 +10,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmProviderService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -24,7 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class MonitorHandler implements AzureServiceHandler, Resettable {
+public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProviderService {
 
     private static final Logger LOG = Logger.getLogger(MonitorHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -78,6 +79,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable {
         return Response.status(404).entity("Not Found").build();
     }
 
+    @Override
+    public Set<String> providerNamespaces() {
+        return Set.of("Microsoft.OperationalInsights", "Microsoft.Insights");
+    }
+
+    @Override
     public Response handleArm(AzureRequest req, String path, String method, String sub) {
         LOG.debugf("MonitorHandler ARM-plane %s /%s", method, path);
 
@@ -508,7 +515,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable {
     }
 
     private Map<String, Object> parseBody(AzureRequest req) {
-        return ArmJson.parseBodyLenient(req);
+        return ArmJson.parseBodyStrict(req);
     }
 
     public void clearAll() {
