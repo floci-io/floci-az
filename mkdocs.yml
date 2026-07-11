@@ -69,6 +69,7 @@ nav:
       - application.yml Reference: configuration/advanced/application-yml.md
   - Services:
     - Overview: services/index.md
+    - Azure Resource Manager: services/arm.md
     - Blob Storage: services/blob.md
     - Queue Storage: services/queue.md
     - Table Storage: services/table.md
