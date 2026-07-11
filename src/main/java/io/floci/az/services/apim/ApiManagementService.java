@@ -679,7 +679,7 @@ public class ApiManagementService {
     }
 
     private Map<String, Object> parseBody(AzureRequest request) {
-        return ArmJson.parseBodyLenient(request);
+        return ArmJson.parseBodyStrict(request);
     }
 
     private static Map<String, Object> stripInternal(Map<String, Object> resource) {
