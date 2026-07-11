@@ -48,7 +48,15 @@ GET    /subscriptions/{sub}/resourceGroups
 GET    /subscriptions/{sub}/resources
 GET    /subscriptions/{sub}/providers[/{namespace}]
 POST   /subscriptions/{sub}/providers/{namespace}/checkNameAvailability
+
+# ARM shells (bridge to the live data-plane handlers)
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Storage/storageAccounts/{name}
+PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{name}
 ```
+
+`azurerm_storage_account` and `azurerm_key_vault` resolve to those two provider paths; the storage
+account returns the well-known development key and the vault's `vaultUri` points at the live
+[Key Vault](key-vault.md) data plane.
 
 ## Quickstart
 
@@ -91,7 +99,7 @@ floci-az:
 | `enabled` | `FLOCI_AZ_SERVICES_ARM_ENABLED` | `true` | Enables the ARM management plane. Disabling it turns off every ARM-based service |
 
 The subscription and tenant GUIDs are fixed
-(`00000000-0000-0000-0000-000000000001` / `…000000000002`) and shared with the
+(`00000000-0000-0000-0000-000000000001` / `00000000-0000-0000-0000-000000000002`) and shared with the
 [Entra ID](entra.md) and [Managed Identity](managed-identity.md) emulation.
 
 ## Intentional deviations

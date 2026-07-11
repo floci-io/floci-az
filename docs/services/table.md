@@ -66,6 +66,7 @@ floci-az:
 |---|---|---|---|
 | `enabled` | `FLOCI_AZ_SERVICES_TABLE_ENABLED` | `true` | Enables the Table Storage service |
 | `storage.services.table.mode` | `FLOCI_AZ_STORAGE_SERVICES_TABLE_MODE` | *(inherits `storage.mode`)* | Per-service backend override (`memory` / `persistent` / `hybrid` / `wal`) |
+| `storage.services.table.flush-interval-ms` | `FLOCI_AZ_STORAGE_SERVICES_TABLE_FLUSH_INTERVAL_MS` | `5000` | Background flush-to-disk interval for the `hybrid` mode only; ignored by `memory` / `persistent` / `wal` (`wal` compacts on `storage.wal.compaction-interval-ms` instead) |
 
 ## Intentional deviations
 
