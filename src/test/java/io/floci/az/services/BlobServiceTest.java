@@ -389,6 +389,184 @@ public class BlobServiceTest {
     }
 
     @Test
+    void dataLakeRecursiveRootListingReturnsNestedFiles() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("json"))
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt", "root.txt"))
+            .body("paths.find { it.name == 'dir/file.txt' }.isDirectory", equalTo(false));
+    }
+
+    @Test
+    void dataLakeNonRecursiveRootListingReturnsImmediateFilesAndDirectories() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=false", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir", "root.txt"))
+            .body("paths.find { it.name == 'dir' }.isDirectory", equalTo(true))
+            .body("paths.find { it.name == 'root.txt' }.isDirectory", equalTo(false));
+    }
+
+    @Test
+    void dataLakeNonRecursiveDirectoryListingReturnsImmediateChildren() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=false&directory=dir", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub"))
+            .body("paths.find { it.name == 'dir/sub' }.isDirectory", equalTo(true));
+    }
+
+    @Test
+    void dataLakeRecursiveDirectoryListingReturnsDescendants() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=dir", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt"));
+    }
+
+    @Test
+    void dataLakeDirectoryListingRequiresExistingDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=missing", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/empty?resource=directory", CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=empty", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeEmptyFilesystemListingReturnsEmptyPaths() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeListPathsPaginatesWithContinuation() {
+        createContainerWithDataLakePaths();
+
+        String continuation = given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&maxResults=2", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", contains("dir/file.txt", "dir/sub/leaf.txt"))
+            .header("x-ms-continuation", not(isEmptyOrNullString()))
+            .extract().header("x-ms-continuation");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&maxResults=2&continuation={continuation}",
+                    CONTAINER, continuation)
+            .then()
+            .statusCode(200)
+            .body("paths.name", contains("root.txt"))
+            .header("x-ms-continuation", nullValue());
+    }
+
+    @Test
+    void dataLakeMalformedContinuationReturnsBadRequest() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&continuation=not-a-marker", CONTAINER)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidQueryParameterValue");
+    }
+
+    @Test
+    void dataLakeListMissingFilesystemReturnsNotFound() {
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "FilesystemNotFound");
+    }
+
+    @Test
+    void dataLakeListPathsRequiresListPermissionForSas() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, sas("r", "c", CONTAINER, null))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, sas("l", "c", CONTAINER, null))
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt", "root.txt"));
+    }
+
+    @Test
+    void directoryScopedSasCanListDirectoryButNotSibling() {
+        createContainerWithDataLakePaths();
+        String directorySas = sas("l", "d", CONTAINER, "dir");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=dir&{sas}",
+                    CONTAINER, directorySas)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt"));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, directorySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
     void setAndGetBlobMetadata() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -655,6 +833,17 @@ public class BlobServiceTest {
         return matcher.group(1);
     }
 
+    private static void createContainerWithDataLakePaths() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String path : new String[] {"root.txt", "dir/file.txt", "dir/sub/leaf.txt"}) {
+            given()
+                .header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .header("x-ms-version", "2023-11-03")
+                .when().put("/{container}/{path}?resource=file", CONTAINER, path)
+                .then().statusCode(201);
+        }
+    }
+
     private static String sas(String permissions, String resource, String container, String blobName) {
         OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
         OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
@@ -709,6 +898,7 @@ public class BlobServiceTest {
                 + "&skv=" + version
                 + "&sr=" + resource
                 + "&sp=" + permissions
+                + ("d".equals(resource) ? "&sdd=1" : "")
                 + "&sig=" + signature;
     }
 

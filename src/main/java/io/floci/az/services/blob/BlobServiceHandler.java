@@ -58,6 +58,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private final UserDelegationKeyService userDelegationKeyService;
     private final StorageSasAuthorization sasAuthorization;
+    private final DataLakePathOperations dataLakePathOperations;
 
     @Inject
     public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
@@ -67,6 +68,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         this.userDelegationKeyService = userDelegationKeyService;
         this.sasAuthorization = sasAuthorization;
         this.store = storageFactory.create("blob");
+        this.dataLakePathOperations = new DataLakePathOperations(store);
     }
 
     @Override
@@ -131,7 +133,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String blobName = parts.length > 1 ? parts[1] : "";
 
             if (blobName.isEmpty()) {
-                if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
+                if ("GET".equalsIgnoreCase(method) && "filesystem".equals(query.get("resource"))) {
+                    response = listDataLakePaths(request, containerName);
+                } else if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                     response = listBlobs(request, containerName);
                 } else if ("PUT".equalsIgnoreCase(method) && "container".equals(query.get("restype"))) {
                     response = createContainer(request, containerName);
@@ -308,6 +312,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> metadata = new HashMap<>();
             String blobType = request.headers().getHeaderString("x-ms-blob-type");
             metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
+            String dataLakeResourceType = request.queryParams().get("resource");
+            if ("file".equals(dataLakeResourceType) || "directory".equals(dataLakeResourceType)) {
+                metadata.put("DataLakeResourceType", dataLakeResourceType);
+            }
             String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
             metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
             metadata.put("Name", blobName);
@@ -529,11 +537,77 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         return Response.ok(XmlUtils.toXml(response)).type(MediaType.APPLICATION_XML).build();
     }
 
+    private Response listDataLakePaths(AzureRequest request, String filesystem) {
+        String directory = request.queryParams().get("directory");
+        Response authFailure = authorizeList(request, filesystem, directory);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (directory != null && !directory.isBlank()
+                && !dataLakePathOperations.pathExists(request.accountName(), filesystem, directory)) {
+            return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        boolean recursive = Boolean.parseBoolean(request.queryParams().getOrDefault("recursive", "false"));
+        List<DataLakePathListResponse.PathEntry> entries =
+                dataLakePathOperations.list(request.accountName(), filesystem, directory, recursive);
+        int start = parseContinuation(request.queryParams().get("continuation"));
+        if (start < 0) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        int maxResults = parseDataLakeMaxResults(request.queryParams().get("maxResults"));
+        int end = Math.min(start + maxResults, entries.size());
+        List<DataLakePathListResponse.PathEntry> page = start >= entries.size()
+                ? List.of()
+                : entries.subList(start, end);
+
+        Response.ResponseBuilder builder = Response.ok(new DataLakePathListResponse(page))
+                .type(MediaType.APPLICATION_JSON_TYPE);
+        if (end < entries.size()) {
+            builder.header("x-ms-continuation", Integer.toString(end));
+        }
+        return builder.build();
+    }
+
     private static int parseMaxResults(String value) {
         if (value == null || value.isBlank()) {
             return 1000;
         }
         return Integer.parseInt(value);
+    }
+
+    private static int parseDataLakeMaxResults(String value) {
+        if (value == null || value.isBlank()) {
+            return 5000;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < 1) {
+                return 5000;
+            }
+            return Math.min(parsed, 5000);
+        } catch (NumberFormatException e) {
+            return 5000;
+        }
+    }
+
+    private static int parseContinuation(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed < 0 ? -1 : parsed;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     // ── Block Blob ────────────────────────────────────────────────────────────
@@ -746,6 +820,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response authorizeList(AzureRequest request, String containerName) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeList(request.accountName(), containerName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeList(AzureRequest request, String containerName, String path) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeList(request.accountName(), containerName, path, token))
                 .orElse(null);
     }
 

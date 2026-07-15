@@ -291,7 +291,7 @@ flowchart LR
 
 | Service                 | Routing                      | Notable operations                                                                                                                                                                                                    |
 |-------------------------|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Blob Storage**        | `/{account}/`                | Create/delete containers, upload/download/delete blobs, list blobs; ADLS Gen2 DFS host alias, user delegation key vending, user delegation SAS enforcement                                                            |
+| **Blob Storage**        | `/{account}/`                | Create/delete containers, upload/download/delete blobs, list blobs; ADLS Gen2 DFS host alias, user delegation key vending, user delegation SAS enforcement, Path - List                                               |
 | **Queue Storage**       | `/{account}-queue/`          | Create/delete queues, send/receive/peek/delete messages, visibility timeout                                                                                                                                           |
 | **Table Storage**       | `/{account}-table/`          | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
 | **Azure Functions**     | `/{account}-functions/`      | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool                                                                                                                            |
@@ -420,7 +420,7 @@ Floci AZ uses path-style routing:
 | Service           | Endpoint                                              | Notes |
 |-------------------|-------------------------------------------------------|-------|
 | Blob              | `http://localhost:4577/{accountName}`                 | |
-| Data Lake Storage Gen2 | `http://localhost:4577/{accountName}`            | Use the `{accountName}.dfs.core.windows.net` Host header; maps to the Blob backend and supports Java DataLake SDK path flows |
+| Data Lake Storage Gen2 | `http://localhost:4577/{accountName}`            | Use the `{accountName}.dfs.core.windows.net` Host header; maps to the Blob backend and supports Java DataLake SDK path flows, including `listPaths` |
 | Queue             | `http://localhost:4577/{accountName}-queue`           | |
 | Table             | `http://localhost:4577/{accountName}-table`           | |
 | Functions         | `http://localhost:4577/{accountName}-functions`       | |

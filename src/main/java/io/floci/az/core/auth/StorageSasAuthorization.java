@@ -27,6 +27,10 @@ public class StorageSasAuthorization {
         return authorize(account, container, null, token, Operation.LIST);
     }
 
+    public Optional<Response> authorizeList(String account, String container, String path, StorageSasToken token) {
+        return authorize(account, container, path, token, Operation.LIST);
+    }
+
     public Optional<Response> authorizeCreate(String account, String container, String path, StorageSasToken token) {
         return authorize(account, container, path, token, Operation.CREATE);
     }
