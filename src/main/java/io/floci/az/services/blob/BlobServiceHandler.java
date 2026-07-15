@@ -2,6 +2,7 @@ package io.floci.az.services.blob;
 
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AuthType;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
@@ -53,10 +54,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private final EmulatorConfig config;
 
+    private final UserDelegationKeyService userDelegationKeyService;
 
     @Inject
-    public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
+    public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
+                              UserDelegationKeyService userDelegationKeyService) {
         this.config = config;
+        this.userDelegationKeyService = userDelegationKeyService;
         this.store = storageFactory.create("blob");
     }
 
@@ -103,6 +107,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         } else if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listContainers(request);
+            } else if ("POST".equalsIgnoreCase(method) && "service".equals(query.get("restype"))
+                    && "userdelegationkey".equals(query.get("comp"))) {
+                response = getUserDelegationKey(request);
             } else if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
                 if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlobServiceProperties();
@@ -163,6 +170,16 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("Date", RFC1123_DATE_TIME.format(Instant.now()))
                 .build();
+    }
+
+    private Response getUserDelegationKey(AzureRequest request) {
+        if (request.authContext() == null || request.authContext().type() != AuthType.BEARER) {
+            return new AzureErrorResponse("AuthenticationFailed",
+                    "Server failed to authenticate the request. Make sure the value of Authorization header "
+                            + "is formed correctly including the signature.")
+                    .toXmlResponse(Response.Status.FORBIDDEN.getStatusCode());
+        }
+        return userDelegationKeyService.create(request);
     }
 
     private Response getBlobServiceProperties() {
