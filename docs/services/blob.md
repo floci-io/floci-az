@@ -25,6 +25,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **User delegation SAS enforcement** — validates SDK-generated user delegation SAS signatures,
   expiry, signed key validity, permissions, and container/blob/directory resource scope for Blob
   and ADLS path operations
+- **ADLS Path - List** — supports Java DataLake SDK `listPaths` over the DFS endpoint, including
+  recursive and non-recursive listing, directory filters, deterministic continuation tokens, and
+  user delegation SAS list-scope checks
 - **Range download** — `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download** — `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **Metadata** — `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
@@ -36,6 +39,7 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 ```
 http://localhost:4577/{account}/{container}                  # container operations
 http://localhost:4577/{account}/{container}/{blob}           # blob operations
+http://localhost:4577/{account}/{filesystem}?resource=filesystem&recursive=true  # ADLS listPaths
 ```
 
 The account also answers at the host-style address `{account}.blob.core.windows.net` (and the Data

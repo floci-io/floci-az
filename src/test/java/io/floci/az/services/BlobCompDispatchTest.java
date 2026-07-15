@@ -122,6 +122,14 @@ public class BlobCompDispatchTest {
                 .then().statusCode(501);
     }
 
+    @Test
+    void dataLakeListPathsDoesNotClaimUnimplementedCompOperation() {
+        given()
+                .header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .when().get("/{container}?resource=filesystem&recursive=true&comp=acl", CONTAINER)
+                .then().statusCode(501);
+    }
+
     // --- the operations that ARE implemented must keep working ---
 
     @Test
