@@ -1,9 +1,12 @@
 package io.floci.az.services;
 
+import io.floci.az.core.XmlParser;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,6 +21,7 @@ public class BlobServiceTest {
     private static final String CONTAINER = "test-container";
     private static final String BLOB = "test-blob.txt";
     private static final String BLOB_CONTENT = "Hello, Blob!";
+    private static final Pattern ISO_UTC_SECONDS = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
 
     @BeforeEach
     void reset() {
@@ -81,6 +85,135 @@ public class BlobServiceTest {
             .then()
             .statusCode(200)
             .body(equalTo(""));
+    }
+
+    @Test
+    void getUserDelegationKeyReturnsAzureXmlForBearerAuth() {
+        String xml = """
+                <KeyInfo>
+                  <Start>2026-07-15T10:00:00Z</Start>
+                  <Expiry>2026-07-15T11:00:00Z</Expiry>
+                </KeyInfo>
+                """;
+
+        String response = given()
+            .header("Authorization", "Bearer fake-token")
+            .header("x-ms-version", "2024-11-04")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .extract().asString();
+
+        assertThat(XmlParser.extractFirst(response, "SignedOid", null),
+                equalTo("00000000-0000-0000-0000-000000000000"));
+        assertThat(XmlParser.extractFirst(response, "SignedTid", null),
+                equalTo("00000000-0000-0000-0000-000000000000"));
+        assertThat(XmlParser.extractFirst(response, "SignedStart", null), equalTo("2026-07-15T10:00:00Z"));
+        assertThat(XmlParser.extractFirst(response, "SignedExpiry", null), equalTo("2026-07-15T11:00:00Z"));
+        assertThat(XmlParser.extractFirst(response, "SignedService", null), equalTo("b"));
+        assertThat(XmlParser.extractFirst(response, "SignedVersion", null), equalTo("2024-11-04"));
+        assertThat(XmlParser.extractFirst(response, "Value", null), not(isEmptyOrNullString()));
+    }
+
+    @Test
+    void getUserDelegationKeyDefaultsMissingStart() {
+        String expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0).toString();
+        String xml = """
+                <KeyInfo>
+                  <Expiry>%s</Expiry>
+                </KeyInfo>
+                """.formatted(expiry);
+
+        String response = given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .extract().asString();
+
+        assertThat(XmlParser.extractFirst(response, "SignedStart", null),
+                matchesPattern(ISO_UTC_SECONDS));
+        assertThat(XmlParser.extractFirst(response, "SignedExpiry", null), equalTo(expiry));
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsMissingExpiry() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T10:00:00Z</Start></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsMalformedTimestamp() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>not-a-date</Start><Expiry>2026-07-15T11:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsExpiryBeforeStart() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T11:00:00Z</Start><Expiry>2026-07-15T10:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "OutOfRangeInput");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsDurationsOverSevenDays() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T10:00:00Z</Start><Expiry>2026-07-23T10:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "OutOfRangeInput");
+    }
+
+    @Test
+    void getUserDelegationKeyRequiresBearerAuth() {
+        String xml = """
+                <KeyInfo>
+                  <Start>2026-07-15T10:00:00Z</Start>
+                  <Expiry>2026-07-15T11:00:00Z</Expiry>
+                </KeyInfo>
+                """;
+
+        given()
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+
+        given()
+            .header("Authorization", "SharedKey " + ACCOUNT + ":ignored")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
     }
 
     @Test

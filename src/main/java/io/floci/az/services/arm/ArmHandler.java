@@ -508,6 +508,7 @@ public class ArmHandler implements AzureServiceHandler {
                 "provisioningState", "Succeeded",
                 "primaryEndpoints", Map.of(
                         "blob",  "http://" + account + ".blob.core.windows.net" + portStr + "/",
+                        "dfs",   "http://" + account + ".dfs.core.windows.net" + portStr + "/",
                         "queue", "http://" + account + ".queue.core.windows.net" + portStr + "/",
                         "table", "http://" + account + ".table.core.windows.net" + portStr + "/"),
                 "primaryLocation", location,
