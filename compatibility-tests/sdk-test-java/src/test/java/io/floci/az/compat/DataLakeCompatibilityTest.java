@@ -8,9 +8,11 @@ import com.azure.storage.file.datalake.DataLakeFileClient;
 import com.azure.storage.file.datalake.DataLakeFileSystemClient;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakeServiceClientBuilder;
+import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import com.azure.storage.file.datalake.models.UserDelegationKey;
 import com.azure.storage.file.datalake.sas.DataLakeServiceSasSignatureValues;
 import com.azure.storage.file.datalake.sas.FileSystemSasPermission;
+import com.azure.storage.file.datalake.sas.PathSasPermission;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -88,6 +91,56 @@ class DataLakeCompatibilityTest {
         DataLakeFileClient file = sasFileSystem.createFile("dir/sas-file.txt");
 
         assertTrue(file.exists());
+
+        bearerClient.deleteFileSystem(name);
+    }
+
+    @Test
+    @DisplayName("user delegation SAS: path scope and permissions are enforced")
+    void userDelegationSasEnforcesPathScopeAndPermissions() {
+        OffsetDateTime start = OffsetDateTime.now().minusMinutes(5);
+        OffsetDateTime expiry = OffsetDateTime.now().plusHours(1);
+        DataLakeServiceClient bearerClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase())
+                .credential(request -> Mono.just(new AccessToken("fake-token", expiry)))
+                .addPolicy(dfsHostPolicy())
+                .buildClient();
+        UserDelegationKey key = bearerClient.getUserDelegationKey(start, expiry);
+
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = bearerClient.createFileSystem(name);
+        fileSystem.createFile("allowed.txt");
+        fileSystem.createFile("denied.txt");
+
+        DataLakeServiceSasSignatureValues pathValues = new DataLakeServiceSasSignatureValues(
+                expiry, new PathSasPermission().setReadPermission(true))
+                .setStartTime(start);
+        String pathSas = fileSystem.getFileClient("allowed.txt")
+                .generateUserDelegationSas(pathValues, key, EmulatorConfig.ACCOUNT, Context.NONE);
+        DataLakeServiceClient pathSasClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase())
+                .sasToken(pathSas)
+                .addPolicy(dfsHostPolicy())
+                .buildClient();
+
+        assertTrue(pathSasClient.getFileSystemClient(name).getFileClient("allowed.txt").exists());
+        DataLakeStorageException siblingFailure = assertThrows(DataLakeStorageException.class,
+                () -> pathSasClient.getFileSystemClient(name).getFileClient("denied.txt").exists());
+        assertEquals(403, siblingFailure.getStatusCode());
+
+        DataLakeServiceSasSignatureValues readOnlyValues = new DataLakeServiceSasSignatureValues(
+                expiry, new FileSystemSasPermission().setReadPermission(true))
+                .setStartTime(start);
+        String readOnlySas = fileSystem.generateUserDelegationSas(
+                readOnlyValues, key, EmulatorConfig.ACCOUNT, Context.NONE);
+        DataLakeServiceClient readOnlyClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase())
+                .sasToken(readOnlySas)
+                .addPolicy(dfsHostPolicy())
+                .buildClient();
+        DataLakeStorageException permissionFailure = assertThrows(DataLakeStorageException.class,
+                () -> readOnlyClient.getFileSystemClient(name).createFile("cannot-create.txt"));
+        assertEquals(403, permissionFailure.getStatusCode());
 
         bearerClient.deleteFileSystem(name);
     }
