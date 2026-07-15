@@ -1,11 +1,19 @@
 package io.floci.az.services;
 
+import io.floci.az.core.XmlParser;
+import io.floci.az.core.auth.UserDelegationKeyMaterial;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -18,6 +26,7 @@ public class BlobServiceTest {
     private static final String CONTAINER = "test-container";
     private static final String BLOB = "test-blob.txt";
     private static final String BLOB_CONTENT = "Hello, Blob!";
+    private static final Pattern ISO_UTC_SECONDS = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
 
     @BeforeEach
     void reset() {
@@ -84,6 +93,135 @@ public class BlobServiceTest {
     }
 
     @Test
+    void getUserDelegationKeyReturnsAzureXmlForBearerAuth() {
+        String xml = """
+                <KeyInfo>
+                  <Start>2026-07-15T10:00:00Z</Start>
+                  <Expiry>2026-07-15T11:00:00Z</Expiry>
+                </KeyInfo>
+                """;
+
+        String response = given()
+            .header("Authorization", "Bearer fake-token")
+            .header("x-ms-version", "2024-11-04")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .extract().asString();
+
+        assertThat(XmlParser.extractFirst(response, "SignedOid", null),
+                equalTo("00000000-0000-0000-0000-000000000000"));
+        assertThat(XmlParser.extractFirst(response, "SignedTid", null),
+                equalTo("00000000-0000-0000-0000-000000000000"));
+        assertThat(XmlParser.extractFirst(response, "SignedStart", null), equalTo("2026-07-15T10:00:00Z"));
+        assertThat(XmlParser.extractFirst(response, "SignedExpiry", null), equalTo("2026-07-15T11:00:00Z"));
+        assertThat(XmlParser.extractFirst(response, "SignedService", null), equalTo("b"));
+        assertThat(XmlParser.extractFirst(response, "SignedVersion", null), equalTo("2024-11-04"));
+        assertThat(XmlParser.extractFirst(response, "Value", null), not(isEmptyOrNullString()));
+    }
+
+    @Test
+    void getUserDelegationKeyDefaultsMissingStart() {
+        String expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0).toString();
+        String xml = """
+                <KeyInfo>
+                  <Expiry>%s</Expiry>
+                </KeyInfo>
+                """.formatted(expiry);
+
+        String response = given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .extract().asString();
+
+        assertThat(XmlParser.extractFirst(response, "SignedStart", null),
+                matchesPattern(ISO_UTC_SECONDS));
+        assertThat(XmlParser.extractFirst(response, "SignedExpiry", null), equalTo(expiry));
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsMissingExpiry() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T10:00:00Z</Start></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsMalformedTimestamp() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>not-a-date</Start><Expiry>2026-07-15T11:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsExpiryBeforeStart() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T11:00:00Z</Start><Expiry>2026-07-15T10:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "OutOfRangeInput");
+    }
+
+    @Test
+    void getUserDelegationKeyRejectsDurationsOverSevenDays() {
+        given()
+            .header("Authorization", "Bearer fake-token")
+            .contentType("application/xml")
+            .body("<KeyInfo><Start>2026-07-15T10:00:00Z</Start><Expiry>2026-07-23T10:00:00Z</Expiry></KeyInfo>")
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "OutOfRangeInput");
+    }
+
+    @Test
+    void getUserDelegationKeyRequiresBearerAuth() {
+        String xml = """
+                <KeyInfo>
+                  <Start>2026-07-15T10:00:00Z</Start>
+                  <Expiry>2026-07-15T11:00:00Z</Expiry>
+                </KeyInfo>
+                """;
+
+        given()
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+
+        given()
+            .header("Authorization", "SharedKey " + ACCOUNT + ":ignored")
+            .contentType("application/xml")
+            .body(xml)
+            .when().post("/{account}?restype=service&comp=userdelegationkey", ACCOUNT)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
     void expiredSasReturnsAuthenticationFailed() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -98,6 +236,334 @@ public class BlobServiceTest {
             .statusCode(403)
             .header("x-ms-error-code", "AuthenticationFailed")
             .body(containsString("AuthenticationFailed"));
+    }
+
+    @Test
+    void validReadSasCanReadBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void arbitraryNonExpiredSasReturnsAuthenticationFailed() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String se = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0).toString();
+        given()
+            .when().get("/{account}/{container}/{blob}?se={se}&sp=r&sv=2024-11-04&sr=b&sig=ignored",
+                    ACCOUNT, CONTAINER, BLOB, se)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void sasWithExpiredUserDelegationKeyReturnsAuthenticationFailed() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        OffsetDateTime keyStart = OffsetDateTime.now(ZoneOffset.UTC).minusHours(2).withNano(0);
+        OffsetDateTime keyExpiry = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1).withNano(0);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB, keyStart, keyExpiry))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void readOnlySasCannotWrite() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+    }
+
+    @Test
+    void pathScopedSasCannotAccessSiblingBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("allowed")
+            .put("/{account}/{container}/allowed.txt", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("denied")
+            .put("/{account}/{container}/denied.txt", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}/denied.txt?{sas}", ACCOUNT, CONTAINER,
+                    sas("r", "b", CONTAINER, "allowed.txt"))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void filesystemScopedSasCanAccessMultipleBlobsInContainer() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String name : new String[] {"one.txt", "two.txt"}) {
+            given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .body(name)
+                .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, name);
+        }
+        String sas = sas("rl", "c", CONTAINER, null);
+
+        given()
+            .when().get("/{account}/{container}/one.txt?{sas}", ACCOUNT, CONTAINER, sas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("one.txt"));
+
+        given()
+            .when().get("/{account}/{container}/two.txt?{sas}", ACCOUNT, CONTAINER, sas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("two.txt"));
+    }
+
+    @Test
+    void containerListRequiresListPermission() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&{sas}", ACCOUNT, CONTAINER,
+                    sas("r", "c", CONTAINER, null))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&{sas}", ACCOUNT, CONTAINER,
+                    sas("l", "c", CONTAINER, null))
+            .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void deleteRequiresDeletePermission() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().delete("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().delete("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("d", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(202);
+    }
+
+    @Test
+    void dataLakeRecursiveRootListingReturnsNestedFiles() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("json"))
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt", "root.txt"))
+            .body("paths.find { it.name == 'dir/file.txt' }.isDirectory", equalTo(false));
+    }
+
+    @Test
+    void dataLakeNonRecursiveRootListingReturnsImmediateFilesAndDirectories() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=false", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir", "root.txt"))
+            .body("paths.find { it.name == 'dir' }.isDirectory", equalTo(true))
+            .body("paths.find { it.name == 'root.txt' }.isDirectory", equalTo(false));
+    }
+
+    @Test
+    void dataLakeNonRecursiveDirectoryListingReturnsImmediateChildren() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=false&directory=dir", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub"))
+            .body("paths.find { it.name == 'dir/sub' }.isDirectory", equalTo(true));
+    }
+
+    @Test
+    void dataLakeRecursiveDirectoryListingReturnsDescendants() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=dir", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt"));
+    }
+
+    @Test
+    void dataLakeDirectoryListingRequiresExistingDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=missing", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/empty?resource=directory", CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=empty", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeEmptyFilesystemListingReturnsEmptyPaths() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeListPathsPaginatesWithContinuation() {
+        createContainerWithDataLakePaths();
+
+        String continuation = given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&maxResults=2", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", contains("dir/file.txt", "dir/sub/leaf.txt"))
+            .header("x-ms-continuation", not(isEmptyOrNullString()))
+            .extract().header("x-ms-continuation");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&maxResults=2&continuation={continuation}",
+                    CONTAINER, continuation)
+            .then()
+            .statusCode(200)
+            .body("paths.name", contains("root.txt"))
+            .header("x-ms-continuation", nullValue());
+    }
+
+    @Test
+    void dataLakeMalformedContinuationReturnsBadRequest() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&continuation=not-a-marker", CONTAINER)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidQueryParameterValue");
+    }
+
+    @Test
+    void dataLakeListMissingFilesystemReturnsNotFound() {
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "FilesystemNotFound");
+    }
+
+    @Test
+    void dataLakeListPathsRequiresListPermissionForSas() {
+        createContainerWithDataLakePaths();
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, sas("r", "c", CONTAINER, null))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, sas("l", "c", CONTAINER, null))
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt", "root.txt"));
+    }
+
+    @Test
+    void directoryScopedSasCanListDirectoryButNotSibling() {
+        createContainerWithDataLakePaths();
+        String directorySas = sas("l", "d", CONTAINER, "dir");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=dir&{sas}",
+                    CONTAINER, directorySas)
+            .then()
+            .statusCode(200)
+            .body("paths.name", containsInAnyOrder("dir/file.txt", "dir/sub/leaf.txt"));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&{sas}",
+                    CONTAINER, directorySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
     }
 
     @Test
@@ -366,4 +832,91 @@ public class BlobServiceTest {
         assertThat(matcher.find(), is(true));
         return matcher.group(1);
     }
+
+    private static void createContainerWithDataLakePaths() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String path : new String[] {"root.txt", "dir/file.txt", "dir/sub/leaf.txt"}) {
+            given()
+                .header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .header("x-ms-version", "2023-11-03")
+                .when().put("/{container}/{path}?resource=file", CONTAINER, path)
+                .then().statusCode(201);
+        }
+    }
+
+    private static String sas(String permissions, String resource, String container, String blobName) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        return sas(permissions, resource, container, blobName, start, expiry);
+    }
+
+    private static String sas(String permissions, String resource, String container, String blobName,
+                              OffsetDateTime signedKeyStart, OffsetDateTime signedKeyExpiry) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String st = start.toString();
+        String se = expiry.toString();
+        String skt = signedKeyStart.toString();
+        String ske = signedKeyExpiry.toString();
+        String version = "2024-11-04";
+        String canonicalName = canonicalName(container, "c".equals(resource) ? null : blobName);
+        String stringToSign = String.join("\n",
+                permissions,
+                st,
+                se,
+                canonicalName,
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID,
+                UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                skt,
+                ske,
+                "b",
+                version,
+                "",
+                "",
+                "",
+                "",
+                "",
+                version,
+                resource,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+        );
+        String signature = hmac(UserDelegationKeyMaterial.signingKeyForAccount(ACCOUNT), stringToSign);
+        return "sv=" + version
+                + "&st=" + st
+                + "&se=" + se
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + skt
+                + "&ske=" + ske
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=" + resource
+                + "&sp=" + permissions
+                + ("d".equals(resource) ? "&sdd=1" : "")
+                + "&sig=" + signature;
+    }
+
+    private static String canonicalName(String container, String blobName) {
+        if (blobName == null || blobName.isBlank()) {
+            return "/blob/" + ACCOUNT + "/" + container;
+        }
+        return "/blob/" + ACCOUNT + "/" + container + "/" + blobName;
+    }
+
+    private static String hmac(String base64Key, String stringToSign) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(Base64.getDecoder().decode(base64Key), "HmacSHA256"));
+            return Base64.getEncoder().encodeToString(mac.doFinal(stringToSign.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to sign test SAS", e);
+        }
+    }
+
 }

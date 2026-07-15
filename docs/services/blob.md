@@ -1,8 +1,9 @@
 # Blob Storage
 
-Compatible with the `azure-storage-blob` SDKs (Java, Python, Node.js), the Azure CLI
-(`az storage blob`), and Azurite-style connection strings. Speaks the Azure Storage Blob REST
-protocol with Shared Key authentication and XML responses.
+Compatible with the `azure-storage-blob` SDKs (Java, Python, Node.js), focused Java
+`azure-storage-file-datalake` SDK flows, the Azure CLI (`az storage blob`), and Azurite-style
+connection strings. Speaks the Azure Storage Blob REST protocol with Shared Key authentication,
+Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 
 > **HTTP-only — no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
 > (`memory` by default; `persistent`, `hybrid`, or `wal` for durability).
@@ -16,6 +17,17 @@ protocol with Shared Key authentication and XML responses.
 - **Blobs** — Put (upload), Get (download), Delete, List within a container; overwrite semantics
 - **Block blobs** — staged block upload (`?comp=block`) followed by commit (`?comp=blocklist`) for
   large payloads, in addition to single-request `Put Blob`
+- **Data Lake Storage Gen2 endpoint alias** — the `{account}.dfs.core.windows.net` host maps to the
+  Blob backend so ADLS SDK path clients can create, read, write, and delete paths through the same
+  local data store
+- **User delegation key vending** — `POST ?restype=service&comp=userdelegationkey` returns
+  deterministic Azure-shaped XML for SDK-generated user delegation SAS flows
+- **User delegation SAS enforcement** — validates SDK-generated user delegation SAS signatures,
+  expiry, signed key validity, permissions, and container/blob/directory resource scope for Blob
+  and ADLS path operations
+- **ADLS Path - List** — supports Java DataLake SDK `listPaths` over the DFS endpoint, including
+  recursive and non-recursive listing, directory filters, deterministic continuation tokens, and
+  user delegation SAS list-scope checks
 - **Range download** — `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download** — `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **Metadata** — `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
@@ -27,11 +39,15 @@ protocol with Shared Key authentication and XML responses.
 ```
 http://localhost:4577/{account}/{container}                  # container operations
 http://localhost:4577/{account}/{container}/{blob}           # blob operations
+http://localhost:4577/{account}/{filesystem}?resource=filesystem&recursive=true  # ADLS listPaths
 ```
 
 The account also answers at the host-style address `{account}.blob.core.windows.net` (and the Data
 Lake Gen2 alias `{account}.dfs.core.windows.net`, which maps to the same blob backend) when the
 `Host` header is set, matching how the SDKs address storage endpoints.
+
+ARM storage account responses include both `blob` and `dfs` primary endpoints so Data Lake SDK
+clients can discover the Gen2 endpoint shape.
 
 ## Quickstart
 
@@ -82,5 +98,8 @@ floci-az:
 
 - **Shared Key signatures are accepted but not cryptographically verified** — the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
-- **No SAS enforcement** — SAS query parameters are parsed but not validated.
+- **SAS enforcement is scoped to user delegation SAS** — SDK-generated user delegation SAS tokens
+  for container (`sr=c`), blob (`sr=b`), and ADLS directory (`sr=d`) resources are validated.
+  Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
+  are not fully modeled.
 - **Snapshots, versioning, leases, and tiering are not modeled.**
