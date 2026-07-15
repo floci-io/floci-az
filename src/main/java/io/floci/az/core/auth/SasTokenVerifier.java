@@ -5,33 +5,29 @@ import io.floci.az.core.AuthType;
 import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
 @ApplicationScoped
 public class SasTokenVerifier implements AuthVerifier {
     @Override
     public Optional<AuthContext> verify(AzureRequest request) {
-        if (request.queryParams().containsKey("sig") && request.queryParams().containsKey("sv")) {
-            String signedExpiry = request.queryParams().get("se");
-            if (signedExpiry != null) {
-                try {
-                    String decodedExpiry = URLDecoder.decode(signedExpiry, StandardCharsets.UTF_8);
-                    Instant expiry = OffsetDateTime.parse(decodedExpiry).toInstant();
-                    if (!expiry.isAfter(Instant.now())) {
-                        return Optional.of(new AuthContext(request.accountName(), AuthType.SAS, false));
-                    }
-                } catch (DateTimeParseException e) {
-                    return Optional.of(new AuthContext(request.accountName(), AuthType.SAS, false));
+        return StorageSasToken.from(request.queryParams())
+            .map(sas -> {
+                Instant now = Instant.now();
+                boolean valid = true;
+                if (sas.startTime() != null) {
+                    valid = sas.parsedStartTime().map(OffsetDateTime::toInstant)
+                            .filter(start -> !start.isAfter(now))
+                            .isPresent();
                 }
-            }
-            // Accept any sig in dev mode
-            return Optional.of(new AuthContext(request.accountName(), AuthType.SAS, true));
-        }
-        return Optional.empty();
+                if (sas.expiryTime() != null) {
+                    valid = valid && sas.parsedExpiryTime().map(OffsetDateTime::toInstant)
+                            .filter(expiry -> expiry.isAfter(now))
+                            .isPresent();
+                }
+                return new AuthContext(request.accountName(), AuthType.SAS, valid, Optional.of(sas));
+            });
     }
 }

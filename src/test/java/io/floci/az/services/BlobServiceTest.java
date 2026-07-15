@@ -1,15 +1,21 @@
 package io.floci.az.services;
 
 import io.floci.az.core.XmlParser;
+import io.floci.az.core.auth.UserDelegationKeyMaterial;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -23,6 +29,9 @@ public class BlobServiceTest {
     private static final String BLOB = "test-blob.txt";
     private static final String BLOB_CONTENT = "Hello, Blob!";
     private static final Pattern ISO_UTC_SECONDS = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
+
+    @Inject
+    UserDelegationKeyMaterial keyMaterial;
 
     @BeforeEach
     void reset() {
@@ -296,6 +305,295 @@ public class BlobServiceTest {
             .statusCode(403)
             .header("x-ms-error-code", "AuthenticationFailed")
             .body(containsString("AuthenticationFailed"));
+    }
+
+    @Test
+    void validReadSasCanReadBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void arbitraryNonExpiredSasReturnsAuthenticationFailed() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String se = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0).toString();
+        given()
+            .when().get("/{account}/{container}/{blob}?se={se}&sp=r&sv=2024-11-04&sr=b&sig=ignored",
+                    ACCOUNT, CONTAINER, BLOB, se)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void accountNameCannotBeUsedToForgeUserDelegationSas() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String forgedSas = sasSignedWith(
+                legacyPublicSigningKey(ACCOUNT), "r", "b", CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB, forgedSas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void sasWithExpiredUserDelegationKeyReturnsAuthenticationFailed() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        OffsetDateTime keyStart = OffsetDateTime.now(ZoneOffset.UTC).minusHours(2).withNano(0);
+        OffsetDateTime keyExpiry = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1).withNano(0);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB, keyStart, keyExpiry))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void readOnlySasCannotWrite() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+    }
+
+    @Test
+    void appendOnlySasCannotCreateOrOverwriteBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String appendOnlySas = sas("a", "b", CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("new")
+            .when().put("/{account}/{container}/{blob}?{sas}",
+                    ACCOUNT, CONTAINER, BLOB, appendOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("overwritten")
+            .when().put("/{account}/{container}/{blob}?{sas}",
+                    ACCOUNT, CONTAINER, BLOB, appendOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo("original"));
+    }
+
+    @Test
+    void appendOnlySasCannotMutateMetadataOrBlockList() {
+        putTestBlob(BLOB_CONTENT);
+        String appendOnlySas = sas("a", "b", CONTAINER, BLOB);
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+
+        given()
+            .header("x-ms-meta-owner", "attacker")
+            .when().put("/{account}/{container}/{blob}?comp=metadata&{sas}",
+                    ACCOUNT, CONTAINER, BLOB, appendOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .body("chunk")
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}&{sas}",
+                    ACCOUNT, CONTAINER, BLOB, blockId, appendOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .body("<BlockList><Latest>" + blockId + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist&{sas}",
+                    ACCOUNT, CONTAINER, BLOB, appendOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+    }
+
+    @Test
+    void createOnlySasCanCreateButCannotOverwriteBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String createOnlySas = sas("c", "b", CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("created")
+            .when().put("/{account}/{container}/{blob}?{sas}",
+                    ACCOUNT, CONTAINER, BLOB, createOnlySas)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("overwritten")
+            .when().put("/{account}/{container}/{blob}?{sas}",
+                    ACCOUNT, CONTAINER, BLOB, createOnlySas)
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo("created"));
+    }
+
+    @Test
+    void writeSasCanCreateAndOverwriteBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String writeSas = sas("w", "b", CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("created")
+            .when().put("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB, writeSas)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("overwritten")
+            .when().put("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB, writeSas)
+            .then()
+            .statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo("overwritten"));
+    }
+
+    @Test
+    void pathScopedSasCannotAccessSiblingBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("allowed")
+            .put("/{account}/{container}/allowed.txt", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("denied")
+            .put("/{account}/{container}/denied.txt", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}/denied.txt?{sas}", ACCOUNT, CONTAINER,
+                    sas("r", "b", CONTAINER, "allowed.txt"))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void filesystemScopedSasCanAccessMultipleBlobsInContainer() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String name : new String[] {"one.txt", "two.txt"}) {
+            given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .body(name)
+                .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, name);
+        }
+        String sas = sas("rl", "c", CONTAINER, null);
+
+        given()
+            .when().get("/{account}/{container}/one.txt?{sas}", ACCOUNT, CONTAINER, sas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("one.txt"));
+
+        given()
+            .when().get("/{account}/{container}/two.txt?{sas}", ACCOUNT, CONTAINER, sas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("two.txt"));
+    }
+
+    @Test
+    void containerListRequiresListPermission() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&{sas}", ACCOUNT, CONTAINER,
+                    sas("r", "c", CONTAINER, null))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&{sas}", ACCOUNT, CONTAINER,
+                    sas("l", "c", CONTAINER, null))
+            .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void deleteRequiresDeletePermission() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().delete("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+
+        given()
+            .when().delete("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("d", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(202);
     }
 
     @Test
@@ -748,4 +1046,115 @@ public class BlobServiceTest {
         assertThat(matcher.find(), is(true));
         return matcher.group(1);
     }
+
+    private String sas(String permissions, String resource, String container, String blobName) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        return sas(permissions, resource, container, blobName, start, expiry);
+    }
+
+    private String sas(String permissions, String resource, String container, String blobName,
+                       OffsetDateTime signedKeyStart, OffsetDateTime signedKeyExpiry) {
+        return sasSignedWith(keyMaterial.signingKeyForAccount(ACCOUNT),
+                permissions, resource, container, blobName, signedKeyStart, signedKeyExpiry);
+    }
+
+    private static String sasSignedWith(
+            String base64Key,
+            String permissions,
+            String resource,
+            String container,
+            String blobName
+    ) {
+        OffsetDateTime keyStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime keyExpiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        return sasSignedWith(base64Key, permissions, resource, container, blobName, keyStart, keyExpiry);
+    }
+
+    private static String sasSignedWith(
+            String base64Key,
+            String permissions,
+            String resource,
+            String container,
+            String blobName,
+            OffsetDateTime signedKeyStart,
+            OffsetDateTime signedKeyExpiry
+    ) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String st = start.toString();
+        String se = expiry.toString();
+        String skt = signedKeyStart.toString();
+        String ske = signedKeyExpiry.toString();
+        String version = "2024-11-04";
+        String canonicalName = canonicalName(container, "c".equals(resource) ? null : blobName);
+        String stringToSign = String.join("\n",
+                permissions,
+                st,
+                se,
+                canonicalName,
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID,
+                UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                skt,
+                ske,
+                "b",
+                version,
+                "",
+                "",
+                "",
+                "",
+                "",
+                version,
+                resource,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+        );
+        String signature = hmac(base64Key, stringToSign);
+        return "sv=" + version
+                + "&st=" + st
+                + "&se=" + se
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + skt
+                + "&ske=" + ske
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=" + resource
+                + "&sp=" + permissions
+                + "&sig=" + signature;
+    }
+
+    private static String legacyPublicSigningKey(String accountName) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] key = digest.digest(
+                    ("floci-az-user-delegation:" + accountName).getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(key);
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to derive legacy test key", e);
+        }
+    }
+
+    private static String canonicalName(String container, String blobName) {
+        if (blobName == null || blobName.isBlank()) {
+            return "/blob/" + ACCOUNT + "/" + container;
+        }
+        return "/blob/" + ACCOUNT + "/" + container + "/" + blobName;
+    }
+
+    private static String hmac(String base64Key, String stringToSign) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(Base64.getDecoder().decode(base64Key), "HmacSHA256"));
+            return Base64.getEncoder().encodeToString(mac.doFinal(stringToSign.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to sign test SAS", e);
+        }
+    }
+
 }

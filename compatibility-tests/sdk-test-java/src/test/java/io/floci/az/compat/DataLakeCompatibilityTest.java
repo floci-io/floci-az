@@ -8,9 +8,11 @@ import com.azure.storage.file.datalake.DataLakeFileClient;
 import com.azure.storage.file.datalake.DataLakeFileSystemClient;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakeServiceClientBuilder;
+import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import com.azure.storage.file.datalake.models.UserDelegationKey;
 import com.azure.storage.file.datalake.sas.DataLakeServiceSasSignatureValues;
 import com.azure.storage.file.datalake.sas.FileSystemSasPermission;
+import com.azure.storage.file.datalake.sas.PathSasPermission;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -31,8 +34,9 @@ class DataLakeCompatibilityTest {
     private DataLakeServiceClient client;
 
     @BeforeAll
-    void setup() {
+    void setup() throws Exception {
         EmulatorConfig.assumeEmulatorRunning();
+        EmulatorConfig.installEmulatorTlsCert();
         client = new DataLakeServiceClientBuilder()
                 .endpoint(EmulatorConfig.httpBase())
                 .credential(new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY))
@@ -58,7 +62,6 @@ class DataLakeCompatibilityTest {
     void userDelegationKeyCanGenerateUsableDfsSas() throws Exception {
         OffsetDateTime start = OffsetDateTime.now().minusMinutes(5);
         OffsetDateTime expiry = OffsetDateTime.now().plusHours(1);
-        EmulatorConfig.installEmulatorTlsCert();
         DataLakeServiceClient bearerClient = new DataLakeServiceClientBuilder()
                 .endpoint(EmulatorConfig.httpBase().replaceFirst("^http://", "https://"))
                 .credential(request -> Mono.just(new AccessToken("fake-token", expiry)))
@@ -71,26 +74,80 @@ class DataLakeCompatibilityTest {
 
         String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         DataLakeFileSystemClient fileSystem = bearerClient.createFileSystem(name);
-        FileSystemSasPermission permissions = new FileSystemSasPermission()
-                .setCreatePermission(true)
-                .setReadPermission(true)
-                .setWritePermission(true);
-        DataLakeServiceSasSignatureValues values = new DataLakeServiceSasSignatureValues(expiry, permissions)
-                .setStartTime(start);
-        String sas = fileSystem.generateUserDelegationSas(values, key, EmulatorConfig.ACCOUNT, Context.NONE);
-        assertTrue(sas.contains("sig="));
+        try {
+            FileSystemSasPermission permissions = new FileSystemSasPermission()
+                    .setCreatePermission(true)
+                    .setReadPermission(true)
+                    .setWritePermission(true);
+            DataLakeServiceSasSignatureValues values = new DataLakeServiceSasSignatureValues(expiry, permissions)
+                    .setStartTime(start);
+            String sas = fileSystem.generateUserDelegationSas(values, key, EmulatorConfig.ACCOUNT, Context.NONE);
+            assertTrue(sas.contains("sig="));
 
-        DataLakeServiceClient sasClient = new DataLakeServiceClientBuilder()
-                .endpoint(EmulatorConfig.httpBase())
-                .sasToken(sas)
+            DataLakeServiceClient sasClient = new DataLakeServiceClientBuilder()
+                    .endpoint(EmulatorConfig.httpBase())
+                    .sasToken(sas)
+                    .addPolicy(dfsHostPolicy())
+                    .buildClient();
+            DataLakeFileSystemClient sasFileSystem = sasClient.getFileSystemClient(name);
+            DataLakeFileClient file = sasFileSystem.createFile("dir/sas-file.txt");
+
+            assertTrue(file.exists());
+        } finally {
+            client.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("user delegation SAS: path scope and permissions are enforced")
+    void userDelegationSasEnforcesPathScopeAndPermissions() {
+        OffsetDateTime start = OffsetDateTime.now().minusMinutes(5);
+        OffsetDateTime expiry = OffsetDateTime.now().plusHours(1);
+        DataLakeServiceClient bearerClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase().replaceFirst("^http://", "https://"))
+                .credential(request -> Mono.just(new AccessToken("fake-token", expiry)))
                 .addPolicy(dfsHostPolicy())
                 .buildClient();
-        DataLakeFileSystemClient sasFileSystem = sasClient.getFileSystemClient(name);
-        DataLakeFileClient file = sasFileSystem.createFile("dir/sas-file.txt");
+        UserDelegationKey key = bearerClient.getUserDelegationKey(start, expiry);
 
-        assertTrue(file.exists());
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = bearerClient.createFileSystem(name);
+        try {
+            fileSystem.createFile("allowed.txt");
+            fileSystem.createFile("denied.txt");
 
-        bearerClient.deleteFileSystem(name);
+            DataLakeServiceSasSignatureValues pathValues = new DataLakeServiceSasSignatureValues(
+                    expiry, new PathSasPermission().setReadPermission(true))
+                    .setStartTime(start);
+            String pathSas = fileSystem.getFileClient("allowed.txt")
+                    .generateUserDelegationSas(pathValues, key, EmulatorConfig.ACCOUNT, Context.NONE);
+            DataLakeServiceClient pathSasClient = new DataLakeServiceClientBuilder()
+                    .endpoint(EmulatorConfig.httpBase())
+                    .sasToken(pathSas)
+                    .addPolicy(dfsHostPolicy())
+                    .buildClient();
+
+            assertTrue(pathSasClient.getFileSystemClient(name).getFileClient("allowed.txt").exists());
+            DataLakeStorageException siblingFailure = assertThrows(DataLakeStorageException.class,
+                    () -> pathSasClient.getFileSystemClient(name).getFileClient("denied.txt").exists());
+            assertEquals(403, siblingFailure.getStatusCode());
+
+            DataLakeServiceSasSignatureValues readOnlyValues = new DataLakeServiceSasSignatureValues(
+                    expiry, new FileSystemSasPermission().setReadPermission(true))
+                    .setStartTime(start);
+            String readOnlySas = fileSystem.generateUserDelegationSas(
+                    readOnlyValues, key, EmulatorConfig.ACCOUNT, Context.NONE);
+            DataLakeServiceClient readOnlyClient = new DataLakeServiceClientBuilder()
+                    .endpoint(EmulatorConfig.httpBase())
+                    .sasToken(readOnlySas)
+                    .addPolicy(dfsHostPolicy())
+                    .buildClient();
+            DataLakeStorageException permissionFailure = assertThrows(DataLakeStorageException.class,
+                    () -> readOnlyClient.getFileSystemClient(name).createFile("cannot-create.txt"));
+            assertEquals(403, permissionFailure.getStatusCode());
+        } finally {
+            client.deleteFileSystem(name);
+        }
     }
 
     private static HttpPipelinePolicy dfsHostPolicy() {

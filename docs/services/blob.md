@@ -21,7 +21,10 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   Blob backend so ADLS SDK path clients can create, read, write, and delete paths through the same
   local data store
 - **User delegation key vending** — `POST ?restype=service&comp=userdelegationkey` returns
-  deterministic Azure-shaped XML for SDK-generated user delegation SAS flows
+  Azure-shaped XML for SDK-generated user delegation SAS flows
+- **User delegation SAS enforcement** — validates SDK-generated user delegation SAS signatures,
+  expiry, signed key validity, permissions, and container/blob/directory resource scope for Blob
+  and ADLS path operations
 - **Range download** — `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download** — `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **Metadata** — `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
@@ -91,7 +94,11 @@ floci-az:
 
 - **Shared Key signatures are accepted but not cryptographically verified** — the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
-- **No SAS enforcement** — SAS query parameters are parsed but not validated.
+- **SAS enforcement is scoped to user delegation SAS** — SDK-generated user delegation SAS tokens
+  for container (`sr=c`), blob (`sr=b`), and ADLS directory (`sr=d`) resources are validated.
+  Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
+  are not fully modeled. User delegation keys are protected by a process-local secret, so SAS
+  tokens issued by a previous emulator process are invalid after restart.
 - **Snapshots, versioning, leases, and tiering are not modeled.** `Get Blob` and
   `Get Container Properties` still report the lease headers Azure always returns, fixed at the
   unleased values (`x-ms-lease-status: unlocked`, `x-ms-lease-state: available`), because strict SDK

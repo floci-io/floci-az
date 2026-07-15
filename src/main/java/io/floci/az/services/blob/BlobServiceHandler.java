@@ -8,6 +8,8 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.auth.StorageSasAuthorization;
+import io.floci.az.core.auth.StorageSasToken;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
 import io.floci.az.core.storage.StorageBackend;
@@ -62,12 +64,15 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
 
     private final UserDelegationKeyService userDelegationKeyService;
+    private final StorageSasAuthorization sasAuthorization;
 
     @Inject
     public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
-                              UserDelegationKeyService userDelegationKeyService) {
+                              UserDelegationKeyService userDelegationKeyService,
+                              StorageSasAuthorization sasAuthorization) {
         this.config = config;
         this.userDelegationKeyService = userDelegationKeyService;
+        this.sasAuthorization = sasAuthorization;
         this.store = storageFactory.create("blob");
     }
 
@@ -243,6 +248,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response getContainer(AzureRequest request, String containerName, boolean headOnly) {
+        Response authFailure = authorizeRead(request, containerName, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
         if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
             return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -260,6 +269,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response createContainer(AzureRequest request, String containerName) {
+        Response authFailure = authorizeCreate(request, containerName, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
         String key = nsKey(request.accountName(), containerName);
         if (store.get(key).isPresent()) {
             return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
@@ -273,6 +286,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response deleteContainer(AzureRequest request, String containerName) {
+        Response authFailure = authorizeDelete(request, containerName, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
         store.delete(nsKey(request.accountName(), containerName));
         String objPrefix = request.accountName() + "/" + containerName + "/";
         String blkPrefix = BLK_PREFIX + objPrefix;
@@ -284,6 +301,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response listContainers(AzureRequest request) {
+        Response authFailure = authorizeList(request, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
         String prefix = request.queryParams().getOrDefault("prefix", "");
         String nsFilter = NS_PREFIX + request.accountName() + "/" + prefix;
 
@@ -306,12 +327,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response putBlob(AzureRequest request, String containerName, String blobName) {
         try {
+            Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+            Response authFailure = existing.isPresent()
+                    ? authorizeWrite(request, containerName, blobName)
+                    : authorizeCreate(request, containerName, blobName);
+            if (authFailure != null) {
+                return authFailure;
+            }
             if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                 return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
             }
 
-            Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
             Response conditionFailure = validateBlobConditions(request, existing);
             if (conditionFailure != null) {
                 return conditionFailure;
@@ -342,6 +369,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response getBlob(AzureRequest request, String containerName, String blobName, boolean headOnly) {
+        Response authFailure = authorizeRead(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
 
         if (object.isEmpty()) {
@@ -424,6 +455,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response deleteBlob(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeDelete(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
@@ -438,6 +473,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response getBlobMetadata(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeRead(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
@@ -458,6 +497,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response setBlobMetadata(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeWrite(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
@@ -489,6 +532,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response listBlobs(AzureRequest request, String containerName) {
+        Response authFailure = authorizeList(request, containerName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         String prefix = request.queryParams().getOrDefault("prefix", "");
         String delimiter = request.queryParams().getOrDefault("delimiter", "");
         String marker = request.queryParams().getOrDefault("marker", "");
@@ -553,6 +600,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      */
     private Response putBlock(AzureRequest request, String containerName, String blobName) {
         try {
+            Response authFailure = authorizeWrite(request, containerName, blobName);
+            if (authFailure != null) {
+                return authFailure;
+            }
             if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                 return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -584,6 +635,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      */
     private Response putBlockList(AzureRequest request, String containerName, String blobName) {
         try {
+            Response authFailure = authorizeWrite(request, containerName, blobName);
+            if (authFailure != null) {
+                return authFailure;
+            }
             if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                 return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -672,6 +727,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      * (staged) blocks, depending on {@code blocklisttype}.
      */
     private Response getBlockList(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeRead(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
         String listType = request.queryParams().getOrDefault("blocklisttype", "committed");
 
         List<BlobModels.BlockItem> committed   = new ArrayList<>();
@@ -745,6 +804,47 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     /** Prefix that matches all staged blocks for a given blob. */
     private static String blockStagingPrefix(String account, String container, String blobName) {
         return BLK_PREFIX + objKey(account, container, blobName) + ":";
+    }
+
+    private Response authorizeRead(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeRead(
+                        request.accountName(), containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeList(AzureRequest request, String containerName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeList(request.accountName(), containerName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeCreate(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeCreate(
+                        request.accountName(), containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeWrite(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeWrite(
+                        request.accountName(), containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeDelete(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeDelete(
+                        request.accountName(), containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private static Optional<StorageSasToken> storageSas(AzureRequest request) {
+        if (request.authContext() == null || request.authContext().type() != AuthType.SAS) {
+            return Optional.empty();
+        }
+        return request.authContext().storageSas();
     }
 
     /**
