@@ -353,6 +353,37 @@ public class CosmosContainerIndexingTest {
     }
 
     @Test
+    void paramValueWithApostropheStillEnforcesOrderBy() {
+        // "Alice's" substitutes to a literal with an escaped quote. Enforcement
+        // must not be bypassed: without a composite index the multi-property
+        // ORDER BY still fails 400 (SC2104).
+        createContainer("chat", null);
+        insertDoc("chat", "m1", "conv1", 1);
+
+        queryRaw("chat", """
+                {"query": "SELECT * FROM c WHERE c.name = @name ORDER BY c.conversationId, c.sequence",
+                 "parameters": [{"name": "@name", "value": "Alice's"}]}""")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void paramValueWithApostropheServedAndSorted() {
+        createContainer("chat", COMPOSITE_POLICY);
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m1\",\"conversationId\":\"conv1\",\"sequence\":2,\"name\":\"Alice's\"}");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m2\",\"conversationId\":\"conv1\",\"sequence\":1,\"name\":\"Alice's\"}");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m3\",\"conversationId\":\"conv1\",\"sequence\":9,\"name\":\"Bob\"}");
+
+        queryRaw("chat", """
+                {"query": "SELECT * FROM c WHERE c.name = @name ORDER BY c.conversationId, c.sequence",
+                 "parameters": [{"name": "@name", "value": "Alice's"}]}""")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+    }
+
+    @Test
     void orderByInsideStringLiteralDoesNotTriggerEnforcement() {
         createContainer("chat", null);
         insertRawDoc("chat", "conv1",

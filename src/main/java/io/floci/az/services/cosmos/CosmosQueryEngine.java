@@ -589,7 +589,13 @@ public class CosmosQueryEngine {
 
     private String toLiteral(Object value) {
         if (value == null)             return "null";
-        if (value instanceof String s) return "'" + s.replace("'", "\\'") + "'";
+        // Escape embedded quotes with SQL-standard doubling ('') rather than a
+        // backslash escape.  A doubled quote keeps the string scanners' state
+        // balanced across the literal boundary (they exit then immediately
+        // re-enter string mode), so keyword detection — ORDER BY, AND/OR, IN —
+        // is not swallowed by a value such as "Alice's".  A backslash escape
+        // ('\'') would leave the scanners stuck inside a phantom string.
+        if (value instanceof String s) return "'" + s.replace("'", "''") + "'";
         if (value instanceof Boolean b) return b.toString();
         return String.valueOf(value);
     }
@@ -599,17 +605,26 @@ public class CosmosQueryEngine {
         if ("true".equalsIgnoreCase(s))  return Boolean.TRUE;
         if ("false".equalsIgnoreCase(s)) return Boolean.FALSE;
         if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith("\"") && s.endsWith("\"")))
-            return s.substring(1, s.length() - 1).replace("\\'", "'").replace("\\\"", "\"");
+            return stripQuotes(s);
         try { return Long.parseLong(s); }   catch (NumberFormatException ignored) {}
         try { return Double.parseDouble(s); } catch (NumberFormatException ignored) {}
         return s;
     }
 
+    /**
+     * Strip matching outer quotes and unescape the string-literal content:
+     * SQL-standard doubled quotes ({@code ''} → {@code '}) plus backslash
+     * escapes ({@code \'}, {@code \"}) for hand-written SQL.  Inverse of the
+     * escaping in {@link #toLiteral}.
+     */
     private String stripQuotes(String s) {
         if (s == null || s.length() < 2) return s;
         char f = s.charAt(0), l = s.charAt(s.length() - 1);
-        return (f == '\'' && l == '\'') || (f == '"' && l == '"')
-                ? s.substring(1, s.length() - 1) : s;
+        if ((f == '\'' && l == '\'') || (f == '"' && l == '"')) {
+            return s.substring(1, s.length() - 1)
+                    .replace("''", "'").replace("\\'", "'").replace("\\\"", "\"");
+        }
+        return s;
     }
 
     private String normalizeWhitespace(String s) {
@@ -717,7 +732,7 @@ public class CosmosQueryEngine {
         // String literal
         if ((expr.startsWith("'") && expr.endsWith("'"))
                 || (expr.startsWith("\"") && expr.endsWith("\""))) {
-            return expr.substring(1, expr.length() - 1);
+            return stripQuotes(expr);
         }
 
         // null / boolean keyword literals
