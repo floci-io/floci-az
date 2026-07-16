@@ -388,6 +388,25 @@ class CosmosCompatibilityTest {
     }
 
     @Test
+    @DisplayName("container create with single-path composite index → CosmosException (400)")
+    void singlePathCompositeIndexRejected() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+
+        CosmosContainerProperties props = new CosmosContainerProperties("bad", "/conversationId");
+        IndexingPolicy policy = new IndexingPolicy();
+        policy.setCompositeIndexes(List.of(List.of(
+            new CompositePath().setPath("/a").setOrder(CompositePathSortOrder.ASCENDING))));
+        props.setIndexingPolicy(policy);
+
+        CosmosException ex = assertThrows(CosmosException.class, () -> db.createContainer(props));
+        assertEquals(400, ex.getStatusCode());
+
+        db.delete();
+    }
+
+    @Test
     @DisplayName("multi-property ORDER BY with matching composite index succeeds")
     void multiPropertyOrderByWithCompositeIndexSucceeds() {
         String id = dbId();

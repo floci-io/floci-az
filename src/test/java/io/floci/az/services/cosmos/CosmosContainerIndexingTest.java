@@ -62,10 +62,22 @@ public class CosmosContainerIndexingTest {
     }
 
     private io.restassured.response.Response query(String coll, String sql) {
+        return queryRaw(coll, "{\"query\":\"" + sql + "\",\"parameters\":[]}");
+    }
+
+    private io.restassured.response.Response queryRaw(String coll, String bodyJson) {
         return given().contentType("application/query+json")
                 .header("x-ms-documentdb-isquery", "True")
-                .body("{\"query\":\"" + sql + "\",\"parameters\":[]}")
+                .body(bodyJson)
                 .when().post(BASE + "/dbs/" + DB + "/colls/" + coll + "/docs");
+    }
+
+    private void insertRawDoc(String coll, String pk, String docJson) {
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", "[\"" + pk + "\"]")
+                .body(docJson)
+                .when().post(BASE + "/dbs/" + DB + "/colls/" + coll + "/docs")
+                .then().statusCode(201);
     }
 
     // ------------------------------------------------------------------ create
@@ -113,6 +125,53 @@ public class CosmosContainerIndexingTest {
                 .when().post(BASE + "/dbs/" + DB + "/colls")
                 .then().statusCode(400)
                 .body("code", is("BadRequest"));
+    }
+
+    @Test
+    void createContainerWithInvalidPolicyDoesNotCreateContainer() {
+        String body = "{\"id\":\"bad\",\"partitionKey\":{\"paths\":[\"/pk\"],\"kind\":\"Hash\"},"
+                + "\"indexingPolicy\":{\"indexingMode\":\"bogus\"}}";
+        given().contentType("application/json").body(body)
+                .when().post(BASE + "/dbs/" + DB + "/colls")
+                .then().statusCode(400);
+
+        given().when().get(BASE + "/dbs/" + DB + "/colls/bad")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void createContainerWithNonObjectPolicyFails() {
+        String body = "{\"id\":\"bad\",\"partitionKey\":{\"paths\":[\"/pk\"],\"kind\":\"Hash\"},"
+                + "\"indexingPolicy\":\"not-an-object\"}";
+        given().contentType("application/json").body(body)
+                .when().post(BASE + "/dbs/" + DB + "/colls")
+                .then().statusCode(400)
+                .body("code", is("BadRequest"));
+    }
+
+    @Test
+    void createContainerPreservesCustomIncludedAndExcludedPaths() {
+        createContainer("chat", """
+                {"includedPaths": [{"path": "/conversationId/?"}],
+                 "excludedPaths": [{"path": "/*"}]}""");
+
+        given().when().get(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200)
+                .body("indexingPolicy.includedPaths[0].path", is("/conversationId/?"))
+                .body("indexingPolicy.excludedPaths[0].path", is("/*"));
+    }
+
+    @Test
+    void createContainerWithEmptyCompositeIndexesOmitsThemAndRejectsMultiOrderBy() {
+        createContainer("chat", "{\"compositeIndexes\": []}");
+        insertDoc("chat", "m1", "conv1", 1);
+
+        given().when().get(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200)
+                .body("indexingPolicy.compositeIndexes", nullValue());
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(400);
     }
 
     // ------------------------------------------------------------------ ORDER BY enforcement
@@ -183,6 +242,133 @@ public class CosmosContainerIndexingTest {
                 .body("Documents.id", contains("m1", "m2"));
     }
 
+    @Test
+    void mixedDirectionCompositeServesMixedOrderByAndItsInverse() {
+        createContainer("chat", """
+                {"compositeIndexes": [[
+                  {"path": "/conversationId", "order": "ascending"},
+                  {"path": "/sequence", "order": "descending"}
+                ]]}""");
+        insertDoc("chat", "m1", "conv1", 1);
+        insertDoc("chat", "m2", "conv1", 2);
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId ASC, c.sequence DESC")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId DESC, c.sequence ASC")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m1", "m2"));
+        // same-direction pair not covered by an (asc, desc) index
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void threePropertyOrderByRequiresThreePathComposite() {
+        createContainer("chat", """
+                {"compositeIndexes": [[
+                  {"path": "/conversationId"},
+                  {"path": "/sequence"},
+                  {"path": "/kind"}
+                ]]}""");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m1\",\"conversationId\":\"conv1\",\"sequence\":1,\"kind\":\"b\"}");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m2\",\"conversationId\":\"conv1\",\"sequence\":1,\"kind\":\"a\"}");
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence, c.kind")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+
+        // two-property prefix of the three-path index is NOT served (Azure parity)
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void secondOfMultipleCompositeIndexesServesQuery() {
+        createContainer("chat", """
+                {"compositeIndexes": [
+                  [{"path": "/x"}, {"path": "/y"}],
+                  [{"path": "/conversationId"}, {"path": "/sequence"}]
+                ]}""");
+        insertDoc("chat", "m1", "conv1", 2);
+        insertDoc("chat", "m2", "conv1", 1);
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+    }
+
+    @Test
+    void nestedPathCompositeIndexServesNestedOrderBy() {
+        createContainer("chat", """
+                {"compositeIndexes": [[
+                  {"path": "/conversationId"},
+                  {"path": "/meta/seq"}
+                ]]}""");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m1\",\"conversationId\":\"conv1\",\"meta\":{\"seq\":2}}");
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m2\",\"conversationId\":\"conv1\",\"meta\":{\"seq\":1}}");
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.meta.seq")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+    }
+
+    @Test
+    void orderByWithOffsetLimitStillEnforcedAndServed() {
+        createContainer("chat", COMPOSITE_POLICY);
+        insertDoc("chat", "m1", "conv1", 1);
+        insertDoc("chat", "m2", "conv1", 2);
+        insertDoc("chat", "m3", "conv1", 3);
+
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence OFFSET 1 LIMIT 1")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2"));
+
+        createContainer("plain", null);
+        insertDoc("plain", "p1", "conv1", 1);
+        query("plain", "SELECT * FROM c ORDER BY c.conversationId, c.sequence OFFSET 1 LIMIT 1")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void lowercaseOrderByStillEnforced() {
+        createContainer("chat", null);
+        insertDoc("chat", "m1", "conv1", 1);
+
+        query("chat", "select * from c order by c.conversationId, c.sequence")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void parameterizedWhereWithMultiPropertyOrderByServed() {
+        createContainer("chat", COMPOSITE_POLICY);
+        insertDoc("chat", "m1", "conv1", 2);
+        insertDoc("chat", "m2", "conv1", 1);
+        insertDoc("chat", "m3", "conv2", 1);
+
+        queryRaw("chat", """
+                {"query": "SELECT * FROM c WHERE c.conversationId = @conv ORDER BY c.conversationId, c.sequence",
+                 "parameters": [{"name": "@conv", "value": "conv1"}]}""")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m2", "m1"));
+    }
+
+    @Test
+    void orderByInsideStringLiteralDoesNotTriggerEnforcement() {
+        createContainer("chat", null);
+        insertRawDoc("chat", "conv1",
+                "{\"id\":\"m1\",\"conversationId\":\"conv1\",\"note\":\"order by c.a, c.b\"}");
+
+        queryRaw("chat", """
+                {"query": "SELECT * FROM c WHERE c.note = 'order by c.a, c.b'", "parameters": []}""")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m1"));
+    }
+
     // ------------------------------------------------------------------ replace
 
     @Test
@@ -232,5 +418,64 @@ public class CosmosContainerIndexingTest {
         given().contentType("application/json").body("{\"id\":\"ghost\"}")
                 .when().put(BASE + "/dbs/" + DB + "/colls/ghost")
                 .then().statusCode(404);
+    }
+
+    @Test
+    void replaceWithInvalidPolicyKeepsExistingPolicy() {
+        createContainer("chat", COMPOSITE_POLICY);
+        insertDoc("chat", "m1", "conv1", 1);
+        insertDoc("chat", "m2", "conv1", 2);
+
+        given().contentType("application/json")
+                .body("{\"id\":\"chat\",\"indexingPolicy\":{\"indexingMode\":\"bogus\"}}")
+                .when().put(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(400);
+
+        // old composite index survives the failed replace
+        given().when().get(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200)
+                .body("indexingPolicy.compositeIndexes[0].path",
+                        contains("/conversationId", "/sequence"));
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(200)
+                .body("Documents.id", contains("m1", "m2"));
+    }
+
+    @Test
+    void replaceWithoutPolicyResetsToDefault() {
+        createContainer("chat", COMPOSITE_POLICY);
+        insertDoc("chat", "m1", "conv1", 1);
+
+        String replaceBody = "{\"id\":\"chat\","
+                + "\"partitionKey\":{\"paths\":[\"/conversationId\"],\"kind\":\"Hash\"}}";
+        given().contentType("application/json").body(replaceBody)
+                .when().put(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200)
+                .body("indexingPolicy.compositeIndexes", nullValue());
+
+        // composite index gone → multi-property ORDER BY now rejected, like Azure
+        query("chat", "SELECT * FROM c ORDER BY c.conversationId, c.sequence")
+                .then().statusCode(400);
+    }
+
+    @Test
+    void replaceKeepsDocumentsAndIdentity() {
+        createContainer("chat", null);
+        insertDoc("chat", "m1", "conv1", 1);
+
+        String ridBefore = given().when().get(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200).extract().path("_rid");
+
+        String replaceBody = "{\"id\":\"chat\",\"indexingPolicy\":" + COMPOSITE_POLICY + "}";
+        given().contentType("application/json").body(replaceBody)
+                .when().put(BASE + "/dbs/" + DB + "/colls/chat")
+                .then().statusCode(200)
+                .body("_rid", is(ridBefore))
+                .body("partitionKey.paths[0]", is("/conversationId"));
+
+        given().header("x-ms-documentdb-partitionkey", "[\"conv1\"]")
+                .when().get(BASE + "/dbs/" + DB + "/colls/chat/docs/m1")
+                .then().statusCode(200)
+                .body("id", is("m1"));
     }
 }

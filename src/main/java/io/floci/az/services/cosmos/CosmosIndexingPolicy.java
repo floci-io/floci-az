@@ -46,7 +46,10 @@ final class CosmosIndexingPolicy {
      *   translate this into a 400 BadRequest
      */
     static Map<String, Object> normalize(Object raw) {
-        if (!(raw instanceof Map<?, ?> in)) return defaultPolicy();
+        if (raw == null) return defaultPolicy();
+        if (!(raw instanceof Map<?, ?> in)) {
+            throw new IllegalArgumentException("The indexing policy must be a JSON object.");
+        }
 
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("automatic", !(in.get("automatic") instanceof Boolean b) || b);

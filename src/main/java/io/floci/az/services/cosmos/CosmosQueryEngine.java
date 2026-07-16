@@ -629,13 +629,24 @@ public class CosmosQueryEngine {
     }
 
     private int indexOfKeyword(String upperSql, String keyword, int from) {
-        int idx = upperSql.indexOf(keyword, from);
-        while (idx >= 0) {
-            int end = idx + keyword.length();
-            boolean beforeOk = idx == 0 || !Character.isLetterOrDigit(upperSql.charAt(idx - 1));
-            boolean afterOk  = end >= upperSql.length() || !Character.isLetterOrDigit(upperSql.charAt(end));
-            if (beforeOk && afterOk) return idx;
-            idx = upperSql.indexOf(keyword, idx + 1);
+        // String-literal state must be tracked from position 0 — `from` may
+        // otherwise land inside a quoted value (e.g. WHERE c.x = 'order by').
+        boolean inStr = false;
+        char strCh = 0;
+        for (int i = 0; i < upperSql.length(); i++) {
+            char c = upperSql.charAt(i);
+            if (inStr) {
+                if (c == strCh) inStr = false;
+                continue;
+            }
+            if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
+            if (i < from) continue;
+            if (upperSql.regionMatches(i, keyword, 0, keyword.length())) {
+                int end = i + keyword.length();
+                boolean beforeOk = i == 0 || !Character.isLetterOrDigit(upperSql.charAt(i - 1));
+                boolean afterOk  = end >= upperSql.length() || !Character.isLetterOrDigit(upperSql.charAt(end));
+                if (beforeOk && afterOk) return i;
+            }
         }
         return -1;
     }

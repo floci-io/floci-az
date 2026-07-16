@@ -53,6 +53,39 @@ class CosmosIndexingPolicyTest {
     }
 
     @Test
+    void noneAndLazyModesAccepted() {
+        assertEquals("none", CosmosIndexingPolicy.normalize(Map.of("indexingMode", "None")).get("indexingMode"));
+        assertEquals("lazy", CosmosIndexingPolicy.normalize(Map.of("indexingMode", "lazy")).get("indexingMode"));
+    }
+
+    @Test
+    void automaticFalsePreserved() {
+        assertEquals(false, CosmosIndexingPolicy.normalize(Map.of("automatic", false)).get("automatic"));
+    }
+
+    @Test
+    void customIncludedAndExcludedPathsPreserved() {
+        Map<String, Object> p = CosmosIndexingPolicy.normalize(Map.of(
+                "includedPaths", List.of(Map.of("path", "/conversationId/?")),
+                "excludedPaths", List.of(Map.of("path", "/*"))));
+        assertEquals(List.of(Map.of("path", "/conversationId/?")), p.get("includedPaths"));
+        assertEquals(List.of(Map.of("path", "/*")), p.get("excludedPaths"));
+    }
+
+    @Test
+    void nonObjectPolicyRejected() {
+        assertThrows(IllegalArgumentException.class, () -> CosmosIndexingPolicy.normalize("bogus"));
+        assertThrows(IllegalArgumentException.class, () -> CosmosIndexingPolicy.normalize(List.of()));
+        assertThrows(IllegalArgumentException.class, () -> CosmosIndexingPolicy.normalize(42));
+    }
+
+    @Test
+    void emptyCompositeIndexesOmittedFromPolicy() {
+        Map<String, Object> p = CosmosIndexingPolicy.normalize(Map.of("compositeIndexes", List.of()));
+        assertFalse(p.containsKey("compositeIndexes"));
+    }
+
+    @Test
     void invalidIndexingModeRejected() {
         assertThrows(IllegalArgumentException.class,
                 () -> CosmosIndexingPolicy.normalize(Map.of("indexingMode", "bogus")));
@@ -70,6 +103,27 @@ class CosmosIndexingPolicyTest {
         assertThrows(IllegalArgumentException.class,
                 () -> CosmosIndexingPolicy.normalize(
                         Map.of("compositeIndexes", List.of(List.of(path("a", null), path("/b", null))))));
+    }
+
+    @Test
+    void compositePathEntryMissingPathRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CosmosIndexingPolicy.normalize(Map.of("compositeIndexes",
+                        List.of(List.of(Map.of("order", "ascending"), path("/b", null))))));
+    }
+
+    @Test
+    void compositeIndexNotAnArrayRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CosmosIndexingPolicy.normalize(
+                        Map.of("compositeIndexes", List.of(Map.of("path", "/a")))));
+    }
+
+    @Test
+    void invalidCompositeOrderValueRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CosmosIndexingPolicy.normalize(Map.of("compositeIndexes",
+                        List.of(List.of(path("/a", "up"), path("/b", null))))));
     }
 
     // ------------------------------------------------------------------ supportsOrderBy
@@ -117,6 +171,39 @@ class CosmosIndexingPolicyTest {
         Map<String, Object> p = policyWithComposite(
                 List.of(path("/a", "ascending"), path("/b", "ascending"), path("/c", "ascending")));
         assertFalse(CosmosIndexingPolicy.supportsOrderBy(p, List.of(ob("c.a", true), ob("c.b", true))));
+    }
+
+    @Test
+    void emptyCompositeIndexesDoNotServeMultiPropertyOrderBy() {
+        Map<String, Object> p = CosmosIndexingPolicy.normalize(Map.of("compositeIndexes", List.of()));
+        assertFalse(CosmosIndexingPolicy.supportsOrderBy(p, List.of(ob("c.a", true), ob("c.b", true))));
+    }
+
+    @Test
+    void pathMatchingIsCaseSensitive() {
+        Map<String, Object> p = policyWithComposite(
+                List.of(path("/ConversationId", "ascending"), path("/sequence", "ascending")));
+        assertFalse(CosmosIndexingPolicy.supportsOrderBy(p,
+                List.of(ob("c.conversationId", true), ob("c.sequence", true))));
+    }
+
+    @Test
+    void secondOfMultipleCompositeIndexesMatches() {
+        Map<String, Object> p = CosmosIndexingPolicy.normalize(Map.of("compositeIndexes", List.of(
+                List.of(path("/x", null), path("/y", null)),
+                List.of(path("/a", null), path("/b", "descending")))));
+        assertTrue(CosmosIndexingPolicy.supportsOrderBy(p, List.of(ob("c.a", true), ob("c.b", false))));
+    }
+
+    @Test
+    void threePropertyExactMatchSupported() {
+        Map<String, Object> p = policyWithComposite(
+                List.of(path("/a", null), path("/b", null), path("/c", "descending")));
+        assertTrue(CosmosIndexingPolicy.supportsOrderBy(p,
+                List.of(ob("c.a", true), ob("c.b", true), ob("c.c", false))));
+        // and fully inverted
+        assertTrue(CosmosIndexingPolicy.supportsOrderBy(p,
+                List.of(ob("c.a", false), ob("c.b", false), ob("c.c", true))));
     }
 
     @Test
