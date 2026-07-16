@@ -218,8 +218,7 @@ final class ServiceBusRuleSelector {
      * {@code EXISTS} consumes its parenthesised argument as well.
      */
     private static int appendIdentifier(StringBuilder out, String expression, String token, int resume) {
-        String lower = token.toLowerCase(Locale.ROOT);
-        switch (lower) {
+        switch (token.toLowerCase(Locale.ROOT)) {
             case "and", "or", "not", "like", "in", "is", "null", "between", "escape", "true", "false" -> {
                 out.append(token);
                 return resume;
@@ -229,16 +228,20 @@ final class ServiceBusRuleSelector {
             }
             default -> { }
         }
+        out.append(mapProperty(token));
+        return resume;
+    }
+
+    /** Resolves a {@code sys.}/{@code user.}/bare property token to its selector identifier. */
+    private static String mapProperty(String token) {
+        String lower = token.toLowerCase(Locale.ROOT);
         if (lower.startsWith("sys.")) {
-            out.append(mapSystemProperty(token.substring(4)));
-            return resume;
+            return mapSystemProperty(token.substring(4));
         }
         if (lower.startsWith("user.")) {
-            out.append(userProperty(token.substring(5)));
-            return resume;
+            return userProperty(token.substring(5));
         }
-        out.append(userProperty(token));
-        return resume;
+        return userProperty(token);
     }
 
     private static String mapSystemProperty(String name) {
@@ -264,16 +267,7 @@ final class ServiceBusRuleSelector {
             throw new IllegalArgumentException("Unterminated EXISTS(...) in filter: " + expression);
         }
         String rawName = expression.substring(i + 1, close).trim();
-        String lower = rawName.toLowerCase(Locale.ROOT);
-        String mapped;
-        if (lower.startsWith("sys.")) {
-            mapped = mapSystemProperty(rawName.substring(4));
-        } else if (lower.startsWith("user.")) {
-            mapped = userProperty(rawName.substring(5));
-        } else {
-            mapped = userProperty(rawName);
-        }
-        out.append("(").append(mapped).append(" IS NOT NULL)");
+        out.append("(").append(mapProperty(rawName)).append(" IS NOT NULL)");
         return close + 1;
     }
 }

@@ -47,17 +47,17 @@ class ServiceBusRuleCompatibilityTest {
         EmulatorConfig.ensureServiceBusTopic(topic);
         EmulatorConfig.ensureServiceBusSubscription(topic, "red-sub");
         EmulatorConfig.ensureServiceBusSubscription(topic, "blue-sub");
-        replaceDefaultRule(topic, "red-sub", correlationRule("only-red", "<Label>red</Label>"));
-        replaceDefaultRule(topic, "blue-sub", correlationRule("only-blue", "<Label>blue</Label>"));
+        replaceDefaultRule(topic, "red-sub", "only-red", correlationRule("only-red", "<Label>red</Label>"));
+        replaceDefaultRule(topic, "blue-sub", "only-blue", correlationRule("only-blue", "<Label>blue</Label>"));
 
         sendWithSubject(topic, "m-red", "red");
         sendWithSubject(topic, "m-blue", "blue");
         sendWithSubject(topic, "m-green", "green");
 
-        List<String> red = drain(topic, "red-sub");
+        List<String> red = drain(topic, "red-sub", 1);
         assertEquals(List.of("m-red"), red, "red-sub must receive exactly the red message");
 
-        List<String> blue = drain(topic, "blue-sub");
+        List<String> blue = drain(topic, "blue-sub", 1);
         assertEquals(List.of("m-blue"), blue, "blue-sub must receive exactly the blue message");
     }
 
@@ -67,7 +67,7 @@ class ServiceBusRuleCompatibilityTest {
         String topic = uniqueName("rules-cid");
         EmulatorConfig.ensureServiceBusTopic(topic);
         EmulatorConfig.ensureServiceBusSubscription(topic, "high-sub");
-        replaceDefaultRule(topic, "high-sub",
+        replaceDefaultRule(topic, "high-sub", "only-high",
                 correlationRule("only-high", "<CorrelationId>high</CorrelationId>"));
 
         try (ServiceBusSenderClient sender = topicSender(topic)) {
@@ -75,7 +75,7 @@ class ServiceBusRuleCompatibilityTest {
             sender.sendMessage(new ServiceBusMessage("m-low").setCorrelationId("low"));
         }
 
-        assertEquals(List.of("m-high"), drain(topic, "high-sub"));
+        assertEquals(List.of("m-high"), drain(topic, "high-sub", 1));
     }
 
     @Test
@@ -84,7 +84,7 @@ class ServiceBusRuleCompatibilityTest {
         String topic = uniqueName("rules-prop");
         EmulatorConfig.ensureServiceBusTopic(topic);
         EmulatorConfig.ensureServiceBusSubscription(topic, "prop-sub");
-        replaceDefaultRule(topic, "prop-sub", correlationRule("only-eu",
+        replaceDefaultRule(topic, "prop-sub", "only-eu", correlationRule("only-eu",
                 "<Properties><KeyValueOfstringanyType><Key>region</Key>"
                         + "<Value i:type=\"d6p1:string\" xmlns:d6p1=\"http://www.w3.org/2001/XMLSchema\">eu</Value>"
                         + "</KeyValueOfstringanyType></Properties>"));
@@ -98,7 +98,7 @@ class ServiceBusRuleCompatibilityTest {
             sender.sendMessage(us);
         }
 
-        assertEquals(List.of("m-eu"), drain(topic, "prop-sub"));
+        assertEquals(List.of("m-eu"), drain(topic, "prop-sub", 1));
     }
 
     @Test
@@ -107,7 +107,7 @@ class ServiceBusRuleCompatibilityTest {
         String topic = uniqueName("rules-sql");
         EmulatorConfig.ensureServiceBusTopic(topic);
         EmulatorConfig.ensureServiceBusSubscription(topic, "sql-sub");
-        replaceDefaultRule(topic, "sql-sub", sqlRule("big-blue",
+        replaceDefaultRule(topic, "sql-sub", "big-blue", sqlRule("big-blue",
                 "color='blue' AND quantity &gt; 5 AND sys.Label='order'"));
 
         try (ServiceBusSenderClient sender = topicSender(topic)) {
@@ -117,7 +117,7 @@ class ServiceBusRuleCompatibilityTest {
             sender.sendMessage(withProps("m-wrong-label", "invoice", "blue", 10));
         }
 
-        assertEquals(List.of("m-match"), drain(topic, "sql-sub"));
+        assertEquals(List.of("m-match"), drain(topic, "sql-sub", 1));
     }
 
     @Test
@@ -130,7 +130,7 @@ class ServiceBusRuleCompatibilityTest {
         sendWithSubject(topic, "m-1", "red");
         sendWithSubject(topic, "m-2", "blue");
 
-        List<String> got = drain(topic, "all-sub");
+        List<String> got = drain(topic, "all-sub", 2);
         assertEquals(List.of("m-1", "m-2"), got, "$Default TrueFilter must accept everything");
     }
 
@@ -144,7 +144,7 @@ class ServiceBusRuleCompatibilityTest {
 
         sendWithSubject(topic, "m-lost", "red");
 
-        assertEquals(List.of(), drain(topic, "empty-sub"),
+        assertEquals(List.of(), drain(topic, "empty-sub", 0),
                 "a subscription without rules must not receive messages");
     }
 
@@ -154,7 +154,7 @@ class ServiceBusRuleCompatibilityTest {
         String topic = uniqueName("rules-or");
         EmulatorConfig.ensureServiceBusTopic(topic);
         EmulatorConfig.ensureServiceBusSubscription(topic, "or-sub");
-        replaceDefaultRule(topic, "or-sub", correlationRule("red", "<Label>red</Label>"));
+        replaceDefaultRule(topic, "or-sub", "red", correlationRule("red", "<Label>red</Label>"));
         EmulatorConfig.ensureServiceBusRule(topic, "or-sub", "blue",
                 correlationRule("blue", "<Label>blue</Label>"));
 
@@ -162,21 +162,16 @@ class ServiceBusRuleCompatibilityTest {
         sendWithSubject(topic, "m-blue", "blue");
         sendWithSubject(topic, "m-green", "green");
 
-        assertEquals(List.of("m-red", "m-blue"), drain(topic, "or-sub"));
+        assertEquals(List.of("m-red", "m-blue"), drain(topic, "or-sub", 2));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Azure SDK flow: add the new rule first, then delete the implicit $Default. */
-    private static void replaceDefaultRule(String topic, String sub, String ruleXml) throws Exception {
-        String ruleName = ruleNameOf(ruleXml);
+    private static void replaceDefaultRule(String topic, String sub, String ruleName,
+                                            String ruleXml) throws Exception {
         EmulatorConfig.ensureServiceBusRule(topic, sub, ruleName, ruleXml);
         EmulatorConfig.deleteServiceBusRule(topic, sub, "$Default");
-    }
-
-    private static String ruleNameOf(String ruleXml) {
-        int start = ruleXml.indexOf("<Name>") + "<Name>".length();
-        return ruleXml.substring(start, ruleXml.indexOf("</Name>"));
     }
 
     private static String correlationRule(String name, String filterChildren) {
@@ -212,11 +207,11 @@ class ServiceBusRuleCompatibilityTest {
     }
 
     /**
-     * Receives and completes everything currently on the subscription (send order preserved),
-     * waiting {@link #RECV_TIMEOUT} for the first message and {@link #EMPTY_TIMEOUT} to
-     * confirm there is nothing more.
+     * Receives and completes everything on the subscription (send order preserved).
+     * Requests the expected count first so the call returns as soon as those messages
+     * arrive, then makes one short {@link #EMPTY_TIMEOUT} pass to catch misrouted strays.
      */
-    private List<String> drain(String topic, String sub) {
+    private List<String> drain(String topic, String sub, int expectedCount) {
         List<String> bodies = new ArrayList<>();
         try (ServiceBusReceiverClient receiver = EmulatorConfig.serviceBusClientBuilder()
                 .receiver()
@@ -224,21 +219,20 @@ class ServiceBusRuleCompatibilityTest {
                 .subscriptionName(sub)
                 .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                 .buildClient()) {
-            Duration timeout = RECV_TIMEOUT;
-            while (true) {
-                List<ServiceBusReceivedMessage> batch = new ArrayList<>();
-                receiver.receiveMessages(10, timeout).forEach(batch::add);
-                if (batch.isEmpty()) {
-                    break;
-                }
-                for (ServiceBusReceivedMessage msg : batch) {
-                    bodies.add(msg.getBody().toString());
-                    receiver.complete(msg);
-                }
-                timeout = EMPTY_TIMEOUT;
+            if (expectedCount > 0) {
+                consume(receiver, expectedCount, RECV_TIMEOUT, bodies);
             }
+            consume(receiver, 10, EMPTY_TIMEOUT, bodies);
         }
         return bodies;
+    }
+
+    private static void consume(ServiceBusReceiverClient receiver, int maxMessages,
+                                 Duration timeout, List<String> bodies) {
+        for (ServiceBusReceivedMessage msg : receiver.receiveMessages(maxMessages, timeout)) {
+            bodies.add(msg.getBody().toString());
+            receiver.complete(msg);
+        }
     }
 
     private static String uniqueName(String prefix) {

@@ -374,7 +374,7 @@ public class ServiceBusNamespaceManager {
             if (i > 0) sb.append(",");
             Object v = values[i];
             if (v instanceof String s) {
-                sb.append("\"").append(s.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
+                sb.append(jsonString(s));
             } else {
                 sb.append(v);
             }

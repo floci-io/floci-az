@@ -30,6 +30,13 @@ class ServiceBusRuleSelectorTest {
                 Map.of(), Map.of(), null, Instant.EPOCH);
     }
 
+    private static ServiceBusModels.RuleEntity correlationTyped(Map<String, String> props,
+                                                                 Map<String, String> types) {
+        return new ServiceBusModels.RuleEntity("t", "s", "r", "CorrelationFilter",
+                null, null, null, null, null, null, null, null, null,
+                props, types, null, Instant.EPOCH);
+    }
+
     // ── CorrelationFilter ─────────────────────────────────────────────────────
 
     @Test
@@ -55,30 +62,13 @@ class ServiceBusRuleSelectorTest {
 
     @Test
     void correlationFilterEmitsTypedLiterals() {
-        ServiceBusModels.RuleEntity rule = new ServiceBusModels.RuleEntity(
-                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
-                null, null, null, null,
-                Map.of("quantity", "10"),
-                Map.of("quantity", "int"),
-                null, Instant.EPOCH);
-        assertEquals("quantity = 10", ServiceBusRuleSelector.forRule(rule));
-
-        ServiceBusModels.RuleEntity boolRule = new ServiceBusModels.RuleEntity(
-                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
-                null, null, null, null,
-                Map.of("urgent", "true"),
-                Map.of("urgent", "boolean"),
-                null, Instant.EPOCH);
-        assertEquals("urgent = TRUE", ServiceBusRuleSelector.forRule(boolRule));
-
+        assertEquals("quantity = 10", ServiceBusRuleSelector.forRule(
+                correlationTyped(Map.of("quantity", "10"), Map.of("quantity", "int"))));
+        assertEquals("urgent = TRUE", ServiceBusRuleSelector.forRule(
+                correlationTyped(Map.of("urgent", "true"), Map.of("urgent", "boolean"))));
         // a declared numeric type with a non-numeric value falls back to a string literal
-        ServiceBusModels.RuleEntity badInt = new ServiceBusModels.RuleEntity(
-                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
-                null, null, null, null,
-                Map.of("quantity", "ten"),
-                Map.of("quantity", "int"),
-                null, Instant.EPOCH);
-        assertEquals("quantity = 'ten'", ServiceBusRuleSelector.forRule(badInt));
+        assertEquals("quantity = 'ten'", ServiceBusRuleSelector.forRule(
+                correlationTyped(Map.of("quantity", "ten"), Map.of("quantity", "int"))));
     }
 
     @Test
@@ -220,18 +210,11 @@ class ServiceBusRuleSelectorTest {
 
     @Test
     void typedLiteralsForDecimalAndInvalidBoolean() {
-        ServiceBusModels.RuleEntity priceRule = new ServiceBusModels.RuleEntity(
-                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
-                null, null, null, null,
-                Map.of("price", "2.5"), Map.of("price", "double"), null, Instant.EPOCH);
-        assertEquals("price = 2.5", ServiceBusRuleSelector.forRule(priceRule));
-
+        assertEquals("price = 2.5", ServiceBusRuleSelector.forRule(
+                correlationTyped(Map.of("price", "2.5"), Map.of("price", "double"))));
         // a declared boolean that isn't true/false falls back to a string literal
-        ServiceBusModels.RuleEntity badBool = new ServiceBusModels.RuleEntity(
-                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
-                null, null, null, null,
-                Map.of("urgent", "yes"), Map.of("urgent", "boolean"), null, Instant.EPOCH);
-        assertEquals("urgent = 'yes'", ServiceBusRuleSelector.forRule(badBool));
+        assertEquals("urgent = 'yes'", ServiceBusRuleSelector.forRule(
+                correlationTyped(Map.of("urgent", "yes"), Map.of("urgent", "boolean"))));
     }
 
     // ── Rule-set combination ──────────────────────────────────────────────────

@@ -3,9 +3,15 @@ package io.floci.az.services.servicebus;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 public final class ServiceBusModels {
+
+    /** Service Bus wire timestamp format, shared by all ATOM serialization in this package. */
+    static final DateTimeFormatter ISO8601 =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC);
 
     private ServiceBusModels() {}
 

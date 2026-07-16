@@ -19,9 +19,7 @@ public class ServiceBusRulesTest {
     private static final String SB_NS = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
     private static final String XSI_NS = "http://www.w3.org/2001/XMLSchema-instance";
 
-    private static final String TOPIC_BODY =
-            "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                    + "<TopicDescription xmlns=\"" + SB_NS + "\"/></content></entry>";
+    private static final String TOPIC_BODY = entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>");
 
     private static void createTopicAndSubscription(String topic, String sub) {
         given().body(TOPIC_BODY).when().put(BASE + "/" + topic).then().statusCode(201);
@@ -32,13 +30,29 @@ public class ServiceBusRulesTest {
         return BASE + "/" + topic + "/subscriptions/" + sub + "/rules";
     }
 
-    private static String correlationRuleBody(String ruleName, String label) {
+    private static String entry(String inner) {
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"CorrelationFilter\"><Label>" + label + "</Label></Filter>"
-                + "<Action i:type=\"EmptyRuleAction\"/>"
-                + "<Name>" + ruleName + "</Name>"
-                + "</RuleDescription></content></entry>";
+                + inner + "</content></entry>";
+    }
+
+    private static String ruleBody(String ruleName, String filterXml, String actionXml) {
+        return entry("<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + filterXml
+                + (actionXml == null ? "" : actionXml)
+                + "<Name>" + ruleName + "</Name></RuleDescription>");
+    }
+
+    private static String correlationRuleBody(String ruleName, String label) {
+        return ruleBody(ruleName,
+                "<Filter i:type=\"CorrelationFilter\"><Label>" + label + "</Label></Filter>",
+                "<Action i:type=\"EmptyRuleAction\"/>");
+    }
+
+    private static String sqlRuleBody(String ruleName, String escapedExpression) {
+        return ruleBody(ruleName,
+                "<Filter i:type=\"SqlFilter\"><SqlExpression>" + escapedExpression
+                        + "</SqlExpression></Filter>",
+                null);
     }
 
     @Test
@@ -95,12 +109,7 @@ public class ServiceBusRulesTest {
     @Test
     void sqlRuleIsAcceptedAndReturned() {
         createTopicAndSubscription("rules-topic-sql", "sub1");
-        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"SqlFilter\"><SqlExpression>color='blue' AND sys.Label='x'</SqlExpression></Filter>"
-                + "<Name>sql1</Name></RuleDescription></content></entry>";
-
-        given().body(body)
+        given().body(sqlRuleBody("sql1", "color='blue' AND sys.Label='x'"))
                 .when().put(rulesPath("rules-topic-sql", "sub1") + "/sql1")
                 .then()
                 .statusCode(201)
@@ -111,10 +120,8 @@ public class ServiceBusRulesTest {
     @Test
     void unsupportedCorrelationFieldIsRejected() {
         createTopicAndSubscription("rules-topic-reject", "sub1");
-        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"CorrelationFilter\"><MessageId>m1</MessageId></Filter>"
-                + "<Name>bad</Name></RuleDescription></content></entry>";
+        String body = ruleBody("bad",
+                "<Filter i:type=\"CorrelationFilter\"><MessageId>m1</MessageId></Filter>", null);
 
         given().body(body)
                 .when().put(rulesPath("rules-topic-reject", "sub1") + "/bad")
@@ -127,13 +134,12 @@ public class ServiceBusRulesTest {
     void subscriptionCreateHonoursDefaultRuleDescription() {
         given().body(TOPIC_BODY).when().put(BASE + "/rules-topic-drd").then().statusCode(201);
 
-        String subBody = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+        String subBody = entry("<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
                 + "<DefaultRuleDescription>"
                 + "<Filter i:type=\"CorrelationFilter\"><Label>order.created</Label></Filter>"
                 + "<Name>initial</Name>"
                 + "</DefaultRuleDescription>"
-                + "</SubscriptionDescription></content></entry>";
+                + "</SubscriptionDescription>");
 
         given().body(subBody)
                 .when().put(BASE + "/rules-topic-drd/subscriptions/sub1")
@@ -238,10 +244,7 @@ public class ServiceBusRulesTest {
     @Test
     void emptyCorrelationFilterIsRejectedWith400() {
         createTopicAndSubscription("rules-topic-emptycorr", "sub1");
-        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"CorrelationFilter\"></Filter>"
-                + "<Name>empty</Name></RuleDescription></content></entry>";
+        String body = ruleBody("empty", "<Filter i:type=\"CorrelationFilter\"></Filter>", null);
         given().body(body)
                 .when().put(rulesPath("rules-topic-emptycorr", "sub1") + "/empty")
                 .then().statusCode(400)
@@ -251,11 +254,9 @@ public class ServiceBusRulesTest {
     @Test
     void sqlRuleActionIsStoredAndEchoed() {
         createTopicAndSubscription("rules-topic-action", "sub1");
-        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"SqlFilter\"><SqlExpression>color='red'</SqlExpression></Filter>"
-                + "<Action i:type=\"SqlRuleAction\"><SqlExpression>SET quantity = 1</SqlExpression></Action>"
-                + "<Name>with-action</Name></RuleDescription></content></entry>";
+        String body = ruleBody("with-action",
+                "<Filter i:type=\"SqlFilter\"><SqlExpression>color='red'</SqlExpression></Filter>",
+                "<Action i:type=\"SqlRuleAction\"><SqlExpression>SET quantity = 1</SqlExpression></Action>");
         String rules = rulesPath("rules-topic-action", "sub1");
 
         given().body(body).when().put(rules + "/with-action")
@@ -270,10 +271,8 @@ public class ServiceBusRulesTest {
     @Test
     void falseFilterRuleIsAccepted() {
         createTopicAndSubscription("rules-topic-false", "sub1");
-        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"FalseFilter\"><SqlExpression>1=0</SqlExpression></Filter>"
-                + "<Name>none</Name></RuleDescription></content></entry>";
+        String body = ruleBody("none",
+                "<Filter i:type=\"FalseFilter\"><SqlExpression>1=0</SqlExpression></Filter>", null);
         given().body(body)
                 .when().put(rulesPath("rules-topic-false", "sub1") + "/none")
                 .then().statusCode(201)
@@ -284,12 +283,11 @@ public class ServiceBusRulesTest {
     void subscriptionCreateWithUnsupportedDefaultRuleIsRejected() {
         given().body(TOPIC_BODY).when().put(BASE + "/rules-topic-baddrd").then().statusCode(201);
 
-        String subBody = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+        String subBody = entry("<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
                 + "<DefaultRuleDescription>"
                 + "<Filter i:type=\"CorrelationFilter\"><MessageId>m1</MessageId></Filter>"
                 + "<Name>bad</Name></DefaultRuleDescription>"
-                + "</SubscriptionDescription></content></entry>";
+                + "</SubscriptionDescription>");
 
         given().body(subBody)
                 .when().put(BASE + "/rules-topic-baddrd/subscriptions/sub1")
@@ -409,12 +407,5 @@ public class ServiceBusRulesTest {
                 .when().put(rulesPath("rules-topic-garbage", "sub1") + "/lenient")
                 .then().statusCode(201)
                 .body(containsString("i:type=\"TrueFilter\""));
-    }
-
-    private static String sqlRuleBody(String ruleName, String escapedExpression) {
-        return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
-                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
-                + "<Filter i:type=\"SqlFilter\"><SqlExpression>" + escapedExpression + "</SqlExpression></Filter>"
-                + "<Name>" + ruleName + "</Name></RuleDescription></content></entry>";
     }
 }

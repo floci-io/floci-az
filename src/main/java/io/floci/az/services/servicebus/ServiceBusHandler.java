@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -71,8 +70,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private static final String SB_NS = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
     /** Separate namespace used by MessageCountDetails child elements (per spec). */
     private static final String SB_COUNT_NS = "http://schemas.microsoft.com/netservices/2011/06/servicebus";
-    private static final DateTimeFormatter ISO8601 =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC);
+    private static final DateTimeFormatter ISO8601 = ServiceBusModels.ISO8601;
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -182,8 +180,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         Optional<String> activeNs = resolveActiveNamespace();
         String now = ISO8601.format(Instant.now());
         String nsName = activeNs.orElse(account);
-        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+        String xml = "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
                 + "<id>https://localhost/$namespaceinfo</id>"
                 + "<title type=\"text\">" + nsName + "</title>"
                 + "<updated>" + now + "</updated>"
@@ -197,7 +194,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "</NamespaceInfo>"
                 + "</content>"
                 + "</entry>";
-        return Response.ok(xml).type(ATOM_XML_CONTENT_TYPE).build();
+        return atomEntry(200, xml);
     }
 
     // ── Spec: list resources (queues or topics) ───────────────────────────────
@@ -218,7 +215,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private Response emptyFeed(String entityType) {
         String now = ISO8601.format(Instant.now());
-        return Response.ok("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        return Response.ok(XML_PROLOG
                 + "<feed xmlns=\"http://www.w3.org/2005/Atom\">"
                 + "<title type=\"text\">" + entityType + "</title>"
                 + "<updated>" + now + "</updated>"
@@ -297,23 +294,34 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (subRest.isEmpty()) {
             return handleListSubscriptions(account, ns, topicName);
         }
+        Response response = handleSubscriptionSubPath(req, account, ns, topicName, subRest);
+        return response != null ? response
+                : notFoundAtom("Path not found: " + topicName + "/subscriptions/" + subRest);
+    }
+
+    /**
+     * Routes {@code {subName}[/rules[/{ruleName}]]} for both the spec and legacy paths.
+     * Returns {@code null} when the tail is not a recognised subscription sub-path,
+     * letting each caller keep its own not-found response format.
+     */
+    private Response handleSubscriptionSubPath(AzureRequest req, String account, String namespace,
+                                                String topicName, String subRest) {
         int slash = subRest.indexOf('/');
         if (slash < 0) {
-            return handleSubscriptionCrud(req, account, ns, topicName, subRest);
+            return handleSubscriptionCrud(req, account, namespace, topicName, subRest);
         }
-        // {subName}/rules[/{ruleName}]
         String subName = subRest.substring(0, slash);
         String tail = subRest.substring(slash + 1);
         if ("rules".equals(tail)) {
             return "GET".equals(req.method())
-                    ? handleListRules(account, ns, topicName, subName)
+                    ? handleListRules(account, namespace, topicName, subName)
                     : Response.status(405).build();
         }
         if (tail.startsWith("rules/")) {
-            String ruleName = tail.substring("rules/".length());
-            return handleRuleCrud(req, account, ns, topicName, subName, ruleName);
+            return handleRuleCrud(req, account, namespace, topicName, subName,
+                    tail.substring("rules/".length()));
         }
-        return notFoundAtom("Path not found: " + topicName + "/subscriptions/" + subRest);
+        return null;
     }
 
     // ── Namespace management ──────────────────────────────────────────────────
@@ -432,20 +440,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             }
             if (sub.startsWith("subscriptions/")) {
                 String subRest = sub.substring("subscriptions/".length());
-                int subSlash = subRest.indexOf('/');
-                if (subSlash < 0) {
-                    return handleSubscriptionCrud(req, account, namespace, topicName, subRest);
-                }
-                String subName = subRest.substring(0, subSlash);
-                String tail = subRest.substring(subSlash + 1);
-                if ("rules".equals(tail)) {
-                    return "GET".equals(req.method())
-                            ? handleListRules(account, namespace, topicName, subName)
-                            : Response.status(405).build();
-                }
-                if (tail.startsWith("rules/")) {
-                    return handleRuleCrud(req, account, namespace, topicName, subName,
-                            tail.substring("rules/".length()));
+                Response response = handleSubscriptionSubPath(req, account, namespace, topicName, subRest);
+                if (response != null) {
+                    return response;
                 }
             }
         }
@@ -455,8 +452,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     // ── Queue CRUD ────────────────────────────────────────────────────────────
 
     private Response handleListQueues(String account, String namespace) {
-        String prefix = queuePrefix(account, namespace);
-        List<ServiceBusModels.QueueEntity> queues = store.scan(k -> k.startsWith(prefix))
+        List<ServiceBusModels.QueueEntity> queues =
+                scanDirectChildren(queuePrefix(account, namespace))
                 .stream()
                 .map(obj -> fromBytes(obj.data(), ServiceBusModels.QueueEntity.class))
                 .filter(q -> q != null)
@@ -530,8 +527,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     // ── Topic CRUD ────────────────────────────────────────────────────────────
 
     private Response handleListTopics(String account, String namespace) {
-        String prefix = topicPrefix(account, namespace);
-        List<ServiceBusModels.TopicEntity> topics = store.scan(k -> k.startsWith(prefix))
+        List<ServiceBusModels.TopicEntity> topics =
+                scanDirectChildren(topicPrefix(account, namespace))
                 .stream()
                 .map(obj -> fromBytes(obj.data(), ServiceBusModels.TopicEntity.class))
                 .filter(t -> t != null)
@@ -602,10 +599,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     // ── Subscription CRUD ─────────────────────────────────────────────────────
 
     private Response handleListSubscriptions(String account, String namespace, String topicName) {
-        String prefix = subPrefix(account, namespace, topicName);
-        // Rule entries live under {subPrefix}{sub}/rules/… — only direct children are subscriptions
-        List<ServiceBusModels.SubscriptionEntity> subs = store.scan(
-                        k -> k.startsWith(prefix) && k.indexOf('/', prefix.length()) < 0)
+        List<ServiceBusModels.SubscriptionEntity> subs =
+                scanDirectChildren(subPrefix(account, namespace, topicName))
                 .stream()
                 .map(obj -> fromBytes(obj.data(), ServiceBusModels.SubscriptionEntity.class))
                 .filter(s -> s != null)
@@ -662,7 +657,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                         .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(topicName, subName, "$Default"));
         String selector;
         try {
-            selector = ServiceBusRuleSelector.forRules(List.of(initialRule));
+            selector = ServiceBusRuleSelector.forRule(initialRule);
         } catch (IllegalArgumentException e) {
             return badRequestAtom(e.getMessage());
         }
@@ -845,7 +840,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private String queueFeedXml(String namespace, List<ServiceBusModels.QueueEntity> queues) {
         String now = ISO8601.format(Instant.now());
         StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
           .append("<title type=\"text\">Queues</title>")
           .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/$Resources/queues</id>")
@@ -887,7 +882,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private String topicFeedXml(String namespace, List<ServiceBusModels.TopicEntity> topics) {
         String now = ISO8601.format(Instant.now());
         StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
           .append("<title type=\"text\">Topics</title>")
           .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/$Resources/topics</id>")
@@ -935,7 +930,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                         List<ServiceBusModels.SubscriptionEntity> subs) {
         String now = ISO8601.format(Instant.now());
         StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
           .append("<title type=\"text\">Subscriptions</title>")
           .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/topics/")
@@ -967,7 +962,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                 List<ServiceBusModels.RuleEntity> rules) {
         String now = ISO8601.format(Instant.now());
         StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
           .append("<title type=\"text\">Rules</title>")
           .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/topics/")
@@ -1019,6 +1014,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private static String subKey(String account, String namespace, String topicName, String subName) {
         return subPrefix(account, namespace, topicName) + subName;
+    }
+
+    /**
+     * Storage keys are hierarchical: entities directly under a prefix are that prefix's
+     * children; deeper paths (e.g. {@code {sub}/rules/{rule}} under a subscription prefix)
+     * belong to sub-entities and are excluded from listings.
+     */
+    private List<StoredObject> scanDirectChildren(String prefix) {
+        return store.scan(k -> k.startsWith(prefix) && k.indexOf('/', prefix.length()) < 0);
     }
 
     private static String rulePrefix(String account, String namespace, String topicName, String subName) {
@@ -1150,18 +1154,19 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .type(ATOM_XML_CONTENT_TYPE).build();
     }
 
-    private static Response badRequestAtom(String message) {
-        return Response.status(Response.Status.BAD_REQUEST)
-                .entity("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                        + "<Error><Code>400</Code><Detail>" + xmlEsc(message) + "</Detail></Error>")
+    private static Response errorAtom(int status, String message) {
+        return Response.status(status)
+                .entity(XML_PROLOG
+                        + "<Error><Code>" + status + "</Code><Detail>" + xmlEsc(message) + "</Detail></Error>")
                 .type(ATOM_XML_CONTENT_TYPE).build();
     }
 
+    private static Response badRequestAtom(String message) {
+        return errorAtom(400, message);
+    }
+
     private static Response notFoundAtom(String message) {
-        return Response.status(Response.Status.NOT_FOUND)
-                .entity("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                        + "<Error><Code>404</Code><Detail>" + xmlEsc(message) + "</Detail></Error>")
-                .type(ATOM_XML_CONTENT_TYPE).build();
+        return errorAtom(404, message);
     }
 
     /** Wipes all Service Bus data — used by {@code POST /_admin/reset}. */

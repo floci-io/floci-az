@@ -1,14 +1,11 @@
 package io.floci.az.services.servicebus;
 
 import io.floci.az.core.XmlBuilder;
+import io.floci.az.core.XmlParser;
 
-import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamReader;
-import java.io.StringReader;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -26,17 +23,6 @@ import java.util.Optional;
 final class ServiceBusRuleXml {
 
     private static final String XSI_NS = "http://www.w3.org/2001/XMLSchema-instance";
-    private static final DateTimeFormatter ISO8601 =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC);
-
-    private static final XMLInputFactory FACTORY;
-
-    static {
-        FACTORY = XMLInputFactory.newInstance();
-        FACTORY.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
-        FACTORY.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-        FACTORY.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-    }
 
     private ServiceBusRuleXml() {}
 
@@ -48,12 +34,6 @@ final class ServiceBusRuleXml {
     static ServiceBusModels.RuleEntity parseRule(String topicName, String subscriptionName,
                                                   String ruleName, String xml) {
         return parse(topicName, subscriptionName, ruleName, xml, "RuleDescription")
-                .map(r -> new ServiceBusModels.RuleEntity(
-                        r.topicName(), r.subscriptionName(), ruleName, r.filterType(),
-                        r.sqlExpression(), r.correlationId(), r.messageId(), r.to(), r.replyTo(),
-                        r.label(), r.sessionId(), r.replyToSessionId(), r.contentType(),
-                        r.correlationProperties(), r.correlationPropertyTypes(),
-                        r.actionSqlExpression(), r.createdAt()))
                 .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(topicName, subscriptionName, ruleName));
     }
 
@@ -64,17 +44,21 @@ final class ServiceBusRuleXml {
      */
     static Optional<ServiceBusModels.RuleEntity> parseDefaultRule(String topicName,
                                                                    String subscriptionName, String xml) {
-        return parse(topicName, subscriptionName, "$Default", xml, "DefaultRuleDescription");
+        return parse(topicName, subscriptionName, null, xml, "DefaultRuleDescription");
     }
 
+    /**
+     * @param forcedName authoritative rule name (path segment); when {@code null} the body's
+     *                   {@code <Name>} wins, falling back to {@code $Default}
+     */
     private static Optional<ServiceBusModels.RuleEntity> parse(String topicName, String subscriptionName,
-                                                                String fallbackName, String xml,
+                                                                String forcedName, String xml,
                                                                 String containerElement) {
         if (xml == null || xml.isEmpty()) {
             return Optional.empty();
         }
         try {
-            XMLStreamReader r = FACTORY.createXMLStreamReader(new StringReader(xml));
+            XMLStreamReader r = XmlParser.newStreamReader(xml);
             boolean sawContainer = false;
             boolean inContainer = false;
             boolean inFilter = false;
@@ -104,7 +88,6 @@ final class ServiceBusRuleXml {
                         actionType = typeAttribute(r);
                     } else if (inFilter && "Properties".equals(local)) {
                         inProperties = true;
-                        pendingKey = null;
                     } else if (inProperties && "Key".equals(local)) {
                         pendingKey = r.getElementText();
                     } else if (inProperties && "Value".equals(local)) {
@@ -119,7 +102,7 @@ final class ServiceBusRuleXml {
                     } else if (inProperties) {
                         // KeyValueOfstringanyType wrapper — descend without consuming
                     } else if (inFilter) {
-                        String text = readLeafText(r);
+                        String text = XmlParser.readLeafText(r);
                         if (text != null) {
                             fields.put(local, text);
                         }
@@ -148,9 +131,11 @@ final class ServiceBusRuleXml {
             }
             String resolvedType = resolveFilterType(filterType, fields, properties);
             String action = "SqlRuleAction".equals(actionType) ? actionSql : null;
+            String resolvedName = forcedName != null ? forcedName
+                    : (name != null && !name.isBlank() ? name : "$Default");
             return Optional.of(new ServiceBusModels.RuleEntity(
                     topicName, subscriptionName,
-                    name != null && !name.isBlank() ? name : fallbackName,
+                    resolvedName,
                     resolvedType,
                     "SqlFilter".equals(resolvedType) ? fields.get("SqlExpression") : null,
                     fields.get("CorrelationId"),
@@ -168,32 +153,6 @@ final class ServiceBusRuleXml {
         } catch (Exception e) {
             return Optional.empty();
         }
-    }
-
-    /**
-     * Reads the text of the currently open element if it is a leaf; skips the subtree
-     * and returns {@code null} when it contains child elements. On return the reader
-     * is positioned on the element's END_ELEMENT.
-     */
-    private static String readLeafText(XMLStreamReader r) throws javax.xml.stream.XMLStreamException {
-        StringBuilder sb = new StringBuilder();
-        while (r.hasNext()) {
-            int event = r.next();
-            if (event == XMLStreamConstants.CHARACTERS || event == XMLStreamConstants.CDATA) {
-                sb.append(r.getText());
-            } else if (event == XMLStreamConstants.START_ELEMENT) {
-                int depth = 2;
-                while (r.hasNext()) {
-                    int e = r.next();
-                    if (e == XMLStreamConstants.START_ELEMENT) depth++;
-                    else if (e == XMLStreamConstants.END_ELEMENT && --depth == 0) break;
-                }
-                return null;
-            } else if (event == XMLStreamConstants.END_ELEMENT) {
-                break;
-            }
-        }
-        return sb.toString();
     }
 
     /** Extracts the local part of the xsi:type attribute (e.g. {@code d2p1:SqlFilter} → {@code SqlFilter}). */
@@ -239,7 +198,7 @@ final class ServiceBusRuleXml {
                         "xmlns", sbNamespace);
         appendFilter(xb, rule);
         appendAction(xb, rule);
-        xb.elem("CreatedAt", ISO8601.format(rule.createdAt()))
+        xb.elem("CreatedAt", ServiceBusModels.ISO8601.format(rule.createdAt()))
           .elem("Name", rule.name());
         return xb.end("RuleDescription").build();
     }
