@@ -66,16 +66,20 @@ public class CosmosQueryEngine {
     // Entry point
     // -----------------------------------------------------------------------
 
-    /** Parse just the ORDER BY clause of a query (used for composite-index validation). */
-    public List<OrderByField> parseOrderBy(String sql) {
-        return parse(normalizeWhitespace(sql)).orderBy();
+    /**
+     * Substitute parameters and parse the query once.  The result can be
+     * inspected (e.g. composite-index ORDER BY validation) and then passed to
+     * {@link #execute(ParsedQuery, List)} without re-parsing.
+     */
+    public ParsedQuery prepare(String sql, List<Map<String, Object>> params) {
+        return parse(normalizeWhitespace(substituteParams(sql, params)));
     }
 
     public QueryResult execute(String sql, List<Map<String, Object>> params, List<Map<String, Object>> documents) {
-        sql = normalizeWhitespace(substituteParams(sql, params));
+        return execute(prepare(sql, params), documents);
+    }
 
-        ParsedQuery q = parse(sql);
-
+    public QueryResult execute(ParsedQuery q, List<Map<String, Object>> documents) {
         List<Map<String, Object>> filtered = documents.stream()
                 .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -135,17 +139,22 @@ public class CosmosQueryEngine {
     // SQL parsing
     // -----------------------------------------------------------------------
 
+    private static final Pattern TOP_PATTERN =
+            Pattern.compile("(?i)\\bSELECT\\s+TOP\\s+(\\d+)");
+    private static final Pattern OFFSET_LIMIT_PATTERN =
+            Pattern.compile("(?i)\\bOFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)");
+
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
 
         // TOP
         int top = -1;
-        Matcher topM = Pattern.compile("(?i)\\bSELECT\\s+TOP\\s+(\\d+)").matcher(sql);
+        Matcher topM = TOP_PATTERN.matcher(sql);
         if (topM.find()) top = Integer.parseInt(topM.group(1));
 
         // OFFSET … LIMIT …
         int offset = 0, limit = -1;
-        Matcher olM = Pattern.compile("(?i)\\bOFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)").matcher(sql);
+        Matcher olM = OFFSET_LIMIT_PATTERN.matcher(sql);
         if (olM.find()) {
             offset = Integer.parseInt(olM.group(1));
             limit  = Integer.parseInt(olM.group(2));
@@ -433,14 +442,23 @@ public class CosmosQueryEngine {
     // Field resolution
     // -----------------------------------------------------------------------
 
-    Object resolve(Map<String, Object> doc, String path) {
-        // Strip FROM alias prefix: "c.field" → "field"
+    /**
+     * Strip the FROM-alias prefix from a dotted path: {@code "c.field"} → {@code "field"}.
+     * Shared with the composite-index ORDER BY matcher so validation and
+     * execution always agree on what a property path is.
+     */
+    static String stripAlias(String path) {
         if (path.contains(".")) {
             String[] parts = path.split("\\.", 2);
             if (parts[0].matches("[a-zA-Z_][a-zA-Z0-9_]{0,9}")) {
-                path = parts[1];
+                return parts[1];
             }
         }
+        return path;
+    }
+
+    Object resolve(Map<String, Object> doc, String path) {
+        path = stripAlias(path);
         Object current = doc;
         for (String seg : path.split("\\.")) {
             if (current instanceof Map<?, ?> map) {

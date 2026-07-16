@@ -907,27 +907,28 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> body = parseBody(req);
         String sql = (String) body.getOrDefault("query", "SELECT * FROM c");
 
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> params = body.get("parameters") instanceof List<?> l
+                ? (List<Map<String, Object>>) l : List.of();
+
+        CosmosQueryEngine.ParsedQuery parsed = queryEngine.prepare(sql, params);
+
         // Azure parity: an ORDER BY over two or more properties is only served
         // when the container has a matching composite index; otherwise the
         // service rejects the query with 400 (error code SC2104).
-        List<CosmosQueryEngine.OrderByField> orderBy = queryEngine.parseOrderBy(sql);
-        if (orderBy.size() > 1 && !CosmosIndexingPolicy.supportsOrderBy(
-                parseData(collFound.get()).get("indexingPolicy"), orderBy)) {
+        if (parsed.orderBy().size() > 1 && !CosmosIndexingPolicy.supportsOrderBy(
+                parseData(collFound.get()).get("indexingPolicy"), parsed.orderBy())) {
             return errorResponse(400, "BadRequest",
                     "Message: {\"errors\":[{\"severity\":\"Error\",\"code\":\"SC2104\",\"message\":"
                     + "\"The order by query does not have a corresponding composite index "
                     + "that it can be served from.\"}]}");
         }
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> params = body.get("parameters") instanceof List<?> l
-                ? (List<Map<String, Object>>) l : List.of();
-
         String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
         List<Map<String, Object>> allDocs = store.scan(k -> k.startsWith(prefix))
                 .stream().map(this::parseData).collect(Collectors.toList());
 
-        CosmosQueryEngine.QueryResult result = queryEngine.execute(sql, params, allDocs);
+        CosmosQueryEngine.QueryResult result = queryEngine.execute(parsed, allDocs);
 
         // ---- Pagination ----
         int maxItemCount = parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count"));

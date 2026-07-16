@@ -52,13 +52,8 @@ public class CosmosContainerIndexingTest {
     }
 
     private void insertDoc(String coll, String id, String conversationId, int sequence) {
-        String body = "{\"id\":\"" + id + "\",\"conversationId\":\"" + conversationId
-                + "\",\"sequence\":" + sequence + "}";
-        given().contentType("application/json")
-                .header("x-ms-documentdb-partitionkey", "[\"" + conversationId + "\"]")
-                .body(body)
-                .when().post(BASE + "/dbs/" + DB + "/colls/" + coll + "/docs")
-                .then().statusCode(201);
+        insertRawDoc(coll, conversationId, "{\"id\":\"" + id + "\",\"conversationId\":\""
+                + conversationId + "\",\"sequence\":" + sequence + "}");
     }
 
     private io.restassured.response.Response query(String coll, String sql) {

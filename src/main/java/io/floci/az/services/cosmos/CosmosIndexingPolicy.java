@@ -28,13 +28,18 @@ final class CosmosIndexingPolicy {
 
     private CosmosIndexingPolicy() {}
 
+    private static final List<Map<String, Object>> DEFAULT_INCLUDED_PATHS =
+            List.of(Map.of("path", "/*"));
+    private static final List<Map<String, Object>> DEFAULT_EXCLUDED_PATHS =
+            List.of(Map.of("path", "/\"_etag\"/?"));
+
     /** Azure's default indexing policy for new containers. */
     static Map<String, Object> defaultPolicy() {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("automatic",     true);
         p.put("indexingMode",  "consistent");
-        p.put("includedPaths", List.of(Map.of("path", "/*")));
-        p.put("excludedPaths", List.of(Map.of("path", "/\"_etag\"/?")));
+        p.put("includedPaths", DEFAULT_INCLUDED_PATHS);
+        p.put("excludedPaths", DEFAULT_EXCLUDED_PATHS);
         return p;
     }
 
@@ -62,9 +67,9 @@ final class CosmosIndexingPolicy {
         p.put("indexingMode", mode);
 
         p.put("includedPaths", in.get("includedPaths") instanceof List<?> inc
-                ? List.copyOf(inc) : List.of(Map.of("path", "/*")));
+                ? List.copyOf(inc) : DEFAULT_INCLUDED_PATHS);
         p.put("excludedPaths", in.get("excludedPaths") instanceof List<?> exc
-                ? List.copyOf(exc) : List.of(Map.of("path", "/\"_etag\"/?")));
+                ? List.copyOf(exc) : DEFAULT_EXCLUDED_PATHS);
 
         List<List<Map<String, Object>>> composites = normalizeComposites(in.get("compositeIndexes"));
         if (!composites.isEmpty()) p.put("compositeIndexes", composites);
@@ -143,11 +148,7 @@ final class CosmosIndexingPolicy {
 
     /** {@code "c.a.b"} → {@code "/a/b"} — strip the FROM alias, dots become slashes. */
     static String normalizeOrderByPath(String expr) {
-        String path = expr.trim();
-        int dot = path.indexOf('.');
-        if (dot > 0 && path.substring(0, dot).matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
-            path = path.substring(dot + 1);
-        }
+        String path = CosmosQueryEngine.stripAlias(expr.trim());
         return "/" + String.join("/", path.split("\\."));
     }
 
