@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **servicebus:** subscription rules and topic filters — the `/{topic}/subscriptions/{sub}/rules[/{rule}]` management-plane endpoints (create/get/list/delete, ATOM `RuleDescription` wire format with `CorrelationFilter`/`SqlFilter`/`TrueFilter`/`FalseFilter` and `SqlRuleAction` bodies), Azure's implicit `$Default` TrueFilter rule (auto-created per subscription, replaceable via the delete-then-add SDK flow or a `DefaultRuleDescription` in the subscription create body), and broker-side filter evaluation: rules compile to Artemis SQL92 queue selectors (`CorrelationId`→`JMSCorrelationID`, `Label`/`Subject`→`JMSType`, `SessionId`→`JMSXGroupID`, application properties by name, with typed int/long/double/boolean correlation values), multiple rules OR-combine into a single delivery, no rules delivers nothing, and rule changes update the queue filter in place (`updateQueue`) without dropping routed messages or kicking receivers. Filters on `MessageId`/`To`/`ReplyTo`/`ReplyToSessionId`/`ContentType` are rejected with 400 (no broker-side AMQP mapping); `SqlRuleAction` is stored/echoed but not applied to delivered messages ([#124](https://github.com/floci-io/floci-az/issues/124))
+
+### Fixed
+
+- **servicebus:** ATOM feed responses (queues/topics/subscriptions list) no longer embed an XML prolog inside every `<entry>`, which made the feed malformed XML for strict parsers
+
 ## [0.9.0] - 2026-07-09
 
 ### Added

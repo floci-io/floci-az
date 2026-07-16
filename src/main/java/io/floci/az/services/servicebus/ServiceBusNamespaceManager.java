@@ -227,14 +227,38 @@ public class ServiceBusNamespaceManager {
     /**
      * Provisions a durable MULTICAST queue (subscription) bound to the topic address.
      * The queue name follows the Azure convention: {@code {topicName}/Subscriptions/{subName}}.
+     *
+     * @param filter Artemis core filter (SQL92 selector) applied to the queue — the compiled
+     *               form of the subscription's rules; empty string matches everything
      */
-    public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName) {
+    public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName,
+                                           String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             // address=topicName (MULTICAST), queue name=topicName/Subscriptions/subName
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(topicName, "MULTICAST", queueName, "", true, -1, false, false));
+                    jsonArr(topicName, "MULTICAST", queueName, filter, true, -1, false, false));
+        });
+    }
+
+    /**
+     * Replaces the filter of an existing subscription queue in place via
+     * {@code ActiveMQServerControl.updateQueue(String queueConfiguration)}. The broker applies
+     * the new filter to future routing only ({@code Queue.setFilter}), matching Azure's
+     * rule-change semantics: messages already routed to the subscription stay, attached
+     * receivers stay connected.
+     */
+    public void jolokiaUpdateSubscriptionFilter(String namespaceName, String topicName, String subName,
+                                                 String filter) {
+        String queueName = topicName + "/Subscriptions/" + subName;
+        // QueueConfiguration JSON uses kebab-case keys ("filter-string", not "filterString")
+        String queueConfigJson = "{\"name\":" + jsonString(queueName)
+                + ",\"filter-string\":" + jsonString(filter) + "}";
+        withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "updateQueue(java.lang.String)",
+                    jsonArr(queueConfigJson));
         });
     }
 
@@ -338,6 +362,10 @@ public class ServiceBusNamespaceManager {
         } catch (Exception e) {
             LOG.debugv("Jolokia call failed ({0}): {1}", operation.split("\\(")[0], e.getMessage());
         }
+    }
+
+    private static String jsonString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     private static String jsonArr(Object... values) {

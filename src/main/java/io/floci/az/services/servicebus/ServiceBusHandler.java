@@ -43,6 +43,10 @@ import java.util.Optional;
  *   GET    /{account}-servicebus/{topicName}/subscriptions/{sub}       — get subscription
  *   PUT    /{account}-servicebus/{topicName}/subscriptions/{sub}       — create subscription
  *   DELETE /{account}-servicebus/{topicName}/subscriptions/{sub}       — delete subscription
+ *   GET    /{account}-servicebus/{topicName}/subscriptions/{sub}/rules         — list rules
+ *   GET    /{account}-servicebus/{topicName}/subscriptions/{sub}/rules/{rule}  — get rule
+ *   PUT    /{account}-servicebus/{topicName}/subscriptions/{sub}/rules/{rule}  — create/update rule
+ *   DELETE /{account}-servicebus/{topicName}/subscriptions/{sub}/rules/{rule}  — delete rule
  * </pre>
  *
  * <p><b>Custom paths</b> (with explicit namespace, for programmatic setup):
@@ -61,6 +65,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private static final Logger LOG = Logger.getLogger(ServiceBusHandler.class);
 
     private static final String ATOM_XML_CONTENT_TYPE = "application/atom+xml;charset=utf-8";
+    private static final String XML_PROLOG = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
     private static final String DEFAULT_NAMESPACE = "default";
     /** Main Service Bus namespace for entity descriptions. */
     private static final String SB_NS = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
@@ -245,13 +250,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         Optional<StoredObject> qObj = store.get(qKey);
         if (qObj.isPresent()) {
             ServiceBusModels.QueueEntity q = fromBytes(qObj.get().data(), ServiceBusModels.QueueEntity.class);
-            return Response.ok(queueEntryXml(ns, q)).type(ATOM_XML_CONTENT_TYPE).build();
+            return atomEntry(200, queueEntryXml(ns, q));
         }
         String tKey = topicKey(account, ns, entityName);
         Optional<StoredObject> tObj = store.get(tKey);
         if (tObj.isPresent()) {
             ServiceBusModels.TopicEntity t = fromBytes(tObj.get().data(), ServiceBusModels.TopicEntity.class);
-            return Response.ok(topicEntryXml(ns, t)).type(ATOM_XML_CONTENT_TYPE).build();
+            return atomEntry(200, topicEntryXml(ns, t));
         }
         return notFoundAtom(entityName + " not found");
     }
@@ -292,7 +297,21 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (subRest.isEmpty()) {
             return handleListSubscriptions(account, ns, topicName);
         }
-        return handleSubscriptionCrud(req, account, ns, topicName, subRest);
+        int slash = subRest.indexOf('/');
+        if (slash < 0) {
+            return handleSubscriptionCrud(req, account, ns, topicName, subRest);
+        }
+        // {subName}/rules[/{ruleName}]
+        String subName = subRest.substring(0, slash);
+        String tail = subRest.substring(slash + 1);
+        if ("rules".equals(tail)) {
+            return handleListRules(account, ns, topicName, subName);
+        }
+        if (tail.startsWith("rules/")) {
+            String ruleName = tail.substring("rules/".length());
+            return handleRuleCrud(req, account, ns, topicName, subName, ruleName);
+        }
+        return notFoundAtom("Path not found: " + topicName + "/subscriptions/" + subRest);
     }
 
     // ── Namespace management ──────────────────────────────────────────────────
@@ -410,8 +429,20 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 return handleListSubscriptions(account, namespace, topicName);
             }
             if (sub.startsWith("subscriptions/")) {
-                String subName = sub.substring("subscriptions/".length());
-                return handleSubscriptionCrud(req, account, namespace, topicName, subName);
+                String subRest = sub.substring("subscriptions/".length());
+                int subSlash = subRest.indexOf('/');
+                if (subSlash < 0) {
+                    return handleSubscriptionCrud(req, account, namespace, topicName, subRest);
+                }
+                String subName = subRest.substring(0, subSlash);
+                String tail = subRest.substring(subSlash + 1);
+                if ("rules".equals(tail)) {
+                    return handleListRules(account, namespace, topicName, subName);
+                }
+                if (tail.startsWith("rules/")) {
+                    return handleRuleCrud(req, account, namespace, topicName, subName,
+                            tail.substring("rules/".length()));
+                }
             }
         }
         return notFound("Path not found: " + entityPath);
@@ -447,7 +478,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return store.get(key)
                 .map(obj -> {
                     ServiceBusModels.QueueEntity q = fromBytes(obj.data(), ServiceBusModels.QueueEntity.class);
-                    return Response.ok(queueEntryXml(namespace, q)).type(ATOM_XML_CONTENT_TYPE).build();
+                    return atomEntry(200, queueEntryXml(namespace, q));
                 })
                 .orElseGet(() -> notFoundAtom("Queue not found: " + queueName));
     }
@@ -458,7 +489,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (store.get(key).isPresent()) {
             ServiceBusModels.QueueEntity existing =
                     fromBytes(store.get(key).get().data(), ServiceBusModels.QueueEntity.class);
-            return Response.ok(queueEntryXml(namespace, existing)).type(ATOM_XML_CONTENT_TYPE).build();
+            return atomEntry(200, queueEntryXml(namespace, existing));
         }
 
         if (namespaceManager.getNamespace(namespace).isEmpty()) {
@@ -475,8 +506,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             LOG.warnf(e, "Failed to provision queue '%s' in Artemis for namespace '%s'", queueName, namespace);
         }
 
-        return Response.status(201).entity(queueEntryXml(namespace, queue))
-                .type(ATOM_XML_CONTENT_TYPE).build();
+        return atomEntry(201, queueEntryXml(namespace, queue));
     }
 
     private Response handleDeleteQueue(String account, String namespace, String queueName) {
@@ -519,7 +549,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return store.get(key)
                 .map(obj -> {
                     ServiceBusModels.TopicEntity t = fromBytes(obj.data(), ServiceBusModels.TopicEntity.class);
-                    return Response.ok(topicEntryXml(namespace, t)).type(ATOM_XML_CONTENT_TYPE).build();
+                    return atomEntry(200, topicEntryXml(namespace, t));
                 })
                 .orElseGet(() -> notFoundAtom("Topic not found: " + topicName));
     }
@@ -529,7 +559,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (store.get(key).isPresent()) {
             ServiceBusModels.TopicEntity existing =
                     fromBytes(store.get(key).get().data(), ServiceBusModels.TopicEntity.class);
-            return Response.ok(topicEntryXml(namespace, existing)).type(ATOM_XML_CONTENT_TYPE).build();
+            return atomEntry(200, topicEntryXml(namespace, existing));
         }
 
         if (namespaceManager.getNamespace(namespace).isEmpty()) {
@@ -544,8 +574,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             LOG.warnf(e, "Failed to provision topic '%s' in Artemis for namespace '%s'", topicName, namespace);
         }
 
-        return Response.status(201).entity(topicEntryXml(namespace, topic))
-                .type(ATOM_XML_CONTENT_TYPE).build();
+        return atomEntry(201, topicEntryXml(namespace, topic));
     }
 
     private Response handleDeleteTopic(String account, String namespace, String topicName) {
@@ -570,7 +599,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private Response handleListSubscriptions(String account, String namespace, String topicName) {
         String prefix = subPrefix(account, namespace, topicName);
-        List<ServiceBusModels.SubscriptionEntity> subs = store.scan(k -> k.startsWith(prefix))
+        // Rule entries live under {subPrefix}{sub}/rules/… — only direct children are subscriptions
+        List<ServiceBusModels.SubscriptionEntity> subs = store.scan(
+                        k -> k.startsWith(prefix) && k.indexOf('/', prefix.length()) < 0)
                 .stream()
                 .map(obj -> fromBytes(obj.data(), ServiceBusModels.SubscriptionEntity.class))
                 .filter(s -> s != null)
@@ -586,7 +617,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             case "PUT", "POST"  -> {
                 String body = readBody(req);
                 boolean requiresSession = body.contains("<RequiresSession>true</RequiresSession>");
-                yield handleCreateSubscription(account, namespace, topicName, subName, requiresSession);
+                yield handleCreateSubscription(account, namespace, topicName, subName,
+                        requiresSession, body);
             }
             case "DELETE"       -> handleDeleteSubscription(account, namespace, topicName, subName);
             default             -> Response.status(405).build();
@@ -600,15 +632,14 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .map(obj -> {
                     ServiceBusModels.SubscriptionEntity s =
                             fromBytes(obj.data(), ServiceBusModels.SubscriptionEntity.class);
-                    return Response.ok(subscriptionEntryXml(namespace, s))
-                            .type(ATOM_XML_CONTENT_TYPE).build();
+                    return atomEntry(200, subscriptionEntryXml(namespace, s));
                 })
                 .orElseGet(() -> notFoundAtom("Subscription not found: " + subName));
     }
 
     private Response handleCreateSubscription(String account, String namespace,
                                                 String topicName, String subName,
-                                                boolean requiresSession) {
+                                                boolean requiresSession, String body) {
         if (store.get(topicKey(account, namespace, topicName)).isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
         }
@@ -617,24 +648,37 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (store.get(key).isPresent()) {
             ServiceBusModels.SubscriptionEntity existing =
                     fromBytes(store.get(key).get().data(), ServiceBusModels.SubscriptionEntity.class);
-            return Response.ok(subscriptionEntryXml(namespace, existing))
-                    .type(ATOM_XML_CONTENT_TYPE).build();
+            return atomEntry(200, subscriptionEntryXml(namespace, existing));
+        }
+
+        // A subscription starts with its initial rule: an explicit <DefaultRuleDescription>
+        // from the create body, or Azure's implicit $Default TrueFilter (accept everything).
+        ServiceBusModels.RuleEntity initialRule =
+                ServiceBusRuleXml.parseDefaultRule(topicName, subName, body)
+                        .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(topicName, subName, "$Default"));
+        String selector;
+        try {
+            selector = ServiceBusRuleSelector.forRules(List.of(initialRule));
+        } catch (IllegalArgumentException e) {
+            return badRequestAtom(e.getMessage());
         }
 
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         ServiceBusModels.SubscriptionEntity sub = ServiceBusModels.SubscriptionEntity.defaults(
                 topicName, subName, sb.maxDeliveryCount(), sb.lockDurationSeconds(), requiresSession);
         store.put(key, toStoredObject(key, sub));
+        String ruleStoreKey = ruleKey(account, namespace, topicName, subName, initialRule.name());
+        store.put(ruleStoreKey, toStoredObject(ruleStoreKey, initialRule));
+        warnOnActionIgnored(initialRule);
 
         try {
-            namespaceManager.jolokiaCreateSubscription(namespace, topicName, subName);
+            namespaceManager.jolokiaCreateSubscription(namespace, topicName, subName, selector);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision subscription '%s/%s' in Artemis for namespace '%s'",
                     topicName, subName, namespace);
         }
 
-        return Response.status(201).entity(subscriptionEntryXml(namespace, sub))
-                .type(ATOM_XML_CONTENT_TYPE).build();
+        return atomEntry(201, subscriptionEntryXml(namespace, sub));
     }
 
     private Response handleDeleteSubscription(String account, String namespace,
@@ -643,6 +687,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (store.get(key).isEmpty()) {
             return notFoundAtom("Subscription not found: " + subName);
         }
+        String rulePrefix = rulePrefix(account, namespace, topicName, subName);
+        store.scan(k -> k.startsWith(rulePrefix)).forEach(obj -> store.delete(obj.key()));
         store.delete(key);
         try {
             namespaceManager.jolokiaDeleteSubscription(namespace, topicName, subName);
@@ -652,13 +698,118 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return Response.ok().build();
     }
 
+    // ── Rule CRUD ─────────────────────────────────────────────────────────────
+
+    private Response handleListRules(String account, String namespace,
+                                      String topicName, String subName) {
+        if (store.get(subKey(account, namespace, topicName, subName)).isEmpty()) {
+            return notFoundAtom("Subscription not found: " + subName);
+        }
+        List<ServiceBusModels.RuleEntity> rules = loadRules(account, namespace, topicName, subName);
+        return Response.ok(ruleFeedXml(namespace, topicName, subName, rules))
+                .type(ATOM_XML_CONTENT_TYPE).build();
+    }
+
+    private Response handleRuleCrud(AzureRequest req, String account, String namespace,
+                                     String topicName, String subName, String ruleName) {
+        if (store.get(subKey(account, namespace, topicName, subName)).isEmpty()) {
+            return notFoundAtom("Subscription not found: " + subName);
+        }
+        return switch (req.method()) {
+            case "GET"          -> handleGetRule(account, namespace, topicName, subName, ruleName);
+            case "PUT", "POST"  -> handlePutRule(req, account, namespace, topicName, subName, ruleName);
+            case "DELETE"       -> handleDeleteRule(account, namespace, topicName, subName, ruleName);
+            default             -> Response.status(405).build();
+        };
+    }
+
+    private Response handleGetRule(String account, String namespace,
+                                    String topicName, String subName, String ruleName) {
+        String key = ruleKey(account, namespace, topicName, subName, ruleName);
+        return store.get(key)
+                .map(obj -> {
+                    ServiceBusModels.RuleEntity rule =
+                            fromBytes(obj.data(), ServiceBusModels.RuleEntity.class);
+                    return atomEntry(200, ruleEntryXml(namespace, rule));
+                })
+                .orElseGet(() -> notFoundAtom("Rule not found: " + ruleName));
+    }
+
+    /** Creates or updates a rule, then re-applies the compiled selector to the Artemis queue. */
+    private Response handlePutRule(AzureRequest req, String account, String namespace,
+                                    String topicName, String subName, String ruleName) {
+        ServiceBusModels.RuleEntity rule =
+                ServiceBusRuleXml.parseRule(topicName, subName, ruleName, readBody(req));
+        try {
+            ServiceBusRuleSelector.forRule(rule);
+        } catch (IllegalArgumentException e) {
+            return badRequestAtom(e.getMessage());
+        }
+
+        String key = ruleKey(account, namespace, topicName, subName, ruleName);
+        boolean existed = store.get(key).isPresent();
+        store.put(key, toStoredObject(key, rule));
+        warnOnActionIgnored(rule);
+        applySubscriptionFilter(account, namespace, topicName, subName);
+
+        return atomEntry(existed ? 200 : 201, ruleEntryXml(namespace, rule));
+    }
+
+    private Response handleDeleteRule(String account, String namespace,
+                                       String topicName, String subName, String ruleName) {
+        String key = ruleKey(account, namespace, topicName, subName, ruleName);
+        if (store.get(key).isEmpty()) {
+            return notFoundAtom("Rule not found: " + ruleName);
+        }
+        store.delete(key);
+        applySubscriptionFilter(account, namespace, topicName, subName);
+        return Response.ok().build();
+    }
+
+    private List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
+                                                         String topicName, String subName) {
+        String prefix = rulePrefix(account, namespace, topicName, subName);
+        return store.scan(k -> k.startsWith(prefix))
+                .stream()
+                .map(obj -> fromBytes(obj.data(), ServiceBusModels.RuleEntity.class))
+                .filter(r -> r != null)
+                .toList();
+    }
+
+    /** Recompiles the subscription's rules and re-creates its Artemis queue with the new selector. */
+    private void applySubscriptionFilter(String account, String namespace,
+                                          String topicName, String subName) {
+        String selector;
+        try {
+            selector = ServiceBusRuleSelector.forRules(loadRules(account, namespace, topicName, subName));
+        } catch (IllegalArgumentException e) {
+            LOG.warnf("Cannot compile rules of subscription '%s/%s' to an Artemis filter: %s",
+                    topicName, subName, e.getMessage());
+            return;
+        }
+        try {
+            namespaceManager.jolokiaUpdateSubscriptionFilter(namespace, topicName, subName, selector);
+        } catch (Exception e) {
+            LOG.warnf(e, "Failed to update filter of subscription '%s/%s' in Artemis for namespace '%s'",
+                    topicName, subName, namespace);
+        }
+    }
+
+    private static void warnOnActionIgnored(ServiceBusModels.RuleEntity rule) {
+        if (rule.actionSqlExpression() != null && !rule.actionSqlExpression().isBlank()) {
+            LOG.warnf("Rule '%s' on subscription '%s/%s' declares a SqlRuleAction (\"%s\"); "
+                            + "the emulator stores it but does not apply actions to delivered messages",
+                    rule.name(), rule.topicName(), rule.subscriptionName(), rule.actionSqlExpression());
+        }
+    }
+
     // ── ATOM XML serialization ────────────────────────────────────────────────
 
+    /** Entry XML carries no {@code <?xml?>} prolog so it can be embedded in feeds; responses prepend it. */
     private String queueEntryXml(String namespace, ServiceBusModels.QueueEntity q) {
         String created = ISO8601.format(q.createdAt());
         String updated = ISO8601.format(q.updatedAt());
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+        return "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
                 + "<id>https://localhost/" + namespace + "/queues/" + xmlEsc(q.name()) + "</id>"
                 + "<title type=\"text\">" + xmlEsc(q.name()) + "</title>"
                 + "<published>" + created + "</published>"
@@ -705,8 +856,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private String topicEntryXml(String namespace, ServiceBusModels.TopicEntity t) {
         String created = ISO8601.format(t.createdAt());
         String updated = ISO8601.format(t.updatedAt());
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+        return "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
                 + "<id>https://localhost/" + xmlEsc(namespace) + "/topics/" + xmlEsc(t.name()) + "</id>"
                 + "<title type=\"text\">" + xmlEsc(t.name()) + "</title>"
                 + "<published>" + created + "</published>"
@@ -749,8 +899,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         String created = ISO8601.format(s.createdAt());
         String updated = ISO8601.format(s.updatedAt());
         String lockDuration = isoDuration(s.lockDurationSeconds());
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+        return "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
                 + "<id>https://localhost/" + xmlEsc(namespace) + "/topics/" + xmlEsc(s.topicName())
                 + "/subscriptions/" + xmlEsc(s.name()) + "</id>"
                 + "<title type=\"text\">" + xmlEsc(s.name()) + "</title>"
@@ -795,6 +944,39 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return sb.toString();
     }
 
+    private String ruleEntryXml(String namespace, ServiceBusModels.RuleEntity rule) {
+        String created = ISO8601.format(rule.createdAt());
+        return "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+                + "<id>https://localhost/" + xmlEsc(namespace) + "/topics/" + xmlEsc(rule.topicName())
+                + "/subscriptions/" + xmlEsc(rule.subscriptionName())
+                + "/rules/" + xmlEsc(rule.name()) + "</id>"
+                + "<title type=\"text\">" + xmlEsc(rule.name()) + "</title>"
+                + "<published>" + created + "</published>"
+                + "<updated>" + created + "</updated>"
+                + "<content type=\"application/xml\">"
+                + ServiceBusRuleXml.ruleDescriptionXml(rule, SB_NS)
+                + "</content>"
+                + "</entry>";
+    }
+
+    private String ruleFeedXml(String namespace, String topicName, String subName,
+                                List<ServiceBusModels.RuleEntity> rules) {
+        String now = ISO8601.format(Instant.now());
+        StringBuilder sb = new StringBuilder();
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+          .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
+          .append("<title type=\"text\">Rules</title>")
+          .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/topics/")
+          .append(xmlEsc(topicName)).append("/subscriptions/").append(xmlEsc(subName))
+          .append("/rules</id>")
+          .append("<updated>").append(now).append("</updated>");
+        for (ServiceBusModels.RuleEntity rule : rules) {
+            sb.append(ruleEntryXml(namespace, rule));
+        }
+        sb.append("</feed>");
+        return sb.toString();
+    }
+
     /**
      * Returns a {@code <MessageCountDetails>} element using the spec-mandated 2011/06 namespace.
      * All counts are zero because message state lives entirely in Artemis.
@@ -833,6 +1015,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private static String subKey(String account, String namespace, String topicName, String subName) {
         return subPrefix(account, namespace, topicName) + subName;
+    }
+
+    private static String rulePrefix(String account, String namespace, String topicName, String subName) {
+        return subKey(account, namespace, topicName, subName) + "/rules/";
+    }
+
+    private static String ruleKey(String account, String namespace, String topicName,
+                                   String subName, String ruleName) {
+        return rulePrefix(account, namespace, topicName, subName) + ruleName;
     }
 
     // ── Utility helpers ───────────────────────────────────────────────────────
@@ -947,6 +1138,19 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return Response.status(Response.Status.NOT_FOUND)
                 .entity("{\"error\":\"" + message + "\"}")
                 .type("application/json").build();
+    }
+
+    /** Wraps a prolog-free {@code <entry>} into a standalone ATOM response. */
+    private static Response atomEntry(int status, String entryXml) {
+        return Response.status(status).entity(XML_PROLOG + entryXml)
+                .type(ATOM_XML_CONTENT_TYPE).build();
+    }
+
+    private static Response badRequestAtom(String message) {
+        return Response.status(Response.Status.BAD_REQUEST)
+                .entity("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                        + "<Error><Code>400</Code><Detail>" + xmlEsc(message) + "</Detail></Error>")
+                .type(ATOM_XML_CONTENT_TYPE).build();
     }
 
     private static Response notFoundAtom(String message) {
