@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **cosmos:** custom container indexing policies with Azure-parity composite-index enforcement. A client-supplied `indexingPolicy` (included/excluded paths, composite indexes) on container create is normalized the way Azure does (defaults filled, composite path `order` defaulting to `ascending`), persisted, and returned on container read; container **replace** (`PUT /dbs/{db}/colls/{coll}`) is now supported for updating the policy, with `id` and `partitionKey` immutable as in Azure. Queries with an `ORDER BY` over two or more properties (or mixed sort directions) now fail with `400 BadRequest` ("The order by query does not have a corresponding composite index that it can be served from", code `SC2104`) unless the container has a composite index matching the clause exactly — same paths, same sequence, same length, directions matching exactly or all-inverted — so queries that would be rejected in production fail locally too ([#127](https://github.com/floci-io/floci-az/issues/127))
+
 ## [0.9.0] - 2026-07-09
 
 ### Added

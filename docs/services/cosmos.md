@@ -5,13 +5,13 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 ## Features
 
 - **Databases** — create, get, list, delete (cascade-deletes all containers and documents)
-- **Containers** — create, get, list, delete; configurable partition key path; default indexing policy
+- **Containers** — create, replace, get, list, delete; configurable partition key path; custom indexing policies with composite indexes (persisted on create/replace and returned on read)
 - **Documents** — create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
 - **Queries** — in-process SQL engine with full Cosmos DB SQL dialect support:
   - `SELECT *`, `SELECT c.field1, c.field2`, `SELECT VALUE c.field`, `SELECT TOP n`
   - `WHERE` with `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `IN`, `BETWEEN`, `NOT`, `AND`, `OR`
   - `WHERE` functions: `IS_DEFINED`, `IS_NULL`, `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`, `CONTAINS`, `STARTSWITH`, `ENDSWITH`, `ARRAY_CONTAINS`
-  - `ORDER BY field [ASC|DESC]`, multiple fields
+  - `ORDER BY field [ASC|DESC]`, multiple fields — like Azure, an `ORDER BY` over two or more properties requires a matching composite index on the container, otherwise the query fails with `400 BadRequest` (error `SC2104`)
   - `OFFSET n LIMIT m` pagination
   - `SELECT VALUE COUNT(1)` aggregation
   - Named parameters (`@param`)
@@ -92,7 +92,39 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
 | `POST` | `/dbs/{dbId}/colls` | Create a container |
 | `GET` | `/dbs/{dbId}/colls` | List containers |
 | `GET` | `/dbs/{dbId}/colls/{collId}` | Get a container |
+| `PUT` | `/dbs/{dbId}/colls/{collId}` | Replace a container (e.g. update the indexing policy) |
 | `DELETE` | `/dbs/{dbId}/colls/{collId}` | Delete a container (cascades to documents) |
+
+#### Indexing policies
+
+A custom `indexingPolicy` (included/excluded paths, composite indexes) supplied on container
+create or replace is normalized the way Azure does — missing fields are filled with defaults
+and composite-index path `order` defaults to `ascending` — then persisted and returned on
+container read. The `id` and `partitionKey` of a container are immutable on replace, matching Azure.
+
+Composite indexes are enforced for queries: an `ORDER BY` over two or more properties is only
+served when the container has a composite index whose paths match the `ORDER BY` clause exactly
+(same properties, same sequence, same length) with sort directions matching either exactly or
+exactly inverted on all paths. Queries without such an index fail with `400 BadRequest`
+("The order by query does not have a corresponding composite index that it can be served from"),
+so code that would break in production fails locally too.
+
+```json
+{
+  "id": "messages",
+  "partitionKey": { "paths": ["/conversationId"], "kind": "Hash" },
+  "indexingPolicy": {
+    "indexingMode": "consistent",
+    "automatic": true,
+    "includedPaths": [{ "path": "/*" }],
+    "excludedPaths": [{ "path": "/\"_etag\"/?" }],
+    "compositeIndexes": [[
+      { "path": "/conversationId", "order": "ascending" },
+      { "path": "/sequence", "order": "ascending" }
+    ]]
+  }
+}
+```
 
 ### Documents
 

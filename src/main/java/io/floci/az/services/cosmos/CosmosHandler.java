@@ -120,6 +120,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String collId = segs[3];
         if (segs.length == 4) return switch (m) {
             case "GET"    -> getContainer(req, dbId, collId);
+            case "PUT"    -> replaceContainer(req, dbId, collId);
             case "DELETE" -> deleteContainer(req, dbId, collId);
             default       -> notImplemented();
         };
@@ -299,6 +300,13 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String key = collKey(req.accountName(), dbId, id);
         if (store.get(key).isPresent()) return errorResponse(409, "Conflict", "Container '" + id + "' already exists.");
 
+        Map<String, Object> indexingPolicy;
+        try {
+            indexingPolicy = CosmosIndexingPolicy.normalize(body.get("indexingPolicy"));
+        } catch (IllegalArgumentException e) {
+            return errorResponse(400, "BadRequest", e.getMessage());
+        }
+
         Instant now  = Instant.now();
         String  rid  = newRid(8);
         String  etag = newEtag();
@@ -316,7 +324,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         coll.put("_etag",          quoted(etag));
         coll.put("_ts",            now.getEpochSecond());
         coll.put("partitionKey",   pk);
-        coll.put("indexingPolicy", defaultIndexingPolicy());
+        coll.put("indexingPolicy", indexingPolicy);
         coll.put("_docs",          "docs/");
         coll.put("_sprocs",        "sprocs/");
         coll.put("_triggers",      "triggers/");
@@ -332,6 +340,52 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Optional<StoredObject> found = store.get(collKey(req.accountName(), dbId, collId));
         if (found.isEmpty()) return notFound(collId);
         return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag());
+    }
+
+    /**
+     * PUT /dbs/{db}/colls/{coll} — replace container properties.
+     *
+     * <p>Azure only allows mutable settings such as the indexing policy to
+     * change on replace; the id and partition key are immutable.  SDKs use
+     * this to update the indexing policy of an existing container (e.g. to
+     * add composite indexes).</p>
+     */
+    private Response replaceContainer(AzureRequest req, String dbId, String collId) {
+        String key = collKey(req.accountName(), dbId, collId);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) return notFound(collId);
+
+        Map<String, Object> body = parseBody(req);
+        Object bodyId = body.get("id");
+        if (bodyId != null && !collId.equals(String.valueOf(bodyId))) {
+            return errorResponse(400, "BadRequest",
+                    "The 'id' in the request body does not match the container being replaced.");
+        }
+
+        Map<String, Object> coll = parseData(found.get());
+        if (body.get("partitionKey") instanceof Map<?, ?> newPk
+                && coll.get("partitionKey") instanceof Map<?, ?> oldPk
+                && newPk.get("paths") != null
+                && !Objects.equals(newPk.get("paths"), oldPk.get("paths"))) {
+            return errorResponse(400, "BadRequest",
+                    "Changing the partition key of a container is not allowed.");
+        }
+
+        Map<String, Object> indexingPolicy;
+        try {
+            indexingPolicy = CosmosIndexingPolicy.normalize(body.get("indexingPolicy"));
+        } catch (IllegalArgumentException e) {
+            return errorResponse(400, "BadRequest", e.getMessage());
+        }
+
+        Instant now  = Instant.now();
+        String  etag = newEtag();
+        coll.put("indexingPolicy", indexingPolicy);
+        coll.put("_etag", quoted(etag));
+        coll.put("_ts",   now.getEpochSecond());
+
+        store.put(key, stored(key, coll, now, etag));
+        return cosmosResponse(coll, Response.Status.OK, etag, "dbs/" + dbId);
     }
 
     /**
@@ -847,10 +901,23 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     // -----------------------------------------------------------------------
 
     private Response queryDocuments(AzureRequest req, String dbId, String collId) {
-        if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
+        Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
+        if (collFound.isEmpty()) return notFound(collId);
 
         Map<String, Object> body = parseBody(req);
         String sql = (String) body.getOrDefault("query", "SELECT * FROM c");
+
+        // Azure parity: an ORDER BY over two or more properties is only served
+        // when the container has a matching composite index; otherwise the
+        // service rejects the query with 400 (error code SC2104).
+        List<CosmosQueryEngine.OrderByField> orderBy = queryEngine.parseOrderBy(sql);
+        if (orderBy.size() > 1 && !CosmosIndexingPolicy.supportsOrderBy(
+                parseData(collFound.get()).get("indexingPolicy"), orderBy)) {
+            return errorResponse(400, "BadRequest",
+                    "Message: {\"errors\":[{\"severity\":\"Error\",\"code\":\"SC2104\",\"message\":"
+                    + "\"The order by query does not have a corresponding composite index "
+                    + "that it can be served from.\"}]}");
+        }
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> params = body.get("parameters") instanceof List<?> l
@@ -1156,15 +1223,6 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private byte[] toBytes(Object obj) {
         try { return MAPPER.writeValueAsBytes(obj); }
         catch (JsonProcessingException e) { return new byte[0]; }
-    }
-
-    private Map<String, Object> defaultIndexingPolicy() {
-        Map<String, Object> p = new LinkedHashMap<>();
-        p.put("automatic",    true);
-        p.put("indexingMode", "consistent");
-        p.put("includedPaths", List.of(Map.of("path", "/*")));
-        p.put("excludedPaths", List.of(Map.of("path", "/\"_etag\"/?")));
-        return p;
     }
 
     /**

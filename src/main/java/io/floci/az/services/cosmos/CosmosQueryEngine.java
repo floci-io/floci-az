@@ -66,6 +66,11 @@ public class CosmosQueryEngine {
     // Entry point
     // -----------------------------------------------------------------------
 
+    /** Parse just the ORDER BY clause of a query (used for composite-index validation). */
+    public List<OrderByField> parseOrderBy(String sql) {
+        return parse(normalizeWhitespace(sql)).orderBy();
+    }
+
     public QueryResult execute(String sql, List<Map<String, Object>> params, List<Map<String, Object>> documents) {
         sql = normalizeWhitespace(substituteParams(sql, params));
 
