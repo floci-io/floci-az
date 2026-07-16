@@ -267,6 +267,9 @@ final class ServiceBusRuleSelector {
             throw new IllegalArgumentException("Unterminated EXISTS(...) in filter: " + expression);
         }
         String rawName = expression.substring(i + 1, close).trim();
+        if (rawName.startsWith("[") && rawName.endsWith("]") && rawName.length() >= 2) {
+            rawName = rawName.substring(1, rawName.length() - 1);
+        }
         out.append("(").append(mapProperty(rawName)).append(" IS NOT NULL)");
         return close + 1;
     }

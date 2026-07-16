@@ -203,6 +203,14 @@ class ServiceBusRuleSelectorTest {
     }
 
     @Test
+    void existsStripsBracketDelimiters() {
+        assertEquals("(color IS NOT NULL)",
+                ServiceBusRuleSelector.forRule(sql("EXISTS([color])")));
+        assertEquals("(JMSType IS NOT NULL)",
+                ServiceBusRuleSelector.forRule(sql("EXISTS( [sys.Label] )")));
+    }
+
+    @Test
     void unknownFilterTypeIsRejected() {
         assertThrows(IllegalArgumentException.class,
                 () -> ServiceBusRuleSelector.forRule(ofType("BogusFilter")));
