@@ -193,4 +193,228 @@ public class ServiceBusRulesTest {
                 .when().put(rulesPath("rules-topic-404", "nosub") + "/r")
                 .then().statusCode(404);
     }
+
+    @Test
+    void rulesOnMissingTopicReturn404() {
+        given().when().get(rulesPath("no-such-topic", "nosub")).then().statusCode(404);
+        given().body(correlationRuleBody("r", "x"))
+                .when().put(rulesPath("no-such-topic", "nosub") + "/r")
+                .then().statusCode(404);
+        given().when().delete(rulesPath("no-such-topic", "nosub") + "/r").then().statusCode(404);
+    }
+
+    @Test
+    void nonGetOnRulesCollectionReturns405() {
+        createTopicAndSubscription("rules-topic-405", "sub1");
+        given().when().delete(rulesPath("rules-topic-405", "sub1")).then().statusCode(405);
+        given().body(correlationRuleBody("r", "x"))
+                .when().put(rulesPath("rules-topic-405", "sub1"))
+                .then().statusCode(405);
+    }
+
+    @Test
+    void invalidSqlFiltersAreRejectedWith400() {
+        createTopicAndSubscription("rules-topic-badsql", "sub1");
+        String rules = rulesPath("rules-topic-badsql", "sub1");
+
+        // unterminated string literal
+        given().body(sqlRuleBody("bad1", "color = 'unterminated"))
+                .when().put(rules + "/bad1").then().statusCode(400);
+        // unsupported system property
+        given().body(sqlRuleBody("bad2", "sys.MessageId = 'x'"))
+                .when().put(rules + "/bad2").then().statusCode(400);
+        // unsupported modulo operator
+        given().body(sqlRuleBody("bad3", "quantity % 2 = 0"))
+                .when().put(rules + "/bad3").then().statusCode(400);
+
+        // failed creates must not leave partial rules behind
+        given().when().get(rules)
+                .then().statusCode(200)
+                .body(not(containsString("bad1")))
+                .body(not(containsString("bad2")))
+                .body(not(containsString("bad3")));
+    }
+
+    @Test
+    void emptyCorrelationFilterIsRejectedWith400() {
+        createTopicAndSubscription("rules-topic-emptycorr", "sub1");
+        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"CorrelationFilter\"></Filter>"
+                + "<Name>empty</Name></RuleDescription></content></entry>";
+        given().body(body)
+                .when().put(rulesPath("rules-topic-emptycorr", "sub1") + "/empty")
+                .then().statusCode(400)
+                .body(containsString("at least one property"));
+    }
+
+    @Test
+    void sqlRuleActionIsStoredAndEchoed() {
+        createTopicAndSubscription("rules-topic-action", "sub1");
+        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"SqlFilter\"><SqlExpression>color='red'</SqlExpression></Filter>"
+                + "<Action i:type=\"SqlRuleAction\"><SqlExpression>SET quantity = 1</SqlExpression></Action>"
+                + "<Name>with-action</Name></RuleDescription></content></entry>";
+        String rules = rulesPath("rules-topic-action", "sub1");
+
+        given().body(body).when().put(rules + "/with-action")
+                .then().statusCode(201)
+                .body(containsString("i:type=\"SqlRuleAction\""));
+
+        given().when().get(rules + "/with-action")
+                .then().statusCode(200)
+                .body(containsString("SET quantity = 1"));
+    }
+
+    @Test
+    void falseFilterRuleIsAccepted() {
+        createTopicAndSubscription("rules-topic-false", "sub1");
+        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"FalseFilter\"><SqlExpression>1=0</SqlExpression></Filter>"
+                + "<Name>none</Name></RuleDescription></content></entry>";
+        given().body(body)
+                .when().put(rulesPath("rules-topic-false", "sub1") + "/none")
+                .then().statusCode(201)
+                .body(containsString("i:type=\"FalseFilter\""));
+    }
+
+    @Test
+    void subscriptionCreateWithUnsupportedDefaultRuleIsRejected() {
+        given().body(TOPIC_BODY).when().put(BASE + "/rules-topic-baddrd").then().statusCode(201);
+
+        String subBody = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<DefaultRuleDescription>"
+                + "<Filter i:type=\"CorrelationFilter\"><MessageId>m1</MessageId></Filter>"
+                + "<Name>bad</Name></DefaultRuleDescription>"
+                + "</SubscriptionDescription></content></entry>";
+
+        given().body(subBody)
+                .when().put(BASE + "/rules-topic-baddrd/subscriptions/sub1")
+                .then().statusCode(400);
+
+        // the subscription must not have been half-created
+        given().when().get(BASE + "/rules-topic-baddrd/subscriptions/sub1")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void recreatingExistingSubscriptionKeepsItsRules() {
+        createTopicAndSubscription("rules-topic-recreate", "sub1");
+        String rules = rulesPath("rules-topic-recreate", "sub1");
+        given().body(correlationRuleBody("keep-me", "red"))
+                .when().put(rules + "/keep-me").then().statusCode(201);
+        given().when().delete(rules + "/$Default").then().statusCode(200);
+
+        // idempotent re-create returns the existing subscription and leaves rules alone
+        given().when().put(BASE + "/rules-topic-recreate/subscriptions/sub1")
+                .then().statusCode(200);
+        given().when().get(rules)
+                .then().statusCode(200)
+                .body(containsString("keep-me"))
+                .body(not(containsString("$Default")));
+    }
+
+    @Test
+    void updatingRuleCanChangeFilterType() {
+        createTopicAndSubscription("rules-topic-retype", "sub1");
+        String rules = rulesPath("rules-topic-retype", "sub1");
+
+        given().body(correlationRuleBody("morph", "red"))
+                .when().put(rules + "/morph").then().statusCode(201);
+        given().body(sqlRuleBody("morph", "color='blue'"))
+                .when().put(rules + "/morph")
+                .then().statusCode(200)
+                .body(containsString("i:type=\"SqlFilter\""));
+
+        given().when().get(rules + "/morph")
+                .then().statusCode(200)
+                .body(containsString("i:type=\"SqlFilter\""))
+                .body(not(containsString("CorrelationFilter")));
+    }
+
+    @Test
+    void deletingTopicCascadesRules() {
+        createTopicAndSubscription("rules-topic-tcascade", "sub1");
+        given().body(correlationRuleBody("r1", "red"))
+                .when().put(rulesPath("rules-topic-tcascade", "sub1") + "/r1")
+                .then().statusCode(201);
+
+        given().when().delete(BASE + "/rules-topic-tcascade").then().statusCode(200);
+
+        // recreating the same topic + subscription starts fresh with only $Default
+        createTopicAndSubscription("rules-topic-tcascade", "sub1");
+        given().when().get(rulesPath("rules-topic-tcascade", "sub1"))
+                .then().statusCode(200)
+                .body(containsString("$Default"))
+                .body(not(containsString("<Name>r1</Name>")));
+    }
+
+    @Test
+    void deletingRuleTwiceReturns404() {
+        createTopicAndSubscription("rules-topic-del2", "sub1");
+        String rule = rulesPath("rules-topic-del2", "sub1") + "/$Default";
+        given().when().delete(rule).then().statusCode(200);
+        given().when().delete(rule).then().statusCode(404);
+    }
+
+    @Test
+    void legacyNamespacePathSupportsRuleCrud() {
+        String legacyBase = BASE + "/default/topics/rules-topic-legacy";
+        given().when().put(legacyBase).then().statusCode(201);
+        given().when().put(legacyBase + "/subscriptions/sub1").then().statusCode(201);
+
+        given().body(correlationRuleBody("legacy-rule", "red"))
+                .when().put(legacyBase + "/subscriptions/sub1/rules/legacy-rule")
+                .then().statusCode(201)
+                .body(containsString("<Name>legacy-rule</Name>"));
+
+        given().when().get(legacyBase + "/subscriptions/sub1/rules")
+                .then().statusCode(200)
+                .body(containsString("legacy-rule"))
+                .body(containsString("$Default"));
+
+        given().when().delete(legacyBase + "/subscriptions/sub1/rules/legacy-rule")
+                .then().statusCode(200);
+        given().when().get(legacyBase + "/subscriptions/sub1/rules/legacy-rule")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void feedsContainExactlyOneXmlProlog() {
+        createTopicAndSubscription("rules-topic-prolog", "sub1");
+        given().body(correlationRuleBody("r1", "red"))
+                .when().put(rulesPath("rules-topic-prolog", "sub1") + "/r1")
+                .then().statusCode(201);
+
+        for (String path : new String[]{
+                rulesPath("rules-topic-prolog", "sub1"),
+                BASE + "/rules-topic-prolog/subscriptions"}) {
+            String feed = given().when().get(path)
+                    .then().statusCode(200).extract().asString();
+            long prologs = feed.split("<\\?xml", -1).length - 1;
+            org.junit.jupiter.api.Assertions.assertEquals(1, prologs,
+                    "feed at " + path + " must contain exactly one XML prolog");
+        }
+    }
+
+    @Test
+    void unparseableRuleBodyDegradesToTrueFilter() {
+        // lenient like the rest of the management plane: garbage bodies fall back
+        // to Azure's default TrueFilter instead of failing the create
+        createTopicAndSubscription("rules-topic-garbage", "sub1");
+        given().body("this is not xml <at all")
+                .when().put(rulesPath("rules-topic-garbage", "sub1") + "/lenient")
+                .then().statusCode(201)
+                .body(containsString("i:type=\"TrueFilter\""));
+    }
+
+    private static String sqlRuleBody(String ruleName, String escapedExpression) {
+        return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"SqlFilter\"><SqlExpression>" + escapedExpression + "</SqlExpression></Filter>"
+                + "<Name>" + ruleName + "</Name></RuleDescription></content></entry>";
+    }
 }

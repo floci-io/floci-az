@@ -305,7 +305,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         String subName = subRest.substring(0, slash);
         String tail = subRest.substring(slash + 1);
         if ("rules".equals(tail)) {
-            return handleListRules(account, ns, topicName, subName);
+            return "GET".equals(req.method())
+                    ? handleListRules(account, ns, topicName, subName)
+                    : Response.status(405).build();
         }
         if (tail.startsWith("rules/")) {
             String ruleName = tail.substring("rules/".length());
@@ -437,7 +439,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 String subName = subRest.substring(0, subSlash);
                 String tail = subRest.substring(subSlash + 1);
                 if ("rules".equals(tail)) {
-                    return handleListRules(account, namespace, topicName, subName);
+                    return "GET".equals(req.method())
+                            ? handleListRules(account, namespace, topicName, subName)
+                            : Response.status(405).build();
                 }
                 if (tail.startsWith("rules/")) {
                     return handleRuleCrud(req, account, namespace, topicName, subName,

@@ -163,6 +163,77 @@ class ServiceBusRuleSelectorTest {
                 () -> ServiceBusRuleSelector.forRule(sql("")));
     }
 
+    @Test
+    void sqlFilterSupportsInBetweenAndParentheses() {
+        assertEquals("color IN ('red', 'blue') OR (quantity + 5) * 2 <= 30",
+                ServiceBusRuleSelector.forRule(sql("color IN ('red', 'blue') OR (quantity + 5) * 2 <= 30")));
+        assertEquals("note NOT LIKE 'a%'",
+                ServiceBusRuleSelector.forRule(sql("note NOT LIKE 'a%'")));
+    }
+
+    @Test
+    void sqlFilterPrefixesAreCaseInsensitiveAndKeywordCasePreserved() {
+        assertEquals("JMSType = 'x'", ServiceBusRuleSelector.forRule(sql("SYS.LABEL = 'x'")));
+        assertEquals("Color = 'y'", ServiceBusRuleSelector.forRule(sql("USER.Color = 'y'")));
+        assertEquals("a = 1 and b = 2", ServiceBusRuleSelector.forRule(sql("a = 1 and b = 2")));
+    }
+
+    @Test
+    void sqlFilterAllowsUnderscoreAndDollarIdentifiers() {
+        assertEquals("_private = 1 AND $dollar = 2",
+                ServiceBusRuleSelector.forRule(sql("_private = 1 AND $dollar = 2")));
+    }
+
+    @Test
+    void sqlFilterMapsBracketedSystemProperty() {
+        assertEquals("JMSType = 'blue'",
+                ServiceBusRuleSelector.forRule(sql("[sys.Label] = 'blue'")));
+    }
+
+    @Test
+    void sqlFilterRejectsBadBracketedIdentifiers() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(sql("[bad-name] = 1")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(sql("[unterminated = 1")));
+    }
+
+    @Test
+    void existsVariants() {
+        assertEquals("(color IS NOT NULL)",
+                ServiceBusRuleSelector.forRule(sql("EXISTS(user.color)")));
+        assertEquals("(JMSXGroupID IS NOT NULL)",
+                ServiceBusRuleSelector.forRule(sql("EXISTS ( sys.SessionId )")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(sql("EXISTS(sys.MessageId)")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(sql("EXISTS color")));
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(sql("EXISTS(color")));
+    }
+
+    @Test
+    void unknownFilterTypeIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ServiceBusRuleSelector.forRule(ofType("BogusFilter")));
+    }
+
+    @Test
+    void typedLiteralsForDecimalAndInvalidBoolean() {
+        ServiceBusModels.RuleEntity priceRule = new ServiceBusModels.RuleEntity(
+                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
+                null, null, null, null,
+                Map.of("price", "2.5"), Map.of("price", "double"), null, Instant.EPOCH);
+        assertEquals("price = 2.5", ServiceBusRuleSelector.forRule(priceRule));
+
+        // a declared boolean that isn't true/false falls back to a string literal
+        ServiceBusModels.RuleEntity badBool = new ServiceBusModels.RuleEntity(
+                "t", "s", "r", "CorrelationFilter", null, null, null, null, null,
+                null, null, null, null,
+                Map.of("urgent", "yes"), Map.of("urgent", "boolean"), null, Instant.EPOCH);
+        assertEquals("urgent = 'yes'", ServiceBusRuleSelector.forRule(badBool));
+    }
+
     // ── Rule-set combination ──────────────────────────────────────────────────
 
     @Test

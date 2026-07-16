@@ -131,6 +131,122 @@ class ServiceBusRuleXmlTest {
     }
 
     @Test
+    void missingTypeAttributeFallsBackToStructuralDetection() {
+        String sqlBody = "<RuleDescription xmlns=\"" + SB_NS + "\">"
+                + "<Filter><SqlExpression>a = 1</SqlExpression></Filter>"
+                + "<Name>r</Name></RuleDescription>";
+        assertEquals("SqlFilter", ServiceBusRuleXml.parseRule("t", "s", "r", sqlBody).filterType());
+
+        String corrBody = "<RuleDescription xmlns=\"" + SB_NS + "\">"
+                + "<Filter><Label>red</Label></Filter>"
+                + "<Name>r</Name></RuleDescription>";
+        assertEquals("CorrelationFilter", ServiceBusRuleXml.parseRule("t", "s", "r", corrBody).filterType());
+
+        String emptyFilter = "<RuleDescription xmlns=\"" + SB_NS + "\">"
+                + "<Filter/><Name>r</Name></RuleDescription>";
+        assertEquals("TrueFilter", ServiceBusRuleXml.parseRule("t", "s", "r", emptyFilter).filterType());
+    }
+
+    @Test
+    void namespacePrefixedTypeAttributeIsStripped() {
+        String body = "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"d2p1:SqlFilter\"><SqlExpression>a = 1</SqlExpression></Filter>"
+                + "<Name>r</Name></RuleDescription>";
+        ServiceBusModels.RuleEntity rule = ServiceBusRuleXml.parseRule("t", "s", "r", body);
+        assertEquals("SqlFilter", rule.filterType());
+        assertEquals("a = 1", rule.sqlExpression());
+    }
+
+    @Test
+    void multipleCorrelationPropertiesAreAllParsed() {
+        String body = "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"CorrelationFilter\"><Properties>"
+                + "<KeyValueOfstringanyType><Key>b</Key><Value>2</Value></KeyValueOfstringanyType>"
+                + "<KeyValueOfstringanyType><Key>a</Key><Value>1</Value></KeyValueOfstringanyType>"
+                + "</Properties></Filter><Name>r</Name></RuleDescription>";
+        ServiceBusModels.RuleEntity rule = ServiceBusRuleXml.parseRule("t", "s", "r", body);
+        assertEquals(Map.of("b", "2", "a", "1"), rule.correlationProperties());
+    }
+
+    @Test
+    void specialCharactersSurviveBuildParseRoundTrip() {
+        String nasty = "a<b&'c\"";
+        ServiceBusModels.RuleEntity rule = new ServiceBusModels.RuleEntity(
+                "t", "s", "r", "CorrelationFilter",
+                null, null, null, null, null, nasty, null, null, null,
+                Map.of("k", nasty), Map.of(), null, Instant.EPOCH);
+        ServiceBusModels.RuleEntity reparsed = ServiceBusRuleXml.parseRule(
+                "t", "s", "r", ServiceBusRuleXml.ruleDescriptionXml(rule, SB_NS));
+        assertEquals(nasty, reparsed.label());
+        assertEquals(nasty, reparsed.correlationProperties().get("k"));
+    }
+
+    @Test
+    void malformedXmlFallsBackSafely() {
+        // rule body: unparseable input degrades to Azure's default TrueFilter
+        assertEquals("TrueFilter",
+                ServiceBusRuleXml.parseRule("t", "s", "r", "<Filter i:type=").filterType());
+        // subscription body: unparseable input means "no DefaultRuleDescription"
+        assertTrue(ServiceBusRuleXml.parseDefaultRule("t", "s", "not xml at all").isEmpty());
+    }
+
+    @Test
+    void unknownNestedElementInsideFilterIsSkipped() {
+        String body = "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"SqlFilter\">"
+                + "<SqlExpression>a = 1</SqlExpression>"
+                + "<Parameters><KeyValueOfstringanyType><Key>x</Key><Value>1</Value></KeyValueOfstringanyType></Parameters>"
+                + "</Filter><Name>r</Name></RuleDescription>";
+        ServiceBusModels.RuleEntity rule = ServiceBusRuleXml.parseRule("t", "s", "r", body);
+        assertEquals("SqlFilter", rule.filterType());
+        assertEquals("a = 1", rule.sqlExpression());
+    }
+
+    @Test
+    void emptyPropertiesElementYieldsNoProperties() {
+        String body = "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"CorrelationFilter\"><CorrelationId>c</CorrelationId><Properties/></Filter>"
+                + "<Name>r</Name></RuleDescription>";
+        ServiceBusModels.RuleEntity rule = ServiceBusRuleXml.parseRule("t", "s", "r", body);
+        assertEquals("c", rule.correlationId());
+        assertTrue(rule.correlationProperties().isEmpty());
+    }
+
+    @Test
+    void defaultRuleWithoutNameIsNamedDefault() {
+        String body = "<SubscriptionDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<DefaultRuleDescription><Filter i:type=\"TrueFilter\"/></DefaultRuleDescription>"
+                + "</SubscriptionDescription>";
+        Optional<ServiceBusModels.RuleEntity> rule = ServiceBusRuleXml.parseDefaultRule("t", "s", body);
+        assertTrue(rule.isPresent());
+        assertEquals("$Default", rule.get().name());
+        assertEquals("TrueFilter", rule.get().filterType());
+    }
+
+    @Test
+    void falseFilterXmlUsesCanonicalExpression() {
+        ServiceBusModels.RuleEntity rule = new ServiceBusModels.RuleEntity(
+                "t", "s", "r", "FalseFilter", null, null, null, null, null,
+                null, null, null, null, Map.of(), Map.of(), null, Instant.EPOCH);
+        String xml = ServiceBusRuleXml.ruleDescriptionXml(rule, SB_NS);
+        assertTrue(xml.contains("i:type=\"FalseFilter\""));
+        assertTrue(xml.contains("<SqlExpression>1=0</SqlExpression>"));
+    }
+
+    @Test
+    void sqlRuleActionRoundTrips() {
+        ServiceBusModels.RuleEntity rule = new ServiceBusModels.RuleEntity(
+                "t", "s", "r", "SqlFilter", "a = 1", null, null, null, null,
+                null, null, null, null, Map.of(), Map.of(), "SET quantity = 1", Instant.EPOCH);
+        String xml = ServiceBusRuleXml.ruleDescriptionXml(rule, SB_NS);
+        assertTrue(xml.contains("i:type=\"SqlRuleAction\""));
+
+        ServiceBusModels.RuleEntity reparsed = ServiceBusRuleXml.parseRule("t", "s", "r", xml);
+        assertEquals("a = 1", reparsed.sqlExpression());
+        assertEquals("SET quantity = 1", reparsed.actionSqlExpression());
+    }
+
+    @Test
     void trueFilterXmlUsesCanonicalExpression() {
         ServiceBusModels.RuleEntity rule = ServiceBusModels.RuleEntity.trueFilter("t", "s", "$Default");
         String xml = ServiceBusRuleXml.ruleDescriptionXml(rule, SB_NS);
