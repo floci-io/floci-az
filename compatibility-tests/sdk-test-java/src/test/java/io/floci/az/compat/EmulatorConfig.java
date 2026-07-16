@@ -502,6 +502,50 @@ public final class EmulatorConfig {
     }
 
     /**
+     * Creates or replaces a subscription rule via the floci-az management API.
+     * {@code ruleDescriptionXml} is the inner {@code <RuleDescription>} element
+     * (with xmlns declarations), as sent by ServiceBusAdministrationClient.
+     */
+    static void ensureServiceBusRule(String topicName, String subName,
+                                      String ruleName, String ruleDescriptionXml) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
+                + "/topics/" + topicName + "/subscriptions/" + subName + "/rules/" + ruleName;
+        String body = "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                + ruleDescriptionXml + "</content></entry>";
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("PUT");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
+        conn.setRequestProperty("Content-Length", String.valueOf(bodyBytes.length));
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(bodyBytes);
+        }
+        int status = conn.getResponseCode();
+        if (status != 200 && status != 201) {
+            throw new RuntimeException("Failed to create rule '" + ruleName + "' on '"
+                    + topicName + "/" + subName + "', HTTP " + status);
+        }
+    }
+
+    /** Deletes a subscription rule (e.g. the implicit $Default) via the management API. */
+    static void deleteServiceBusRule(String topicName, String subName, String ruleName) throws Exception {
+        String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
+                + "/topics/" + topicName + "/subscriptions/" + subName + "/rules/" + ruleName;
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("DELETE");
+        conn.setConnectTimeout(5_000);
+        conn.setReadTimeout(30_000);
+        int status = conn.getResponseCode();
+        if (status != 200) {
+            throw new RuntimeException("Failed to delete rule '" + ruleName + "' on '"
+                    + topicName + "/" + subName + "', HTTP " + status);
+        }
+    }
+
+    /**
      * Returns a ServiceBusClientBuilder connected to the emulator's AMQPS (TLS) port.
      *
      * The Azure Service Bus SDK 7.17.x always uses TLS when {@code customEndpointAddress}
