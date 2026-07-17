@@ -44,9 +44,12 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>Convenience: {@code /connect} — returns all connection string formats</li>
  * </ul>
  *
- * <p>Responses are synchronous (mirroring {@code SqlHandler}); the container is started
- * during the PUT and the server is reported {@code provisioningState=Succeeded} immediately,
- * which the azurerm long-running-operation poller accepts as a terminal result.
+ * <p>Server create is fully synchronous: the container is started during the PUT and the
+ * response body reports {@code provisioningState=Succeeded} / {@code state=Ready}. A terminal
+ * create returns <b>HTTP 200</b> (not 201): azurerm 4.x Flexible Server CreateOrUpdate rejects
+ * a bare 201 with a completed body as {@code unexpected status 201}. Child resources (databases,
+ * firewall rules) still use 201 on first create. Full ARM async LRO (201/202 + Azure-AsyncOperation)
+ * is not implemented.
  */
 @ApplicationScoped
 public class PostgresHandler implements AzureServiceHandler, Resettable {
@@ -204,7 +207,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
 
                 if (config.services().postgres().mocked()) {
                     // Control-plane only: no container, data plane unavailable. Reports Ready.
-                    return Response.status(201).entity(serverResponse(entry)).build();
+                    // HTTP 200: terminal create for azurerm 4.x (see class javadoc).
+                    return Response.ok(serverResponse(entry)).build();
                 }
 
                 try {
@@ -225,7 +229,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
                         .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
                         .build();
                 }
-                return Response.status(201).entity(serverResponse(entry)).build();
+                // Fully ready: return 200 so azurerm 4.x CreateOrUpdate accepts the terminal body.
+                return Response.ok(serverResponse(entry)).build();
             }
 
             // Update existing server metadata in place — do NOT restart the container.
