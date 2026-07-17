@@ -37,7 +37,7 @@ public class TableServiceTest {
             .body("<StorageServiceProperties><Logging><Version>1.0</Version></Logging></StorageServiceProperties>")
             .when().put("/{account}?restype=service&comp=properties", ACCOUNT)
             .then()
-            .statusCode(200);
+            .statusCode(202);
     }
 
     @Test

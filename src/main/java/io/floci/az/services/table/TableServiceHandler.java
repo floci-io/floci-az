@@ -99,7 +99,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                 response = getTableServiceProperties();
             } else {
-                response = Response.ok().build();
+                response = Response.accepted().build();
             }
         } else if (path.startsWith("Tables")) {
             if ("GET".equalsIgnoreCase(method)) {
