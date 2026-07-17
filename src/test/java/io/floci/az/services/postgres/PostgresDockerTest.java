@@ -75,13 +75,14 @@ class PostgresDockerTest {
 
     @Test
     @Order(1)
-    @DisplayName("PUT server starts a container and returns 201 with provisioningState=Succeeded + localPort")
+    @DisplayName("PUT server starts a container and returns 200 with provisioningState=Succeeded + localPort")
     void createServer() {
         given().post("/_admin/reset").then().statusCode(204);
 
+        // 200: terminal create compatible with azurerm 4.x Flexible Server CreateOrUpdate.
         localPort = given().contentType("application/json").body(CREATE_BODY)
             .when().put(PG_PATH + API)
-            .then().statusCode(201)
+            .then().statusCode(200)
             .body("name", equalTo(NAME))
             .body("properties.provisioningState", equalTo("Succeeded"))
             .body("properties.state", equalTo("Ready"))

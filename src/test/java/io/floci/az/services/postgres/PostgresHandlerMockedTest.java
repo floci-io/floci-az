@@ -54,15 +54,16 @@ class PostgresHandlerMockedTest {
     private void createServer(String name) {
         given().contentType("application/json").body(SERVER_BODY)
             .when().put(BASE + "/flexibleServers/" + name + API)
-            .then().statusCode(201);
+            .then().statusCode(200);
     }
 
     @Test
-    @DisplayName("PUT server returns 201 with state=Ready, provisioningState=Succeeded and no localPort")
+    @DisplayName("PUT server returns 200 with state=Ready, provisioningState=Succeeded and no localPort")
     void putServerReady() {
+        // 200 (not 201): azurerm 4.x rejects bare 201 + Succeeded body for Flexible Server create.
         given().contentType("application/json").body(SERVER_BODY)
             .when().put(BASE + "/flexibleServers/pgserver" + API)
-            .then().statusCode(201)
+            .then().statusCode(200)
             .body("name", equalTo("pgserver"))
             .body("type", equalTo("Microsoft.DBforPostgreSQL/flexibleServers"))
             .body("sku.name", equalTo("Standard_B1ms"))
@@ -74,6 +75,17 @@ class PostgresHandlerMockedTest {
             .body("properties.storage.storageSizeGB", equalTo(32))
             .body("properties.fullyQualifiedDomainName", notNullValue())
             .body("properties", not(hasKey("localPort")));
+    }
+
+    @Test
+    @DisplayName("PUT existing server is idempotent update and still returns 200")
+    void putServerIdempotentUpdate() {
+        createServer("idempotent");
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(BASE + "/flexibleServers/idempotent" + API)
+            .then().statusCode(200)
+            .body("name", equalTo("idempotent"))
+            .body("properties.provisioningState", equalTo("Succeeded"));
     }
 
     @Test
