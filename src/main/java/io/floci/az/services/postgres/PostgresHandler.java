@@ -44,9 +44,30 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>Convenience: {@code /connect} — returns all connection string formats</li>
  * </ul>
  *
- * <p>Responses are synchronous (mirroring {@code SqlHandler}); the container is started
- * during the PUT and the server is reported {@code provisioningState=Succeeded} immediately,
- * which the azurerm long-running-operation poller accepts as a terminal result.
+ * <p>Server create is fully synchronous: the container is started during the PUT and the
+ * response body reports {@code provisioningState=Succeeded} / {@code state=Ready}.</p>
+ *
+ * <h2>Why mutating operations answer 202</h2>
+ *
+ * <p>Every mutating operation (PUT and PATCH on servers, databases, firewall rules and
+ * configurations) returns <b>HTTP 202</b> with a {@code Location} header pointing at the
+ * resource's own URL. ARM models these as long-running operations, and the provider's
+ * expected status codes differ by major version:</p>
+ *
+ * <table border="1">
+ *   <caption>go-azure-sdk expected status codes</caption>
+ *   <tr><th>Operation</th><th>azurerm 3.x</th><th>azurerm 4.x</th></tr>
+ *   <tr><td>PUT (create/update)</td><td>200, 201, 202</td><td>202 only</td></tr>
+ *   <tr><td>PATCH (update)</td><td>200, 202</td><td>202 only</td></tr>
+ *   <tr><td>DELETE</td><td>200, 202, 204</td><td>202, 204</td></tr>
+ * </table>
+ *
+ * <p>202 is therefore the only value both majors accept; a 200 or 201 fails 4.x with
+ * {@code unexpected status}. Because the work is already finished when we answer, the
+ * {@code Location} header points back at the resource itself: the SDK's poller then reads
+ * the terminal {@code provisioningState} (or, for the metadata-only children that carry no
+ * such field, treats its absence as completion) and finishes on the first poll. DELETE keeps
+ * returning 204, which both majors already accept.</p>
  */
 @ApplicationScoped
 public class PostgresHandler implements AzureServiceHandler, Resettable {
@@ -135,6 +156,34 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
             .build();
     }
 
+    // ── ARM long-running-operation responses ──────────────────────────────────
+
+    /**
+     * Builds the absolute URL of an ARM resource for the {@code Location} header,
+     * preserving the caller's {@code api-version} so the polled URL matches the one
+     * the client just wrote to.
+     */
+    private String resourceLocation(AzureRequest request, String armId) {
+        String host = request.headers().getHeaderString("Host");
+        if (host == null || host.isBlank()) host = "localhost:" + config.port();
+        String scheme = request.headers().getHeaderString("X-Forwarded-Proto");
+        if (scheme == null || scheme.isBlank()) scheme = request.secure() ? "https" : "http";
+        String apiVersion = request.queryParams().get("api-version");
+        return scheme + "://" + host + armId
+            + (apiVersion == null || apiVersion.isBlank() ? "" : "?api-version=" + apiVersion);
+    }
+
+    /**
+     * Completed mutating operation: 202 plus a self-referencing {@code Location}, the only
+     * shape both azurerm majors accept (see class javadoc).
+     */
+    private Response accepted(AzureRequest request, String armId, Object body) {
+        return Response.status(202)
+            .header("Location", resourceLocation(request, armId))
+            .entity(body)
+            .build();
+    }
+
     // ── checkNameAvailability ─────────────────────────────────────────────────
 
     private Response handleCheckNameAvailability(AzureRequest request) {
@@ -204,7 +253,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
 
                 if (config.services().postgres().mocked()) {
                     // Control-plane only: no container, data plane unavailable. Reports Ready.
-                    return Response.status(201).entity(serverResponse(entry)).build();
+                    return accepted(request, entry.armId(), serverResponse(entry));
                 }
 
                 try {
@@ -225,7 +274,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
                         .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
                         .build();
                 }
-                return Response.status(201).entity(serverResponse(entry)).build();
+                return accepted(request, entry.armId(), serverResponse(entry));
             }
 
             // Update existing server metadata in place — do NOT restart the container.
@@ -246,7 +295,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
                 existing.databases(), existing.firewallRules(), existing.configurations(),
                 existing.createdAt());
             state.putServer(updated);
-            return Response.status(200).entity(serverResponse(updated)).build();
+            return accepted(request, updated.armId(), serverResponse(updated));
 
         } catch (Exception e) {
             LOG.errorf(e, "Error creating PostgreSQL server %s", serverName);
@@ -302,17 +351,14 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
             String charset   = props.path("charset").asText("");
             String collation = props.path("collation").asText("");
 
-            boolean isNew = !state.databaseExists(serverName, dbName);
-
             // The emulator tracks the database in state only. Actual CREATE DATABASE is the
             // application's responsibility (psql, Flyway, Liquibase, etc.) via the /connect URL.
             PostgresState.DatabaseEntry db = PostgresState.DatabaseEntry.create(
                 dbName, serverName, charset, collation);
             state.putDatabase(serverName, db);
 
-            return Response.status(isNew ? 201 : 200)
-                .entity(databaseResponse(db, serverOpt.get()))
-                .build();
+            Map<String, Object> resp = databaseResponse(db, serverOpt.get());
+            return accepted(request, String.valueOf(resp.get("id")), resp);
         } catch (Exception e) {
             LOG.errorf(e, "Error creating database %s on server %s", dbName, serverName);
             return Response.status(500).entity(Map.of("error", String.valueOf(e.getMessage()))).build();
@@ -374,11 +420,10 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
             String end     = props.path("endIpAddress").asText();
             if (start.isBlank() || end.isBlank())
                 return badRequest("startIpAddress and endIpAddress are required");
-            boolean isNew = !state.getFirewallRule(serverName, ruleName).isPresent();
             PostgresState.FirewallRule rule = new PostgresState.FirewallRule(ruleName, start, end);
             state.putFirewallRule(serverName, rule);
-            return Response.status(isNew ? 201 : 200)
-                .entity(firewallRuleResponse(rule, serverName)).build();
+            Map<String, Object> resp = firewallRuleResponse(rule, serverName);
+            return accepted(request, String.valueOf(resp.get("id")), resp);
         } catch (Exception e) {
             return badRequest("Invalid firewall rule body: " + e.getMessage());
         }
@@ -408,7 +453,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
                     JsonNode body = readBody(request.bodyStream());
                     String value  = body.path("properties").path("value").asText("");
                     state.putConfiguration(serverName, cfgName, value);
-                    yield Response.status(200).entity(configurationResponse(serverName, cfgName, value)).build();
+                    Map<String, Object> resp = configurationResponse(serverName, cfgName, value);
+                    yield accepted(request, String.valueOf(resp.get("id")), resp);
                 } catch (Exception e) {
                     yield badRequest("Invalid configuration body: " + e.getMessage());
                 }

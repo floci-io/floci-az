@@ -84,8 +84,10 @@ class PostgresCompatibilityTest {
         HttpResponse<String> resp = send("PUT",
             ARM_BASE + "/flexibleServers/" + SERVER + API, serverBody, Duration.ofMinutes(5));
 
-        assertTrue(resp.statusCode() == 200 || resp.statusCode() == 201,
-            "PUT server failed (" + resp.statusCode() + "): " + resp.body());
+        // 202 + Location: the ARM long-running-operation shape both azurerm 3.x and 4.x accept.
+        assertEquals(202, resp.statusCode(), "PUT server failed: " + resp.body());
+        assertTrue(resp.headers().firstValue("Location").isPresent(),
+            "PUT server must carry a Location header for the SDK poller to follow");
 
         HttpResponse<String> connectResp = send("GET",
             BASE + "/devstoreaccount1-postgres/flexibleServers/" + SERVER + "/connect", null);
@@ -155,15 +157,14 @@ class PostgresCompatibilityTest {
 
     @Test
     @Order(30)
-    @DisplayName("PUT database registers it and returns 200/201")
+    @DisplayName("PUT database registers it and returns 202")
     void createDatabase() throws Exception {
         String dbBody = "{\"properties\":{\"charset\":\"UTF8\",\"collation\":\"en_US.utf8\"}}";
 
         HttpResponse<String> resp = send("PUT",
             ARM_BASE + "/flexibleServers/" + SERVER + "/databases/" + DB + API,
             dbBody, Duration.ofSeconds(60));
-        assertTrue(resp.statusCode() == 200 || resp.statusCode() == 201,
-            "PUT database failed (" + resp.statusCode() + "): " + resp.body());
+        assertEquals(202, resp.statusCode(), "PUT database failed: " + resp.body());
         assertTrue(resp.body().contains("\"name\":\"" + DB + "\""), "db name in response");
     }
 
@@ -258,8 +259,7 @@ class PostgresCompatibilityTest {
         String ruleUrl = ARM_BASE + "/flexibleServers/" + SERVER + "/firewallRules/" + ruleName + API;
 
         HttpResponse<String> putResp = send("PUT", ruleUrl, ruleBody);
-        assertTrue(putResp.statusCode() == 200 || putResp.statusCode() == 201,
-            "PUT firewall rule: " + putResp.body());
+        assertEquals(202, putResp.statusCode(), "PUT firewall rule: " + putResp.body());
 
         HttpResponse<String> getResp = send("GET", ruleUrl, null);
         assertEquals(200, getResp.statusCode());
@@ -285,7 +285,7 @@ class PostgresCompatibilityTest {
 
         HttpResponse<String> putResp = send("PUT", cfgUrl,
             "{\"properties\":{\"value\":\"200\",\"source\":\"user-override\"}}");
-        assertEquals(200, putResp.statusCode(), "PUT configuration: " + putResp.body());
+        assertEquals(202, putResp.statusCode(), "PUT configuration: " + putResp.body());
 
         HttpResponse<String> getResp = send("GET", cfgUrl, null);
         assertEquals(200, getResp.statusCode());

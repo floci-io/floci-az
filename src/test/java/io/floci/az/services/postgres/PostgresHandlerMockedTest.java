@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 /**
@@ -54,15 +55,16 @@ class PostgresHandlerMockedTest {
     private void createServer(String name) {
         given().contentType("application/json").body(SERVER_BODY)
             .when().put(BASE + "/flexibleServers/" + name + API)
-            .then().statusCode(201);
+            .then().statusCode(202);
     }
 
     @Test
-    @DisplayName("PUT server returns 201 with state=Ready, provisioningState=Succeeded and no localPort")
+    @DisplayName("PUT server returns 202 with state=Ready, provisioningState=Succeeded and no localPort")
     void putServerReady() {
+        // 202 is the only create status both azurerm 3.x and 4.x accept (see PostgresHandler javadoc).
         given().contentType("application/json").body(SERVER_BODY)
             .when().put(BASE + "/flexibleServers/pgserver" + API)
-            .then().statusCode(201)
+            .then().statusCode(202)
             .body("name", equalTo("pgserver"))
             .body("type", equalTo("Microsoft.DBforPostgreSQL/flexibleServers"))
             .body("sku.name", equalTo("Standard_B1ms"))
@@ -74,6 +76,56 @@ class PostgresHandlerMockedTest {
             .body("properties.storage.storageSizeGB", equalTo(32))
             .body("properties.fullyQualifiedDomainName", notNullValue())
             .body("properties", not(hasKey("localPort")));
+    }
+
+    @Test
+    @DisplayName("PUT existing server is idempotent update and still returns 202")
+    void putServerIdempotentUpdate() {
+        createServer("idempotent");
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(BASE + "/flexibleServers/idempotent" + API)
+            .then().statusCode(202)
+            .body("name", equalTo("idempotent"))
+            .body("properties.provisioningState", equalTo("Succeeded"));
+    }
+
+    @Test
+    @DisplayName("mutating responses carry a Location header the client can poll to completion")
+    void acceptedResponsesArePollable() {
+        // The go-azure-sdk poller follows Location and finishes once the resource reports a
+        // terminal provisioningState — this replays that exact two-step exchange.
+        String location = given().contentType("application/json").body(SERVER_BODY)
+            .when().put(BASE + "/flexibleServers/pollme" + API)
+            .then().statusCode(202)
+            .header("Location", notNullValue())
+            .extract().header("Location");
+
+        assertThat(location, containsString("/flexibleServers/pollme"));
+        assertThat(location, containsString("api-version="));
+
+        given().when().get(location)
+            .then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Succeeded"));
+    }
+
+    @Test
+    @DisplayName("child resources answer 202 with a pollable Location too")
+    void childResourcesAreAccepted() {
+        createServer("children");
+
+        String dbLocation = given().contentType("application/json")
+            .body("{\"properties\":{\"charset\":\"UTF8\",\"collation\":\"en_US.utf8\"}}")
+            .when().put(BASE + "/flexibleServers/children/databases/appdb" + API)
+            .then().statusCode(202)
+            .extract().header("Location");
+        given().when().get(dbLocation).then().statusCode(200).body("name", equalTo("appdb"));
+
+        String fwLocation = given().contentType("application/json")
+            .body("{\"properties\":{\"startIpAddress\":\"0.0.0.0\",\"endIpAddress\":\"255.255.255.255\"}}")
+            .when().put(BASE + "/flexibleServers/children/firewallRules/AllowAll" + API)
+            .then().statusCode(202)
+            .extract().header("Location");
+        given().when().get(fwLocation).then().statusCode(200).body("name", equalTo("AllowAll"));
     }
 
     @Test
@@ -97,7 +149,7 @@ class PostgresHandlerMockedTest {
         given().contentType("application/json")
             .body("{\"sku\":{\"name\":\"Standard_B2s\",\"tier\":\"Burstable\"}}")
             .when().patch(BASE + "/flexibleServers/patchme" + API)
-            .then().statusCode(200)
+            .then().statusCode(202)
             .body("sku.name", equalTo("Standard_B2s"))
             .body("properties.administratorLogin", equalTo("psqladmin"));
     }
@@ -110,7 +162,7 @@ class PostgresHandlerMockedTest {
         given().contentType("application/json")
             .body("{\"properties\":{\"charset\":\"UTF8\",\"collation\":\"en_US.utf8\"}}")
             .when().put(BASE + "/flexibleServers/dbhost/databases/appdb" + API)
-            .then().statusCode(201)
+            .then().statusCode(202)
             .body("name", equalTo("appdb"))
             .body("properties.charset", equalTo("UTF8"));
 
@@ -136,7 +188,7 @@ class PostgresHandlerMockedTest {
         given().contentType("application/json")
             .body("{\"properties\":{\"startIpAddress\":\"0.0.0.0\",\"endIpAddress\":\"255.255.255.255\"}}")
             .when().put(BASE + "/flexibleServers/fwhost/firewallRules/AllowAll" + API)
-            .then().statusCode(201)
+            .then().statusCode(202)
             .body("properties.startIpAddress", equalTo("0.0.0.0"));
 
         given().when().get(BASE + "/flexibleServers/fwhost/firewallRules" + API)
@@ -155,7 +207,7 @@ class PostgresHandlerMockedTest {
         given().contentType("application/json")
             .body("{\"properties\":{\"value\":\"200\",\"source\":\"user-override\"}}")
             .when().put(BASE + "/flexibleServers/cfghost/configurations/max_connections" + API)
-            .then().statusCode(200)
+            .then().statusCode(202)
             .body("name", equalTo("max_connections"))
             .body("properties.value", equalTo("200"));
 

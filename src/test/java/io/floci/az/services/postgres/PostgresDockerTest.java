@@ -75,13 +75,16 @@ class PostgresDockerTest {
 
     @Test
     @Order(1)
-    @DisplayName("PUT server starts a container and returns 201 with provisioningState=Succeeded + localPort")
+    @DisplayName("PUT server starts a container and returns 202 with provisioningState=Succeeded + localPort")
     void createServer() {
         given().post("/_admin/reset").then().statusCode(204);
 
+        // 202 + Location: the create shape both azurerm 3.x and 4.x accept, answered only once
+        // the container is actually up, so the client's first poll already sees Succeeded.
         localPort = given().contentType("application/json").body(CREATE_BODY)
             .when().put(PG_PATH + API)
-            .then().statusCode(201)
+            .then().statusCode(202)
+            .header("Location", containsString(NAME))
             .body("name", equalTo(NAME))
             .body("properties.provisioningState", equalTo("Succeeded"))
             .body("properties.state", equalTo("Ready"))
