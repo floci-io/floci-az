@@ -25,6 +25,26 @@ public class BlobServiceTest {
     }
 
     @Test
+    void getBlobServicePropertiesReturnsXml() {
+        given()
+            .when().get("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/xml"))
+            .body(containsString("<StorageServiceProperties>"));
+    }
+
+    @Test
+    void setBlobServicePropertiesReturns202() {
+        given()
+            .contentType("application/xml")
+            .body("<StorageServiceProperties><Logging><Version>1.0</Version></Logging></StorageServiceProperties>")
+            .when().put("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(202);
+    }
+
+    @Test
     void createAndDeleteContainer() {
         given()
             .when().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)

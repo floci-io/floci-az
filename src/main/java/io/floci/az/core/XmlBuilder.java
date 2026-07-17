@@ -108,6 +108,12 @@ public final class XmlBuilder {
         return sb.toString();
     }
 
+    /** Same as {@link #build()} — guards against a builder leaking into a response body verbatim. */
+    @Override
+    public String toString() {
+        return build();
+    }
+
     /**
      * Escapes the five XML special characters: {@code & < > " '}.
      * Returns an empty string for null or empty input.

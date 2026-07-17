@@ -6,6 +6,7 @@ import com.azure.storage.queue.QueueServiceClientBuilder;
 import com.azure.storage.queue.models.PeekedMessageItem;
 import com.azure.storage.queue.models.QueueItem;
 import com.azure.storage.queue.models.QueueMessageItem;
+import com.azure.storage.queue.models.QueueServiceProperties;
 import com.azure.storage.queue.models.QueueStorageException;
 import com.azure.storage.queue.models.QueuesSegmentOptions;
 import com.azure.storage.queue.models.UpdateMessageResult;
@@ -218,5 +219,16 @@ class QueueCompatibilityTest {
         QueueStorageException ex = assertThrows(QueueStorageException.class,
             () -> queue.receiveMessages(1).stream().toList());
         assertEquals(404, ex.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("service properties: getProperties returns StorageServiceProperties XML")
+    void getServiceProperties() {
+        QueueServiceProperties props = client.getProperties();
+
+        assertNotNull(props);
+        assertNotNull(props.getAnalyticsLogging());
+        assertNotNull(props.getHourMetrics());
+        assertNotNull(props.getMinuteMetrics());
     }
 }

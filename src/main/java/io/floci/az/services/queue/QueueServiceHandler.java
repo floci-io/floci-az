@@ -94,7 +94,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                 if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getQueueServiceProperties();
                 } else {
-                    response = Response.ok().build();
+                    response = Response.accepted().build();
                 }
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
@@ -172,7 +172,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                 .end("MinuteMetrics")
                 .selfClose("Cors")
             .end("StorageServiceProperties")
-            .toString();
+            .build();
         return Response.ok(xml, "application/xml").build();
     }
 
