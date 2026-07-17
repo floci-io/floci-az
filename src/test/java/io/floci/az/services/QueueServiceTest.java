@@ -20,6 +20,16 @@ public class QueueServiceTest {
     }
 
     @Test
+    void getQueueServicePropertiesReturnsXml() {
+        given()
+            .when().get("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/xml"))
+            .body(containsString("<StorageServiceProperties>"));
+    }
+
+    @Test
     void createAndDeleteQueue() {
         given()
             .when().put("/{account}/{queue}", ACCOUNT, QUEUE)

@@ -9,6 +9,7 @@ import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
+import com.azure.storage.blob.models.BlobServiceProperties;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
 import com.azure.storage.blob.models.ListBlobsOptions;
@@ -382,5 +383,16 @@ class BlobCompatibilityTest {
         assertEquals(412, ex.getStatusCode());
 
         client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("service properties: getProperties returns StorageServiceProperties XML")
+    void getServiceProperties() {
+        BlobServiceProperties props = client.getProperties();
+
+        assertNotNull(props);
+        assertNotNull(props.getLogging());
+        assertNotNull(props.getHourMetrics());
+        assertNotNull(props.getMinuteMetrics());
     }
 }

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **table:** `GET /{account}-table?restype=service&comp=properties` (Get Table Service Properties) now returns the `<StorageServiceProperties>` XML document instead of falling through to Query Tables and returning list-tables JSON, which broke `Azure.Data.Tables` `TableServiceClient.GetProperties` with an XML parse error ([#132](https://github.com/floci-io/floci-az/issues/132))
+- **blob, queue:** Get Blob/Queue Service Properties returned the Java identity string (`io.floci.az.core.XmlBuilder@…`) instead of the built XML — the handlers called `toString()` on `XmlBuilder`, which did not override it. `XmlBuilder.toString()` now delegates to `build()` ([#131](https://github.com/floci-io/floci-az/issues/131))
+
 ## [0.9.0] - 2026-07-09
 
 ### Added

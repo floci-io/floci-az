@@ -8,6 +8,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -79,6 +80,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     public Response handle(AzureRequest request) {
         String path = request.resourcePath();
         String method = request.method();
+        Map<String, String> query = request.queryParams();
 
         LOGGER.infof("TableService handling: %s %s", method, path);
 
@@ -93,7 +95,13 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         Response response;
-        if (path.startsWith("Tables")) {
+        if ("service".equals(query.get("restype")) && "properties".equals(query.get("comp"))) {
+            if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+                response = getTableServiceProperties();
+            } else {
+                response = Response.ok().build();
+            }
+        } else if (path.startsWith("Tables")) {
             if ("GET".equalsIgnoreCase(method)) {
                 response = listTables(request);
             } else if ("POST".equalsIgnoreCase(method)) {
@@ -137,6 +145,32 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("DataServiceVersion", "3.0;")
                 .build();
+    }
+
+    private Response getTableServiceProperties() {
+        String xml = new XmlBuilder()
+            .start("StorageServiceProperties")
+                .start("Logging")
+                    .elem("Version", "1.0")
+                    .elem("Delete", "false")
+                    .elem("Read", "false")
+                    .elem("Write", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("Logging")
+                .start("HourMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("HourMetrics")
+                .start("MinuteMetrics")
+                    .elem("Version", "1.0")
+                    .elem("Enabled", "false")
+                    .start("RetentionPolicy").elem("Enabled", "false").end("RetentionPolicy")
+                .end("MinuteMetrics")
+                .selfClose("Cors")
+            .end("StorageServiceProperties")
+            .build();
+        return Response.ok(xml, "application/xml").build();
     }
 
     // -------------------------------------------------------------------------
