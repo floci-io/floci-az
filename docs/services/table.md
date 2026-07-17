@@ -20,6 +20,8 @@ authentication.
   (`x-ms-continuation-Next*` headers)
 - **Optimistic concurrency** — `ETag` / `If-Match` on update and delete; a stale ETag is rejected
 - **Batch transactions** — `$batch` multipart change sets are applied atomically
+- **Service properties** — `restype=service&comp=properties` returns a static
+  `<StorageServiceProperties>` document (logging and metrics disabled); Set is accepted as a no-op
 
 ## Endpoint
 

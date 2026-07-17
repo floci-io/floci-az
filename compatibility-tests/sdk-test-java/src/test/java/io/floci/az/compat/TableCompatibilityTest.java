@@ -7,6 +7,7 @@ import com.azure.data.tables.models.ListEntitiesOptions;
 import com.azure.data.tables.models.TableEntity;
 import com.azure.data.tables.models.TableEntityUpdateMode;
 import com.azure.data.tables.models.TableServiceException;
+import com.azure.data.tables.models.TableServiceProperties;
 import com.azure.data.tables.models.TableTransactionAction;
 import com.azure.data.tables.models.TableTransactionActionType;
 import org.junit.jupiter.api.*;
@@ -279,5 +280,16 @@ class TableCompatibilityTest {
         assertEquals(404, ex.getResponse().getStatusCode());
 
         client.deleteTable(name);
+    }
+
+    @Test
+    @DisplayName("service properties: getProperties returns StorageServiceProperties XML")
+    void getServiceProperties() {
+        TableServiceProperties props = client.getProperties();
+
+        assertNotNull(props);
+        assertNotNull(props.getLogging());
+        assertNotNull(props.getHourMetrics());
+        assertNotNull(props.getMinuteMetrics());
     }
 }
