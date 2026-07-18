@@ -507,7 +507,7 @@ public interface EmulatorConfig {
         String acceptEula();
 
         /** Docker image for the SQL Server container. */
-        @WithDefault("mcr.microsoft.com/azure-sql-edge:latest")
+        @WithDefault("mcr.microsoft.com/mssql/server:2025-latest")
         String image();
 
         /**

@@ -21,7 +21,7 @@ class SqlConnectionInfoTest {
         assertTrue(jdbc.startsWith("jdbc:sqlserver://localhost:1433"), "should start with jdbc:sqlserver://localhost:1433");
         assertTrue(jdbc.contains("databaseName=mydb"), "should include databaseName");
         assertTrue(jdbc.contains("trustServerCertificate=true"), "should trust server cert");
-        assertTrue(jdbc.contains("encrypt=true"), "should use encrypt=true (azure-sql-edge requires TLS)");
+        assertTrue(jdbc.contains("encrypt=true"), "should use encrypted SQL Server connections");
     }
 
     @Test
@@ -33,7 +33,7 @@ class SqlConnectionInfoTest {
         assertTrue(ado.contains("Initial Catalog=orders"), "database");
         assertTrue(ado.contains("User ID=sa"), "login");
         assertTrue(ado.contains("TrustServerCertificate=True"), "trust cert");
-        assertTrue(ado.contains("Encrypt=True"), "encrypt=true (azure-sql-edge requires TLS)");
+        assertTrue(ado.contains("Encrypt=True"), "should use encrypted SQL Server connections");
     }
 
     @Test
