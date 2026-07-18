@@ -33,9 +33,9 @@ public record SqlConnectionInfo(
                                        String database) {
         String db = (database != null && !database.isBlank()) ? database : "master";
 
-        // encrypt=true + trustServerCertificate=true: use TLS (required by azure-sql-edge and
-        // mssql-jdbc 12.x default) but accept the self-signed container certificate without
-        // validating the chain.  encrypt=false causes Connection reset on azure-sql-edge.
+        // encrypt=true + trustServerCertificate=true: use the mssql-jdbc 12.x secure default
+        // while accepting the self-signed SQL Server container certificate without validating
+        // the chain.
         String jdbc = String.format(
             "jdbc:sqlserver://%s:%d;databaseName=%s;user=%s;password=%s;"
             + "encrypt=true;trustServerCertificate=true;",

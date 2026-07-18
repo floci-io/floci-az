@@ -39,7 +39,7 @@ These ports are resolved at runtime via the Docker daemon — you never configur
 
 | Service | Sidecar container | Protocol | How to discover port |
 |---|---|---|---|
-| Azure SQL Database | `azure-sql-edge` | TDS (SQL Server) | `GET /{account}-sql/servers/{name}/connect` → `port` field |
+| Azure SQL Database | `mssql/server` | TDS (SQL Server) | `GET /{account}-sql/servers/{name}/connect` → `port` field |
 | Azure Kubernetes Service | `rancher/k3s` | HTTPS (Kubernetes API) | `POST .../listClusterAdminCredential` → `kubeconfigs[0].value` → `server:` in kubeconfig |
 | Cosmos MongoDB | `mongo` | MongoDB wire | `GET /{account}-cosmosmongo/connect` → `port` field |
 | Cosmos PostgreSQL | `postgres` | PostgreSQL | `GET /{account}-cosmospostgresql/connect` → `port` field |

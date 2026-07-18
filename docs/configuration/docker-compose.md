@@ -67,7 +67,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA: "Y"   # accept the Microsoft SQL Server EULA
-      # FLOCI_AZ_SERVICES_SQL_IMAGE: "mcr.microsoft.com/azure-sql-edge:latest"
+      # FLOCI_AZ_SERVICES_SQL_IMAGE: "mcr.microsoft.com/mssql/server:2025-latest"
 ```
 
 > SQL Server containers bind a random host port directly via Docker — do **not** add those ports
@@ -237,7 +237,7 @@ All variables are optional; the default applies when unset.
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA (required) |
-| `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/azure-sql-edge:latest` | Docker image for SQL Server containers |
+| `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/mssql/server:2025-latest` | Docker image for SQL Server containers |
 | `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for SQL Server to become ready |
 
 ### Azure Functions

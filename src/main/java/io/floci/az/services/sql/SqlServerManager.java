@@ -19,10 +19,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Manages the Docker lifecycle of Azure SQL Server containers.
  *
- * <p>Each logical server maps to one {@code azure-sql-edge} (or configurable)
- * Docker container.  Containers are started on-demand when the first request
- * arrives for a given server name, following the same pattern used by the
- * Cosmos DB engine providers.
+ * <p>Each logical server maps to one SQL Server container. Containers start on demand when the
+ * first request arrives for a given server name, following the same pattern used by the Cosmos DB
+ * engine providers.
  *
  * <p>This class is intentionally free of JDBC / DDL logic.  Database creation
  * and schema migrations are the responsibility of the application (Flyway,
@@ -71,7 +70,6 @@ public class SqlServerManager {
             .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("ACCEPT_EULA", "Y")
             .withEnv("MSSQL_SA_PASSWORD", password)
-            .withEnv("SA_PASSWORD", password)       // azure-sql-edge uses SA_PASSWORD
             .withLogRotation()
             .build();
 
