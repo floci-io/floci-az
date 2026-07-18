@@ -39,7 +39,7 @@ The following services spin up Docker containers on demand and require the Docke
 | Service | Docker image | Data plane |
 |---|---|---|
 | **Azure Functions** | User-provided image | HTTP to container |
-| **Azure SQL Database** | `mcr.microsoft.com/azure-sql-edge:latest` | TDS direct to container port |
+| **Azure SQL Database** | `mcr.microsoft.com/mssql/server:2025-latest` | TDS direct to container port |
 | **Cosmos DB engines** | Various (mongo, postgres, cassandra, …) | Protocol direct to container port |
 | **Azure Kubernetes Service** | `rancher/k3s:latest` | kubectl direct to k3s API server port |
 

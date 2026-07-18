@@ -2,7 +2,7 @@
 
 Compatible with the `mssql-jdbc`, `pyodbc`, `System.Data.SqlClient`, and any TDS-speaking client.
 
-> **Requires Docker** — each logical SQL Server maps to one `azure-sql-edge` container.
+> **Requires Docker** — each logical SQL Server maps to one SQL Server 2025 container.
 > The data plane (TDS/port 1433) goes **directly** to the container; floci-az only handles
 > the management plane (ARM REST API).
 
@@ -81,7 +81,7 @@ curl -s -X PUT \
 ```
 
 > First call starts the container and waits for the SQL Server engine to become ready (~30 s with
-> a cached image, longer on the first pull of `azure-sql-edge`).
+> a cached image, longer on the first pull of the SQL Server image).
 
 ### 2 — Get connection strings
 
@@ -128,8 +128,8 @@ try (Connection conn = DriverManager.getConnection(jdbcUrl);
 }
 ```
 
-> **Important:** use `encrypt=true;trustServerCertificate=true` — `azure-sql-edge` requires TLS,
-> and `encrypt=false` causes `Connection reset` errors with `mssql-jdbc` 12.x.
+> **Important:** use `encrypt=true;trustServerCertificate=true` to accept the container's
+> self-signed certificate while retaining encrypted connections with `mssql-jdbc` 12.x.
 
 ---
 
@@ -296,9 +296,9 @@ floci-az:
   services:
     sql:
       enabled: true
-      mocked: false                                 # false (default) = real azure-sql-edge container (needs accept-eula=Y). true = management plane only, no Docker, no EULA
+      mocked: false                                 # false (default) = real SQL Server container (needs accept-eula=Y). true = management plane only, no Docker, no EULA
       accept-eula: "Y"                              # Required to start containers
-      image: "mcr.microsoft.com/azure-sql-edge:latest"
+      image: "mcr.microsoft.com/mssql/server:2025-latest"
       startup-timeout-seconds: 60
 ```
 
@@ -312,7 +312,7 @@ JDBC endpoint), so the `/connect` endpoints return no usable port.
 | `FLOCI_AZ_SERVICES_SQL_ENABLED` | `true` | Enable or disable the SQL service |
 | `FLOCI_AZ_SERVICES_SQL_MOCKED` | `false` | Mocked mode (management plane only, no Docker, no EULA) |
 | `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA |
-| `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/azure-sql-edge:latest` | Docker image to use for SQL Server containers |
+| `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/mssql/server:2025-latest` | Docker image to use for SQL Server containers |
 | `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for the SQL Server engine to become ready |
 
 ---

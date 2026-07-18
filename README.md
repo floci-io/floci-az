@@ -301,7 +301,7 @@ flowchart LR
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
 | **Service Bus**         | `/{account}-servicebus/` + AMQP `:5673` | Queues, topics, subscriptions (created dynamically); AMQP 1.0 data plane via Artemis sidecar, or mocked (management plane only)                                                                             |
-| **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed `azure-sql-edge` containers; dynamic port allocation                                                                                                               |
+| **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; Docker-backed SQL Server 2025 containers; dynamic port allocation                                                                                                                |
 | **Azure Database for PostgreSQL** | ARM path (`Microsoft.DBforPostgreSQL`) + `/{account}-postgres/` | Flexible servers, databases, firewall rules, configurations; Docker-backed `postgres:17-alpine` containers (no EULA), dynamic port allocation, or mocked |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
 | **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
@@ -380,7 +380,7 @@ Floci AZ uses real Docker containers when in-process emulation would reduce fide
 | Cosmos DB PostgreSQL | `citusdata/citus` | Citus — the exact engine Azure runs |
 | Cosmos DB Cassandra | `scylladb/scylla:6.2` | CQL-compatible drop-in |
 | Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop — standard Gremlin traversals |
-| Azure SQL Database | `mcr.microsoft.com/azure-sql-edge` | SQL Server engine (per server) |
+| Azure SQL Database | `mcr.microsoft.com/mssql/server:2025-latest` | SQL Server engine (per server) |
 | Azure Database for PostgreSQL | `postgres:17-alpine` | PostgreSQL engine (per flexible server) |
 | AKS | `rancher/k3s:latest` | Kubernetes API server via k3s |
 | Azure Cache for Redis | `valkey/valkey:8-alpine` | Redis / Valkey protocol (per cache) |

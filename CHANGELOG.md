@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sql:** replace the retired Azure SQL Edge container with the supported SQL Server 2025 image (`mcr.microsoft.com/mssql/server:2025-latest`) ([#138](https://github.com/floci-io/floci-az/issues/138))
+
 ## [0.9.0] - 2026-07-09
 
 ### Added
