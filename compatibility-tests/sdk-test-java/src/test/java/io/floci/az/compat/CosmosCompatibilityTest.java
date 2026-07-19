@@ -291,4 +291,52 @@ class CosmosCompatibilityTest {
             () -> client.getDatabase("no-such-db-xyz").read());
         assertEquals(404, ex.getStatusCode());
     }
+
+    // --- Time to live ---
+
+    @Test
+    @DisplayName("container TTL: defaultTtl round-trips, expired items disappear, ttl=-1 opts out")
+    void containerTtl() throws InterruptedException {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+
+        CosmosContainerProperties props = new CosmosContainerProperties("events", "/category");
+        props.setDefaultTimeToLiveInSeconds(2);
+        db.createContainer(props);
+        CosmosContainer container = db.getContainer("events");
+
+        assertEquals(Integer.valueOf(2),
+            container.read().getProperties().getDefaultTimeToLiveInSeconds());
+
+        container.createItem(doc("short-lived", "logs"), new PartitionKey("logs"),
+                new CosmosItemRequestOptions());
+        container.createItem(doc("keeper", "logs", "ttl", -1), new PartitionKey("logs"),
+                new CosmosItemRequestOptions());
+
+        // the item using the container default expires within the TTL window
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (true) {
+            try {
+                container.readItem("short-lived", new PartitionKey("logs"), Map.class);
+                if (System.currentTimeMillis() > deadline) fail("item did not expire within 10s");
+                Thread.sleep(250);
+            } catch (CosmosException e) {
+                assertEquals(404, e.getStatusCode());
+                break;
+            }
+        }
+
+        // the ttl=-1 item outlives the container default
+        assertEquals("keeper",
+            container.readItem("keeper", new PartitionKey("logs"), Map.class).getItem().get("id"));
+
+        // replacing the container without a TTL switches it off
+        CosmosContainerProperties replace = container.read().getProperties();
+        replace.setDefaultTimeToLiveInSeconds(null);
+        container.replace(replace);
+        assertNull(container.read().getProperties().getDefaultTimeToLiveInSeconds());
+
+        db.delete();
+    }
 }
