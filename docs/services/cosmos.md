@@ -5,8 +5,9 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 ## Features
 
 - **Databases** — create, get, list, delete (cascade-deletes all containers and documents)
-- **Containers** — create, get, list, delete; configurable partition key path; default indexing policy
+- **Containers** — create, get, list, replace, delete; configurable partition key path; default indexing policy
 - **Documents** — create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
+- **Time to live (TTL)** — container `defaultTtl` (set on create or replace) with per-document `ttl` overrides; expired documents disappear from reads, lists, queries, and batches
 - **Queries** — in-process SQL engine with full Cosmos DB SQL dialect support:
   - `SELECT *`, `SELECT c.field1, c.field2`, `SELECT VALUE c.field`, `SELECT TOP n`
   - `WHERE` with `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `IN`, `BETWEEN`, `NOT`, `AND`, `OR`
@@ -92,6 +93,7 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
 | `POST` | `/dbs/{dbId}/colls` | Create a container |
 | `GET` | `/dbs/{dbId}/colls` | List containers |
 | `GET` | `/dbs/{dbId}/colls/{collId}` | Get a container |
+| `PUT` | `/dbs/{dbId}/colls/{collId}` | Replace container properties (e.g. `defaultTtl`; id and partition key are immutable) |
 | `DELETE` | `/dbs/{dbId}/colls/{collId}` | Delete a container (cascades to documents) |
 
 ### Documents
@@ -243,6 +245,40 @@ curl -X POST .../docs \
   -H "x-ms-documentdb-is-upsert: True" \
   -d '{"id": "laptop-1", "category": "electronics", "price": 999}'
 ```
+
+## Time to live (TTL)
+
+Containers accept Azure's `defaultTtl` property on create and replace (`-1`, or a positive
+number of seconds up to `2147483647`; `0` is rejected with `400`, matching Azure). Documents
+may override it with their own `ttl` property. Expiry follows the
+[Azure TTL semantics](https://learn.microsoft.com/en-us/azure/cosmos-db/time-to-live), measured
+from the document's last modification (`_ts`):
+
+| Container `defaultTtl` | Document `ttl` | Result |
+|---|---|---|
+| absent | anything | TTL disabled — nothing expires |
+| `-1` | absent or `-1` | never expires |
+| `-1` | `m` | expires `m` seconds after `_ts` |
+| `n` | absent | expires `n` seconds after `_ts` |
+| `n` | `-1` | never expires |
+| `n` | `m` | expires `m` seconds after `_ts` |
+
+```bash
+# Create a container whose documents expire after one hour
+curl -X POST http://localhost:4577/devstoreaccount1-cosmos/dbs/mydb/colls \
+  -H "Content-Type: application/json" \
+  -d '{"id": "audit", "partitionKey": {"paths": ["/tenant"], "kind": "Hash"}, "defaultTtl": 3600}'
+
+# Switch TTL off again (omit defaultTtl on replace)
+curl -X PUT http://localhost:4577/devstoreaccount1-cosmos/dbs/mydb/colls/audit \
+  -H "Content-Type: application/json" \
+  -d '{"id": "audit"}'
+```
+
+Expired documents vanish from point reads, lists, queries, and transactional batches
+immediately (and no longer block re-creating the same id). Physical deletion is lazy — an
+expired document is purged when a read next encounters it — mirroring Azure's contract that
+expired items leave query results at once while background deletion timing is unspecified.
 
 ## Storage Mode
 

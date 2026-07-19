@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **cosmos:** container `DefaultTimeToLive` (TTL) support. `defaultTtl` is accepted and validated on container create and on the (new) container replace (`PUT /dbs/{db}/colls/{coll}`, id and partition key immutable), echoed on container reads, and enforced with Azure's semantics measured from `_ts`: absent = TTL off (per-item `ttl` inert), `-1` = TTL on with no default expiry, `n` = expire after `n` seconds, with per-document `ttl` overrides (`-1` opts out). Expired documents immediately vanish from point reads, lists, queries, and transactional batches, no longer block re-creating the same id, and are purged lazily when encountered — mirroring Azure's contract that expired items leave query results at once while background deletion timing is unspecified ([#126](https://github.com/floci-io/floci-az/issues/126))
+
 ## [0.9.0] - 2026-07-09
 
 ### Added
