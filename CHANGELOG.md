@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **tls:** the emulator now starts with `FLOCI_AZ_TLS_ENABLED=true` on Windows hosts. `TlsConfigSource` fed native backslash paths into `quarkus.http.ssl.certificate.*`, and SmallRye Config treats backslashes in property values as escape characters, so startup died with `NoSuchFileException: D:Devfloci-az.datatls...`. Certificate and key paths (generated and user-provided) are now emitted with forward slashes on Windows, which the Windows file APIs accept; on other platforms paths are passed through untouched since a backslash is a legal filename character there
+
 ## [0.9.0] - 2026-07-09
 
 ### Added
