@@ -301,8 +301,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (store.get(key).isPresent()) return errorResponse(409, "Conflict", "Container '" + id + "' already exists.");
 
         Map<String, Object> indexingPolicy;
+        Integer defaultTtl;
         try {
             indexingPolicy = CosmosIndexingPolicy.normalize(body.get("indexingPolicy"));
+            defaultTtl     = CosmosTtl.normalizeDefaultTtl(body.get("defaultTtl"));
         } catch (IllegalArgumentException e) {
             return errorResponse(400, "BadRequest", e.getMessage());
         }
@@ -325,6 +327,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         coll.put("_ts",            now.getEpochSecond());
         coll.put("partitionKey",   pk);
         coll.put("indexingPolicy", indexingPolicy);
+        if (defaultTtl != null) coll.put("defaultTtl", defaultTtl);
         coll.put("_docs",          "docs/");
         coll.put("_sprocs",        "sprocs/");
         coll.put("_triggers",      "triggers/");
@@ -345,10 +348,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     /**
      * PUT /dbs/{db}/colls/{coll} — replace container properties.
      *
-     * <p>Azure only allows mutable settings such as the indexing policy to
-     * change on replace; the id and partition key are immutable.  SDKs use
-     * this to update the indexing policy of an existing container (e.g. to
-     * add composite indexes).</p>
+     * <p>Azure only allows mutable settings to change on replace; the id and
+     * partition key are immutable.  SDKs use this to update the indexing
+     * policy of an existing container (e.g. to add composite indexes), and to
+     * change {@code defaultTtl} — enable TTL, adjust it, or (by omitting the
+     * property) switch it off.</p>
      */
     private Response replaceContainer(AzureRequest req, String dbId, String collId) {
         String key = collKey(req.accountName(), dbId, collId);
@@ -372,8 +376,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
 
         Map<String, Object> indexingPolicy;
+        Integer defaultTtl;
         try {
             indexingPolicy = CosmosIndexingPolicy.normalize(body.get("indexingPolicy"));
+            defaultTtl     = CosmosTtl.normalizeDefaultTtl(body.get("defaultTtl"));
         } catch (IllegalArgumentException e) {
             return errorResponse(400, "BadRequest", e.getMessage());
         }
@@ -381,6 +387,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Instant now  = Instant.now();
         String  etag = newEtag();
         coll.put("indexingPolicy", indexingPolicy);
+        if (defaultTtl != null) coll.put("defaultTtl", defaultTtl);
+        else                    coll.remove("defaultTtl");   // absent on replace switches TTL off
         coll.put("_etag", quoted(etag));
         coll.put("_ts",   now.getEpochSecond());
 
@@ -516,10 +524,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     // -----------------------------------------------------------------------
 
     private Response listDocuments(AzureRequest req, String dbId, String collId) {
-        if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
-        String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
-        List<Map<String, Object>> items = store.scan(k -> k.startsWith(prefix))
-                .stream().map(this::parseData).collect(Collectors.toList());
+        Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
+        if (collFound.isEmpty()) return notFound(collId);
+        List<Map<String, Object>> items =
+                liveDocuments(req.accountName(), dbId, collId, containerDefaultTtl(collFound));
         return listResponse("Documents", items, collRid(req.accountName(), dbId, collId));
     }
 
@@ -538,7 +546,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String pkEnc  = encodeKey(pk);
         String docKey = docKey(req.accountName(), dbId, collId, pkEnc, id);
 
-        if (!upsert && store.get(docKey).isPresent())
+        if (!upsert && liveDoc(store.get(docKey), collMeta.get("defaultTtl")).isPresent())
             return errorResponse(409, "Conflict", "Document with id '" + id + "' already exists.");
 
         Instant now  = Instant.now();
@@ -574,11 +582,12 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String pkEnc  = encodeKey(pk);
         String docKey = docKey(req.accountName(), dbId, collId, pkEnc, docId);
 
-        if (store.get(docKey).isEmpty()) return notFound(docId);
+        Optional<StoredObject> existing = liveDoc(store.get(docKey), collMeta.get("defaultTtl"));
+        if (existing.isEmpty()) return notFound(docId);
 
         Instant now  = Instant.now();
         String  etag = newEtag();
-        Map<String, Object> old = parseData(store.get(docKey).get());
+        Map<String, Object> old = parseData(existing.get());
 
         body.put("_rid",         old.getOrDefault("_rid", newRid(12)));
         body.put("_self",        "dbs/" + dbId + "/colls/" + collId + "/docs/" + docId);
@@ -752,6 +761,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         String pk    = extractPartitionKeyValue(req);
         String pkEnc = encodeKey(pk);
+        Object defaultTtl = containerDefaultTtl(collFound);
 
         List<Map<String, Object>> operations;
         try {
@@ -769,11 +779,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                     ? (Map<String, Object>) m : null;
 
             results.add(switch (opType) {
-                case "Create"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, false);
-                case "Upsert"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, true);
-                case "Read"    -> batchRead(req.accountName(), dbId, collId, pkEnc, docId);
-                case "Replace" -> batchReplace(req.accountName(), dbId, collId, pkEnc, docId, body);
-                case "Delete"  -> batchDelete(req.accountName(), dbId, collId, pkEnc, docId);
+                case "Create"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, false, defaultTtl);
+                case "Upsert"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, true, defaultTtl);
+                case "Read"    -> batchRead(req.accountName(), dbId, collId, pkEnc, docId, defaultTtl);
+                case "Replace" -> batchReplace(req.accountName(), dbId, collId, pkEnc, docId, body, defaultTtl);
+                case "Delete"  -> batchDelete(req.accountName(), dbId, collId, pkEnc, docId, defaultTtl);
                 default        -> batchResultError(400);
             });
         }
@@ -792,7 +802,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> batchCreate(String account, String dbId, String collId,
-            String pk, String pkEnc, Map<String, Object> body, boolean upsert) {
+            String pk, String pkEnc, Map<String, Object> body, boolean upsert, Object defaultTtl) {
         if (body == null) return batchResultError(400);
 
         body = new LinkedHashMap<>(body);
@@ -800,7 +810,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("id", id);
 
         String key     = docKey(account, dbId, collId, pkEnc, id);
-        boolean existed = store.get(key).isPresent();
+        boolean existed = liveDoc(store.get(key), defaultTtl).isPresent();
         if (!upsert && existed) return batchResultError(409);
 
         Instant now  = Instant.now();
@@ -818,16 +828,16 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     private Map<String, Object> batchRead(String account, String dbId, String collId,
-            String pkEnc, String docId) {
+            String pkEnc, String docId, Object defaultTtl) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
+        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
         if (found.isEmpty()) {
             // Fallback scan for cases where PK is unknown/encoded differently
             String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst();
+            found = liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
+                    .stream().findFirst(), defaultTtl);
         }
         if (found.isEmpty()) return batchResultError(404);
 
@@ -837,11 +847,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> batchReplace(String account, String dbId, String collId,
-            String pkEnc, String docId, Map<String, Object> body) {
+            String pkEnc, String docId, Map<String, Object> body, Object defaultTtl) {
         if (docId == null || body == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
+        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
 
         body = new LinkedHashMap<>(body);
@@ -862,15 +872,15 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     private Map<String, Object> batchDelete(String account, String dbId, String collId,
-            String pkEnc, String docId) {
+            String pkEnc, String docId, Object defaultTtl) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
+        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
         if (found.isEmpty()) {
             String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst();
+            found = liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
+                    .stream().findFirst(), defaultTtl);
         }
         if (found.isEmpty()) return batchResultError(404);
 
@@ -924,9 +934,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                     + "that it can be served from.\"}]}");
         }
 
-        String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
-        List<Map<String, Object>> allDocs = store.scan(k -> k.startsWith(prefix))
-                .stream().map(this::parseData).collect(Collectors.toList());
+        List<Map<String, Object>> allDocs =
+                liveDocuments(req.accountName(), dbId, collId, containerDefaultTtl(collFound));
 
         CosmosQueryEngine.QueryResult result = queryEngine.execute(parsed, allDocs);
 
@@ -1010,19 +1019,53 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     // -----------------------------------------------------------------------
 
     private StoredObject findDoc(AzureRequest req, String dbId, String collId, String docId) {
-        // Fast path: construct exact key using partition key from header
         Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
+        Object defaultTtl = containerDefaultTtl(collFound);
+        // Fast path: construct exact key using partition key from header
         if (collFound.isPresent()) {
             String pk    = extractPartitionKeyValue(req);
             String pkEnc = encodeKey(pk);
             String exact = docKey(req.accountName(), dbId, collId, pkEnc, docId);
-            Optional<StoredObject> found = store.get(exact);
+            Optional<StoredObject> found = liveDoc(store.get(exact), defaultTtl);
             if (found.isPresent()) return found.get();
         }
         // Fallback: scan (handles missing PK header or cross-partition reads)
         String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
-        return store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                .stream().findFirst().orElse(null);
+        return liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
+                .stream().findFirst(), defaultTtl).orElse(null);
+    }
+
+    // -----------------------------------------------------------------------
+    // TTL enforcement (lazy: expired docs vanish from reads and are purged)
+    // -----------------------------------------------------------------------
+
+    /** The container's stored {@code defaultTtl} value, or {@code null} when TTL is off. */
+    private Object containerDefaultTtl(Optional<StoredObject> collFound) {
+        return collFound.map(o -> parseData(o).get("defaultTtl")).orElse(null);
+    }
+
+    /** Returns the doc when present and not expired; an expired doc is purged and treated as absent. */
+    private Optional<StoredObject> liveDoc(Optional<StoredObject> found, Object defaultTtl) {
+        if (found.isPresent()
+                && CosmosTtl.isExpired(parseData(found.get()), defaultTtl, Instant.now().getEpochSecond())) {
+            store.delete(found.get().key());
+            return Optional.empty();
+        }
+        return found;
+    }
+
+    /** All non-expired docs of a container; expired docs encountered by the scan are purged. */
+    private List<Map<String, Object>> liveDocuments(String account, String dbId, String collId,
+            Object defaultTtl) {
+        String prefix = account + K_DOC + dbId + "|" + collId + "|";
+        long now = Instant.now().getEpochSecond();
+        List<Map<String, Object>> live = new ArrayList<>();
+        for (StoredObject obj : store.scan(k -> k.startsWith(prefix))) {
+            Map<String, Object> doc = parseData(obj);
+            if (CosmosTtl.isExpired(doc, defaultTtl, now)) store.delete(obj.key());
+            else live.add(doc);
+        }
+        return live;
     }
 
     // -----------------------------------------------------------------------
