@@ -3,6 +3,7 @@
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
         test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
+        test-entra-node test-entra-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean
@@ -246,6 +247,10 @@ test-blob-node:
 	@echo "==> Blob Storage Node.js SDK compatibility tests (Docker)"
 	$(call COMPAT_SESSION,node,blob-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts)
 
+test-entra-node:
+	@echo "==> Entra ID / Graph Node.js SDK compatibility tests (Docker)"
+	$(call COMPAT_SESSION,node,entra-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/entra.test.ts)
+
 test-apim-java:
 	@echo "==> API Management Java compatibility tests (Docker)"
 	$(call COMPAT_SESSION,java,apim-java,,--entrypoint bash,-c 'mvn test -Dtest=ApiManagementCompatibilityTest; status=$$?; cp target/surefire-reports/TEST-*.xml /results/ 2>/dev/null || true; exit $$status')
@@ -289,6 +294,12 @@ test-blob-node-local: require-emulator
 	@cd $(NODE_DIR) && \
 	npm install --silent && \
 	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) npm test -- --runTestsByPath tests/blob.test.ts
+
+test-entra-node-local: require-emulator
+	@echo "==> Entra ID / Graph Node.js SDK compatibility tests (local emulator)"
+	@cd $(NODE_DIR) && \
+	npm install --silent && \
+	FLOCI_AZ_ENDPOINT=http://127.0.0.1:$(PORT) npm test -- --runTestsByPath tests/entra.test.ts
 
 test-blob-local:
 	@echo "==> Blob Storage SDK compatibility tests (local emulator)"
