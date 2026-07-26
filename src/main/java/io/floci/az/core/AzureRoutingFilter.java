@@ -164,7 +164,7 @@ public class AzureRoutingFilter {
 
     /** Service types dispatched by a stage directly rather than named in a handler's routing table. */
     private static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of(
-        "managedidentity", "entra", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
+        "managedidentity", "entra", "graph", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
         "blob", "queue" // the storage fallback in resolveStorageServiceType
     );
 
@@ -408,9 +408,15 @@ public class AzureRoutingFilter {
         return ctx.path().startsWith("metadata/endpoints") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
     }
 
-    /** Microsoft Graph API — called by the azurerm provider for service principal discovery. */
+    /**
+     * Microsoft Graph API — a narrow slice at {@code /v1.0/...}: service principal discovery (used by
+     * the azurerm provider) plus group-membership management ({@code GraphServiceHandler}).
+     */
     private Outcome routeMicrosoftGraph(RoutingContext ctx) {
-        return ctx.path().startsWith("v1.0/") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
+        if (!ctx.path().startsWith("v1.0/")) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        return dispatchOrServiceDisabled(ctx, "graph", "graph", ctx.path());
     }
 
     private Outcome routeMonitor(RoutingContext ctx) {

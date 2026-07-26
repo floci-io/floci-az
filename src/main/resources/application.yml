@@ -197,6 +197,8 @@ floci-az:
       token-lifetime-seconds: 3599
       validate-tokens: false        # true = BearerTokenVerifier validates signature/claims (default off: permissive dev auth)
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
+    graph:
+      enabled: true                 # Microsoft Graph slice at /v1.0/...: servicePrincipals discovery + group membership
     # docker-network:  # optional: shared Docker network for sidecar containers
     email:
       enabled: true

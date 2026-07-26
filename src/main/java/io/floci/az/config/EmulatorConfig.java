@@ -132,6 +132,7 @@ public interface EmulatorConfig {
         AcrConfig              acr();
         MonitorConfig          monitor();
         EntraConfig            entra();
+        GraphConfig            graph();
         ArmConfig              arm();
         NetworkConfig          network();
         EventGridConfig        eventGrid();
@@ -230,6 +231,16 @@ public interface EmulatorConfig {
          * {@code {storage.persistent-path}/entra}.
          */
         Optional<String> signingKeyPath();
+    }
+
+    /**
+     * Microsoft Graph — a narrow slice at {@code /v1.0/...}: service principal discovery
+     * (used by the azurerm provider) and group-membership management, backed by the same
+     * directory data as {@link EntraConfig}.
+     */
+    interface GraphConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ApimConfig {

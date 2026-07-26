@@ -121,6 +121,10 @@ public class BannerLogger {
                     + "  validate-tokens:" + config.services().entra().validateTokens();
             sb.append(String.format("   %-9s [%s]  %s\n", "entra", "enabled ", entraInfo));
         }
+        if (config.services().graph().enabled()) {
+            sb.append(String.format("   %-9s [%s]  %s\n", "graph", "enabled ",
+                    "Microsoft Graph slice (/v1.0/servicePrincipals, users/getMemberGroups, groups/members)"));
+        }
         sb.append(String.format("   %-9s [%s]  %s\n", "arm",
                 config.services().arm().enabled() ? "enabled " : "disabled",
                 "management plane (/providers, /subscriptions, resource groups)"));

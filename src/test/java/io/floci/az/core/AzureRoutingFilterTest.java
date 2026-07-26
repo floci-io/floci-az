@@ -30,8 +30,8 @@ class AzureRoutingFilterTest {
 
     // ── Anti-routes: deliberate 404s (uncovered elsewhere) ──────────────────────
 
-    // The filter returns null for these (not routed to any service handler) so go-azure-sdk does
-    // not detect Azure Stack / a Graph endpoint; the downstream fallthrough currently answers 200.
+    // The filter returns null for metadata/endpoints (not routed to any service handler) so
+    // go-azure-sdk does not detect Azure Stack; the downstream fallthrough currently answers 200.
     // Characterizes the filter's null-return decision, which A4 must preserve.
 
     @Test
@@ -39,8 +39,10 @@ class AzureRoutingFilterTest {
         given().when().get("/metadata/endpoints").then().statusCode(200);
     }
 
+    // v1.0/* is a real route (GraphServiceHandler, "graph" service type) rather than an anti-route;
+    // servicePrincipals is the one endpoint it implements, so it still answers 200.
     @Test
-    void graphV1AntiRouted() {
+    void graphV1RoutesToGraphHandler() {
         given().when().get("/v1.0/servicePrincipals").then().statusCode(200);
     }
 
