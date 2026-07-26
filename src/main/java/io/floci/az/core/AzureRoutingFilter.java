@@ -381,13 +381,15 @@ public class AzureRoutingFilter {
 
     /**
      * Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
-     * {@code {tenant}/oauth2/v2.0/token}, {@code {tenant}/oauth2/token},
-     * {@code {tenant}/discovery/v2.0/keys}, {@code {tenant}[/v2.0]/.well-known/openid-configuration},
+     * {@code {tenant}/oauth2/v2.0/authorize}, {@code {tenant}/oauth2/v2.0/token},
+     * {@code {tenant}/oauth2/token}, {@code {tenant}/discovery/v2.0/keys},
+     * {@code {tenant}[/v2.0]/.well-known/openid-configuration},
      * where {@code {tenant}} is a tenant id or common/organizations/consumers.
      */
     private Outcome routeEntra(RoutingContext ctx) {
         String path = ctx.path();
         boolean isEntraPath = path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
+            || path.contains("oauth2/v2.0/authorize")
             || path.endsWith("discovery/v2.0/keys")
             || path.endsWith(".well-known/openid-configuration");
         if (!isEntraPath) {

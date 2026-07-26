@@ -94,6 +94,18 @@ class EntraServiceTest {
     }
 
     @Test
+    void authorizeEndpointRoutesToEntraHandlerNotStorageAccount() {
+        // The full authorize flow lands in a follow-up; this only pins down that the routing
+        // filter recognizes the path as Entra (JSON oauth error) rather than misreading {tenant}
+        // as a storage account name and handing "oauth2/v2.0/authorize" to the blob handler.
+        given()
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT)
+          .then()
+            .contentType("application/json")
+            .body("error", not(emptyOrNullString()));
+    }
+
+    @Test
     void commonTenantAliasResolvesToDefaultTenant() {
         given()
           .when().get("/common/v2.0/.well-known/openid-configuration")
