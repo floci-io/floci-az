@@ -1,10 +1,19 @@
 package io.floci.az.services.entra;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 class EntraServiceTest {
@@ -80,8 +89,8 @@ class EntraServiceTest {
     void unsupportedGrantReturnsOauthError() {
         given()
           .contentType("application/x-www-form-urlencoded")
-          .formParam("grant_type", "authorization_code")
-          .formParam("code", "abc")
+          .formParam("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+          .formParam("device_code", "abc")
           .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
           .then()
             .statusCode(400)
@@ -94,15 +103,107 @@ class EntraServiceTest {
     }
 
     @Test
-    void authorizeEndpointRoutesToEntraHandlerNotStorageAccount() {
-        // The full authorize flow lands in a follow-up; this only pins down that the routing
-        // filter recognizes the path as Entra (JSON oauth error) rather than misreading {tenant}
-        // as a storage account name and handing "oauth2/v2.0/authorize" to the blob handler.
+    void authorizeEndpointRequiresRedirectUri() {
+        // Also pins down that the routing filter recognizes the path as Entra (JSON oauth error)
+        // rather than misreading {tenant} as a storage account name.
         given()
           .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT)
           .then()
+            .statusCode(400)
             .contentType("application/json")
-            .body("error", not(emptyOrNullString()));
+            .body("error", is("invalid_request"));
+    }
+
+    @Test
+    void authorizeAutoApprovesAndRedirectsWithCode() {
+        given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .queryParam("state", "xyz")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT)
+          .then()
+            .statusCode(302)
+            .header("Location", allOf(startsWith("https://app.local/callback?"), containsString("state=xyz")));
+    }
+
+    @Test
+    void authorizationCodeGrantExchangesForAccessAndIdTokenWithPkce() throws Exception {
+        String verifier = "test-code-verifier-1234567890-abcdefghijklmnop";
+        String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
+
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .queryParam("nonce", "nonce-123")
+          .queryParam("code_challenge", challenge)
+          .queryParam("code_challenge_method", "S256")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        Response token = given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "authorization_code")
+          .formParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .formParam("code_verifier", verifier)
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT);
+
+        token.then()
+            .statusCode(200)
+            .body("access_token", not(emptyOrNullString()))
+            .body("id_token", not(emptyOrNullString()));
+
+        Map<?, ?> idClaims = decodeJwtClaims(token.jsonPath().getString("id_token"));
+        assertEquals("nonce-123", idClaims.get("nonce"));
+        assertEquals(EntraStore.DEV_CLIENT_ID, idClaims.get("aud"), "id_token audience must be the client id");
+        assertEquals(EntraStore.DEV_USER_UPN, idClaims.get("preferred_username"));
+    }
+
+    @Test
+    void authorizationCodeGrantRejectsWrongVerifier() throws Exception {
+        String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                MessageDigest.getInstance("SHA-256").digest("correct-verifier".getBytes(StandardCharsets.US_ASCII)));
+
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .queryParam("code_challenge", challenge)
+          .queryParam("code_challenge_method", "S256")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "authorization_code")
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .formParam("code_verifier", "wrong-verifier")
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_grant"));
+    }
+
+    private static String queryParam(String url, String name) {
+        for (String pair : URI.create(url).getRawQuery().split("&")) {
+            int eq = pair.indexOf('=');
+            if (pair.substring(0, eq).equals(name)) {
+                return java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            }
+        }
+        throw new IllegalArgumentException("query param not found: " + name);
+    }
+
+    private static Map<?, ?> decodeJwtClaims(String jwt) throws Exception {
+        String[] parts = jwt.split("\\.");
+        return new ObjectMapper().readValue(Base64.getUrlDecoder().decode(parts[1]), Map.class);
     }
 
     @Test

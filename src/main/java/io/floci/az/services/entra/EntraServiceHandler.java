@@ -6,6 +6,8 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.services.entra.EntraModels.AppRegistration;
+import io.floci.az.services.entra.EntraModels.AuthorizationCode;
+import io.floci.az.services.entra.EntraModels.User;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -13,15 +15,21 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -89,7 +97,67 @@ public class EntraServiceHandler implements AzureServiceHandler {
             boolean v2 = path.endsWith("v2.0/token");
             return handleToken(request, tenantSegment(path), baseUrl, v2);
         }
+        if (path.endsWith("oauth2/v2.0/authorize")) {
+            return handleAuthorize(request);
+        }
         return oauthError("invalid_request", "Unsupported Entra endpoint: " + path, 404);
+    }
+
+    // ── Authorize endpoint ──────────────────────────────────────────────────────
+
+    /**
+     * {@code GET /{tenant}/oauth2/v2.0/authorize} — auth-code+PKCE, local-dev shaped: there is no
+     * real interactive consent screen, the request is auto-approved against a seeded dev user
+     * (selectable via {@code login_hint}) and immediately redirected back with a code.
+     */
+    private Response handleAuthorize(AzureRequest request) {
+        Map<String, String> params = request.queryParams();
+        String redirectUri = params.get("redirect_uri");
+        String responseType = params.getOrDefault("response_type", "code");
+        String responseMode = params.getOrDefault("response_mode", "query");
+        String loginHint = params.get("login_hint");
+
+        if (redirectUri == null || redirectUri.isBlank()) {
+            return oauthError("invalid_request", "redirect_uri is required", 400);
+        }
+        if (!"code".equals(responseType)) {
+            return oauthError("unsupported_response_type",
+                    "response_type '" + responseType + "' is not supported in this phase", 400);
+        }
+
+        User user = (loginHint == null ? Optional.<User>empty() : store.findUserByUpn(loginHint))
+                .or(() -> store.getUser(EntraStore.DEV_USER_OBJECT_ID))
+                .orElse(null);
+        if (user == null) {
+            return oauthError("invalid_request", "no dev user available to auto-approve the request", 400);
+        }
+
+        String code = UUID.randomUUID().toString();
+        store.putAuthorizationCode(new AuthorizationCode(
+                code, params.get("client_id"), redirectUri, params.get("code_challenge"),
+                params.getOrDefault("code_challenge_method", "plain"), params.get("scope"),
+                user.objectId(), params.get("nonce"), params.get("state"),
+                Instant.now().plusSeconds(300)));
+
+        return Response.status(Response.Status.FOUND)
+                .location(URI.create(buildRedirect(redirectUri, responseMode, code, params.get("state"))))
+                .build();
+    }
+
+    /** Appends {@code code}/{@code state} as a query string ({@code response_mode=query}, the default) or fragment. */
+    private static String buildRedirect(String redirectUri, String responseMode, String code, String state) {
+        StringBuilder location = new StringBuilder(redirectUri);
+        boolean fragment = "fragment".equals(responseMode);
+        location.append(fragment ? '#' : (redirectUri.contains("?") ? '&' : '?'));
+        location.append("code=").append(urlEncode(code));
+        if (state != null) {
+            location.append("&state=").append(urlEncode(state));
+        }
+        return location.toString();
+    }
+
+    private static String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     // ── Token endpoint ──────────────────────────────────────────────────────────
@@ -133,6 +201,10 @@ public class EntraServiceHandler implements AzureServiceHandler {
                         v2 ? "2.0" : "1.0", null, lifetime));
                 return tokenResponse(token, lifetime, scp);
             }
+            case "authorization_code" -> {
+                return handleAuthorizationCodeGrant(form, clientId, appId, effectiveTenant, issuer, v2,
+                        lifetime, baseUrl);
+            }
             default -> {
                 return oauthError("unsupported_grant_type",
                         "grant_type '" + grantType + "' is not supported in this phase", 400);
@@ -140,8 +212,85 @@ public class EntraServiceHandler implements AzureServiceHandler {
         }
     }
 
+    /**
+     * Redeems a single-use authorization code: verifies the {@code redirect_uri}/{@code client_id}
+     * match the {@code /authorize} request and the PKCE {@code code_verifier}, then issues an access
+     * token plus an ID token (echoing the original {@code nonce}) for the code's resolved user.
+     */
+    private Response handleAuthorizationCodeGrant(Map<String, String> form, String clientId, String appId,
+            String effectiveTenant, String issuer, boolean v2, long lifetime, String baseUrl) {
+        String code = form.get("code");
+        if (code == null || code.isBlank()) {
+            return oauthError("invalid_request", "code is required", 400);
+        }
+        Optional<AuthorizationCode> stored = store.consumeAuthorizationCode(code);
+        if (stored.isEmpty()) {
+            return oauthError("invalid_grant", "authorization code is invalid or has already been used", 400);
+        }
+        AuthorizationCode authCode = stored.get();
+        if (authCode.expiresAt().isBefore(Instant.now())) {
+            return oauthError("invalid_grant", "authorization code has expired", 400);
+        }
+        String redirectUri = form.get("redirect_uri");
+        if (redirectUri != null && !redirectUri.equals(authCode.redirectUri())) {
+            return oauthError("invalid_grant", "redirect_uri does not match the authorization request", 400);
+        }
+        if (clientId != null && authCode.clientId() != null && !clientId.equals(authCode.clientId())) {
+            return oauthError("invalid_grant", "client_id does not match the authorization request", 400);
+        }
+        if (!verifyPkce(authCode, form.get("code_verifier"))) {
+            return oauthError("invalid_grant", "code_verifier does not match the code_challenge", 400);
+        }
+        User user = store.getUser(authCode.userObjectId()).orElse(null);
+        if (user == null) {
+            return oauthError("invalid_grant", "authorization code does not resolve to a known user", 400);
+        }
+
+        String scp = normalizeScopes(authCode.scope());
+        String accessAudience = v2 ? appId : firstScopeResource(authCode.scope(), baseUrl);
+        String accessToken = tokenIssuer.issue(new TokenIssuer.TokenSpec(
+                effectiveTenant, issuer, accessAudience, user.objectId(), user.objectId(), appId, scp,
+                v2 ? "2.0" : "1.0", null, lifetime));
+        // The ID token audience is always the client id, regardless of API version — OIDC, not Azure-version-specific.
+        String idToken = tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
+                effectiveTenant, issuer, appId, user.objectId(), user.objectId(), appId, scp,
+                v2 ? "2.0" : "1.0", null, lifetime),
+                authCode.nonce(), user.displayName(), user.upn(), user.email());
+        return tokenResponse(accessToken, idToken, lifetime, scp);
+    }
+
+    /**
+     * PKCE verification is permissive: an {@code /authorize} request that omitted
+     * {@code code_challenge} skips verification here too, matching this phase's permissive-by-default
+     * stance on client validation.
+     */
+    private boolean verifyPkce(AuthorizationCode authCode, String codeVerifier) {
+        String challenge = authCode.codeChallenge();
+        if (challenge == null || challenge.isBlank()) {
+            return true;
+        }
+        if (codeVerifier == null || codeVerifier.isBlank()) {
+            return false;
+        }
+        if (!"S256".equalsIgnoreCase(authCode.codeChallengeMethod())) {
+            return codeVerifier.equals(challenge);
+        }
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+            String computed = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+            return computed.equals(challenge);
+        } catch (NoSuchAlgorithmException e) {
+            return false;
+        }
+    }
+
     /** Preserves the existing stub response shape, adding {@code scope} only when present. */
     private Response tokenResponse(String accessToken, long expiresIn, String scope) {
+        return tokenResponse(accessToken, null, expiresIn, scope);
+    }
+
+    private Response tokenResponse(String accessToken, String idToken, long expiresIn, String scope) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("token_type", "Bearer");
         body.put("expires_in", expiresIn);
@@ -150,6 +299,9 @@ public class EntraServiceHandler implements AzureServiceHandler {
             body.put("scope", scope);
         }
         body.put("access_token", accessToken);
+        if (idToken != null) {
+            body.put("id_token", idToken);
+        }
         return json(body);
     }
 

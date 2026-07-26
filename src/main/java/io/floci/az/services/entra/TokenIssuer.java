@@ -64,6 +64,31 @@ public class TokenIssuer {
 
     /** Returns the compact serialised, signed JWT. */
     public String issue(TokenSpec spec) {
+        return issue(spec, Map.of());
+    }
+
+    /**
+     * Mints an ID token: the same claim set as {@link #issue}, plus the OIDC-specific claims
+     * {@code nonce}/{@code name}/{@code preferred_username}/{@code email}. {@code nonce} must echo
+     * the value from the {@code /authorize} request or MSAL rejects the token as a replay.
+     */
+    public String issueIdToken(TokenSpec spec, String nonce, String name, String preferredUsername,
+                                String email) {
+        Map<String, Object> extra = new LinkedHashMap<>();
+        putIfPresent(extra, "nonce", nonce);
+        putIfPresent(extra, "name", name);
+        putIfPresent(extra, "preferred_username", preferredUsername);
+        putIfPresent(extra, "email", email);
+        return issue(spec, extra);
+    }
+
+    private static void putIfPresent(Map<String, Object> claims, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            claims.put(key, value);
+        }
+    }
+
+    private String issue(TokenSpec spec, Map<String, Object> extraClaims) {
         Instant now = Instant.now();
         long iat = now.getEpochSecond();
         long exp = iat + spec.lifetimeSeconds();
@@ -94,6 +119,7 @@ public class TokenIssuer {
         if (spec.idtyp() != null && !spec.idtyp().isBlank()) {
             claims.put("idtyp", spec.idtyp());
         }
+        claims.putAll(extraClaims);
         claims.put("uti", newUti());
 
         try {
