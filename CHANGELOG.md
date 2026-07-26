@@ -21,14 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accept the token. `EntraStore` gains `User`/`Group`/`GroupMembership`/`AuthorizationCode`
   directory records plus a seeded dev user/group. `refresh_token` is not yet supported. Enables
   permissive CORS (`quarkus.http.cors`) so browser SPA flows work, not just RestAssured/SDK
-  clients ([#120](https://github.com/floci-io/floci-az/issues/120))
+  clients. Compatibility: `tests/entra.test.ts` in `sdk-test-node` exercises the flow with real
+  PKCE codes from `@azure/msal-node`'s `CryptoProvider`, wired into `make test-entra-node`
+  ([#120](https://github.com/floci-io/floci-az/issues/120))
 - **graph:** a new `graph` service — a narrow Microsoft Graph slice at `/v1.0/...`: service
   principal discovery (`GET /v1.0/servicePrincipals`, moved from an ad-hoc JAX-RS stub) plus
   group-membership management (`POST /v1.0/users/{id}/getMemberGroups` by object id or UPN,
   honoring `securityEnabledOnly`; `POST`/`DELETE /v1.0/groups/{id}/members/$ref`). Directory data
   is shared with Entra (`EntraStore`), so a token's `oid` and a Graph lookup resolve to one
   identity. Direct membership only, no nested-group transitivity. Enabled by default
-  (`services.graph.enabled`) ([#120](https://github.com/floci-io/floci-az/issues/120))
+  (`services.graph.enabled`). Compatibility: `tests/entra.test.ts` in `sdk-test-node` also covers
+  `getMemberGroups` via the real `@microsoft/microsoft-graph-client` SDK
+  ([#120](https://github.com/floci-io/floci-az/issues/120))
 
 ## [0.10.0] - 2026-07-31
 
