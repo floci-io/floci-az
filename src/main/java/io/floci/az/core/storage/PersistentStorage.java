@@ -61,6 +61,13 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
     }
 
     @Override
+    public Optional<V> remove(K key) {
+        Optional<V> removed = Optional.ofNullable(store.remove(key));
+        removed.ifPresent(v -> persistToDisk());
+        return removed;
+    }
+
+    @Override
     public List<V> scan(Predicate<K> keyFilter) {
         return store.entrySet().stream()
                 .filter(e -> keyFilter.test(e.getKey()))

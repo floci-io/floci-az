@@ -19,6 +19,9 @@ public interface StorageBackend<K, V> {
 
     void delete(K key);
 
+    /** Atomically removes and returns the value, so a concurrent caller can never observe it twice. */
+    Optional<V> remove(K key);
+
     List<V> scan(Predicate<K> keyFilter);
 
     Set<K> keys();

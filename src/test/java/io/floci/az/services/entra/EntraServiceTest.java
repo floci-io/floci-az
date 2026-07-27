@@ -166,12 +166,23 @@ class EntraServiceTest {
     }
 
     @Test
+    void authorizeEndpointRequiresClientId() {
+        given()
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_request"));
+    }
+
+    @Test
     void authorizationCodeGrantRejectsWrongVerifier() throws Exception {
         String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 MessageDigest.getInstance("SHA-256").digest("correct-verifier".getBytes(StandardCharsets.US_ASCII)));
 
         Response authorize = given()
           .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
           .queryParam("redirect_uri", "https://app.local/callback")
           .queryParam("response_type", "code")
           .queryParam("code_challenge", challenge)
@@ -182,10 +193,76 @@ class EntraServiceTest {
         given()
           .contentType("application/x-www-form-urlencoded")
           .formParam("grant_type", "authorization_code")
+          .formParam("client_id", EntraStore.DEV_CLIENT_ID)
           .formParam("redirect_uri", "https://app.local/callback")
           .formParam("code", code)
           .formParam("code_verifier", "wrong-verifier")
           .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_grant"));
+    }
+
+    @Test
+    void authorizationCodeGrantRejectsOmittedClientId() {
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "authorization_code")
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_grant"));
+    }
+
+    @Test
+    void authorizationCodeGrantRejectsOmittedRedirectUri() {
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "authorization_code")
+          .formParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .formParam("code", code)
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_grant"));
+    }
+
+    @Test
+    void authorizationCodeGrantRejectsCrossTenantRedemption() {
+        String otherTenant = "00000000-0000-0000-0000-0000000000ff";
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "authorization_code")
+          .formParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .when().post("/{tenant}/oauth2/v2.0/token", otherTenant)
           .then()
             .statusCode(400)
             .body("error", is("invalid_grant"));

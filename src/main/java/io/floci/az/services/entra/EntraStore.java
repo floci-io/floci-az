@@ -143,13 +143,14 @@ public class EntraStore {
         write(GROUP_PREFIX + group.objectId(), group);
     }
 
-    public void addMember(String groupId, String memberObjectId) {
+    /** Synchronized so concurrent add/remove on the same group can't race each other's read-modify-write. */
+    public synchronized void addMember(String groupId, String memberObjectId) {
         Set<String> members = new LinkedHashSet<>(membership(groupId).memberObjectIds());
         members.add(memberObjectId);
         write(MEMBERSHIP_PREFIX + groupId, new GroupMembership(groupId, members));
     }
 
-    public void removeMember(String groupId, String memberObjectId) {
+    public synchronized void removeMember(String groupId, String memberObjectId) {
         Set<String> members = new LinkedHashSet<>(membership(groupId).memberObjectIds());
         members.remove(memberObjectId);
         write(MEMBERSHIP_PREFIX + groupId, new GroupMembership(groupId, members));
@@ -177,11 +178,9 @@ public class EntraStore {
         write(AUTHCODE_PREFIX + code.code(), code);
     }
 
-    /** Reads and immediately deletes the code, enforcing single use. */
+    /** Atomically removes the code, enforcing single use even under concurrent redemption attempts. */
     public Optional<AuthorizationCode> consumeAuthorizationCode(String code) {
-        Optional<AuthorizationCode> found = read(AUTHCODE_PREFIX + code, AuthorizationCode.class);
-        found.ifPresent(c -> store.delete(AUTHCODE_PREFIX + code));
-        return found;
+        return store.remove(AUTHCODE_PREFIX + code).map(obj -> parse(obj.data(), AuthorizationCode.class, obj.key()));
     }
 
     private <T> Optional<T> read(String key, Class<T> type) {

@@ -72,7 +72,9 @@ GET /{tenant}/oauth2/v2.0/authorize
 ```
 
 `302`s to `{redirect_uri}?code=...&state=...` (or `#code=...&state=...` for `response_mode=fragment`).
-Redeem the code with `grant_type=authorization_code`:
+The issued code is bound to the tenant, `client_id`, and `redirect_uri` from this request — redemption
+must repeat the same `client_id`/`redirect_uri` and happen against the same tenant, or it fails with
+`invalid_grant`. Redeem the code with `grant_type=authorization_code`:
 
 ```bash
 curl -s http://localhost:4577/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token \
@@ -86,8 +88,11 @@ curl -s http://localhost:4577/00000000-0000-0000-0000-000000000002/oauth2/v2.0/t
 The response carries both `access_token` and `id_token`. The ID token's `aud` is always the client
 id (per OIDC, regardless of v1.0/v2.0), and it echoes the `nonce` from the `/authorize` request —
 MSAL rejects an ID token whose nonce doesn't match. PKCE verification (`S256` or `plain`) is
-skipped when `/authorize` was called without a `code_challenge`, matching this phase's permissive
-client validation elsewhere (`client_credentials` is likewise accepted without strict validation).
+skipped when `/authorize` was called without a `code_challenge` — `client_id` is still required and
+bound to the code, so an omitted challenge no longer hands a usable code to a caller who doesn't
+know the client. There is no app-registration redirect-URI allow-list yet ([#23](https://github.com/floci-io/floci-az/issues/23)),
+so any `client_id` is accepted at `/authorize`, matching this phase's permissive client validation
+elsewhere (`client_credentials` is likewise accepted without strict validation).
 
 **Not yet supported:** `grant_type=refresh_token` — MSAL's silent token renewal via
 `offline_access` will not work against this emulator yet.

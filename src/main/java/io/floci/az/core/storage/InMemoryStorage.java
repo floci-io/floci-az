@@ -28,6 +28,11 @@ public class InMemoryStorage<K, V> implements StorageBackend<K, V> {
     }
 
     @Override
+    public Optional<V> remove(K key) {
+        return Optional.ofNullable(store.remove(key));
+    }
+
+    @Override
     public List<V> scan(Predicate<K> keyFilter) {
         List<V> result = new ArrayList<>();
         store.forEach((k, v) -> {

@@ -69,6 +69,7 @@ function s256Challenge(verifier: string): string {
 
 test("authorization_code grant rejects a wrong PKCE verifier", async () => {
   const resp = await authorize({
+    client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: "code",
     code_challenge: s256Challenge("correct-verifier"),
@@ -81,6 +82,7 @@ test("authorization_code grant rejects a wrong PKCE verifier", async () => {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
+      client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,
       code,
       code_verifier: "wrong-verifier",

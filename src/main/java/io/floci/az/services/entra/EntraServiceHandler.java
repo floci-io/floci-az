@@ -98,7 +98,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
             return handleToken(request, tenantSegment(path), baseUrl, v2);
         }
         if (path.endsWith("oauth2/v2.0/authorize")) {
-            return handleAuthorize(request);
+            return handleAuthorize(request, resolveTenantId(tenantSegment(path)));
         }
         return oauthError("invalid_request", "Unsupported Entra endpoint: " + path, 404);
     }
@@ -110,12 +110,13 @@ public class EntraServiceHandler implements AzureServiceHandler {
      * real interactive consent screen, the request is auto-approved against a seeded dev user
      * (selectable via {@code login_hint}) and immediately redirected back with a code.
      */
-    private Response handleAuthorize(AzureRequest request) {
+    private Response handleAuthorize(AzureRequest request, String effectiveTenant) {
         Map<String, String> params = request.queryParams();
         String redirectUri = params.get("redirect_uri");
         String responseType = params.getOrDefault("response_type", "code");
         String responseMode = params.getOrDefault("response_mode", "query");
         String loginHint = params.get("login_hint");
+        String clientId = params.get("client_id");
 
         if (redirectUri == null || redirectUri.isBlank()) {
             return oauthError("invalid_request", "redirect_uri is required", 400);
@@ -123,6 +124,9 @@ public class EntraServiceHandler implements AzureServiceHandler {
         if (!"code".equals(responseType)) {
             return oauthError("unsupported_response_type",
                     "response_type '" + responseType + "' is not supported in this phase", 400);
+        }
+        if (clientId == null || clientId.isBlank()) {
+            return oauthError("invalid_request", "client_id is required", 400);
         }
 
         User user = (loginHint == null ? Optional.<User>empty() : store.findUserByUpn(loginHint))
@@ -134,7 +138,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
 
         String code = UUID.randomUUID().toString();
         store.putAuthorizationCode(new AuthorizationCode(
-                code, params.get("client_id"), redirectUri, params.get("code_challenge"),
+                code, effectiveTenant, clientId, redirectUri, params.get("code_challenge"),
                 params.getOrDefault("code_challenge_method", "plain"), params.get("scope"),
                 user.objectId(), params.get("nonce"), params.get("state"),
                 Instant.now().plusSeconds(300)));
@@ -213,9 +217,10 @@ public class EntraServiceHandler implements AzureServiceHandler {
     }
 
     /**
-     * Redeems a single-use authorization code: verifies the {@code redirect_uri}/{@code client_id}
-     * match the {@code /authorize} request and the PKCE {@code code_verifier}, then issues an access
-     * token plus an ID token (echoing the original {@code nonce}) for the code's resolved user.
+     * Redeems a single-use authorization code: verifies the tenant, {@code redirect_uri} and
+     * {@code client_id} match the {@code /authorize} request and the PKCE {@code code_verifier},
+     * then issues an access token plus an ID token (echoing the original {@code nonce}) for the
+     * code's resolved user.
      */
     private Response handleAuthorizationCodeGrant(Map<String, String> form, String clientId, String appId,
             String effectiveTenant, String issuer, boolean v2, long lifetime, String baseUrl) {
@@ -231,11 +236,14 @@ public class EntraServiceHandler implements AzureServiceHandler {
         if (authCode.expiresAt().isBefore(Instant.now())) {
             return oauthError("invalid_grant", "authorization code has expired", 400);
         }
+        if (!effectiveTenant.equals(authCode.tenantId())) {
+            return oauthError("invalid_grant", "authorization code was issued for a different tenant", 400);
+        }
         String redirectUri = form.get("redirect_uri");
-        if (redirectUri != null && !redirectUri.equals(authCode.redirectUri())) {
+        if (redirectUri == null || !redirectUri.equals(authCode.redirectUri())) {
             return oauthError("invalid_grant", "redirect_uri does not match the authorization request", 400);
         }
-        if (clientId != null && authCode.clientId() != null && !clientId.equals(authCode.clientId())) {
+        if (clientId == null || !clientId.equals(authCode.clientId())) {
             return oauthError("invalid_grant", "client_id does not match the authorization request", 400);
         }
         if (!verifyPkce(authCode, form.get("code_verifier"))) {

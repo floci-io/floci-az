@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getMemberGroups` via the real `@microsoft/microsoft-graph-client` SDK
   ([#120](https://github.com/floci-io/floci-az/issues/120))
 
+### Fixed
+
+- **entra:** authorization codes minted by `/authorize` are now bound to the issuing tenant and
+  require a non-blank `client_id`, and redemption enforces exact matches on tenant, `client_id`,
+  and `redirect_uri` (previously these checks were skipped whenever the token request omitted the
+  field, letting a caller who never presented a `client_id` redeem a code sent to an arbitrary
+  `redirect_uri`, or redeem a code across tenants). Code redemption
+  (`EntraStore.consumeAuthorizationCode`) is now atomic, so two concurrent redemptions of the same
+  code can no longer both succeed; `StorageBackend` gains an atomic `remove` for this.
+  `EntraStore.addMember`/`removeMember` are now synchronized so concurrent group-membership writes
+  can no longer silently clobber each other
+
 ## [0.10.0] - 2026-07-31
 
 ### Added

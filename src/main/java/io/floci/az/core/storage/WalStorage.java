@@ -103,6 +103,20 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     }
 
     @Override
+    public Optional<V> remove(K key) {
+        compactionLock.readLock().lock();
+        try {
+            Optional<V> removed = Optional.ofNullable(store.remove(key));
+            if (removed.isPresent()) {
+                appendDelete(key);
+            }
+            return removed;
+        } finally {
+            compactionLock.readLock().unlock();
+        }
+    }
+
+    @Override
     public List<V> scan(Predicate<K> keyFilter) {
         return store.entrySet().stream()
                 .filter(e -> keyFilter.test(e.getKey()))

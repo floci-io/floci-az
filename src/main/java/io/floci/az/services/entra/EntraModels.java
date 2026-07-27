@@ -60,11 +60,14 @@ public final class EntraModels {
 
     /**
      * A single-use authorization code minted by {@code /authorize} and redeemed by the
-     * {@code authorization_code} token grant. {@code codeChallenge}/{@code codeChallengeMethod}
+     * {@code authorization_code} token grant. {@code tenantId} is the resolved (never
+     * {@code common}/{@code organizations}/{@code consumers}) tenant the code was issued under, so
+     * redemption can reject cross-tenant use. {@code codeChallenge}/{@code codeChallengeMethod}
      * carry the PKCE challenge to verify against the token request's {@code code_verifier}.
      */
     public record AuthorizationCode(
         String code,
+        String tenantId,
         String clientId,
         String redirectUri,
         String codeChallenge,
