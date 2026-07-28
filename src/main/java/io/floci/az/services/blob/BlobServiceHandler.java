@@ -187,7 +187,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .end("MinuteMetrics")
                 .start("StaticWebsite").elem("Enabled", "false").end("StaticWebsite")
             .end("StorageServiceProperties")
-            .toString();
+            .build();
         return Response.ok(xml, "application/xml").build();
     }
 

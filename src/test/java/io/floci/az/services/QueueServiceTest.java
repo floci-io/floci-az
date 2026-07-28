@@ -31,6 +31,18 @@ public class QueueServiceTest {
     }
 
     @Test
+    void getQueueServicePropertiesReturnsXml() {
+        given()
+            .when().get("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<StorageServiceProperties>"))
+            .body(containsString("<Logging>"))
+            .body(not(containsString("XmlBuilder@")));
+    }
+
+    @Test
     void createExistingQueuePreservesMetadata() {
         given()
             .header("x-ms-meta-owner", "sdk")

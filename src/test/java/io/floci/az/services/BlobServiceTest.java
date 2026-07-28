@@ -45,6 +45,18 @@ public class BlobServiceTest {
     }
 
     @Test
+    void getBlobServicePropertiesReturnsXml() {
+        given()
+            .when().get("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<StorageServiceProperties>"))
+            .body(containsString("<StaticWebsite>"))
+            .body(not(containsString("XmlBuilder@")));
+    }
+
+    @Test
     void putAndGetBlob() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
