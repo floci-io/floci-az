@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **blob:** `Get Blob` / `Get Blob Properties` now return the `x-ms-creation-time`, `x-ms-lease-status`, `x-ms-lease-state`, and `x-ms-server-encrypted` response headers that Azure always sends, and `Get Container Properties` now returns `x-ms-lease-state` / `x-ms-lease-status`. The Azure SDK for C++ (`azure-storage-blobs` 12.18.0) reads these unconditionally (`std::map::at()`) when deserialising Download, GetProperties, and GetContainerProperties responses, so their absence threw `std::out_of_range` and crashed the client process; the Java, Python, and Node SDKs map them to nullable fields and were unaffected, which is why the existing compatibility suites stayed green. Creation time is now recorded when a blob is written and preserved across metadata updates and overwrites, so it no longer tracks last-modified. Leases remain unmodelled: the lease headers report the fixed values of an unleased blob or container. `Content-Range` is also no longer sent on full (`200 OK`) downloads, matching the Azure spec, which scopes it to range requests ([#145](https://github.com/floci-io/floci-az/issues/145))
+
 ## [0.9.0] - 2026-07-09
 
 ### Added

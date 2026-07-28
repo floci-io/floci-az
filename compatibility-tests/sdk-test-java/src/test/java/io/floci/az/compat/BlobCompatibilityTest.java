@@ -7,10 +7,13 @@ import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobItem;
+import com.azure.storage.blob.models.BlobProperties;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.models.LeaseStateType;
+import com.azure.storage.blob.models.LeaseStatusType;
 import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.core.util.Context;
@@ -82,6 +85,28 @@ class BlobCompatibilityTest {
 
         blob.delete();
         assertEquals(0, container.listBlobs().stream().count());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("blob properties: mandatory Get Blob headers are populated")
+    void mandatoryResponseHeaders() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("props.txt");
+        byte[] content = "header check".getBytes(StandardCharsets.UTF_8);
+        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+
+        BlobProperties props = blob.getProperties();
+        assertNotNull(props.getCreationTime(), "x-ms-creation-time must be returned");
+        assertEquals(LeaseStatusType.UNLOCKED, props.getLeaseStatus());
+        assertEquals(LeaseStateType.AVAILABLE, props.getLeaseState());
+        assertTrue(props.isServerEncrypted(), "x-ms-server-encrypted must be true");
+
+        // creation time must not track last-modified across a metadata update
+        blob.setMetadata(Map.of("owner", "compat"));
+        assertEquals(props.getCreationTime(), blob.getProperties().getCreationTime());
 
         client.deleteBlobContainer(name);
     }

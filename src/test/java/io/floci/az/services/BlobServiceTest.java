@@ -347,6 +347,136 @@ public class BlobServiceTest {
     }
 
     @Test
+    void getBlobReturnsMandatoryHeaders() {
+        putTestBlob(BLOB_CONTENT);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("x-ms-creation-time", not(emptyOrNullString()))
+            .header("x-ms-lease-status", "unlocked")
+            .header("x-ms-lease-state", "available")
+            .header("x-ms-server-encrypted", "true");
+    }
+
+    @Test
+    void headBlobReturnsMandatoryHeaders() {
+        putTestBlob(BLOB_CONTENT);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("x-ms-creation-time", not(emptyOrNullString()))
+            .header("x-ms-lease-status", "unlocked")
+            .header("x-ms-lease-state", "available")
+            .header("x-ms-server-encrypted", "true");
+    }
+
+    @Test
+    void getContainerPropertiesReturnsLeaseHeaders() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-lease-state", "available")
+            .header("x-ms-lease-status", "unlocked");
+
+        given()
+            .when().head("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-lease-state", "available")
+            .header("x-ms-lease-status", "unlocked");
+    }
+
+    @Test
+    void fullDownloadOmitsContentRange() {
+        putTestBlob(BLOB_CONTENT);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Range", nullValue());
+    }
+
+    @Test
+    void rangeRequestIncludesContentRange() {
+        putTestBlob("0123456789");
+
+        given()
+            .header("Range", "bytes=2-5")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(206)
+            .header("Content-Range", "bytes 2-5/10");
+    }
+
+    @Test
+    void creationTimeSurvivesMetadataUpdateAndOverwrite() {
+        putTestBlob(BLOB_CONTENT);
+        String createdOn = given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200)
+            .extract().header("x-ms-creation-time");
+        assertThat(createdOn, not(emptyOrNullString()));
+
+        given()
+            .header("x-ms-meta-owner", "updated")
+            .when().put("/{account}/{container}/{blob}?comp=metadata", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200)
+            .header("x-ms-creation-time", equalTo(createdOn));
+
+        putTestBlob("overwritten");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200)
+            .header("x-ms-creation-time", equalTo(createdOn));
+    }
+
+    @Test
+    void committedBlockBlobReportsCreationTime() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blockId = java.util.Base64.getEncoder()
+            .encodeToString("block-1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        given()
+            .body("chunk")
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, BLOB, blockId)
+            .then().statusCode(201);
+
+        given()
+            .body("<BlockList><Latest>" + blockId + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("x-ms-creation-time", not(emptyOrNullString()))
+            .header("x-ms-server-encrypted", "true");
+    }
+
+    private static void putTestBlob(String content) {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(content)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+    }
+
+    @Test
     void malformedRangeReturns416() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

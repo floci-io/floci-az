@@ -83,4 +83,10 @@ floci-az:
 - **Shared Key signatures are accepted but not cryptographically verified** — the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
 - **No SAS enforcement** — SAS query parameters are parsed but not validated.
-- **Snapshots, versioning, leases, and tiering are not modeled.**
+- **Snapshots, versioning, leases, and tiering are not modeled.** `Get Blob` and
+  `Get Container Properties` still report the lease headers Azure always returns, fixed at the
+  unleased values (`x-ms-lease-status: unlocked`, `x-ms-lease-state: available`), because strict SDK
+  clients require them. There is no way to acquire a lease, so these values never change.
+- **`x-ms-server-encrypted: true` is reported although no encryption is performed** — blob data is
+  stored as-is by the configured storage backend. The header mirrors the
+  `x-ms-request-server-encrypted` already returned on upload and exists for SDK compatibility.

@@ -39,6 +39,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private static final String NS_PREFIX  = "__ns__:";
     private static final String BLK_PREFIX = "__blk__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
+    private static final String CREATION_TIME_KEY = "CreationTime";
     private static final StoredObject NS_SENTINEL =
             new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
 
@@ -199,6 +200,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         return Response.ok()
                 .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
                 .header("ETag", UUID.randomUUID().toString())
+                // Get Container Properties always reports the lease state, and strict SDK clients
+                // read it unconditionally. Leases are not modelled, so a container is always available.
+                .header("x-ms-lease-state", "available")
+                .header("x-ms-lease-status", "unlocked")
                 .header("x-ms-has-immutability-policy", "false")
                 .header("x-ms-has-legal-hold", "false")
                 .build();
@@ -269,6 +274,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
             metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
             metadata.put("Name", blobName);
+            metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
             metadata.putAll(readUserMetadata(request));
 
             String etag = UUID.randomUUID().toString();
@@ -336,9 +342,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-blob-type", so.metadata().getOrDefault("BlobType", "BlockBlob"))
                 .header(HttpHeaders.CONTENT_TYPE, so.metadata().getOrDefault("Content-Type", "application/octet-stream"))
                 .header(HttpHeaders.CONTENT_LENGTH, contentLength)
-                .header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize))
                 .header("x-ms-blob-content-length", totalSize)
-                .header("Accept-Ranges", "bytes");
+                .header("Accept-Ranges", "bytes")
+                // Get Blob always reports these. Strict SDK clients (e.g. the Azure SDK for C++)
+                // read x-ms-creation-time and x-ms-server-encrypted unconditionally and throw when
+                // they are absent. Leases are not modelled, so the values are those of an unleased blob.
+                .header("x-ms-creation-time", RFC1123_DATE_TIME.format(creationTime(so)))
+                .header("x-ms-lease-status", "unlocked")
+                .header("x-ms-lease-state", "available")
+                .header("x-ms-server-encrypted", "true");
+        if (isRangeRequest) {
+            rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
+        }
         addUserMetadataHeaders(rb, so.metadata());
 
         if (!headOnly) {
@@ -554,6 +569,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
             metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
             metadata.put("Name", blobName);
+            metadata.put(CREATION_TIME_KEY, createdOn(
+                    store.get(objKey(request.accountName(), containerName, blobName))).toString());
             // Persist committed block list for future GetBlockList calls
             metadata.put("CommittedBlocks", String.join("|", committedMeta));
             metadata.putAll(readUserMetadata(request));
@@ -713,6 +730,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         (left, right) -> right,
                         LinkedHashMap::new
                 ));
+    }
+
+    /**
+     * Creation time to record when writing a blob: an overwrite preserves the original
+     * creation time, a first write stamps now. Azure reports creation time independently
+     * of last-modified, so it must not be re-derived on later writes or metadata updates.
+     */
+    private static Instant createdOn(Optional<StoredObject> existing) {
+        return existing.map(BlobServiceHandler::creationTime).orElseGet(Instant::now);
+    }
+
+    /**
+     * Creation time of a stored blob. Falls back to last-modified for blobs persisted
+     * before {@code CreationTime} was recorded (reloaded from a persistent backend).
+     */
+    private static Instant creationTime(StoredObject so) {
+        String stored = so.metadata().get(CREATION_TIME_KEY);
+        return stored == null ? so.lastModified() : Instant.parse(stored);
     }
 
     private static void addUserMetadataHeaders(Response.ResponseBuilder rb, Map<String, String> storedMetadata) {
