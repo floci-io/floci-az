@@ -19,6 +19,7 @@ import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -60,6 +61,9 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final String PROVIDER_COMMUNICATION = "/providers/Microsoft.Communication/";
+
+    private static final String OPERATION_ID_HEADER = "Operation-Id";
+    private static final String RETRY_AFTER_SECONDS = "3";
 
     // In-memory stores — no persistence needed for email capture
     private final StorageBackend<String, StoredObject> emailStorage = new InMemoryStorage<>();
@@ -143,7 +147,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         try {
             EmailSendRequest sendRequest = MAPPER.readValue(req.bodyStream(), EmailSendRequest.class);
 
-            String operationId = UUID.randomUUID().toString();
+            String operationId = clientOperationId(req);
             String messageId   = UUID.randomUUID().toString();
 
             CapturedEmail captured = new CapturedEmail();
@@ -163,17 +167,17 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
                     sendRequest.getContent() != null ? sendRequest.getContent().getSubject() : "(none)");
 
             // ACS returns 202 Accepted with Operation-Location header for polling
-            String baseUrl = config.effectiveBaseUrl();
+            String baseUrl = req.secure() ? config.baseUrlHttps() : config.effectiveBaseUrl();
             String operationLocation = baseUrl + "/emails/operations/" + operationId
                     + "?api-version=" + req.queryParams().getOrDefault("api-version", "2023-03-31");
 
+            EmailSendResultResponse result = new EmailSendResultResponse(operationId, "Running");
+
             return Response.status(202)
                     .header("Operation-Location", operationLocation)
+                    .header("Retry-After", RETRY_AFTER_SECONDS)
                     .header("x-ms-request-id", UUID.randomUUID().toString())
-                    .entity(Map.of(
-                            "id", operationId,
-                            "status", "Running",
-                            "error", Map.of()))
+                    .entity(result)
                     .type("application/json")
                     .build();
 
@@ -193,15 +197,10 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
 
         try {
             CapturedEmail captured = MAPPER.readValue(found.get().data(), CapturedEmail.class);
-
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("id", captured.getOperationId());
-            result.put("status", captured.getStatus());
-            if ("Succeeded".equals(captured.getStatus())) {
-                result.put("resourceLocation", captured.getMessageId());
-            }
-            result.put("error", Map.of());
-
+            EmailSendResultResponse result = new EmailSendResultResponse(
+                    captured.getOperationId(),
+                    captured.getStatus()
+            );
             return Response.ok(result).type("application/json").build();
         } catch (Exception e) {
             return serverError("Failed to read operation status: " + e.getMessage());
@@ -404,6 +403,16 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         };
     }
 
+    private record EmailSendResultResponse(
+            String id,
+            String status,
+            Object error
+    ) {
+        EmailSendResultResponse(String id, String status) {
+            this(id, status, null);
+        }
+    }
+
     // ── Path parsing helpers ─────────────────────────────────────────────────
 
     private static String extractCommunicationPath(String fullPath) {
@@ -437,6 +446,15 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
                     ? fullPath.indexOf('?') : fullPath.length());
         }
         return "/subscriptions/default/providers/Microsoft.Communication/" + resourceType + "/" + name;
+    }
+
+    // ── Header parsing helpers ───────────────────────────────────────────────
+
+    private String clientOperationId(AzureRequest req) {
+        return Optional.ofNullable(req.headers())
+                .map(h -> h.getHeaderString(OPERATION_ID_HEADER))
+                .filter(StringUtils::isNotBlank)
+                .orElseGet(() -> UUID.randomUUID().toString());
     }
 
     // ── Body parsing helpers ─────────────────────────────────────────────────

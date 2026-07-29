@@ -14,9 +14,12 @@ mailbox for your tests. No real email is ever delivered.
 
 - **Send email** — `POST /emails:send` accepts the full ACS payload (`senderAddress`, `content`
   with `subject`/`plainText`/`html`, `recipients` `to`/`cc`/`bcc`, `attachments`, `replyTo`,
-  `headers`) and returns `202 Accepted` with an `Operation-Location` header for polling
+  `headers`) and returns `202 Accepted` with `Operation-Location` and `Retry-After` headers for
+  polling. A caller-supplied **`Operation-Id`** request header is adopted as the operation id; without
+  one the emulator generates a UUID, matching ACS
 - **Operation status** — `GET /emails/operations/{operationId}` reports the long-running operation
-  status; the emulator completes immediately, so it returns `Succeeded` with a `resourceLocation`
+  status as `{"id":…,"status":…,"error":null}`, the same shape ACS returns. The emulator completes
+  immediately, so the status is `Succeeded`
 - **Inspection mailbox** — `GET /emailMessages` lists every captured message, `GET
   /emailMessages/{operationId}` returns one in full (including the original request body), and
   `DELETE /emailMessages` clears the mailbox
@@ -119,7 +122,8 @@ floci-az:
 - **No delivery.** Messages are captured in-memory only; nothing is sent over SMTP and no external
   recipient receives anything. The mailbox is not persisted and is cleared on restart.
 - **Operations always succeed immediately.** There is no `Running`→`Succeeded` transition delay and
-  no failure simulation.
+  no failure simulation. `Retry-After: 3` is still returned on the `202` to match ACS, but the first
+  poll already reports `Succeeded`.
 - **Auth is permissive.** The connection-string access key and `Authorization` header are accepted
   but not validated (dev mode), matching the rest of the emulator.
 - **ARM resources are state-only.** `communicationServices`/`emailServices`/`domains` return
