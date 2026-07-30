@@ -56,34 +56,47 @@ public class MySqlServerManager {
             .build();
 
         String containerId = containerManager.create(spec);
-        containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
-            "/docker-entrypoint-initdb.d/10-grant-admin.sql");
-        var info = containerManager.startCreated(containerId, spec);
+        try {
+            containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
+                "/docker-entrypoint-initdb.d/10-grant-admin.sql");
+            var info = containerManager.startCreated(containerId, spec);
 
-        int hostPort = Optional.ofNullable(info.getEndpoint(MYSQL_CONTAINER_PORT))
-            .map(ContainerLifecycleManager.EndpointInfo::port)
-            .orElseThrow(() -> new RuntimeException(
-                "Could not resolve host port for MySQL container " + containerName));
+            int hostPort = Optional.ofNullable(info.getEndpoint(MYSQL_CONTAINER_PORT))
+                .map(ContainerLifecycleManager.EndpointInfo::port)
+                .orElseThrow(() -> new RuntimeException(
+                    "Could not resolve host port for MySQL container " + containerName));
 
-        String reachableHost;
-        int reachablePort;
-        if (containerDetector.isRunningInContainer()) {
-            reachableHost = containerName;
-            reachablePort = MYSQL_CONTAINER_PORT;
-        } else {
-            reachableHost = "localhost";
-            reachablePort = hostPort;
+            String reachableHost;
+            int reachablePort;
+            if (containerDetector.isRunningInContainer()) {
+                reachableHost = containerName;
+                reachablePort = MYSQL_CONTAINER_PORT;
+            } else {
+                reachableHost = "localhost";
+                reachablePort = hostPort;
+            }
+
+            managedContainers.put(containerId, containerName);
+            LOG.infof("MySQL container started: server=%s containerId=%s endpoint=%s:%d",
+                entry.serverName(), containerId, reachableHost, reachablePort);
+
+            waitForReady(reachableHost, reachablePort, mysqlConfig.startupTimeoutSeconds());
+            LOG.infof("MySQL server ready: server=%s endpoint=%s:%d",
+                entry.serverName(), reachableHost, reachablePort);
+
+            return entry.withContainer(containerId, reachablePort, reachableHost);
+        } catch (RuntimeException e) {
+            // The caller rolls back state that never learned this containerId, so a failed
+            // start must dispose of its own container or it leaks as a running orphan.
+            managedContainers.remove(containerId);
+            try {
+                containerManager.stopAndRemove(containerId, null);
+            } catch (Exception cleanup) {
+                LOG.warnf(cleanup, "Failed to clean up MySQL container %s after start failure",
+                    containerName);
+            }
+            throw e;
         }
-
-        managedContainers.put(containerId, containerName);
-        LOG.infof("MySQL container started: server=%s containerId=%s endpoint=%s:%d",
-            entry.serverName(), containerId, reachableHost, reachablePort);
-
-        waitForReady(reachableHost, reachablePort, mysqlConfig.startupTimeoutSeconds());
-        LOG.infof("MySQL server ready: server=%s endpoint=%s:%d",
-            entry.serverName(), reachableHost, reachablePort);
-
-        return entry.withContainer(containerId, reachablePort, reachableHost);
     }
 
     public void stopServer(MySqlState.ServerEntry entry) {
