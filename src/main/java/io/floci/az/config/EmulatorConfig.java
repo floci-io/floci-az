@@ -36,7 +36,7 @@ public interface EmulatorConfig {
      * {@code tls().enabled()} is true — the TlsProxyServer serves HTTPS on the same port.
      */
     default String baseUrlHttps() {
-        return baseUrl().replaceFirst("^http://", "https://");
+        return effectiveBaseUrl().replaceFirst("^http://", "https://");
     }
 
     TlsConfig tls();
