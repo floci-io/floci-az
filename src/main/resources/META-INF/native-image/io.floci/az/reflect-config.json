@@ -87,6 +87,36 @@
   "allDeclaredFields": true
  },
  {
+  "name": "com.github.dockerjava.core.command.ExecCreateCmdImpl",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "com.github.dockerjava.core.command.ExecStartCmdImpl",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "com.github.dockerjava.core.command.InspectExecCmdImpl",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "com.github.dockerjava.api.command.ExecCreateCmd",
+  "allDeclaredMethods": true
+ },
+ {
+  "name": "com.github.dockerjava.api.command.ExecStartCmd",
+  "allDeclaredMethods": true
+ },
+ {
+  "name": "com.github.dockerjava.api.command.InspectExecCmd",
+  "allDeclaredMethods": true
+ },
+ {
   "name": "com.github.dockerjava.api.model.ContainerConfig",
   "allDeclaredConstructors": true,
   "allDeclaredMethods": true,
