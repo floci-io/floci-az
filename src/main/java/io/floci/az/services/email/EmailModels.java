@@ -167,4 +167,16 @@ public final class EmailModels {
         public EmailSendRequest getRequest() { return request; }
         public void setRequest(EmailSendRequest request) { this.request = request; }
     }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record EmailSendResult(
+            String id,
+            String status,
+            Object error
+    ) {
+        EmailSendResult(String id, String status) {
+            this(id, status, null);
+        }
+    }
 }

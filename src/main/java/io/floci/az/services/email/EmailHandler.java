@@ -1,6 +1,5 @@
 package io.floci.az.services.email;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -14,12 +13,12 @@ import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.services.email.EmailModels.CapturedEmail;
 import io.floci.az.services.email.EmailModels.EmailSendRequest;
+import io.floci.az.services.email.EmailModels.EmailSendResult;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
-import org.apache.commons.lang3.StringUtils;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -171,7 +170,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
             String operationLocation = baseUrl + "/emails/operations/" + operationId
                     + "?api-version=" + req.queryParams().getOrDefault("api-version", "2023-03-31");
 
-            EmailSendResultResponse result = new EmailSendResultResponse(operationId, "Running");
+            EmailSendResult result = new EmailSendResult(operationId, "Running");
 
             return Response.status(202)
                     .header("Operation-Location", operationLocation)
@@ -197,7 +196,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
 
         try {
             CapturedEmail captured = MAPPER.readValue(found.get().data(), CapturedEmail.class);
-            EmailSendResultResponse result = new EmailSendResultResponse(
+            EmailSendResult result = new EmailSendResult(
                     captured.getOperationId(),
                     captured.getStatus()
             );
@@ -403,16 +402,6 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         };
     }
 
-    private record EmailSendResultResponse(
-            String id,
-            String status,
-            Object error
-    ) {
-        EmailSendResultResponse(String id, String status) {
-            this(id, status, null);
-        }
-    }
-
     // ── Path parsing helpers ─────────────────────────────────────────────────
 
     private static String extractCommunicationPath(String fullPath) {
@@ -453,7 +442,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     private String clientOperationId(AzureRequest req) {
         return Optional.ofNullable(req.headers())
                 .map(h -> h.getHeaderString(OPERATION_ID_HEADER))
-                .filter(StringUtils::isNotBlank)
+                .filter(id -> !id.isBlank())
                 .orElseGet(() -> UUID.randomUUID().toString());
     }
 
