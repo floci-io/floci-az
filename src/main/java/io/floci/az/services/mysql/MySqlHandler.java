@@ -214,23 +214,31 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
             String skuTier  = sku.path("tier").asText(existing.skuTier());
             Map<String, String> mergedTags = body.has("tags") ? tags : existing.tags();
 
-            // Rotate inside the live container BEFORE committing the new password to state:
-            // if ALTER USER fails, state keeps the password the container still accepts.
-            boolean passwordChanged = !password.isBlank()
-                && !password.equals(existing.administratorLoginPassword());
-            if (passwordChanged && !config.services().mysql().mocked() && existing.containerId() != null) {
-                serverManager.rotateAdminPassword(existing, password);
+            // Rotate-then-commit runs under the start lock so a concurrent /connect or GET
+            // cannot start a container with the pre-update password between the rotation
+            // decision and the state commit. Rotation happens BEFORE the commit: if ALTER USER
+            // fails, state keeps the password the container still accepts. A server without a
+            // container skips rotation — ensureStarted below initializes the fresh container
+            // with the committed password.
+            MySqlState.ServerEntry updated;
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                MySqlState.ServerEntry live = state.getServer(serverName).orElse(existing);
+                boolean passwordChanged = !password.isBlank()
+                    && !password.equals(live.administratorLoginPassword());
+                if (passwordChanged && !config.services().mysql().mocked() && live.containerId() != null) {
+                    serverManager.rotateAdminPassword(live, password);
+                }
+                updated = new MySqlState.ServerEntry(
+                    serverName, live.subscriptionId(), live.resourceGroupName(),
+                    live.location(), version, live.administratorLogin(),
+                    password.isBlank() ? live.administratorLoginPassword() : password,
+                    skuName, skuTier, storageGB,
+                    live.containerId(), live.hostPort(), live.host(), mergedTags,
+                    live.databases(), live.firewallRules(), live.configurations(),
+                    live.createdAt());
+                state.putServer(updated);
             }
-
-            MySqlState.ServerEntry updated = new MySqlState.ServerEntry(
-                serverName, existing.subscriptionId(), existing.resourceGroupName(),
-                existing.location(), version, existing.administratorLogin(),
-                password.isBlank() ? existing.administratorLoginPassword() : password,
-                skuName, skuTier, storageGB,
-                existing.containerId(), existing.hostPort(), existing.host(), mergedTags,
-                existing.databases(), existing.firewallRules(), existing.configurations(),
-                existing.createdAt());
-            state.putServer(updated);
             if (!config.services().mysql().mocked()) {
                 updated = ensureStarted(updated);
             }
@@ -242,24 +250,29 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
         }
     }
 
+    /**
+     * Rehydrate on read: clients (azurerm refresh, SDK pollers, list data sources) expect a
+     * persisted server to be Ready after an emulator restart, not Creating. Best-effort — a
+     * read must never fail because the container could not come back; the entry then reports
+     * its current state instead.
+     */
+    private MySqlState.ServerEntry rehydrateBestEffort(MySqlState.ServerEntry entry) {
+        if (config.services().mysql().mocked() || entry.containerId() != null) {
+            return entry;
+        }
+        try {
+            return ensureStarted(entry);
+        } catch (Exception e) {
+            LOG.warnf(e, "Rehydrate failed for MySQL server %s — reporting current state",
+                entry.serverName());
+            return entry;
+        }
+    }
+
     private Response getServer(String serverName) {
-        Optional<MySqlState.ServerEntry> found = state.getServer(serverName);
-        if (found.isEmpty()) {
-            return notFound("Server '" + serverName + "' not found");
-        }
-        MySqlState.ServerEntry entry = found.get();
-        // Rehydrate on read: clients (azurerm refresh, SDK pollers) expect a persisted server
-        // to be Ready after an emulator restart, not Creating. Best-effort — a read must never
-        // fail because the container could not come back; it then reports the current state.
-        if (!config.services().mysql().mocked() && entry.containerId() == null) {
-            try {
-                entry = ensureStarted(entry);
-            } catch (Exception e) {
-                LOG.warnf(e, "Rehydrate on GET failed for MySQL server %s — reporting current state",
-                    serverName);
-            }
-        }
-        return Response.ok(serverResponse(entry)).build();
+        return state.getServer(serverName)
+            .map(s -> Response.ok(serverResponse(rehydrateBestEffort(s))).build())
+            .orElse(notFound("Server '" + serverName + "' not found"));
     }
 
     private Response deleteServer(String serverName) {
@@ -278,7 +291,10 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
         List<MySqlState.ServerEntry> servers = rg.equals("default")
             ? state.listServersBySubscription(sub)
             : state.listServersByResourceGroup(sub, rg);
-        List<Map<String, Object>> value = servers.stream().map(this::serverResponse).toList();
+        List<Map<String, Object>> value = servers.stream()
+            .map(this::rehydrateBestEffort)
+            .map(this::serverResponse)
+            .toList();
         return Response.ok(Map.of("value", value)).build();
     }
 
