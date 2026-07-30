@@ -55,8 +55,10 @@ public class MariaDbServerManager {
             .withLogRotation()
             .build();
 
-        var info = containerManager.createAndStart(spec);
-        String containerId = info.containerId();
+        String containerId = containerManager.create(spec);
+        containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
+            "/docker-entrypoint-initdb.d/10-grant-admin.sql");
+        var info = containerManager.startCreated(containerId, spec);
 
         int hostPort = Optional.ofNullable(info.getEndpoint(MARIADB_CONTAINER_PORT))
             .map(ContainerLifecycleManager.EndpointInfo::port)
@@ -92,25 +94,40 @@ public class MariaDbServerManager {
         managedContainers.remove(entry.containerId());
     }
 
+    /**
+     * The admin user created via MARIADB_USER only receives privileges on the init database,
+     * but an Azure Database admin can create databases and manage grants. The image
+     * entrypoint executes this on first init, before the server starts listening.
+     */
+    private static String grantAdminSql(String login) {
+        String quoted = login.replace("'", "''");
+        return "GRANT ALL PRIVILEGES ON *.* TO '" + quoted + "'@'%' WITH GRANT OPTION;\n"
+             + "FLUSH PRIVILEGES;\n";
+    }
+
     private void waitForReady(String host, int port, int timeoutSeconds) {
         LOG.infof("Waiting for MariaDB to be ready on %s:%d (timeout=%ds)…", host, port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
 
         while (System.currentTimeMillis() < deadline) {
+            // The server speaks first in the MySQL/MariaDB protocol: a live server sends its
+            // handshake packet immediately on accept. A bare TCP connect is not proof of
+            // readiness — Docker's port proxy accepts connections long before the server
+            // inside the container finishes first-time init and listens.
             try (Socket s = new Socket(host, port)) {
-                LOG.infof("MariaDB TCP %s:%d is open — waiting for engine init…", host, port);
-                break;
+                s.setSoTimeout(2_000);
+                if (s.getInputStream().read() != -1) {
+                    LOG.infof("MariaDB ready: %s:%d", host, port);
+                    return;
+                }
             } catch (Exception e) {
-                sleep(1000);
+                // not ready yet — retry until the deadline
             }
+            sleep(1000);
         }
 
-        long postTcpMs = Math.min(5_000L, deadline - System.currentTimeMillis());
-        if (postTcpMs > 0) {
-            sleep(postTcpMs);
-        }
-
-        LOG.infof("MariaDB ready: %s:%d", host, port);
+        LOG.warnf("MariaDB on %s:%d did not send a handshake within %ds — continuing anyway",
+            host, port, timeoutSeconds);
     }
 
     private static void sleep(long ms) {
