@@ -214,6 +214,14 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
             String skuTier  = sku.path("tier").asText(existing.skuTier());
             Map<String, String> mergedTags = body.has("tags") ? tags : existing.tags();
 
+            // Rotate inside the live container BEFORE committing the new password to state:
+            // if ALTER USER fails, state keeps the password the container still accepts.
+            boolean passwordChanged = !password.isBlank()
+                && !password.equals(existing.administratorLoginPassword());
+            if (passwordChanged && !config.services().mysql().mocked() && existing.containerId() != null) {
+                serverManager.rotateAdminPassword(existing, password);
+            }
+
             MySqlState.ServerEntry updated = new MySqlState.ServerEntry(
                 serverName, existing.subscriptionId(), existing.resourceGroupName(),
                 existing.location(), version, existing.administratorLogin(),
@@ -223,6 +231,9 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
                 existing.databases(), existing.firewallRules(), existing.configurations(),
                 existing.createdAt());
             state.putServer(updated);
+            if (!config.services().mysql().mocked()) {
+                updated = ensureStarted(updated);
+            }
             return Response.status(200).entity(serverResponse(updated)).build();
 
         } catch (Exception e) {
@@ -406,23 +417,55 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
 
     // ── Convenience /connect ──────────────────────────────────────────────────
 
+    /**
+     * Restarts the sidecar for a server whose container is gone — after an emulator restart,
+     * {@code loadFromStore} rebuilds persisted entries with {@code containerId=null}. Servers
+     * with a live container pass through untouched. Callers skip this in mocked mode.
+     */
+    private MySqlState.ServerEntry ensureStarted(MySqlState.ServerEntry entry) {
+        if (entry.containerId() != null) {
+            return entry;
+        }
+        Object lock = startLocks.computeIfAbsent(entry.serverName().toLowerCase(), k -> new Object());
+        synchronized (lock) {
+            MySqlState.ServerEntry current = state.getServer(entry.serverName()).orElse(entry);
+            if (current.containerId() != null) {
+                return current;
+            }
+            MySqlState.ServerEntry started = serverManager.startServer(current);
+            state.putServer(started);
+            return started;
+        }
+    }
+
     private Response handleServerConnect(String serverName) {
-        return state.getServer(serverName)
-            .map(s -> {
-                MySqlConnectionInfo info = MySqlConnectionInfo.of(
-                    s.fullyQualifiedDomainName(), s.hostPort(),
-                    s.administratorLogin(), s.administratorLoginPassword(), null);
-                Map<String, Object> resp = new LinkedHashMap<>();
-                resp.put("server", s.serverName());
-                resp.put("host", info.host());
-                resp.put("port", info.port());
-                resp.put("jdbcUrl", info.jdbcUrl());
-                resp.put("uri", info.uri());
-                resp.put("mysql", info.mysql());
-                resp.put("dotNet", info.dotNet());
-                return Response.ok(resp).build();
-            })
-            .orElse(notFound("Server '" + serverName + "' not found"));
+        Optional<MySqlState.ServerEntry> found = state.getServer(serverName);
+        if (found.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        MySqlState.ServerEntry entry = found.get();
+        if (!config.services().mysql().mocked()) {
+            try {
+                entry = ensureStarted(entry);
+            } catch (Exception e) {
+                LOG.errorf(e, "Failed to restart MySQL container for server=%s", serverName);
+                return Response.status(500)
+                    .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                    .build();
+            }
+        }
+        MySqlConnectionInfo info = MySqlConnectionInfo.of(
+            entry.fullyQualifiedDomainName(), entry.hostPort(),
+            entry.administratorLogin(), entry.administratorLoginPassword(), null);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("server", entry.serverName());
+        resp.put("host", info.host());
+        resp.put("port", info.port());
+        resp.put("jdbcUrl", info.jdbcUrl());
+        resp.put("uri", info.uri());
+        resp.put("mysql", info.mysql());
+        resp.put("dotNet", info.dotNet());
+        return Response.ok(resp).build();
     }
 
     // ── Response builders ─────────────────────────────────────────────────────

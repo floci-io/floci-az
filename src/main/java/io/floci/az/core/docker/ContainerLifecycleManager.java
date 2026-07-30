@@ -1,6 +1,7 @@
 package io.floci.az.core.docker;
 
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
@@ -10,6 +11,7 @@ import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.ExposedPort;
+import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Ports;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -237,6 +239,41 @@ public class ContainerLifecycleManager {
 
     public DockerClient getDockerClient() {
         return dockerClient;
+    }
+
+    /** Result of a command executed inside a running container. */
+    public record ExecResult(int exitCode, String output) {}
+
+    /**
+     * Runs a command inside a running container and waits for it to finish.
+     * The command is passed as an argv array directly to the container runtime — no shell
+     * is involved, so arguments need no shell quoting.
+     */
+    public ExecResult execInContainer(String containerId, String... cmd) {
+        try {
+            String execId = dockerClient.execCreateCmd(containerId)
+                    .withCmd(cmd)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .exec()
+                    .getId();
+
+            StringBuilder output = new StringBuilder();
+            dockerClient.execStartCmd(execId)
+                    .exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame frame) {
+                            output.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    })
+                    .awaitCompletion(60, java.util.concurrent.TimeUnit.SECONDS);
+
+            Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
+            return new ExecResult(exitCode == null ? -1 : exitCode.intValue(), output.toString());
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted executing command in container " + containerId, ie);
+        }
     }
 
     /**

@@ -288,6 +288,37 @@ class MySqlCompatibilityTest {
     }
 
     @Test
+    @Order(65)
+    @DisplayName("PATCH rotates the admin password inside the live container")
+    void passwordRotation() throws Exception {
+        String newPwd = "FlociAz_Rotated456!";
+
+        HttpResponse<String> patchResp = send("PATCH",
+            ARM_BASE + "/flexibleServers/" + SERVER + API,
+            "{\"properties\":{\"administratorLoginPassword\":\"" + newPwd + "\"}}");
+        assertEquals(200, patchResp.statusCode(), "PATCH password: " + patchResp.body());
+
+        HttpResponse<String> connectResp = send("GET",
+            BASE + "/devstoreaccount1-mysql/flexibleServers/" + SERVER + "/connect", null);
+        assertEquals(200, connectResp.statusCode());
+        String rotatedUrl = extractField(connectResp.body(), "jdbcUrl");
+        assertNotNull(rotatedUrl);
+        assertTrue(rotatedUrl.contains(newPwd), "jdbcUrl should embed the rotated password");
+
+        // The rotated credentials must actually authenticate against the running server.
+        try (Connection conn = DriverManager.getConnection(rotatedUrl);
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT 1")) {
+            assertTrue(rs.next());
+        }
+
+        // And the old password must no longer work.
+        assertThrows(SQLException.class,
+            () -> DriverManager.getConnection(defaultJdbcUrl).close(),
+            "old password should be rejected after rotation");
+    }
+
+    @Test
     @Order(70)
     @DisplayName("DELETE app database removes it from server")
     void deleteDatabase() throws Exception {

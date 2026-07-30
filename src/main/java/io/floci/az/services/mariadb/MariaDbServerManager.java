@@ -126,8 +126,34 @@ public class MariaDbServerManager {
             sleep(1000);
         }
 
-        LOG.warnf("MariaDB on %s:%d did not send a handshake within %ds — continuing anyway",
-            host, port, timeoutSeconds);
+        // Callers surface this as a failed create (500 + state rollback) — a server that never
+        // spoke the protocol must not be reported Ready.
+        throw new RuntimeException(String.format(
+            "MariaDB on %s:%d did not send a handshake within %ds", host, port, timeoutSeconds));
+    }
+
+    /**
+     * Rotates the admin password inside the live container via ALTER USER, so credential
+     * rotation through ARM keeps the data plane reachable. The root password is rotated in
+     * the same batch: it starts equal to the create-time admin password, and keeping the two
+     * in lockstep lets every future rotation authenticate with the state's current password.
+     */
+    public void rotateAdminPassword(MariaDbState.ServerEntry entry, String newPassword) {
+        String sql = "ALTER USER '" + sqlQuote(entry.administratorLogin()) + "'@'%' IDENTIFIED BY '"
+                + sqlQuote(newPassword) + "'; "
+                + "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + sqlQuote(newPassword) + "'; "
+                + "FLUSH PRIVILEGES;";
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(), "mariadb", "-uroot", "-p" + entry.administratorLoginPassword(), "-e", sql);
+        if (result.exitCode() != 0) {
+            throw new RuntimeException("Password rotation failed for MariaDB server '"
+                + entry.serverName() + "': " + result.output());
+        }
+        LOG.infof("Rotated admin password for MariaDB server %s", entry.serverName());
+    }
+
+    private static String sqlQuote(String s) {
+        return s.replace("\\", "\\\\").replace("'", "''");
     }
 
     private static void sleep(long ms) {
