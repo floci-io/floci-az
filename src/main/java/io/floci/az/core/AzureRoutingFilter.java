@@ -2,6 +2,7 @@ package io.floci.az.core;
 
 import io.floci.az.core.auth.AuthPipeline;
 import io.floci.az.services.arm.ArmHandler;
+import io.floci.az.services.monitor.MonitorHandler;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import jakarta.annotation.PostConstruct;
@@ -411,7 +412,11 @@ public class AzureRoutingFilter {
     }
 
     private Outcome routeMonitor(RoutingContext ctx) {
-        if (!ctx.path().startsWith("dataCollectionRules/") && !ctx.path().startsWith("v1/workspaces/")) {
+        // Diagnostic settings live under an arbitrary resource URI
+        // ({resourceUri}/providers/microsoft.insights/diagnosticSettings), so they must be claimed
+        // here, before routeArmProviders matches the resource's own provider namespace.
+        if (!ctx.path().startsWith("dataCollectionRules/") && !ctx.path().startsWith("v1/workspaces/")
+                && !MonitorHandler.isDiagnosticSettingsPath(ctx.path())) {
             return Fallthrough.TO_NEXT_STAGE;
         }
         return dispatchOrServiceDisabled(ctx, "monitor", "monitor", ctx.path());

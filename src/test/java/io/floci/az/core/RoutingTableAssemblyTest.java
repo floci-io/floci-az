@@ -60,6 +60,8 @@ class RoutingTableAssemblyTest {
         Map.entry("-eventhub", "eventhub"),
         Map.entry("-sql", "sql"),
         Map.entry("-postgres", "postgres"),
+        Map.entry("-mysql", "mysql"),
+        Map.entry("-mariadb", "mariadb"),
         Map.entry("-servicebus", "servicebus"),
         Map.entry("-apim", "apim"),
         Map.entry("-email", "email")
@@ -76,6 +78,8 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.ContainerRegistry/", "acr"),
         Map.entry("/providers/Microsoft.Sql/", "sql"),
         Map.entry("/providers/Microsoft.DBforPostgreSQL/", "postgres"),
+        Map.entry("/providers/Microsoft.DBforMySQL/", "mysql"),
+        Map.entry("/providers/Microsoft.DBforMariaDB/", "mariadb"),
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
         Map.entry("/providers/Microsoft.Communication/", "email")
@@ -96,7 +100,7 @@ class RoutingTableAssemblyTest {
     @Test
     void accountSuffixRoutesMatchA4() {
         assertEquals(GOLDEN_ACCOUNT_ROUTES, asEntries(filter.accountSuffixRoutes()));
-        assertEquals(19, filter.accountSuffixRoutes().size(), "no duplicate account suffixes");
+        assertEquals(GOLDEN_ACCOUNT_ROUTES.size(), filter.accountSuffixRoutes().size(), "no duplicate account suffixes");
     }
 
     @Test
