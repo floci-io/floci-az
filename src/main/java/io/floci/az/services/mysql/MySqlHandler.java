@@ -243,9 +243,23 @@ public class MySqlHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response getServer(String serverName) {
-        return state.getServer(serverName)
-            .map(s -> Response.ok(serverResponse(s)).build())
-            .orElse(notFound("Server '" + serverName + "' not found"));
+        Optional<MySqlState.ServerEntry> found = state.getServer(serverName);
+        if (found.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        MySqlState.ServerEntry entry = found.get();
+        // Rehydrate on read: clients (azurerm refresh, SDK pollers) expect a persisted server
+        // to be Ready after an emulator restart, not Creating. Best-effort — a read must never
+        // fail because the container could not come back; it then reports the current state.
+        if (!config.services().mysql().mocked() && entry.containerId() == null) {
+            try {
+                entry = ensureStarted(entry);
+            } catch (Exception e) {
+                LOG.warnf(e, "Rehydrate on GET failed for MySQL server %s — reporting current state",
+                    serverName);
+            }
+        }
+        return Response.ok(serverResponse(entry)).build();
     }
 
     private Response deleteServer(String serverName) {
