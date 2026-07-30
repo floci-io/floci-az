@@ -5,7 +5,7 @@
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean
+        test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -326,6 +326,18 @@ test-sql:
 	@echo "==> Azure SQL Database compatibility test (requires Docker)"
 	$(MAKE) run-sql
 	cd $(JAVA_DIR) && mvn test -Dtest=SqlCompatibilityTest; \
+	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
+
+test-mysql:
+	@echo "==> Azure Database for MySQL compatibility test (requires Docker)"
+	$(MAKE) run
+	cd $(JAVA_DIR) && mvn test -Dtest=MySqlCompatibilityTest; \
+	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
+
+test-mariadb:
+	@echo "==> Azure Database for MariaDB compatibility test (requires Docker)"
+	$(MAKE) run
+	cd $(JAVA_DIR) && mvn test -Dtest=MariaDbCompatibilityTest; \
 	EXIT=$$?; $(MAKE) -C $(CURDIR) stop; exit $$EXIT
 
 test-eventgrid:

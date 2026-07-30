@@ -133,6 +133,20 @@
             <version>12.6.1.jre11</version>
             <scope>test</scope>
         </dependency>
+        <!-- MySQL JDBC (for MySqlCompatibilityTest) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.4.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- MariaDB JDBC (for MariaDbCompatibilityTest) -->
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>3.4.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
