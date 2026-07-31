@@ -273,6 +273,40 @@ public sealed class ServiceBusCompatibilityTests
             cancellationToken);
     }
 
+    [Test]
+    [NotInParallel("servicebus-broker")]
+    [Timeout(90_000)]
+    public async Task ExpiredLockedMessageDeadLettersWhenAbandoned(
+        CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string queue = $"locked-ttl-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureQueue(
+            serviceBusNamespace, queue, TimeSpan.FromSeconds(1), cancellationToken);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        await using var client = new ServiceBusClient(connectionString);
+        await using ServiceBusSender sender = client.CreateSender(queue);
+        await using ServiceBusReceiver receiver = client.CreateReceiver(queue);
+
+        await sender.SendMessageAsync(new ServiceBusMessage("locked-expiry"), cancellationToken);
+        ServiceBusReceivedMessage locked = await Receive(receiver, cancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        await receiver.AbandonMessageAsync(locked, cancellationToken: cancellationToken);
+
+        await Assert.That(await receiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(1), cancellationToken)).IsNull();
+        await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
+            queue, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+        ServiceBusReceivedMessage expired = await Receive(deadLetterReceiver, cancellationToken);
+        await Assert.That(expired.Body.ToString()).IsEqualTo("locked-expiry");
+        await deadLetterReceiver.CompleteMessageAsync(expired, cancellationToken);
+    }
+
     private static async Task AssertExpiresIntoDeadLetterQueue(
         ServiceBusClient client,
         string queue,

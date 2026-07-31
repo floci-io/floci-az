@@ -15,6 +15,7 @@ import org.apache.activemq.artemis.core.transaction.Transaction;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import java.lang.management.ManagementFactory;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,6 +37,8 @@ public final class ServiceBusExpiryPlugin
     public static final String OBJECT_NAME = "io.floci.az.artemis:type=ServiceBusExpiry";
 
     private final ConcurrentHashMap<String, ExpirySettings> settingsByQueue =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ExpiryKey, ExpiryDeadline> expiryDeadlines =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ExpiryKey, ScheduledFuture<?>> scheduledExpirations =
             new ConcurrentHashMap<>();
@@ -76,6 +79,7 @@ public final class ServiceBusExpiryPlugin
         } finally {
             scheduledExpirations.values().forEach(task -> task.cancel(false));
             scheduledExpirations.clear();
+            expiryDeadlines.clear();
             settingsByQueue.clear();
             server = null;
         }
@@ -104,6 +108,7 @@ public final class ServiceBusExpiryPlugin
                 task.cancel(false);
             }
         });
+        expiryDeadlines.keySet().removeIf(key -> key.queueName().equals(queueName));
     }
 
     @Override
@@ -132,8 +137,21 @@ public final class ServiceBusExpiryPlugin
             long delayMillis = effectiveDelay(
                     message.getExpiration(), now, settings.defaultTtlMillis());
             long messageId = message.getMessageID();
-            scheduleExpiry(activeServer, queue, messageId, settings, delayMillis);
+            scheduleExpiry(activeServer, queue, messageId, settings, now, delayMillis);
         }
+    }
+
+    @Override
+    public boolean canAccept(ServerConsumer consumer, MessageReference reference) {
+        ExpiryKey key = expiryKey(reference);
+        ExpiryDeadline deadline = expiryDeadlines.get(key);
+        if (deadline == null || deadline.expiresAtMillis() > System.currentTimeMillis()) {
+            return true;
+        }
+        if (expire(reference.getQueue(), reference.getMessageID(), deadline.deadLetterAddress())) {
+            clearExpiry(key);
+        }
+        return false;
     }
 
     @Override
@@ -172,40 +190,63 @@ public final class ServiceBusExpiryPlugin
             Queue queue,
             long messageId,
             ExpirySettings settings,
+            long now,
             long delayMillis) {
         ExpiryKey key = new ExpiryKey(queue.getName().toString(), messageId);
         synchronized (scheduledExpirations) {
-            if (scheduledExpirations.containsKey(key)) {
+            if (expiryDeadlines.putIfAbsent(key, new ExpiryDeadline(
+                    saturatingAdd(now, delayMillis), settings.deadLetterAddress())) != null) {
                 return;
             }
             ScheduledFuture<?> task = activeServer.getScheduledPool().schedule(() -> {
-                try {
-                    expire(queue, messageId, settings.deadLetterAddress());
-                } finally {
+                synchronized (scheduledExpirations) {
                     scheduledExpirations.remove(key);
+                    if (isDelivering(queue, messageId)) {
+                        return;
+                    }
+                    if (expire(queue, messageId, settings.deadLetterAddress())) {
+                        expiryDeadlines.remove(key);
+                    }
                 }
             }, delayMillis, TimeUnit.MILLISECONDS);
             scheduledExpirations.put(key, task);
         }
     }
 
+    private static long saturatingAdd(long left, long right) {
+        return Long.MAX_VALUE - left < right ? Long.MAX_VALUE : left + right;
+    }
+
     private void cancelExpiry(MessageReference reference) {
-        ExpiryKey key = new ExpiryKey(
-                reference.getQueue().getName().toString(), reference.getMessageID());
+        clearExpiry(expiryKey(reference));
+    }
+
+    private void clearExpiry(ExpiryKey key) {
+        expiryDeadlines.remove(key);
         ScheduledFuture<?> task = scheduledExpirations.remove(key);
         if (task != null) {
             task.cancel(false);
         }
     }
 
-    private static void expire(Queue queue, long messageId, String deadLetterAddress) {
+    private static ExpiryKey expiryKey(MessageReference reference) {
+        return new ExpiryKey(
+                reference.getQueue().getName().toString(), reference.getMessageID());
+    }
+
+    private static boolean isDelivering(Queue queue, long messageId) {
+        return queue.getDeliveringMessages().values().stream()
+                .flatMap(Collection::stream)
+                .anyMatch(reference -> reference.getMessageID() == messageId);
+    }
+
+    private static boolean expire(Queue queue, long messageId, String deadLetterAddress) {
         try {
             if (deadLetterAddress == null) {
-                queue.expireReference(messageId);
-            } else {
-                queue.moveReference(
-                        messageId, SimpleString.of(deadLetterAddress), null, false);
+                return queue.expireReference(messageId);
             }
+            return queue.moveReference(
+                    messageId, SimpleString.of(deadLetterAddress), null, false);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Could not expire message " + messageId + " from " + queue.getName(), e);
@@ -213,6 +254,8 @@ public final class ServiceBusExpiryPlugin
     }
 
     private record ExpirySettings(long defaultTtlMillis, String deadLetterAddress) {}
+
+    private record ExpiryDeadline(long expiresAtMillis, String deadLetterAddress) {}
 
     private record ExpiryKey(String queueName, long messageId) {}
 }
