@@ -319,17 +319,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> metadata = new HashMap<>();
             String blobType = request.headers().getHeaderString("x-ms-blob-type");
             metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
-            String ct = request.headers().getHeaderString("x-ms-blob-content-type");
-            if (ct == null) {
-                ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
-            }
-            metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
-            BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, responseHeader) -> {
-                String value = request.headers().getHeaderString(requestHeader);
-                if (value != null) {
-                    metadata.put(responseHeader, value);
-                }
-            });
+            addBlobHttpProperties(request, metadata);
             metadata.put("Name", blobName);
             metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
             metadata.putAll(readUserMetadata(request));
@@ -408,12 +398,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-lease-status", "unlocked")
                 .header("x-ms-lease-state", "available")
                 .header("x-ms-server-encrypted", "true");
-        BLOB_HTTP_PROPERTY_HEADERS.values().forEach(header -> {
+        for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
-            if (value != null) {
+            if (value != null && !(isRangeRequest && "Content-MD5".equals(header))) {
                 rb.header(header, value);
             }
-        });
+        }
         if (isRangeRequest) {
             rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
         }
@@ -629,8 +619,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> metadata = new HashMap<>();
             String blobType = request.headers().getHeaderString("x-ms-blob-type");
             metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
-            String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
-            metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
+            addBlobHttpProperties(request, metadata);
             metadata.put("Name", blobName);
             metadata.put(CREATION_TIME_KEY, createdOn(
                     store.get(objKey(request.accountName(), containerName, blobName))).toString());
@@ -659,6 +648,20 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             LOGGER.errorf(e, "putBlockList I/O error: container=%s blob=%s", containerName, blobName);
             return Response.serverError().build();
         }
+    }
+
+    private static void addBlobHttpProperties(AzureRequest request, Map<String, String> metadata) {
+        String contentType = request.headers().getHeaderString("x-ms-blob-content-type");
+        if (contentType == null) {
+            contentType = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+        }
+        metadata.put("Content-Type", contentType != null ? contentType : "application/octet-stream");
+        BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, responseHeader) -> {
+            String value = request.headers().getHeaderString(requestHeader);
+            if (value != null) {
+                metadata.put(responseHeader, value);
+            }
+        });
     }
 
     /**
