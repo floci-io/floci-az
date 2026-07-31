@@ -1326,5 +1326,5 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
     private String quoted(String s) { return "\"" + s + "\""; }
 
-    public void clear() { store.clear(); }
+    public synchronized void clear() { store.clear(); }
 }
