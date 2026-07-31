@@ -51,6 +51,8 @@ public class ServiceBusNamespaceManager {
     private static final int JOLOKIA_PORT = 8161;
     private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$DeadLetterQueue";
     private static final String SUBSCRIPTION_DIVERT_SUFFIX = "/$Divert";
+    private static final String TOPIC_ADDRESS_SUFFIX = "/$Topic";
+    private static final String TOPIC_DIVERT_SUFFIX = "/$TopicDivert";
 
     /**
      * Immutable snapshot of a running namespace.
@@ -250,23 +252,42 @@ public class ServiceBusNamespaceManager {
     }
 
     /**
-     * Provisions a topic address that accepts the SDK's ANYCAST-prefixed sender link while
-     * subscription diverts fan each message out with topic semantics.
+     * Provisions an ANYCAST ingress accepted by SDK sender links and diverts it exclusively to a
+     * hidden MULTICAST address. Subscription diverts fan messages out from that hidden address.
      */
     public void jolokiaCreateTopic(String namespaceName, String topicName) {
+        String topicAddress = topicName + TOPIC_ADDRESS_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
-                    jsonArr(topicName, "ANYCAST,MULTICAST"));
+                    jsonArr(topicName, "ANYCAST"));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
+                    jsonArr(topicName, "ANYCAST", topicName, "", true, -1, false, false));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createAddress(java.lang.String,java.lang.String)",
+                    jsonArr(topicAddress, "MULTICAST"));
+            jolokiaCreateDivert(http, baseUrl, auth, mbean,
+                    topicName + TOPIC_DIVERT_SUFFIX, topicName, topicAddress, "", true);
         });
     }
 
     /** Removes a MULTICAST address and all its subscription queues from the running Artemis broker. */
     public void jolokiaDeleteTopic(String namespaceName, String topicName) {
+        String topicAddress = topicName + TOPIC_ADDRESS_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyDivert(java.lang.String)",
+                    jsonArr(topicName + TOPIC_DIVERT_SUFFIX));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyQueue(java.lang.String,boolean,boolean)",
+                    jsonArr(topicName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
                     "deleteAddress(java.lang.String,boolean)",
                     jsonArr(topicName, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "deleteAddress(java.lang.String,boolean)",
+                    jsonArr(topicAddress, true));
         });
     }
 
@@ -304,8 +325,8 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
-            jolokiaCreateSubscriptionDivert(http, baseUrl, auth, mbean,
-                    divertName, topicName, queueName, filter);
+            jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
+                    topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
         });
     }
 
@@ -322,8 +343,8 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyDivert(java.lang.String)",
                     jsonArr(divertName));
-            jolokiaCreateSubscriptionDivert(http, baseUrl, auth, mbean,
-                    divertName, topicName, queueName, filter);
+            jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
+                    topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
         });
     }
 
@@ -390,13 +411,13 @@ public class ServiceBusNamespaceManager {
         void run(HttpClient http, String baseUrl, String auth, String mbean) throws Exception;
     }
 
-    private void jolokiaCreateSubscriptionDivert(HttpClient http, String baseUrl, String auth,
-                                                   String mbean, String divertName,
-                                                   String topicName, String queueName,
-                                                   String filter) {
+    private void jolokiaCreateDivert(HttpClient http, String baseUrl, String auth,
+                                      String mbean, String divertName, String sourceAddress,
+                                      String forwardingAddress, String filter, boolean exclusive) {
         jolokiaExec(http, baseUrl, auth, mbean,
                 "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
-                jsonArr(divertName, divertName, topicName, queueName, false, filter, null));
+                jsonArr(divertName, divertName, sourceAddress, forwardingAddress,
+                        exclusive, filter, null));
     }
 
     private void withJolokia(String namespaceName, JolokiaAction action) {
