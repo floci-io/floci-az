@@ -34,6 +34,8 @@ class ServiceBusConfigGeneratorTest {
 
         assertEquals(2, brokerXml.split("saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN", -1).length - 1);
         assertEquals(2, brokerXml.split("anycastPrefix=/", -1).length - 1);
+        assertTrue(brokerXml.contains(
+                "class-name=\"io.floci.az.artemis.ServiceBusDuplicateDetectionPlugin\""));
     }
 
     @Test
@@ -107,6 +109,7 @@ class ServiceBusConfigGeneratorTest {
                 "org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/AmqpTransferTagGenerator.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.class",
+                "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.class");
         try (InputStream stream = getClass().getResourceAsStream(
                 ServiceBusNamespaceManager.ARTEMIS_AMQP_PATCH_RESOURCE)) {

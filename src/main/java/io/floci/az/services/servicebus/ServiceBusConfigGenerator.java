@@ -51,6 +51,11 @@ public class ServiceBusConfigGenerator {
                         + ";maxMessageSize=1048576")
                   .end("acceptor")
                 .end("acceptors")
+                .start("broker-plugins")
+                  .startAttr("broker-plugin", "class-name",
+                          "io.floci.az.artemis.ServiceBusDuplicateDetectionPlugin")
+                  .end("broker-plugin")
+                .end("broker-plugins")
                 .start("address-settings")
                   .startAttr("address-setting", "match", "#")
                     .elem("max-delivery-attempts", maxDelivery)

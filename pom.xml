@@ -208,6 +208,7 @@
                                     <includes>
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java,
+                                        org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java
                                     </includes>
                                 </artifactItem>
@@ -266,7 +267,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="final String sourceAddress = ParameterisedAddress.extractAddress(source.getAddress());"
-                                    value="final String sourceAddress = ServiceBusSessionSupport.normalizeEntityPath(ParameterisedAddress.extractAddress(source.getAddress()));"
+                                    value="final String sourceAddress = ServiceBusSessionSupport.normalizeEntityPath(ParameterisedAddress.extractAddress(source.getAddress())).replaceFirst(&quot;^/&quot;, &quot;&quot;);"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
@@ -277,6 +278,26 @@
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="public void close(boolean remoteClose) throws Exception {"
                                     value="public void close(boolean remoteClose) throws Exception { ServiceBusSessionSupport.release(protonSender);"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="addressToUse = SimpleString.of(sourceAddress);"
+                                    value="addressToUse = SimpleString.of(sourceAddress);&#10;            directQueue = sessionSPI.queueQuery(QueueConfiguration.of(addressToUse), false);&#10;            if (directQueue.isExists()) {&#10;               queueNameToUse = addressToUse;&#10;               addressToUse = directQueue.getAddress();&#10;            }"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="final boolean isFQQN;"
+                                    value="final boolean isFQQN;&#10;         QueueQueryResult directQueue = null;"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="multicast = verifySourceCapability(source, TOPIC_CAPABILITY);"
+                                    value="multicast = directQueue != null &amp;&amp; directQueue.isExists() ? directQueue.getRoutingType() == RoutingType.MULTICAST : verifySourceCapability(source, TOPIC_CAPABILITY);"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
+                                    token="address = SimpleString.of(targetAddress);"
+                                    value="address = SimpleString.of(targetAddress.startsWith(&quot;/&quot;) ? targetAddress.substring(1) : targetAddress);"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"

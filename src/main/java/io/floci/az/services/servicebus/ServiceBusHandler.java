@@ -264,12 +264,18 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         boolean isQueue = body.isEmpty() || body.contains("QueueDescription");
         boolean isTopic = !isQueue && body.contains("TopicDescription");
         boolean requiresSession = body.contains("<RequiresSession>true</RequiresSession>");
+        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection;
+        try {
+            duplicateDetection = ServiceBusEntityXml.duplicateDetection(body);
+        } catch (IllegalArgumentException e) {
+            return badRequestAtom(e.getMessage());
+        }
 
         if (isTopic) {
-            return handleCreateTopic(account, ns, entityName);
+            return handleCreateTopic(account, ns, entityName, duplicateDetection);
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
-        return handleCreateQueue(account, ns, entityName, requiresSession);
+        return handleCreateQueue(account, ns, entityName, requiresSession, duplicateDetection);
     }
 
     private Response handleSpecEntityDelete(String account, String ns, String entityName) {
@@ -468,7 +474,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             case "PUT", "POST"  -> {
                 String body = readBody(req);
                 boolean requiresSession = body.contains("<RequiresSession>true</RequiresSession>");
-                yield handleCreateQueue(account, namespace, queueName, requiresSession);
+                try {
+                    yield handleCreateQueue(account, namespace, queueName, requiresSession,
+                            ServiceBusEntityXml.duplicateDetection(body));
+                } catch (IllegalArgumentException e) {
+                    yield badRequestAtom(e.getMessage());
+                }
             }
             case "DELETE"       -> handleDeleteQueue(account, namespace, queueName);
             default             -> Response.status(405).build();
@@ -486,7 +497,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response handleCreateQueue(String account, String namespace, String queueName,
-                                        boolean requiresSession) {
+                                        boolean requiresSession,
+                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.QueueEntity existing =
@@ -499,12 +511,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         ServiceBusModels.QueueEntity queue = ServiceBusModels.QueueEntity.defaults(
-                queueName, sb.maxDeliveryCount(), sb.lockDurationSeconds(), requiresSession);
+                queueName, sb.maxDeliveryCount(), sb.lockDurationSeconds(), requiresSession,
+                duplicateDetection);
         store.put(key, toStoredObject(key, queue));
 
         try {
-            namespaceManager.jolokiaCreateQueue(
-                    namespace, queueName, queue.requiresSession(), queue.lockDurationSeconds());
+            namespaceManager.jolokiaCreateQueue(namespace, queueName,
+                    queue.requiresSession(), queue.lockDurationSeconds(), duplicateDetection);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision queue '%s' in Artemis for namespace '%s'", queueName, namespace);
         }
@@ -541,7 +554,14 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private Response handleTopicCrud(AzureRequest req, String account, String namespace, String topicName) {
         return switch (req.method()) {
             case "GET"          -> handleGetTopic(account, namespace, topicName);
-            case "PUT", "POST"  -> handleCreateTopic(account, namespace, topicName);
+            case "PUT", "POST"  -> {
+                try {
+                    yield handleCreateTopic(account, namespace, topicName,
+                            ServiceBusEntityXml.duplicateDetection(readBody(req)));
+                } catch (IllegalArgumentException e) {
+                    yield badRequestAtom(e.getMessage());
+                }
+            }
             case "DELETE"       -> handleDeleteTopic(account, namespace, topicName);
             default             -> Response.status(405).build();
         };
@@ -557,7 +577,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .orElseGet(() -> notFoundAtom("Topic not found: " + topicName));
     }
 
-    private Response handleCreateTopic(String account, String namespace, String topicName) {
+    private Response handleCreateTopic(String account, String namespace, String topicName,
+                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
         String key = topicKey(account, namespace, topicName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.TopicEntity existing =
@@ -568,11 +589,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (namespaceManager.getNamespace(namespace).isEmpty()) {
             lazyStartNamespace(namespace);
         }
-        ServiceBusModels.TopicEntity topic = ServiceBusModels.TopicEntity.defaults(topicName);
+        ServiceBusModels.TopicEntity topic =
+                ServiceBusModels.TopicEntity.defaults(topicName, duplicateDetection);
         store.put(key, toStoredObject(key, topic));
 
         try {
-            namespaceManager.jolokiaCreateTopic(namespace, topicName);
+            namespaceManager.jolokiaCreateTopic(namespace, topicName, duplicateDetection);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision topic '%s' in Artemis for namespace '%s'", topicName, namespace);
         }
@@ -838,7 +860,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<DefaultMessageTimeToLive>P14D</DefaultMessageTimeToLive>"
                 + "<LockDuration>" + lockDuration + "</LockDuration>"
                 + "<MaxDeliveryCount>" + q.maxDeliveryCount() + "</MaxDeliveryCount>"
-                + "<RequiresDuplicateDetection>false</RequiresDuplicateDetection>"
+                + "<RequiresDuplicateDetection>" + q.requiresDuplicateDetection()
+                + "</RequiresDuplicateDetection>"
+                + "<DuplicateDetectionHistoryTimeWindow>"
+                + isoDuration(q.duplicateDetectionHistorySeconds())
+                + "</DuplicateDetectionHistoryTimeWindow>"
                 + "<RequiresSession>" + q.requiresSession() + "</RequiresSession>"
                 + "<DeadLetteringOnMessageExpiration>false</DeadLetteringOnMessageExpiration>"
                 + "<EnableBatchedOperations>true</EnableBatchedOperations>"
@@ -882,7 +908,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return "<TopicDescription xmlns=\"" + SB_NS + "\">"
                 + "<MaxSizeInMegabytes>" + t.maxSizeInMegabytes() + "</MaxSizeInMegabytes>"
                 + "<DefaultMessageTimeToLive>P14D</DefaultMessageTimeToLive>"
-                + "<RequiresDuplicateDetection>false</RequiresDuplicateDetection>"
+                + "<RequiresDuplicateDetection>" + t.requiresDuplicateDetection()
+                + "</RequiresDuplicateDetection>"
+                + "<DuplicateDetectionHistoryTimeWindow>"
+                + isoDuration(t.duplicateDetectionHistorySeconds())
+                + "</DuplicateDetectionHistoryTimeWindow>"
                 + "<EnableBatchedOperations>true</EnableBatchedOperations>"
                 + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
                 + "<Status>Active</Status>"

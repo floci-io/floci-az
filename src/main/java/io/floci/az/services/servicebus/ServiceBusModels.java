@@ -22,14 +22,18 @@ public final class ServiceBusModels {
             long lockDurationSeconds,
             long maxSizeInMegabytes,
             boolean requiresSession,
+            boolean requiresDuplicateDetection,
+            long duplicateDetectionHistorySeconds,
             Instant createdAt,
             Instant updatedAt) {
 
         static QueueEntity defaults(String name, int maxDeliveryCount,
-                                     long lockDurationSeconds, boolean requiresSession) {
+                                     long lockDurationSeconds, boolean requiresSession,
+                                     ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
             Instant now = Instant.now();
             return new QueueEntity(name, maxDeliveryCount, lockDurationSeconds,
-                    1024, requiresSession, now, now);
+                    1024, requiresSession, duplicateDetection.enabled(),
+                    duplicateDetection.historySeconds(), now, now);
         }
     }
 
@@ -37,12 +41,16 @@ public final class ServiceBusModels {
     public record TopicEntity(
             String name,
             long maxSizeInMegabytes,
+            boolean requiresDuplicateDetection,
+            long duplicateDetectionHistorySeconds,
             Instant createdAt,
             Instant updatedAt) {
 
-        static TopicEntity defaults(String name) {
+        static TopicEntity defaults(String name,
+                                    ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
             Instant now = Instant.now();
-            return new TopicEntity(name, 1024, now, now);
+            return new TopicEntity(name, 1024, duplicateDetection.enabled(),
+                    duplicateDetection.historySeconds(), now, now);
         }
     }
 
