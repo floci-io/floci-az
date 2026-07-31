@@ -249,12 +249,15 @@ public class ServiceBusNamespaceManager {
         });
     }
 
-    /** Provisions a MULTICAST address for a topic in the running Artemis broker. */
+    /**
+     * Provisions a topic address that accepts the SDK's ANYCAST-prefixed sender link while
+     * subscription diverts fan each message out with topic semantics.
+     */
     public void jolokiaCreateTopic(String namespaceName, String topicName) {
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
-                    jsonArr(topicName, "MULTICAST"));
+                    jsonArr(topicName, "ANYCAST,MULTICAST"));
         });
     }
 
