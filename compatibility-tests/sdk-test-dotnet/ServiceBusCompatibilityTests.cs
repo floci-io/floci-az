@@ -243,13 +243,11 @@ public sealed class ServiceBusCompatibilityTests
         await subscriptionReceiver.CompleteMessageAsync(topicMarker, cancellationToken);
     }
 
-    [Fact]
-    public async Task EntityAndMessageTtlExpireIntoDeadLetterQueue()
+    [Test]
+    [Timeout(45_000)]
+    public async Task EntityAndMessageTtlExpireIntoDeadLetterQueue(
+        CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
-            TestContext.Current.CancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(45));
-        CancellationToken cancellationToken = timeout.Token;
         const string serviceBusNamespace = "default";
         string entityTtlQueue = $"entity-ttl-{Guid.NewGuid():N}";
         string messageTtlQueue = $"message-ttl-{Guid.NewGuid():N}";
@@ -284,13 +282,13 @@ public sealed class ServiceBusCompatibilityTests
         await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
 
         await using ServiceBusReceiver normalReceiver = client.CreateReceiver(queue);
-        Assert.Null(await normalReceiver.ReceiveMessageAsync(
-            TimeSpan.FromSeconds(1), cancellationToken));
+        await Assert.That(await normalReceiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(1), cancellationToken)).IsNull();
 
         await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
             queue, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
         ServiceBusReceivedMessage expired = await Receive(deadLetterReceiver, cancellationToken);
-        Assert.Equal(message.Body.ToString(), expired.Body.ToString());
+        await Assert.That(expired.Body.ToString()).IsEqualTo(message.Body.ToString());
         await deadLetterReceiver.CompleteMessageAsync(expired, cancellationToken);
     }
 
