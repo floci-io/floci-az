@@ -52,6 +52,14 @@ public class BlobServiceTest {
     }
 
     @Test
+    void postBlobServicePropertiesIsNotImplemented() {
+        given()
+            .when().post("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(501);
+    }
+
+    @Test
     void createAndDeleteContainer() {
         given()
             .when().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)

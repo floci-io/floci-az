@@ -45,6 +45,14 @@ public class TableServiceTest {
     }
 
     @Test
+    void postTableServicePropertiesIsNotImplemented() {
+        given()
+            .when().post("/{account}?restype=service&comp=properties", ACCOUNT)
+            .then()
+            .statusCode(501);
+    }
+
+    @Test
     void listTablesStillReturnsJson() {
         given()
             .contentType("application/json")

@@ -100,8 +100,12 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 && "properties".equals(query.get("comp"))) {
             if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                 response = getTableServiceProperties();
-            } else {
+            } else if ("PUT".equalsIgnoreCase(method)) {
                 response = Response.accepted().build();
+            } else {
+                response = new AzureErrorResponse(
+                        "NotImplemented", "The requested operation is not implemented.")
+                        .toXmlResponse(501);
             }
         } else if (path.startsWith("Tables")) {
             if ("GET".equalsIgnoreCase(method)) {
