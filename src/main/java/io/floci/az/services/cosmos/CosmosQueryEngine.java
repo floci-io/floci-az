@@ -143,6 +143,10 @@ public class CosmosQueryEngine {
             Pattern.compile("(?i)\\bSELECT\\s+TOP\\s+(\\d+)");
     private static final Pattern OFFSET_LIMIT_PATTERN =
             Pattern.compile("(?i)\\bOFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)");
+    private static final Pattern CORRELATED_EXISTS_PATTERN = Pattern.compile(
+            "(?is)EXISTS\\s*\\(\\s*SELECT\\s+VALUE\\s+(\\w+)\\s+"
+                    + "FROM\\s+\\1\\s+IN\\s+([\\w.]+)"
+                    + "(?:\\s+WHERE\\s+(.+))?\\s*\\)");
 
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
@@ -288,6 +292,16 @@ public class CosmosQueryEngine {
         pred = pred.trim();
         Matcher m;
 
+        // EXISTS(SELECT VALUE item FROM item IN c.items WHERE item.field = value)
+        m = CORRELATED_EXISTS_PATTERN.matcher(pred);
+        if (m.matches()) {
+            Object source = resolve(doc, m.group(2));
+            if (!(source instanceof List<?> items)) return false;
+            String where = m.group(3);
+            if (where == null) return !items.isEmpty();
+            return items.stream().anyMatch(item -> evalExistsItem(item, where));
+        }
+
         // IS_DEFINED(c.field)
         m = Pattern.compile("(?i)IS_DEFINED\\s*\\(([^)]+)\\)").matcher(pred);
         if (m.matches()) return resolve(doc, m.group(1).trim()) != null;
@@ -423,6 +437,13 @@ public class CosmosQueryEngine {
         }
 
         return false;
+    }
+
+    private boolean evalExistsItem(Object item, String where) {
+        if (!(item instanceof Map<?, ?> map)) return false;
+        Map<String, Object> nestedDocument = new LinkedHashMap<>();
+        map.forEach((key, value) -> nestedDocument.put(String.valueOf(key), value));
+        return evalExpr(nestedDocument, where);
     }
 
     /** Convert a SQL LIKE pattern (% and _ wildcards) to a regex and match. */

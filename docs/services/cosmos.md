@@ -9,7 +9,7 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 - **Documents** — create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
 - **Queries** — in-process SQL engine with full Cosmos DB SQL dialect support:
   - `SELECT *`, `SELECT c.field1, c.field2`, `SELECT VALUE c.field`, `SELECT TOP n`
-  - `WHERE` with `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `IN`, `BETWEEN`, `NOT`, `AND`, `OR`
+  - `WHERE` with `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `IN`, `BETWEEN`, `NOT`, `AND`, `OR`, and correlated `EXISTS` over arrays
   - `WHERE` functions: `IS_DEFINED`, `IS_NULL`, `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`, `CONTAINS`, `STARTSWITH`, `ENDSWITH`, `ARRAY_CONTAINS`
   - `ORDER BY field [ASC|DESC]`, multiple fields — like Azure, an `ORDER BY` over two or more properties requires a matching composite index on the container, otherwise the query fails with `400 BadRequest` (error `SC2104`)
   - `OFFSET n LIMIT m` pagination
