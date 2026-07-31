@@ -267,7 +267,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag());
     }
 
-    private Response deleteDatabase(AzureRequest req, String dbId) {
+    private synchronized Response deleteDatabase(AzureRequest req, String dbId) {
         String key = dbKey(req.accountName(), dbId);
         if (store.get(key).isEmpty()) return notFound(dbId);
 
@@ -509,7 +509,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    private Response deleteContainer(AzureRequest req, String dbId, String collId) {
+    private synchronized Response deleteContainer(AzureRequest req, String dbId, String collId) {
         String key = collKey(req.accountName(), dbId, collId);
         if (store.get(key).isEmpty()) return notFound(collId);
 
