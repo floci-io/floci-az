@@ -295,11 +295,14 @@ public class CosmosQueryEngine {
         // EXISTS(SELECT VALUE item FROM item IN c.items WHERE item.field = value)
         m = CORRELATED_EXISTS_PATTERN.matcher(pred);
         if (m.matches()) {
-            Object source = resolve(doc, m.group(2));
+            String itemAlias = m.group(1);
+            String sourcePath = m.group(2);
+            Object source = resolve(doc, sourcePath);
             if (!(source instanceof List<?> items)) return false;
             String where = m.group(3);
             if (where == null) return !items.isEmpty();
-            return items.stream().anyMatch(item -> evalExistsItem(item, where));
+            String outerAlias = sourcePath.contains(".") ? sourcePath.substring(0, sourcePath.indexOf('.')) : null;
+            return items.stream().anyMatch(item -> evalExistsItem(doc, item, itemAlias, outerAlias, where));
         }
 
         // IS_DEFINED(c.field)
@@ -439,11 +442,14 @@ public class CosmosQueryEngine {
         return false;
     }
 
-    private boolean evalExistsItem(Object item, String where) {
-        if (!(item instanceof Map<?, ?> map)) return false;
-        Map<String, Object> nestedDocument = new LinkedHashMap<>();
-        map.forEach((key, value) -> nestedDocument.put(String.valueOf(key), value));
-        return evalExpr(nestedDocument, where);
+    private boolean evalExistsItem(Map<String, Object> outerDocument, Object item, String itemAlias,
+                                   String outerAlias, String where) {
+        QueryScope scope = new QueryScope(outerDocument);
+        scope.bind(itemAlias, item);
+        if (outerAlias != null) {
+            scope.bind(outerAlias, outerDocument);
+        }
+        return evalExpr(scope, where);
     }
 
     /** Convert a SQL LIKE pattern (% and _ wildcards) to a regex and match. */
@@ -479,16 +485,45 @@ public class CosmosQueryEngine {
     }
 
     Object resolve(Map<String, Object> doc, String path) {
-        path = stripAlias(path);
-        Object current = doc;
-        for (String seg : path.split("\\.")) {
+        String[] segments = path.split("\\.");
+        Object current;
+        int startIndex;
+        if (doc instanceof QueryScope scope && scope.hasBinding(segments[0])) {
+            current = scope.binding(segments[0]);
+            startIndex = 1;
+        } else {
+            segments = stripAlias(path).split("\\.");
+            current = doc;
+            startIndex = 0;
+        }
+        for (int i = startIndex; i < segments.length; i++) {
             if (current instanceof Map<?, ?> map) {
-                current = map.get(seg);
+                current = map.get(segments[i]);
             } else {
                 return null;
             }
         }
         return current;
+    }
+
+    private static final class QueryScope extends LinkedHashMap<String, Object> {
+        private final Map<String, Object> bindings = new HashMap<>();
+
+        private QueryScope(Map<String, Object> document) {
+            super(document);
+        }
+
+        private void bind(String alias, Object value) {
+            bindings.put(alias, value);
+        }
+
+        private boolean hasBinding(String alias) {
+            return bindings.containsKey(alias);
+        }
+
+        private Object binding(String alias) {
+            return bindings.get(alias);
+        }
     }
 
     // -----------------------------------------------------------------------
