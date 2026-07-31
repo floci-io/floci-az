@@ -171,6 +171,33 @@ class CosmosCompatibilityTest {
     }
 
     @Test
+    @DisplayName("document replace: stale If-Match returns 412 and preserves item")
+    @SuppressWarnings("unchecked")
+    void documentReplaceHonorsIfMatch() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosContainer container = db.getContainer("items");
+        container.createItem(doc("conditional-1", "tools", "stock", 10));
+
+        CosmosException exception = assertThrows(CosmosException.class,
+            () -> container.replaceItem(
+                doc("conditional-1", "tools", "stock", 5),
+                "conditional-1",
+                new PartitionKey("tools"),
+                new CosmosItemRequestOptions().setIfMatchETag("\"stale\"")));
+
+        assertEquals(412, exception.getStatusCode());
+        Map<String, Object> unchanged = container
+            .readItem("conditional-1", new PartitionKey("tools"), Map.class)
+            .getItem();
+        assertEquals(10, ((Number) unchanged.get("stock")).intValue());
+
+        db.delete();
+    }
+
+    @Test
     @DisplayName("database delete cascades to containers and documents")
     void cascadeDelete() {
         String id = dbId();
