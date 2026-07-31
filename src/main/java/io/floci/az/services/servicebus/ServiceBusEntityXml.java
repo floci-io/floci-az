@@ -8,7 +8,9 @@ import java.time.format.DateTimeParseException;
 /** Parses settings shared by Service Bus queue and topic descriptions. */
 final class ServiceBusEntityXml {
 
-    private static final Duration DEFAULT_DUPLICATE_DETECTION_HISTORY = Duration.ofMinutes(10);
+    static final long DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofMinutes(10).toSeconds();
+    private static final Duration DEFAULT_DUPLICATE_DETECTION_HISTORY =
+            Duration.ofSeconds(DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS);
     private static final long MIN_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofSeconds(20).toSeconds();
     private static final long MAX_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofDays(7).toSeconds();
 

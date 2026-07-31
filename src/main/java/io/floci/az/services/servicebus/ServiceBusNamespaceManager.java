@@ -118,7 +118,12 @@ public class ServiceBusNamespaceManager {
         this.tlsGenerator = tlsGenerator;
     }
 
-    public NamespaceState startNamespace(String namespaceName, int amqpHostPort, int amqpsHostPort) {
+    public synchronized NamespaceState startNamespace(
+            String namespaceName, int amqpHostPort, int amqpsHostPort) {
+        NamespaceState existing = namespaces.get(namespaceName);
+        if (existing != null) {
+            return existing;
+        }
         String containerName = containerName(namespaceName);
 
         LOG.infov("Starting Artemis broker for Service Bus namespace ''{0}'' (plain:{1}, TLS:{2})",

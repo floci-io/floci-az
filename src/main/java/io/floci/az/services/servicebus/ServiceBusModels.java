@@ -27,6 +27,13 @@ public final class ServiceBusModels {
             Instant createdAt,
             Instant updatedAt) {
 
+        public QueueEntity {
+            if (duplicateDetectionHistorySeconds == 0) {
+                duplicateDetectionHistorySeconds =
+                        ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
+            }
+        }
+
         static QueueEntity defaults(String name, int maxDeliveryCount,
                                      long lockDurationSeconds, boolean requiresSession,
                                      ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
@@ -45,6 +52,13 @@ public final class ServiceBusModels {
             long duplicateDetectionHistorySeconds,
             Instant createdAt,
             Instant updatedAt) {
+
+        public TopicEntity {
+            if (duplicateDetectionHistorySeconds == 0) {
+                duplicateDetectionHistorySeconds =
+                        ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
+            }
+        }
 
         static TopicEntity defaults(String name,
                                     ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
