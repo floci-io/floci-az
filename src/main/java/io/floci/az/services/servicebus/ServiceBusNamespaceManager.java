@@ -227,14 +227,38 @@ public class ServiceBusNamespaceManager {
     /**
      * Provisions a durable MULTICAST queue (subscription) bound to the topic address.
      * The queue name follows the Azure convention: {@code {topicName}/Subscriptions/{subName}}.
+     *
+     * @param filter Artemis core filter (SQL92 selector) applied to the queue — the compiled
+     *               form of the subscription's rules; empty string matches everything
      */
-    public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName) {
+    public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName,
+                                           String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             // address=topicName (MULTICAST), queue name=topicName/Subscriptions/subName
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(topicName, "MULTICAST", queueName, "", true, -1, false, false));
+                    jsonArr(topicName, "MULTICAST", queueName, filter, true, -1, false, false));
+        });
+    }
+
+    /**
+     * Replaces the filter of an existing subscription queue in place via
+     * {@code ActiveMQServerControl.updateQueue(String queueConfiguration)}. The broker applies
+     * the new filter to future routing only ({@code Queue.setFilter}), matching Azure's
+     * rule-change semantics: messages already routed to the subscription stay, attached
+     * receivers stay connected.
+     */
+    public void jolokiaUpdateSubscriptionFilter(String namespaceName, String topicName, String subName,
+                                                 String filter) {
+        String queueName = topicName + "/Subscriptions/" + subName;
+        // QueueConfiguration JSON uses kebab-case keys ("filter-string", not "filterString")
+        String queueConfigJson = "{\"name\":" + jsonString(queueName)
+                + ",\"filter-string\":" + jsonString(filter) + "}";
+        withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "updateQueue(java.lang.String)",
+                    jsonArr(queueConfigJson));
         });
     }
 
@@ -340,13 +364,38 @@ public class ServiceBusNamespaceManager {
         }
     }
 
+    private static String jsonString(String value) {
+        StringBuilder sb = new StringBuilder(value.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\f' -> sb.append("\\f");
+                case '\b' -> sb.append("\\b");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.append('"').toString();
+    }
+
     private static String jsonArr(Object... values) {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < values.length; i++) {
             if (i > 0) sb.append(",");
             Object v = values[i];
             if (v instanceof String s) {
-                sb.append("\"").append(s.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
+                sb.append(jsonString(s));
             } else {
                 sb.append(v);
             }
