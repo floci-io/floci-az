@@ -130,7 +130,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         return notImplemented();
     }
 
-    private Response routeDocs(AzureRequest req, String[] segs, String dbId, String collId) {
+    private synchronized Response routeDocs(AzureRequest req, String[] segs, String dbId, String collId) {
         String m      = req.method().toUpperCase();
         // Query plan requests use x-ms-cosmos-is-query-plan-request: True (no isquery header)
         boolean planRequest = "True".equalsIgnoreCase(
@@ -899,7 +899,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (found.isEmpty()) return batchResultError(404);
         if (!(body.get("operations") instanceof List<?> rawOperations)) return batchResultError(400);
 
-        List<Map<String, Object>> operations = (List<Map<String, Object>>) rawOperations;
+        List<Map<String, Object>> operations = new ArrayList<>(rawOperations.size());
+        for (Object rawOperation : rawOperations) {
+            if (!(rawOperation instanceof Map<?, ?> operation)) return batchResultError(400);
+            operations.add((Map<String, Object>) operation);
+        }
         Map<String, Object> document = parseData(found.get());
         applyPatchOperations(document, operations);
 

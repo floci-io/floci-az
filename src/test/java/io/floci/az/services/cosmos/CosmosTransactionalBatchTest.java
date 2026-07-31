@@ -78,6 +78,29 @@ class CosmosTransactionalBatchTest {
                 .body("counter", is(7));
     }
 
+    @Test
+    void malformedPatchOperationReturnsBatchFailure() {
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
+                .header("x-ms-cosmos-is-batch-request", "true")
+                .body("""
+                        [
+                          {
+                            "operationType":"Patch",
+                            "id":"one",
+                            "resourceBody":{"operations":[42]}
+                          },
+                          {"operationType":"Read","id":"one"}
+                        ]""")
+                .post(DOCS)
+                .then().statusCode(200)
+                .body("statusCode", contains(400, 424));
+
+        read("one").then().statusCode(200)
+                .body("value", is(1))
+                .body("counter", is(2));
+    }
+
     private io.restassured.response.Response read(String id) {
         return given().header("x-ms-documentdb-partitionkey", PARTITION_KEY)
                 .get(DOCS + "/" + id);
