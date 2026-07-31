@@ -49,6 +49,23 @@ public class NetworkService {
             return Response.ok(Map.of("value", listSubnets(sub, rg, vnetName))).build();
         }
 
+        // Child resources whose canonical home is an array on the parent. Azure models LB
+        // backend pools and NSG security rules this way, and azurerm manages them through
+        // these dedicated child endpoints — routing them into the generic CRUD would store
+        // a mis-typed sibling the parent read-back never sees.
+        if (tail.matches("loadBalancers/[^/?]+/backendAddressPools([/?].*)?")) {
+            return handleParentArrayChild(request, method, sub, rg, tail,
+                    "loadBalancers", "backendAddressPools", false);
+        }
+        if (tail.matches("networkSecurityGroups/[^/?]+/securityRules([/?].*)?")) {
+            return handleParentArrayChild(request, method, sub, rg, tail,
+                    "networkSecurityGroups", "securityRules", false);
+        }
+        if (tail.matches("networkSecurityGroups/[^/?]+/defaultSecurityRules([/?].*)?")) {
+            return handleParentArrayChild(request, method, sub, rg, tail,
+                    "networkSecurityGroups", "defaultSecurityRules", true);
+        }
+
         String resourceType = resourceType(tail);
         String name = resourceName(tail);
         String key = key(sub, rg, tail);
@@ -98,15 +115,16 @@ public class NetworkService {
     private Response createOrUpdateResource(AzureRequest request, String sub, String rg, String tail,
                                             String resourceType, String name, String key) {
         Map<String, Object> body = parseBody(request);
+        String id = "/subscriptions/" + sub + "/resourceGroups/" + rg
+                + "/providers/Microsoft.Network/" + tail;
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
-        synthesizeProperties(resourceType, name, properties);
+        synthesizeProperties(resourceType, name, id, properties);
         properties.put("provisioningState", "Succeeded");
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("_sub", sub);
         resource.put("_rg", rg);
-        resource.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + "/providers/Microsoft.Network/" + tail);
+        resource.put("id", id);
         resource.put("name", name);
         resource.put("type", resourceType);
         String location = bodyString(body, "location", null);
@@ -115,6 +133,15 @@ public class NetworkService {
         }
         if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
             resource.put("tags", tags);
+        }
+        // ARM envelope fields that live beside properties and must round-trip verbatim —
+        // azurerm reads them from the response model, not from its own state (e.g.
+        // azurerm_lb sets sku/sku_tier from model.Sku and diffs forever if it vanishes).
+        for (String envelope : List.of("sku", "zones", "identity")) {
+            Object value = body.get(envelope);
+            if (value != null) {
+                resource.put(envelope, value);
+            }
         }
         resource.put("properties", properties);
         resources.put(key, resource);
@@ -129,9 +156,116 @@ public class NetworkService {
         }
     }
 
+    /**
+     * CRUD for child resources stored as an array on the parent (LB backendAddressPools,
+     * NSG securityRules/defaultSecurityRules). The parent's array is the single source of
+     * truth: a child PUT upserts into it, so the parent read-back and the child endpoint
+     * never diverge, and cascade delete is inherent. {@code readOnly} models Azure's
+     * defaultSecurityRules, which exist only as a synthesized read surface.
+     */
     @SuppressWarnings("unchecked")
-    private static void synthesizeProperties(String resourceType, String name, Map<String, Object> properties) {
+    private Response handleParentArrayChild(AzureRequest request, String method, String sub, String rg,
+                                            String tail, String parentSegment, String childSegment,
+                                            boolean readOnly) {
+        String[] parts = tail.split("[/?]");
+        String parentName = parts[1];
+        String childName = parts.length > 3 && !parts[3].isEmpty() ? parts[3] : null;
+
+        Map<String, Object> parent = resources.get(key(sub, rg, parentSegment + "/" + parentName));
+        if (parent == null) {
+            return notFound(parentSegment + "/" + parentName);
+        }
+        Map<String, Object> parentProps = cast(parent.get("properties"));
+        List<Object> entries = parentProps.get(childSegment) instanceof List<?> l
+                ? new ArrayList<>((List<Object>) l)
+                : new ArrayList<>();
+
+        if (childName == null) {
+            return "GET".equals(method)
+                    ? Response.ok(Map.of("value", entries)).build()
+                    : Response.status(405).build();
+        }
+
+        switch (method) {
+            case "GET" -> {
+                for (Object item : entries) {
+                    Map<String, Object> entry = cast(item);
+                    if (childName.equals(entry.get("name"))) {
+                        return Response.ok(entry).build();
+                    }
+                }
+                return notFound(tail);
+            }
+            case "PUT" -> {
+                if (readOnly) {
+                    return Response.status(405).build();
+                }
+                Map<String, Object> body = parseBody(request);
+                Map<String, Object> entryProps = new LinkedHashMap<>(cast(body.get("properties")));
+                entryProps.put("provisioningState", "Succeeded");
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", childName);
+                entry.put("id", parent.get("id") + "/" + childSegment + "/" + childName);
+                entry.put("properties", entryProps);
+                entries.removeIf(item -> childName.equals(cast(item).get("name")));
+                entries.add(entry);
+                parentProps.put(childSegment, entries);
+                return Response.ok(entry).build();
+            }
+            case "DELETE" -> {
+                if (readOnly) {
+                    return Response.status(405).build();
+                }
+                entries.removeIf(item -> childName.equals(cast(item).get("name")));
+                parentProps.put(childSegment, entries);
+                return Response.ok().build();
+            }
+            default -> {
+                return Response.status(405).build();
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void synthesizeProperties(String resourceType, String name, String id,
+                                             Map<String, Object> properties) {
         switch (resourceType) {
+            case "Microsoft.Network/loadBalancers" -> {
+                // azurerm's flatteners scan every frontend for id + private IP fields, and
+                // lb_rule/probe/nat_rule child resources read-modify-write these arrays on
+                // the parent, so entries must echo with well-formed ARM ids. Every collection
+                // must EXIST even when empty — real Azure always returns them, and azurerm v3
+                // child resources deref the collection unguarded (probe_resource panics on a
+                // missing probes array).
+                stampChildArray(properties, "frontendIPConfigurations", id, entryProps -> {
+                    entryProps.putIfAbsent("privateIPAllocationMethod", "Dynamic");
+                    entryProps.putIfAbsent("privateIPAddress", "10.0.0.6");
+                });
+                properties.putIfAbsent("frontendIPConfigurations", new ArrayList<>());
+                for (String segment : List.of("backendAddressPools", "loadBalancingRules",
+                        "probes", "inboundNatRules", "inboundNatPools", "outboundRules")) {
+                    stampChildArray(properties, segment, id, entryProps -> { });
+                    properties.putIfAbsent(segment, new ArrayList<>());
+                }
+            }
+            case "Microsoft.Network/networkSecurityGroups" -> {
+                stampChildArray(properties, "securityRules", id, entryProps -> { });
+                properties.putIfAbsent("securityRules", new ArrayList<>());
+                properties.putIfAbsent("defaultSecurityRules", defaultSecurityRules(id));
+            }
+            case "Microsoft.Network/applicationGateways" -> {
+                // azurerm builds child sub-resource ids itself and sends them in the PUT, so
+                // echo is usually enough — but its flatteners parse every id and fail the
+                // apply on a malformed one, so ids synthesized here must use the exact
+                // {agwId}/{segment}/{name} form.
+                for (String segment : List.of("gatewayIPConfigurations", "frontendIPConfigurations",
+                        "frontendPorts", "httpListeners", "backendAddressPools",
+                        "backendHttpSettingsCollection", "requestRoutingRules", "probes",
+                        "sslCertificates", "urlPathMaps", "redirectConfigurations")) {
+                    stampChildArray(properties, segment, id, entryProps -> { });
+                }
+                properties.putIfAbsent("operationalState", "Running");
+            }
             case "Microsoft.Network/privateLinkServices" -> {
                 properties.putIfAbsent("alias",
                         name + "." + java.util.UUID.randomUUID() + ".azure.privatelinkservice");
@@ -165,6 +299,78 @@ public class NetworkService {
             }
             default -> { }
         }
+    }
+
+    /**
+     * Stamps each entry of an inline child array with its ARM id
+     * ({@code {parentId}/{segment}/{name}}), a Succeeded provisioningState, and
+     * segment-specific property defaults. Existing ids are kept — azurerm sends
+     * self-built ids for Application Gateway children and they must echo untouched.
+     */
+    @SuppressWarnings("unchecked")
+    private static void stampChildArray(Map<String, Object> properties, String segment, String parentId,
+                                        java.util.function.Consumer<Map<String, Object>> defaults) {
+        if (!(properties.get(segment) instanceof List<?> items) || items.isEmpty()) {
+            return;
+        }
+        List<Object> stamped = new ArrayList<>(items.size());
+        int index = 0;
+        for (Object item : items) {
+            index++;
+            Map<String, Object> entry = new LinkedHashMap<>(cast(item));
+            String name = bodyString(entry, "name", segment + index);
+            entry.put("name", name);
+            entry.putIfAbsent("id", parentId + "/" + segment + "/" + name);
+            Map<String, Object> entryProps = new LinkedHashMap<>(cast(entry.get("properties")));
+            defaults.accept(entryProps);
+            entryProps.put("provisioningState", "Succeeded");
+            entry.put("properties", entryProps);
+            stamped.add(entry);
+        }
+        properties.put(segment, stamped);
+    }
+
+    /**
+     * The six default rules every real NSG carries, from the Network 2025-01-01 spec's
+     * NetworkSecurityGroupGet example. Terraform never reads them; az and the SDKs do.
+     */
+    private static List<Object> defaultSecurityRules(String nsgId) {
+        record Rule(String name, String description, String sourceAddressPrefix,
+                    String destinationAddressPrefix, String access, int priority, String direction) { }
+        List<Rule> rules = List.of(
+                new Rule("AllowVnetInBound", "Allow inbound traffic from all VMs in VNET",
+                        "VirtualNetwork", "VirtualNetwork", "Allow", 65000, "Inbound"),
+                new Rule("AllowAzureLoadBalancerInBound", "Allow inbound traffic from azure load balancer",
+                        "AzureLoadBalancer", "*", "Allow", 65001, "Inbound"),
+                new Rule("DenyAllInBound", "Deny all inbound traffic",
+                        "*", "*", "Deny", 65500, "Inbound"),
+                new Rule("AllowVnetOutBound", "Allow outbound traffic from all VMs to all VMs in VNET",
+                        "VirtualNetwork", "VirtualNetwork", "Allow", 65000, "Outbound"),
+                new Rule("AllowInternetOutBound", "Allow outbound traffic from all VMs to Internet",
+                        "*", "Internet", "Allow", 65001, "Outbound"),
+                new Rule("DenyAllOutBound", "Deny all outbound traffic",
+                        "*", "*", "Deny", 65500, "Outbound"));
+
+        List<Object> result = new ArrayList<>(rules.size());
+        for (Rule rule : rules) {
+            Map<String, Object> props = new LinkedHashMap<>();
+            props.put("description", rule.description());
+            props.put("protocol", "*");
+            props.put("sourcePortRange", "*");
+            props.put("destinationPortRange", "*");
+            props.put("sourceAddressPrefix", rule.sourceAddressPrefix());
+            props.put("destinationAddressPrefix", rule.destinationAddressPrefix());
+            props.put("access", rule.access());
+            props.put("priority", rule.priority());
+            props.put("direction", rule.direction());
+            props.put("provisioningState", "Succeeded");
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", rule.name());
+            entry.put("id", nsgId + "/defaultSecurityRules/" + rule.name());
+            entry.put("properties", props);
+            result.add(entry);
+        }
+        return result;
     }
 
     private static String resourceType(String tail) {
@@ -1043,7 +1249,7 @@ public class NetworkService {
             nicKey = key(sub, rg, "networkInterfaces/" + nicName);
             nicId = "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/networkInterfaces/" + nicName;
             Map<String, Object> nicProps = new LinkedHashMap<>();
-            synthesizeProperties("Microsoft.Network/networkInterfaces", nicName, nicProps);
+            synthesizeProperties("Microsoft.Network/networkInterfaces", nicName, nicId, nicProps);
             nicProps.put("provisioningState", "Succeeded");
             Map<String, Object> nic = new LinkedHashMap<>();
             nic.put("_sub", sub);

@@ -12,12 +12,14 @@ Compatible with ARM-speaking clients, Terraform's AzureRM provider, and OpenTofu
 - **Subnets** — CreateOrUpdate, Get, Delete, and List under a virtual network
 - **Network interfaces** — CreateOrUpdate, Get, Delete, and List by resource group
 - **Public IP addresses** — CreateOrUpdate, Get, Delete, and List by resource group
-- **Network security groups** — CreateOrUpdate, Get, Delete, and List by resource group
+- **Network security groups** — CreateOrUpdate, Get, Delete, and List by resource group; inline and standalone `securityRules` (child endpoint) with synthesized rule IDs, plus the six real-Azure `defaultSecurityRules`
+- **Load balancers** — CreateOrUpdate, Get, Delete, and List; top-level `sku` round-trips, frontend IP configurations get synthesized IDs and private IPs, and `backendAddressPools` are manageable through the dedicated child endpoint (`azurerm_lb_backend_address_pool`)
+- **Application gateways** — CreateOrUpdate, Get, Delete, and List; child sub-resources (listeners, ports, pools, routing rules, …) echo with well-formed ARM IDs (synthesized when absent) and the gateway reports `operationalState = "Running"`
 - **Private DNS zones** — CreateOrUpdate, Get, Delete, and List, with record sets (A, AAAA, CNAME, MX, PTR, SOA, SRV, TXT); a default SOA record set is seeded on creation, record/link counts are tracked, and ETag (`If-Match` / `If-None-Match`) concurrency is enforced
 - **Private DNS virtual network links** — CreateOrUpdate, Get, Delete, and List under a private DNS zone; links report `virtualNetworkLinkState = "Completed"`
 - **Private endpoints** — CreateOrUpdate, Get, Delete, and List; `privateLinkServiceConnections` are auto-approved, a backing network interface with a synthesized private IP is created, and nested `privateDnsZoneGroups` are supported
 - **Private link services** — CreateOrUpdate, Get, Delete, and List, with a synthesized `alias`
-- **Terraform/OpenTofu compatibility** — supports the Network resources needed by `azurerm_linux_virtual_machine`, `azurerm_private_dns_zone`, `azurerm_private_dns_zone_virtual_network_link`, and `azurerm_private_endpoint`
+- **Terraform/OpenTofu compatibility** — supports the Network resources needed by `azurerm_linux_virtual_machine`, `azurerm_private_dns_zone`, `azurerm_private_dns_zone_virtual_network_link`, `azurerm_private_endpoint`, `azurerm_network_security_group` / `azurerm_network_security_rule`, `azurerm_lb` (+ backend pool, probe, rule), and `azurerm_application_gateway`
 - **Resource group listing** — Network resources appear in ARM resource group resource listings
 
 Created resources return `properties.provisioningState = "Succeeded"`. NICs synthesize a dynamic private IP (`10.0.0.4`) when no private IP is supplied, and public IP resources synthesize a dynamic public IP (`20.0.0.4`) when no address is supplied. Creating a private endpoint likewise synthesizes a backing network interface with a `10.0.0.4` private IP.
@@ -118,8 +120,8 @@ floci-az:
 ## Scope And Limitations
 
 - No real L2/L3 networking, routing, peering, DNS, packet forwarding, or service endpoints
-- No NSG rule enforcement; NSG resources are stored as ARM state only
-- No route table, NAT gateway, load balancer, or application gateway behavior
+- No NSG rule enforcement; NSG resources (including default rules) are stored as ARM state only
+- No route table or NAT gateway behavior; load balancers and application gateways are ARM-state synthesis only — no traffic is balanced or routed
 - Private endpoints and private DNS zones are ARM-state only — a backing NIC with a synthesized `10.0.0.4` is created and connections are auto-approved, but there is no real private-link traffic, name registration, or DNS resolution against the private zone records
 - No real IP address management; default private and public IPs are synthesized for SDK and provider compatibility
 - Deletes are state-only; deleting a VNet also removes its child subnets from the in-memory store

@@ -568,4 +568,182 @@ class NetworkHandlerTest {
                 .then().statusCode(200)
                 .body("value", hasSize(0));
     }
+
+    @Test
+    void loadBalancerEchoesSkuAndSynthesizesFrontendIds() {
+        String lbBody = """
+                {
+                  "location": "eastus",
+                  "sku": {"name": "Standard", "tier": "Regional"},
+                  "properties": {
+                    "frontendIPConfigurations": [
+                      {"name": "internal", "properties": {"subnet": {"id": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/sub1"}}}
+                    ],
+                    "loadBalancingRules": [
+                      {"name": "rule1", "properties": {"protocol": "Tcp", "frontendPort": 80, "backendPort": 8080}}
+                    ]
+                  }
+                }
+                """;
+
+        String lbId = BASE.replace("/subscriptions", "/subscriptions") + "/loadBalancers/lb1";
+        given().contentType("application/json").body(lbBody)
+                .when().put(BASE + "/loadBalancers/lb1" + API)
+                .then().statusCode(200)
+                .body("sku.name", equalTo("Standard"))
+                .body("sku.tier", equalTo("Regional"))
+                .body("properties.frontendIPConfigurations[0].id",
+                        equalTo(lbId + "/frontendIPConfigurations/internal"))
+                .body("properties.frontendIPConfigurations[0].properties.privateIPAllocationMethod",
+                        equalTo("Dynamic"))
+                .body("properties.frontendIPConfigurations[0].properties.provisioningState",
+                        equalTo("Succeeded"))
+                .body("properties.loadBalancingRules[0].id", equalTo(lbId + "/loadBalancingRules/rule1"))
+                .body("properties.provisioningState", equalTo("Succeeded"));
+
+        given().when().get(BASE + "/loadBalancers/lb1" + API)
+                .then().statusCode(200)
+                .body("sku.name", equalTo("Standard"));
+    }
+
+    @Test
+    void loadBalancerBackendAddressPoolChildEndpointSyncsWithParent() {
+        given().contentType("application/json")
+                .body("{\"location\": \"eastus\", \"sku\": {\"name\": \"Standard\"}, \"properties\": {}}")
+                .when().put(BASE + "/loadBalancers/lb1" + API)
+                .then().statusCode(200);
+
+        given().contentType("application/json").body("{\"properties\": {}}")
+                .when().put(BASE + "/loadBalancers/lb1/backendAddressPools/pool1" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("pool1"))
+                .body("id", equalTo(BASE + "/loadBalancers/lb1/backendAddressPools/pool1"))
+                .body("properties.provisioningState", equalTo("Succeeded"));
+
+        given().when().get(BASE + "/loadBalancers/lb1/backendAddressPools/pool1" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("pool1"));
+
+        given().when().get(BASE + "/loadBalancers/lb1/backendAddressPools" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1));
+
+        given().when().get(BASE + "/loadBalancers/lb1" + API)
+                .then().statusCode(200)
+                .body("properties.backendAddressPools[0].name", equalTo("pool1"));
+
+        given().when().delete(BASE + "/loadBalancers/lb1/backendAddressPools/pool1" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/loadBalancers/lb1/backendAddressPools/pool1" + API)
+                .then().statusCode(404);
+
+        given().when().get(BASE + "/loadBalancers/lb1" + API)
+                .then().statusCode(200)
+                .body("properties.backendAddressPools", hasSize(0));
+    }
+
+    @Test
+    void networkSecurityGroupSynthesizesRuleIdsAndDefaultRules() {
+        String nsgBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "securityRules": [
+                      {"name": "allow-https", "properties": {
+                        "protocol": "Tcp", "sourcePortRange": "*", "destinationPortRange": "443",
+                        "sourceAddressPrefix": "*", "destinationAddressPrefix": "*",
+                        "access": "Allow", "priority": 100, "direction": "Inbound"}}
+                    ]
+                  }
+                }
+                """;
+
+        given().contentType("application/json").body(nsgBody)
+                .when().put(BASE + "/networkSecurityGroups/nsg1" + API)
+                .then().statusCode(200)
+                .body("properties.securityRules[0].id",
+                        equalTo(BASE + "/networkSecurityGroups/nsg1/securityRules/allow-https"))
+                .body("properties.securityRules[0].properties.provisioningState", equalTo("Succeeded"))
+                .body("properties.defaultSecurityRules", hasSize(6))
+                .body("properties.defaultSecurityRules[0].name", equalTo("AllowVnetInBound"))
+                .body("properties.defaultSecurityRules[0].id",
+                        equalTo(BASE + "/networkSecurityGroups/nsg1/defaultSecurityRules/AllowVnetInBound"))
+                .body("properties.defaultSecurityRules[2].properties.access", equalTo("Deny"))
+                .body("properties.defaultSecurityRules[2].properties.priority", equalTo(65500));
+
+        given().when().get(BASE + "/networkSecurityGroups/nsg1/defaultSecurityRules" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(6));
+
+        given().when().get(BASE + "/networkSecurityGroups/nsg1/defaultSecurityRules/DenyAllInBound" + API)
+                .then().statusCode(200)
+                .body("properties.direction", equalTo("Inbound"));
+    }
+
+    @Test
+    void networkSecurityRuleChildEndpointSyncsWithParent() {
+        given().contentType("application/json").body("{\"location\": \"eastus\", \"properties\": {}}")
+                .when().put(BASE + "/networkSecurityGroups/nsg1" + API)
+                .then().statusCode(200);
+
+        String ruleBody = """
+                {"properties": {
+                  "protocol": "Tcp", "sourcePortRange": "*", "destinationPortRange": "22",
+                  "sourceAddressPrefix": "10.0.0.0/8", "destinationAddressPrefix": "*",
+                  "access": "Allow", "priority": 200, "direction": "Inbound"}}
+                """;
+
+        given().contentType("application/json").body(ruleBody)
+                .when().put(BASE + "/networkSecurityGroups/nsg1/securityRules/allow-ssh" + API)
+                .then().statusCode(200)
+                .body("name", equalTo("allow-ssh"))
+                .body("id", equalTo(BASE + "/networkSecurityGroups/nsg1/securityRules/allow-ssh"))
+                .body("properties.priority", equalTo(200));
+
+        given().when().get(BASE + "/networkSecurityGroups/nsg1" + API)
+                .then().statusCode(200)
+                .body("properties.securityRules[0].name", equalTo("allow-ssh"));
+
+        given().when().delete(BASE + "/networkSecurityGroups/nsg1/securityRules/allow-ssh" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/networkSecurityGroups/nsg1/securityRules/allow-ssh" + API)
+                .then().statusCode(404);
+    }
+
+    @Test
+    void applicationGatewayEchoesChildIdsAndSynthesizesAbsentOnes() {
+        String agwId = BASE + "/applicationGateways/agw1";
+        String agwBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "sku": {"name": "Standard_v2", "tier": "Standard_v2", "capacity": 1},
+                    "frontendPorts": [
+                      {"name": "port80", "properties": {"port": 80}}
+                    ],
+                    "httpListeners": [
+                      {"name": "listener1",
+                       "id": "%s/httpListeners/listener1",
+                       "properties": {
+                         "frontendIPConfiguration": {"id": "%s/frontendIPConfigurations/feip"},
+                         "frontendPort": {"id": "%s/frontendPorts/port80"},
+                         "protocol": "Http"}}
+                    ]
+                  }
+                }
+                """.formatted(agwId, agwId, agwId);
+
+        given().contentType("application/json").body(agwBody)
+                .when().put(BASE + "/applicationGateways/agw1" + API)
+                .then().statusCode(200)
+                .body("properties.sku.name", equalTo("Standard_v2"))
+                .body("properties.frontendPorts[0].id", equalTo(agwId + "/frontendPorts/port80"))
+                .body("properties.httpListeners[0].id", equalTo(agwId + "/httpListeners/listener1"))
+                .body("properties.httpListeners[0].properties.frontendPort.id",
+                        equalTo(agwId + "/frontendPorts/port80"))
+                .body("properties.operationalState", equalTo("Running"))
+                .body("properties.provisioningState", equalTo("Succeeded"));
+    }
 }

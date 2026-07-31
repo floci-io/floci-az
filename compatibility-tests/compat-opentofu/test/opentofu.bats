@@ -173,3 +173,33 @@ setup() {
     assert_output --partial "networkInterfaces"
     assert_output --partial "Succeeded"
 }
+
+@test "OpenTofu: NSG created with inline rule, child rule, and default rules" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/networkSecurityGroups/${NSG_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/networkSecurityGroups"
+    assert_output --partial "allow-https"
+    assert_output --partial "${NSG_RULE_NAME}"
+    assert_output --partial "DenyAllInBound"
+    assert_output --partial "Succeeded"
+}
+
+@test "OpenTofu: load balancer echoes sku and frontend with backend pool" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/loadBalancers/${LB_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/loadBalancers"
+    assert_output --partial "Standard"
+    assert_output --partial "frontendIPConfigurations"
+    assert_output --partial "${LB_POOL_NAME}"
+    assert_output --partial "Succeeded"
+}
+
+@test "OpenTofu: application gateway created with listeners and routing rules" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/applicationGateways/${AGW_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.Network/applicationGateways"
+    assert_output --partial "httpListeners"
+    assert_output --partial "requestRoutingRules"
+    assert_output --partial "Running"
+    assert_output --partial "Succeeded"
+}

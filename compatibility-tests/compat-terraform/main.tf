@@ -186,3 +186,161 @@ resource "azurerm_container_registry" "acr" {
 output "acr_login_server" {
   value = azurerm_container_registry.acr.login_server
 }
+
+# ── Network type synthesis: NSG / Load Balancer / Application Gateway ────────
+
+resource "azurerm_network_security_group" "nsg" {
+  name                = "floci-test-nsg"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  security_rule {
+    name                       = "allow-https"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_security_rule" "ssh" {
+  name                        = "allow-ssh"
+  priority                    = 200
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "22"
+  source_address_prefix       = "10.0.0.0/8"
+  destination_address_prefix  = "*"
+  resource_group_name         = azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsg.name
+}
+
+resource "azurerm_public_ip" "lb_pip" {
+  name                = "floci-test-lb-pip"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_lb" "lb" {
+  name                = "floci-test-lb"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "Standard"
+
+  frontend_ip_configuration {
+    name                 = "frontend"
+    public_ip_address_id = azurerm_public_ip.lb_pip.id
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "pool" {
+  name            = "floci-test-lb-pool"
+  loadbalancer_id = azurerm_lb.lb.id
+}
+
+resource "azurerm_lb_probe" "probe" {
+  name            = "floci-test-lb-probe"
+  loadbalancer_id = azurerm_lb.lb.id
+  port            = 8080
+}
+
+resource "azurerm_lb_rule" "rule" {
+  name                           = "floci-test-lb-rule"
+  loadbalancer_id                = azurerm_lb.lb.id
+  protocol                       = "Tcp"
+  frontend_port                  = 80
+  backend_port                   = 8080
+  frontend_ip_configuration_name = "frontend"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.pool.id]
+  probe_id                       = azurerm_lb_probe.probe.id
+}
+
+resource "azurerm_subnet" "agw_subnet" {
+  name                 = "floci-test-agw-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.3.0/24"]
+}
+
+resource "azurerm_public_ip" "agw_pip" {
+  name                = "floci-test-agw-pip"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_application_gateway" "agw" {
+  name                = "floci-test-agw"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  sku {
+    name     = "Standard_v2"
+    tier     = "Standard_v2"
+    capacity = 1
+  }
+
+  gateway_ip_configuration {
+    name      = "gwip"
+    subnet_id = azurerm_subnet.agw_subnet.id
+  }
+
+  frontend_port {
+    name = "port80"
+    port = 80
+  }
+
+  frontend_ip_configuration {
+    name                 = "feip"
+    public_ip_address_id = azurerm_public_ip.agw_pip.id
+  }
+
+  backend_address_pool {
+    name = "bepool"
+  }
+
+  backend_http_settings {
+    name                  = "behttp"
+    cookie_based_affinity = "Disabled"
+    port                  = 8080
+    protocol              = "Http"
+    request_timeout       = 30
+  }
+
+  http_listener {
+    name                           = "listener"
+    frontend_ip_configuration_name = "feip"
+    frontend_port_name             = "port80"
+    protocol                       = "Http"
+  }
+
+  request_routing_rule {
+    name                       = "rule1"
+    priority                   = 100
+    rule_type                  = "Basic"
+    http_listener_name         = "listener"
+    backend_address_pool_name  = "bepool"
+    backend_http_settings_name = "behttp"
+  }
+}
+
+output "lb_id" {
+  value = azurerm_lb.lb.id
+}
+
+output "nsg_id" {
+  value = azurerm_network_security_group.nsg.id
+}
+
+output "application_gateway_id" {
+  value = azurerm_application_gateway.agw.id
+}

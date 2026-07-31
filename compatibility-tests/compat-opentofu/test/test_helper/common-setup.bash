@@ -35,6 +35,11 @@ export PG_DB_NAME="floci-test-db"
 export PDZ_NAME="privatelink.blob.core.windows.net"
 export PDZ_LINK_NAME="floci-test-pdzvnl"
 export PE_NAME="floci-test-pe"
+export NSG_NAME="floci-test-nsg"
+export NSG_RULE_NAME="allow-ssh"
+export LB_NAME="floci-test-lb"
+export LB_POOL_NAME="floci-test-lb-pool"
+export AGW_NAME="floci-test-agw"
 export SUB_ID="${TF_VAR_subscription_id}"
 
 arm_get() {
