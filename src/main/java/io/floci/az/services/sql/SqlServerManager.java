@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Map;
 import java.util.Optional;
@@ -109,7 +110,19 @@ public class SqlServerManager {
         LOG.infof("SQL Server container started: server=%s containerId=%s endpoint=%s:%d",
             entry.serverName(), containerId, reachableHost, reachablePort);
 
-        waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
+        try {
+            waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
+        } catch (RuntimeException startupFailure) {
+            managedContainers.remove(containerId);
+            try {
+                containerManager.stopAndRemove(containerId, null);
+            } catch (RuntimeException cleanupFailure) {
+                startupFailure.addSuppressed(cleanupFailure);
+                LOG.warnf(cleanupFailure,
+                    "Failed to remove unready SQL Server container '%s'", containerName);
+            }
+            throw startupFailure;
+        }
         LOG.infof("SQL Server ready: server=%s endpoint=%s:%d", entry.serverName(), reachableHost, reachablePort);
 
         return entry.withContainer(containerId, reachablePort, reachableHost);
@@ -147,18 +160,32 @@ public class SqlServerManager {
      * clients.  A brief post-TCP sleep covers the remaining boot window without
      * requiring a JDBC driver on the main runtime classpath.
      */
-    private void waitForReady(String host, int port, int timeoutSeconds) {
+    static void waitForReady(String host, int port, int timeoutSeconds) {
         LOG.infof("Waiting for SQL Server to be ready on %s:%d (timeout=%ds)…", host, port, timeoutSeconds);
         long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
+        boolean tcpOpen = false;
 
         // Phase 1 — wait for the port to accept TCP connections
         while (System.currentTimeMillis() < deadline) {
-            try (Socket s = new Socket(host, port)) {
+            try (Socket socket = new Socket()) {
+                long remainingMillis = deadline - System.currentTimeMillis();
+                socket.connect(new InetSocketAddress(host, port),
+                    Math.toIntExact(Math.min(1_000L, Math.max(1L, remainingMillis))));
                 LOG.infof("SQL Server TCP %s:%d is open — waiting for engine init…", host, port);
+                tcpOpen = true;
                 break;
             } catch (Exception e) {
-                sleep(1000);
+                long retryDelayMillis = Math.min(1_000L,
+                    Math.max(0L, deadline - System.currentTimeMillis()));
+                if (retryDelayMillis > 0) {
+                    sleep(retryDelayMillis);
+                }
             }
+        }
+        if (!tcpOpen) {
+            throw new IllegalStateException(
+                "SQL Server did not open TCP " + host + ":" + port
+                    + " within " + timeoutSeconds + " seconds");
         }
 
         // Phase 2 — give the engine a moment to finish startup after the port opens.

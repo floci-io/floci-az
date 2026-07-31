@@ -302,6 +302,9 @@ floci-az:
       startup-timeout-seconds: 60
 ```
 
+Microsoft supports SQL Server Linux container images only on Intel and AMD x86-64 hosts.
+ARM64 hosts require an explicitly configured alternative image or unsupported CPU emulation.
+
 In **mocked** mode (`mocked: true`) servers are created in state and report
 `state=Ready` with no SQL Server container and no EULA required — useful for
 management-plane testing without Docker. The data plane is unavailable (no live
