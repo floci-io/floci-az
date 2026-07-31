@@ -14,6 +14,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StorageBatchTest {
@@ -92,6 +93,20 @@ class StorageBatchTest {
                 new WalStorage<>(snapshot, wal, STRING_MAP, 60_000);
         try {
             storage.load();
+            assertTrue(storage.keys().isEmpty());
+        } finally {
+            storage.shutdown();
+        }
+    }
+
+    @Test
+    void walStorageRejectsBatchBeforeWriterIsOpen() {
+        WalStorage<String, String> storage = new WalStorage<>(
+                tempDir.resolve("unopened-snapshot.json"),
+                tempDir.resolve("unopened-storage.wal"), STRING_MAP, 60_000);
+        try {
+            assertThrows(IllegalStateException.class,
+                    () -> storage.applyBatch(Map.of("new", "value"), Set.of()));
             assertTrue(storage.keys().isEmpty());
         } finally {
             storage.shutdown();

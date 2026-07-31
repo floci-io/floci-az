@@ -261,7 +261,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     private void appendBatch(Map<K, V> puts, Set<K> deletes) {
         DataOutputStream out = walWriter;
         if (out == null) {
-            return;
+            throw new IllegalStateException("WAL writer is not open");
         }
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
