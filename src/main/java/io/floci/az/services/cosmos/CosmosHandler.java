@@ -611,32 +611,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         //   1. {"operations": [...]}  — Java / Python SDKs
         //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
         List<Map<String, Object>> operations = parsePatchBody(req);
-
-        for (Map<String, Object> op : operations) {
-            String opType = op.get("op") instanceof String s ? s.toLowerCase() : "";
-            String path   = op.get("path") instanceof String p ? p : null;
-            Object value  = op.get("value");
-
-            if (path == null) {
-                LOG.warnf("PATCH op '%s' missing 'path' — skipping", opType);
-                continue;
-            }
-
-            switch (opType) {
-                case "add", "set", "replace" -> patchSet(doc, path, value);
-                case "remove"                -> patchRemove(doc, path);
-                case "incr"                  -> patchIncr(doc, path, value);
-                case "move"                  -> {
-                    String from = op.get("from") instanceof String f ? f : null;
-                    if (from != null) {
-                        Object moved = patchGet(doc, from);
-                        patchRemove(doc, from);
-                        patchSet(doc, path, moved);
-                    }
-                }
-                default -> LOG.warnf("Unknown PATCH op '%s' — skipping", opType);
-            }
-        }
+        applyPatchOperations(doc, operations);
 
         Instant now  = Instant.now();
         String  etag = newEtag();
@@ -646,6 +621,32 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         store.put(obj.key(), stored(obj.key(), doc, now, etag));
         return cosmosResponse(doc, Response.Status.OK, etag,
                 "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    private void applyPatchOperations(Map<String, Object> doc, List<Map<String, Object>> operations) {
+        for (Map<String, Object> op : operations) {
+            String opType = op.get("op") instanceof String value ? value.toLowerCase() : "";
+            String path = op.get("path") instanceof String value ? value : null;
+            if (path == null) {
+                LOG.warnf("PATCH op '%s' missing 'path' — skipping", opType);
+                continue;
+            }
+
+            switch (opType) {
+                case "add", "set", "replace" -> patchSet(doc, path, op.get("value"));
+                case "remove" -> patchRemove(doc, path);
+                case "incr" -> patchIncr(doc, path, op.get("value"));
+                case "move" -> {
+                    String from = op.get("from") instanceof String value ? value : null;
+                    if (from != null) {
+                        Object moved = patchGet(doc, from);
+                        patchRemove(doc, from);
+                        patchSet(doc, path, moved);
+                    }
+                }
+                default -> LOG.warnf("Unknown PATCH op '%s' — skipping", opType);
+            }
+        }
     }
 
     /** Set (or create) the field at {@code /a/b/…} to {@code value}. */
@@ -671,7 +672,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String key     = parts[parts.length - 1];
         double current = toDouble(target.getOrDefault(key, 0));
         double result  = current + toDouble(delta);
-        target.put(key, isWholeNum(result) ? (long) result : result);
+        if (isWholeNum(result)) {
+            target.put(key, (long) result);
+        } else {
+            target.put(key, result);
+        }
     }
 
     /** Read the field at {@code path} (used by {@code move}). */
@@ -743,15 +748,14 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * {@code "eTag"} and {@code "resourceBody"}.</p>
      *
      * <p>Supported operation types: {@code Create}, {@code Upsert}, {@code Read},
-     * {@code Replace}, {@code Delete}.</p>
+     * {@code Replace}, {@code Patch}, {@code Delete}.</p>
      */
     @SuppressWarnings("unchecked")
     private Response executeBatch(AzureRequest req, String dbId, String collId) {
         Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
         if (collFound.isEmpty()) return notFound(collId);
 
-        String pk    = extractPartitionKeyValue(req);
-        String pkEnc = encodeKey(pk);
+        String pkEnc = encodeKey(extractPartitionKeyValue(req));
 
         List<Map<String, Object>> operations;
         try {
@@ -761,21 +765,48 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             return errorResponse(400, "BadRequest", "Invalid batch request body.");
         }
 
+        String partitionPrefix = docKey(req.accountName(), dbId, collId, pkEnc, "");
+        Map<String, StoredObject> original = store.scan(k -> k.startsWith(partitionPrefix)).stream()
+                .collect(Collectors.toMap(StoredObject::key, object -> object,
+                        (left, right) -> left, LinkedHashMap::new));
+        Map<String, StoredObject> staged = new LinkedHashMap<>(original);
+
         List<Map<String, Object>> results = new ArrayList<>();
+        boolean failed = false;
         for (Map<String, Object> op : operations) {
             String opType = op.get("operationType") instanceof String t ? t : "";
             String docId  = op.get("id") instanceof String s ? s : null;
             Map<String, Object> body = op.get("resourceBody") instanceof Map<?, ?> m
                     ? (Map<String, Object>) m : null;
 
-            results.add(switch (opType) {
-                case "Create"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, false);
-                case "Upsert"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, true);
-                case "Read"    -> batchRead(req.accountName(), dbId, collId, pkEnc, docId);
-                case "Replace" -> batchReplace(req.accountName(), dbId, collId, pkEnc, docId, body);
-                case "Delete"  -> batchDelete(req.accountName(), dbId, collId, pkEnc, docId);
+            Map<String, Object> result = switch (opType) {
+                case "Create"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, false);
+                case "Upsert"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, true);
+                case "Read"    -> batchRead(staged, req.accountName(), dbId, collId, pkEnc, docId);
+                case "Replace" -> batchReplace(staged, req.accountName(), dbId, collId, pkEnc, docId, body);
+                case "Patch"   -> batchPatch(staged, req.accountName(), dbId, collId, pkEnc, docId, body);
+                case "Delete"  -> batchDelete(staged, req.accountName(), dbId, collId, pkEnc, docId);
                 default        -> batchResultError(400);
-            });
+            };
+            results.add(result);
+
+            if (((Number) result.get("statusCode")).intValue() >= 400) {
+                for (int previous = 0; previous < results.size() - 1; previous++) {
+                    results.set(previous, batchResultError(424));
+                }
+                while (results.size() < operations.size()) {
+                    results.add(batchResultError(424));
+                }
+                failed = true;
+                break;
+            }
+        }
+
+        if (!failed) {
+            original.keySet().stream()
+                    .filter(key -> !staged.containsKey(key))
+                    .forEach(store::delete);
+            staged.forEach(store::put);
         }
 
         try {
@@ -790,17 +821,17 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> batchCreate(String account, String dbId, String collId,
-            String pk, String pkEnc, Map<String, Object> body, boolean upsert) {
+    private Map<String, Object> batchCreate(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
+            String pkEnc, Map<String, Object> body, boolean upsert) {
         if (body == null) return batchResultError(400);
 
         body = new LinkedHashMap<>(body);
         String id = body.containsKey("id") ? String.valueOf(body.get("id")) : UUID.randomUUID().toString();
         body.put("id", id);
 
-        String key     = docKey(account, dbId, collId, pkEnc, id);
-        boolean existed = store.get(key).isPresent();
+        String key = docKey(account, dbId, collId, pkEnc, id);
+        boolean existed = documents.containsKey(key);
         if (!upsert && existed) return batchResultError(409);
 
         Instant now  = Instant.now();
@@ -813,35 +844,31 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("_ts",          now.getEpochSecond());
         body.put("_attachments", "attachments/");
 
-        store.put(key, stored(key, body, now, etag));
+        documents.put(key, stored(key, body, now, etag));
         return batchResultOk(upsert && existed ? 200 : 201, etag, body);
     }
 
-    private Map<String, Object> batchRead(String account, String dbId, String collId,
+    private Map<String, Object> batchRead(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
-        if (found.isEmpty()) {
-            // Fallback scan for cases where PK is unknown/encoded differently
-            String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst();
-        }
+        Optional<StoredObject> found = Optional.ofNullable(documents.get(key));
+        if (found.isEmpty()) found = findBatchDocument(documents, docId);
         if (found.isEmpty()) return batchResultError(404);
 
         Map<String, Object> doc = parseData(found.get());
         return batchResultOk(200, found.get().etag(), doc);
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> batchReplace(String account, String dbId, String collId,
+    private Map<String, Object> batchReplace(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId, Map<String, Object> body) {
         if (docId == null || body == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
+        Optional<StoredObject> found = Optional.ofNullable(documents.get(key));
         if (found.isEmpty()) return batchResultError(404);
 
         body = new LinkedHashMap<>(body);
@@ -857,25 +884,51 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("_ts",          now.getEpochSecond());
         body.put("_attachments", "attachments/");
 
-        store.put(key, stored(key, body, now, etag));
+        documents.put(key, stored(key, body, now, etag));
         return batchResultOk(200, etag, body);
     }
 
-    private Map<String, Object> batchDelete(String account, String dbId, String collId,
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> batchPatch(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
+            String pkEnc, String docId, Map<String, Object> body) {
+        if (docId == null || body == null) return batchResultError(400);
+
+        String key = docKey(account, dbId, collId, pkEnc, docId);
+        Optional<StoredObject> found = Optional.ofNullable(documents.get(key));
+        if (found.isEmpty()) return batchResultError(404);
+        if (!(body.get("operations") instanceof List<?> rawOperations)) return batchResultError(400);
+
+        List<Map<String, Object>> operations = (List<Map<String, Object>>) rawOperations;
+        Map<String, Object> document = parseData(found.get());
+        applyPatchOperations(document, operations);
+
+        Instant now = Instant.now();
+        String etag = newEtag();
+        document.put("_etag", quoted(etag));
+        document.put("_ts", now.getEpochSecond());
+        documents.put(key, stored(key, document, now, etag));
+        return batchResultOk(200, etag, document);
+    }
+
+    private Map<String, Object> batchDelete(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = store.get(key);
-        if (found.isEmpty()) {
-            String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst();
-        }
+        Optional<StoredObject> found = Optional.ofNullable(documents.get(key));
+        if (found.isEmpty()) found = findBatchDocument(documents, docId);
         if (found.isEmpty()) return batchResultError(404);
 
-        store.delete(found.get().key());
+        documents.remove(found.get().key());
         return batchResultOk(204, null, null);
+    }
+
+    private Optional<StoredObject> findBatchDocument(Map<String, StoredObject> documents, String docId) {
+        return documents.values().stream()
+                .filter(object -> object.key().endsWith("|" + docId))
+                .findFirst();
     }
 
     private Map<String, Object> batchResultOk(int statusCode, String etag, Map<String, Object> resourceBody) {
