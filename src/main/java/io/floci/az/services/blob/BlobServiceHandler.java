@@ -117,17 +117,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = Response.ok().build();
                 }
             } else {
-                response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                        .toXmlResponse(501);
+                response = notImplemented();
             }
         } else {
             String[] parts = path.split("/", 2);
             String containerName = parts[0];
             String blobName = parts.length > 1 ? parts[1] : "";
 
+            String comp = query.get("comp");
+
             if (blobName.isEmpty()) {
-                if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
+                if ("GET".equalsIgnoreCase(method) && "list".equals(comp)) {
                     response = listBlobs(request, containerName);
+                } else if (comp != null) {
+                    // Container ops are multiplexed onto the same URL by `comp` (metadata, acl,
+                    // lease, ...). None are implemented. This branch must stay ABOVE the
+                    // restype=container ones: they ignore `comp`, so SetContainerMetadata would
+                    // otherwise land in createContainer and answer 409.
+                    response = notImplemented();
                 } else if ("PUT".equalsIgnoreCase(method) && "container".equals(query.get("restype"))) {
                     response = createContainer(request, containerName);
                 } else if ("DELETE".equalsIgnoreCase(method) && "container".equals(query.get("restype"))) {
@@ -135,11 +142,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) && "container".equals(query.get("restype"))) {
                     response = getContainer(request, containerName, "HEAD".equalsIgnoreCase(method));
                 } else {
-                    response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                            .toXmlResponse(501);
+                    response = notImplemented();
                 }
             } else {
-                String comp = query.get("comp");
                 if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
@@ -152,15 +157,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "blocklist".equals(comp)) {
                     response = getBlockList(request, containerName, blobName);
-                } else if ("PUT".equalsIgnoreCase(method)) {
+                } else if ("PUT".equalsIgnoreCase(method) && isPutBlob(request, comp)) {
                     response = putBlob(request, containerName, blobName);
                 } else if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlob(request, containerName, blobName, "HEAD".equalsIgnoreCase(method));
                 } else if ("DELETE".equalsIgnoreCase(method)) {
                     response = deleteBlob(request, containerName, blobName);
                 } else {
-                    response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                            .toXmlResponse(501);
+                    response = notImplemented();
                 }
             }
         }
@@ -180,6 +184,27 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .toXmlResponse(Response.Status.FORBIDDEN.getStatusCode());
         }
         return userDelegationKeyService.create(request);
+    }
+
+    private Response notImplemented() {
+        return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
+                .toXmlResponse(501);
+    }
+
+    /**
+     * True only for a genuine PutBlob.
+     *
+     * <p>Azure multiplexes many operations onto {@code PUT /{container}/{blob}}: the {@code comp}
+     * values this handler does not implement (lease, snapshot, properties, tier, tags, page,
+     * appendblock, ...), plus CopyBlob and the Data Lake rename, which carry no {@code comp} at all
+     * and are discriminated by a header. Routing any of those to {@code putBlob} replaces the blob
+     * with the request body — usually empty — and answers 201, so the caller sees success while the
+     * content is destroyed. Only an unqualified PUT is a PutBlob.
+     */
+    private boolean isPutBlob(AzureRequest request, String comp) {
+        return comp == null
+                && request.headers().getHeaderString("x-ms-copy-source") == null
+                && request.headers().getHeaderString("x-ms-rename-source") == null;
     }
 
     private Response getBlobServiceProperties() {
