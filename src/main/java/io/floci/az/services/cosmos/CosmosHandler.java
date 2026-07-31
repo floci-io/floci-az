@@ -630,32 +630,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         //   1. {"operations": [...]}  — Java / Python SDKs
         //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
         List<Map<String, Object>> operations = parsePatchBody(req);
-
-        for (Map<String, Object> op : operations) {
-            String opType = op.get("op") instanceof String s ? s.toLowerCase() : "";
-            String path   = op.get("path") instanceof String p ? p : null;
-            Object value  = op.get("value");
-
-            if (path == null) {
-                LOG.warnf("PATCH op '%s' missing 'path' — skipping", opType);
-                continue;
-            }
-
-            switch (opType) {
-                case "add", "set", "replace" -> patchSet(doc, path, value);
-                case "remove"                -> patchRemove(doc, path);
-                case "incr"                  -> patchIncr(doc, path, value);
-                case "move"                  -> {
-                    String from = op.get("from") instanceof String f ? f : null;
-                    if (from != null) {
-                        Object moved = patchGet(doc, from);
-                        patchRemove(doc, from);
-                        patchSet(doc, path, moved);
-                    }
-                }
-                default -> LOG.warnf("Unknown PATCH op '%s' — skipping", opType);
-            }
-        }
+        applyPatchOperations(doc, operations);
 
         Instant now  = Instant.now();
         String  etag = newEtag();
@@ -665,6 +640,32 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         store.put(obj.key(), stored(obj.key(), doc, now, etag));
         return cosmosResponse(doc, Response.Status.OK, etag,
                 "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    private void applyPatchOperations(Map<String, Object> doc, List<Map<String, Object>> operations) {
+        for (Map<String, Object> op : operations) {
+            String opType = op.get("op") instanceof String value ? value.toLowerCase() : "";
+            String path = op.get("path") instanceof String value ? value : null;
+            if (path == null) {
+                LOG.warnf("PATCH op '%s' missing 'path' — skipping", opType);
+                continue;
+            }
+
+            switch (opType) {
+                case "add", "set", "replace" -> patchSet(doc, path, op.get("value"));
+                case "remove" -> patchRemove(doc, path);
+                case "incr" -> patchIncr(doc, path, op.get("value"));
+                case "move" -> {
+                    String from = op.get("from") instanceof String value ? value : null;
+                    if (from != null) {
+                        Object moved = patchGet(doc, from);
+                        patchRemove(doc, from);
+                        patchSet(doc, path, moved);
+                    }
+                }
+                default -> LOG.warnf("Unknown PATCH op '%s' — skipping", opType);
+            }
+        }
     }
 
     /** Set (or create) the field at {@code /a/b/…} to {@code value}. */
@@ -690,7 +691,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String key     = parts[parts.length - 1];
         double current = toDouble(target.getOrDefault(key, 0));
         double result  = current + toDouble(delta);
-        target.put(key, isWholeNum(result) ? (long) result : result);
+        if (isWholeNum(result)) {
+            target.put(key, (long) result);
+        } else {
+            target.put(key, result);
+        }
     }
 
     /** Read the field at {@code path} (used by {@code move}). */
@@ -766,7 +771,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * {@code "eTag"} and {@code "resourceBody"}.</p>
      *
      * <p>Supported operation types: {@code Create}, {@code Upsert}, {@code Read},
-     * {@code Replace}, {@code Delete}.</p>
+     * {@code Replace}, {@code Patch}, {@code Delete}.</p>
      */
     @SuppressWarnings("unchecked")
     private Response executeBatch(AzureRequest req, String dbId, String collId) {
@@ -807,6 +812,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                         defaultTtl, ifMatch, ifNoneMatch);
                 case "Read"    -> batchRead(staged, req.accountName(), dbId, collId, pkEnc, docId, defaultTtl);
                 case "Replace" -> batchReplace(staged, req.accountName(), dbId, collId, pkEnc, docId, body,
+                        defaultTtl, ifMatch, ifNoneMatch);
+                case "Patch"   -> batchPatch(staged, req.accountName(), dbId, collId, pkEnc, docId, body,
                         defaultTtl, ifMatch, ifNoneMatch);
                 case "Delete"  -> batchDelete(staged, req.accountName(), dbId, collId, pkEnc, docId,
                         defaultTtl, ifMatch, ifNoneMatch);
@@ -919,6 +926,31 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         documents.put(key, stored(key, body, now, etag));
         return batchResultOk(200, etag, body);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> batchPatch(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
+            String pkEnc, String docId, Map<String, Object> body,
+            Object defaultTtl, String ifMatch, String ifNoneMatch) {
+        if (docId == null || body == null) return batchResultError(400);
+
+        String key = docKey(account, dbId, collId, pkEnc, docId);
+        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        if (found.isEmpty()) return batchResultError(404);
+        if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
+        if (!(body.get("operations") instanceof List<?> rawOperations)) return batchResultError(400);
+
+        List<Map<String, Object>> operations = (List<Map<String, Object>>) rawOperations;
+        Map<String, Object> document = parseData(found.get());
+        applyPatchOperations(document, operations);
+
+        Instant now = Instant.now();
+        String etag = newEtag();
+        document.put("_etag", quoted(etag));
+        document.put("_ts", now.getEpochSecond());
+        documents.put(key, stored(key, document, now, etag));
+        return batchResultOk(200, etag, document);
     }
 
     private Map<String, Object> batchDelete(Map<String, StoredObject> documents,
