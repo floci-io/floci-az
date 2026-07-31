@@ -6,6 +6,7 @@ import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
+import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobProperties;
 import com.azure.storage.blob.models.BlobRange;
@@ -107,6 +108,44 @@ class BlobCompatibilityTest {
         // creation time must not track last-modified across a metadata update
         blob.setMetadata(Map.of("owner", "compat"));
         assertEquals(props.getCreationTime(), blob.getProperties().getCreationTime());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("blob HTTP headers: upload options round-trip through properties")
+    void blobHttpHeadersRoundTrip() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("image.png");
+        byte[] content = "image".getBytes(StandardCharsets.UTF_8);
+        byte[] md5 = Base64.getDecoder().decode("eIBaIhqYjnnvP0LXxb/UGA==");
+        BlobHttpHeaders headers = new BlobHttpHeaders()
+            .setContentType("image/png")
+            .setCacheControl("public, max-age=31536000")
+            .setContentDisposition("inline; filename=image.png")
+            .setContentEncoding("gzip")
+            .setContentLanguage("en-GB")
+            .setContentMd5(md5);
+
+        blob.getBlockBlobClient().uploadWithResponse(
+            new java.io.ByteArrayInputStream(content),
+            content.length,
+            headers,
+            null,
+            null,
+            null,
+            null,
+            null,
+            Context.NONE);
+
+        BlobProperties properties = blob.getProperties();
+        assertEquals("image/png", properties.getContentType());
+        assertEquals("public, max-age=31536000", properties.getCacheControl());
+        assertEquals("inline; filename=image.png", properties.getContentDisposition());
+        assertEquals("gzip", properties.getContentEncoding());
+        assertEquals("en-GB", properties.getContentLanguage());
+        assertArrayEquals(md5, properties.getContentMd5());
 
         client.deleteBlobContainer(name);
     }

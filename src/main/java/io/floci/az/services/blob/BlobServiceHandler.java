@@ -41,6 +41,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private static final String BLK_PREFIX = "__blk__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final String CREATION_TIME_KEY = "CreationTime";
+    private static final Map<String, String> BLOB_HTTP_PROPERTY_HEADERS = Map.of(
+            "x-ms-blob-cache-control", HttpHeaders.CACHE_CONTROL,
+            "x-ms-blob-content-disposition", "Content-Disposition",
+            "x-ms-blob-content-encoding", HttpHeaders.CONTENT_ENCODING,
+            "x-ms-blob-content-language", HttpHeaders.CONTENT_LANGUAGE,
+            "x-ms-blob-content-md5", "Content-MD5");
     private static final StoredObject NS_SENTINEL =
             new StoredObject("", new byte[0], Map.of(), Instant.EPOCH, "");
 
@@ -313,8 +319,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> metadata = new HashMap<>();
             String blobType = request.headers().getHeaderString("x-ms-blob-type");
             metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
-            String ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+            String ct = request.headers().getHeaderString("x-ms-blob-content-type");
+            if (ct == null) {
+                ct = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+            }
             metadata.put("Content-Type", ct != null ? ct : "application/octet-stream");
+            BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, responseHeader) -> {
+                String value = request.headers().getHeaderString(requestHeader);
+                if (value != null) {
+                    metadata.put(responseHeader, value);
+                }
+            });
             metadata.put("Name", blobName);
             metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
             metadata.putAll(readUserMetadata(request));
@@ -393,6 +408,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-lease-status", "unlocked")
                 .header("x-ms-lease-state", "available")
                 .header("x-ms-server-encrypted", "true");
+        BLOB_HTTP_PROPERTY_HEADERS.values().forEach(header -> {
+            String value = so.metadata().get(header);
+            if (value != null) {
+                rb.header(header, value);
+            }
+        });
         if (isRangeRequest) {
             rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
         }
