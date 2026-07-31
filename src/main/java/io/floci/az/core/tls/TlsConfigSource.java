@@ -5,6 +5,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logging.Logger;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -98,8 +99,8 @@ public class TlsConfigSource implements ConfigSource {
                             + "Set FLOCI_AZ_TLS_CERT_PATH + FLOCI_AZ_TLS_KEY_PATH, or enable FLOCI_AZ_TLS_SELF_SIGNED.");
         }
 
-        properties.put("quarkus.http.ssl.certificate.files", certPath);
-        properties.put("quarkus.http.ssl.certificate.key-files", keyPath);
+        properties.put("quarkus.http.ssl.certificate.files", toConfigPath(certPath));
+        properties.put("quarkus.http.ssl.certificate.key-files", toConfigPath(keyPath));
         // When TLS is enabled, Quarkus HTTP and HTTPS run on internal ports.
         // TlsProxyServer listens on the public floci-az port and routes by protocol.
         properties.put("quarkus.http.insecure-requests", "enabled");
@@ -136,6 +137,25 @@ public class TlsConfigSource implements ConfigSource {
     @Override
     public String getName() {
         return "FlociAzTlsConfigSource";
+    }
+
+    /**
+     * Converts a filesystem path to a form that survives config processing.
+     *
+     * <p>SmallRye Config treats backslashes in property values as escape
+     * characters, so a Windows path such as {@code D:\data\tls\cert.crt}
+     * reaches the Quarkus HTTP server as {@code D:datatlscert.crt} and TLS
+     * startup fails with {@code NoSuchFileException}. The Windows file APIs
+     * accept forward slashes, so the separators are swapped. On platforms
+     * whose separator is {@code /} a backslash is a legal filename character,
+     * so the path is left untouched.</p>
+     */
+    static String toConfigPath(String path) {
+        return toConfigPath(path, File.separatorChar);
+    }
+
+    static String toConfigPath(String path, char separatorChar) {
+        return separatorChar == '\\' ? path.replace('\\', '/') : path;
     }
 
     /**

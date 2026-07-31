@@ -172,7 +172,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                 .end("MinuteMetrics")
                 .selfClose("Cors")
             .end("StorageServiceProperties")
-            .toString();
+            .build();
         return Response.ok(xml, "application/xml").build();
     }
 

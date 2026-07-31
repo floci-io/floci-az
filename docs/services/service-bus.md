@@ -28,6 +28,44 @@ Entity CRUD is served over HTTP at `/{account}-servicebus/`:
 | `PUT` / `DELETE` | `/{account}-servicebus/{topic}` | Create / delete a topic |
 | `GET` | `/{account}-servicebus/{topic}/subscriptions` | List subscriptions |
 | `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}` | Manage a subscription |
+| `GET` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules` | List subscription rules |
+| `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules/{rule}` | Manage a subscription rule |
+
+## Subscription rules and filters
+
+Subscriptions filter which topic messages they receive through named **rules**, matching Azure
+semantics:
+
+- Every new subscription starts with the implicit **`$Default`** rule (a `TrueFilter` that accepts
+  everything). The usual SDK flow — add your real rule, then delete `$Default` — works as on Azure,
+  as does passing a `DefaultRuleDescription` in the subscription create body
+  (`CreateSubscriptionAsync(subscriptionOptions, ruleOptions)`).
+- **`CorrelationFilter`** — exact-match (case-sensitive) AND-combination over `CorrelationId`,
+  `Label`/`Subject`, `SessionId`, and application properties.
+- **`SqlFilter`** — SQL92 expressions over application properties and `sys.CorrelationId`,
+  `sys.Label`, `sys.Subject`, `sys.SessionId` (including `LIKE`, `IN`, `BETWEEN`, `IS NULL`,
+  `EXISTS(prop)`, arithmetic and boolean operators).
+- **`TrueFilter`** / **`FalseFilter`** — accept-all / accept-none.
+- Multiple rules combine as a logical **OR** and deliver a **single** copy of a matching message.
+  A subscription whose rules have all been deleted receives nothing.
+
+Filters compile to [Artemis queue selectors](https://activemq.apache.org/components/artemis/documentation/latest/filter-expressions.html),
+so evaluation happens inside the broker at routing time — messages that don't match a
+subscription's rules are never routed to it (no delivery-count inflation, no spurious
+dead-lettering).
+
+**Emulator deviations from Azure:**
+
+- Filters on `MessageId`, `To`, `ReplyTo`, `ReplyToSessionId`, or `ContentType` (and their `sys.*`
+  forms) are **rejected with HTTP 400** — these AMQP fields have no broker-side selector mapping.
+- **Rule actions** (`SqlRuleAction`) are stored and echoed back by the management API but are
+  **not applied** to delivered messages, and rules with actions do not produce extra message
+  copies.
+- Property names in filters are case-sensitive and must be valid selector identifiers
+  (letters, digits, `_`, `$`). Correlation-filter values typed `int`/`long`/`double`/`boolean`
+  etc. compare with their declared type; other non-string types compare as strings.
+- Rule changes update the subscription's filter in place (messages already routed to the
+  subscription stay, receivers stay attached) and, as on Azure, apply to future messages only.
 
 ## Connection String
 

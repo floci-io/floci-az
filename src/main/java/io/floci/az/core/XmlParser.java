@@ -32,11 +32,20 @@ public final class XmlParser {
     private XmlParser() {}
 
     /**
+     * Creates a stream reader with this class's hardened settings (namespace-aware,
+     * external entities and DTDs disabled) — for callers whose parsing needs go beyond
+     * the extraction helpers here (e.g. reading attributes).
+     */
+    public static XMLStreamReader newStreamReader(String xml) throws XMLStreamException {
+        return FACTORY.createXMLStreamReader(new StringReader(xml));
+    }
+
+    /**
      * Reads the text content of the current element if it is a leaf (contains only text).
      * If the element contains nested child elements, the subtree is skipped and {@code null} is returned.
      * After this returns, the reader is positioned on the END_ELEMENT of the element that was open.
      */
-    private static String readLeafText(XMLStreamReader r) throws XMLStreamException {
+    public static String readLeafText(XMLStreamReader r) throws XMLStreamException {
         StringBuilder sb = new StringBuilder();
         while (r.hasNext()) {
             int event = r.next();
