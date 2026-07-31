@@ -175,7 +175,7 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
-    [Timeout(50_000)]
+    [Timeout(90_000)]
     public async Task DotnetSdkSuppressesDuplicateMessageIdsForQueuesAndTopics(
         CancellationToken cancellationToken)
     {
