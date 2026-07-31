@@ -66,11 +66,20 @@ public class CosmosQueryEngine {
     // Entry point
     // -----------------------------------------------------------------------
 
+    /**
+     * Substitute parameters and parse the query once.  The result can be
+     * inspected (e.g. composite-index ORDER BY validation) and then passed to
+     * {@link #execute(ParsedQuery, List)} without re-parsing.
+     */
+    public ParsedQuery prepare(String sql, List<Map<String, Object>> params) {
+        return parse(normalizeWhitespace(substituteParams(sql, params)));
+    }
+
     public QueryResult execute(String sql, List<Map<String, Object>> params, List<Map<String, Object>> documents) {
-        sql = normalizeWhitespace(substituteParams(sql, params));
+        return execute(prepare(sql, params), documents);
+    }
 
-        ParsedQuery q = parse(sql);
-
+    public QueryResult execute(ParsedQuery q, List<Map<String, Object>> documents) {
         List<Map<String, Object>> filtered = documents.stream()
                 .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -130,17 +139,22 @@ public class CosmosQueryEngine {
     // SQL parsing
     // -----------------------------------------------------------------------
 
+    private static final Pattern TOP_PATTERN =
+            Pattern.compile("(?i)\\bSELECT\\s+TOP\\s+(\\d+)");
+    private static final Pattern OFFSET_LIMIT_PATTERN =
+            Pattern.compile("(?i)\\bOFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)");
+
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
 
         // TOP
         int top = -1;
-        Matcher topM = Pattern.compile("(?i)\\bSELECT\\s+TOP\\s+(\\d+)").matcher(sql);
+        Matcher topM = TOP_PATTERN.matcher(sql);
         if (topM.find()) top = Integer.parseInt(topM.group(1));
 
         // OFFSET … LIMIT …
         int offset = 0, limit = -1;
-        Matcher olM = Pattern.compile("(?i)\\bOFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)").matcher(sql);
+        Matcher olM = OFFSET_LIMIT_PATTERN.matcher(sql);
         if (olM.find()) {
             offset = Integer.parseInt(olM.group(1));
             limit  = Integer.parseInt(olM.group(2));
@@ -428,14 +442,23 @@ public class CosmosQueryEngine {
     // Field resolution
     // -----------------------------------------------------------------------
 
-    Object resolve(Map<String, Object> doc, String path) {
-        // Strip FROM alias prefix: "c.field" → "field"
+    /**
+     * Strip the FROM-alias prefix from a dotted path: {@code "c.field"} → {@code "field"}.
+     * Shared with the composite-index ORDER BY matcher so validation and
+     * execution always agree on what a property path is.
+     */
+    static String stripAlias(String path) {
         if (path.contains(".")) {
             String[] parts = path.split("\\.", 2);
             if (parts[0].matches("[a-zA-Z_][a-zA-Z0-9_]{0,9}")) {
-                path = parts[1];
+                return parts[1];
             }
         }
+        return path;
+    }
+
+    Object resolve(Map<String, Object> doc, String path) {
+        path = stripAlias(path);
         Object current = doc;
         for (String seg : path.split("\\.")) {
             if (current instanceof Map<?, ?> map) {
@@ -566,7 +589,13 @@ public class CosmosQueryEngine {
 
     private String toLiteral(Object value) {
         if (value == null)             return "null";
-        if (value instanceof String s) return "'" + s.replace("'", "\\'") + "'";
+        // Escape embedded quotes with SQL-standard doubling ('') rather than a
+        // backslash escape.  A doubled quote keeps the string scanners' state
+        // balanced across the literal boundary (they exit then immediately
+        // re-enter string mode), so keyword detection — ORDER BY, AND/OR, IN —
+        // is not swallowed by a value such as "Alice's".  A backslash escape
+        // ('\'') would leave the scanners stuck inside a phantom string.
+        if (value instanceof String s) return "'" + s.replace("'", "''") + "'";
         if (value instanceof Boolean b) return b.toString();
         return String.valueOf(value);
     }
@@ -576,17 +605,26 @@ public class CosmosQueryEngine {
         if ("true".equalsIgnoreCase(s))  return Boolean.TRUE;
         if ("false".equalsIgnoreCase(s)) return Boolean.FALSE;
         if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith("\"") && s.endsWith("\"")))
-            return s.substring(1, s.length() - 1).replace("\\'", "'").replace("\\\"", "\"");
+            return stripQuotes(s);
         try { return Long.parseLong(s); }   catch (NumberFormatException ignored) {}
         try { return Double.parseDouble(s); } catch (NumberFormatException ignored) {}
         return s;
     }
 
+    /**
+     * Strip matching outer quotes and unescape the string-literal content:
+     * SQL-standard doubled quotes ({@code ''} → {@code '}) plus backslash
+     * escapes ({@code \'}, {@code \"}) for hand-written SQL.  Inverse of the
+     * escaping in {@link #toLiteral}.
+     */
     private String stripQuotes(String s) {
         if (s == null || s.length() < 2) return s;
         char f = s.charAt(0), l = s.charAt(s.length() - 1);
-        return (f == '\'' && l == '\'') || (f == '"' && l == '"')
-                ? s.substring(1, s.length() - 1) : s;
+        if ((f == '\'' && l == '\'') || (f == '"' && l == '"')) {
+            return s.substring(1, s.length() - 1)
+                    .replace("''", "'").replace("\\'", "'").replace("\\\"", "\"");
+        }
+        return s;
     }
 
     private String normalizeWhitespace(String s) {
@@ -624,13 +662,24 @@ public class CosmosQueryEngine {
     }
 
     private int indexOfKeyword(String upperSql, String keyword, int from) {
-        int idx = upperSql.indexOf(keyword, from);
-        while (idx >= 0) {
-            int end = idx + keyword.length();
-            boolean beforeOk = idx == 0 || !Character.isLetterOrDigit(upperSql.charAt(idx - 1));
-            boolean afterOk  = end >= upperSql.length() || !Character.isLetterOrDigit(upperSql.charAt(end));
-            if (beforeOk && afterOk) return idx;
-            idx = upperSql.indexOf(keyword, idx + 1);
+        // String-literal state must be tracked from position 0 — `from` may
+        // otherwise land inside a quoted value (e.g. WHERE c.x = 'order by').
+        boolean inStr = false;
+        char strCh = 0;
+        for (int i = 0; i < upperSql.length(); i++) {
+            char c = upperSql.charAt(i);
+            if (inStr) {
+                if (c == strCh) inStr = false;
+                continue;
+            }
+            if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
+            if (i < from) continue;
+            if (upperSql.regionMatches(i, keyword, 0, keyword.length())) {
+                int end = i + keyword.length();
+                boolean beforeOk = i == 0 || !Character.isLetterOrDigit(upperSql.charAt(i - 1));
+                boolean afterOk  = end >= upperSql.length() || !Character.isLetterOrDigit(upperSql.charAt(end));
+                if (beforeOk && afterOk) return i;
+            }
         }
         return -1;
     }
@@ -683,7 +732,7 @@ public class CosmosQueryEngine {
         // String literal
         if ((expr.startsWith("'") && expr.endsWith("'"))
                 || (expr.startsWith("\"") && expr.endsWith("\""))) {
-            return expr.substring(1, expr.length() - 1);
+            return stripQuotes(expr);
         }
 
         // null / boolean keyword literals
