@@ -35,13 +35,24 @@ public class SqlServerManager {
 
     private static final int SQL_CONTAINER_PORT = 1433;
 
-    @Inject EmulatorConfig config;
-    @Inject ContainerLifecycleManager containerManager;
-    @Inject ContainerBuilder containerBuilder;
-    @Inject ContainerDetector containerDetector;
+    private final EmulatorConfig config;
+    private final ContainerLifecycleManager containerManager;
+    private final ContainerBuilder containerBuilder;
+    private final ContainerDetector containerDetector;
 
     /** containerId → container name, for cleanup on shutdown. */
     private final ConcurrentHashMap<String, String> managedContainers = new ConcurrentHashMap<>();
+
+    @Inject
+    public SqlServerManager(EmulatorConfig config,
+                            ContainerLifecycleManager containerManager,
+                            ContainerBuilder containerBuilder,
+                            ContainerDetector containerDetector) {
+        this.config = config;
+        this.containerManager = containerManager;
+        this.containerBuilder = containerBuilder;
+        this.containerDetector = containerDetector;
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
