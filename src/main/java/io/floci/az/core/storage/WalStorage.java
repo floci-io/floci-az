@@ -40,6 +40,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
 
     static final byte OP_PUT = 0x01;
     static final byte OP_DELETE = 0x02;
+    static final byte OP_BATCH = 0x03;
 
     private final ConcurrentHashMap<K, V> store = new ConcurrentHashMap<>();
     private final Path snapshotPath;
@@ -48,6 +49,7 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     private final ObjectMapper walMapper;
     private final TypeReference<Map<K, V>> typeReference;
     private final ReentrantReadWriteLock compactionLock = new ReentrantReadWriteLock();
+    private final Object mutationLock = new Object();
     private final ScheduledExecutorService scheduler;
     private volatile DataOutputStream walWriter;
 
@@ -79,8 +81,10 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     public void put(K key, V value) {
         compactionLock.readLock().lock();
         try {
-            store.put(key, value);
-            appendPut(key, value);
+            synchronized (mutationLock) {
+                store.put(key, value);
+                appendPut(key, value);
+            }
         } finally {
             compactionLock.readLock().unlock();
         }
@@ -95,8 +99,24 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
     public void delete(K key) {
         compactionLock.readLock().lock();
         try {
-            store.remove(key);
-            appendDelete(key);
+            synchronized (mutationLock) {
+                store.remove(key);
+                appendDelete(key);
+            }
+        } finally {
+            compactionLock.readLock().unlock();
+        }
+    }
+
+    @Override
+    public void applyBatch(Map<K, V> puts, Set<K> deletes) {
+        compactionLock.readLock().lock();
+        try {
+            synchronized (mutationLock) {
+                appendBatch(puts, deletes);
+                deletes.forEach(store::remove);
+                store.putAll(puts);
+            }
         } finally {
             compactionLock.readLock().unlock();
         }
@@ -238,6 +258,41 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
         }
     }
 
+    private void appendBatch(Map<K, V> puts, Set<K> deletes) {
+        DataOutputStream out = walWriter;
+        if (out == null) {
+            return;
+        }
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (DataOutputStream batch = new DataOutputStream(bytes)) {
+                batch.writeInt(deletes.size());
+                for (K key : deletes) {
+                    writeBytes(batch, walMapper.writeValueAsBytes(key));
+                }
+                batch.writeInt(puts.size());
+                for (Map.Entry<K, V> entry : puts.entrySet()) {
+                    writeBytes(batch, walMapper.writeValueAsBytes(entry.getKey()));
+                    writeBytes(batch, walMapper.writeValueAsBytes(entry.getValue()));
+                }
+            }
+            byte[] payload = bytes.toByteArray();
+            synchronized (out) {
+                out.writeByte(OP_BATCH);
+                out.writeInt(payload.length);
+                out.write(payload);
+                out.flush();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to append BATCH WAL entry", e);
+        }
+    }
+
+    private static void writeBytes(DataOutputStream out, byte[] value) throws IOException {
+        out.writeInt(value.length);
+        out.write(value);
+    }
+
     @SuppressWarnings("unchecked")
     private int replayWal() {
         int replayed = 0;
@@ -246,6 +301,17 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
             while (true) {
                 int op;
                 try { op = in.readByte(); } catch (EOFException e) { break; }
+
+                if (op == OP_BATCH) {
+                    int payloadLength = in.readInt();
+                    byte[] payload = in.readNBytes(payloadLength);
+                    if (payload.length < payloadLength) {
+                        break;
+                    }
+                    replayBatch(payload);
+                    replayed++;
+                    continue;
+                }
 
                 int keyLen = in.readInt();
                 byte[] keyBytes = in.readNBytes(keyLen);
@@ -274,6 +340,39 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
                     walPath, replayed);
         }
         return replayed;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void replayBatch(byte[] payload) throws IOException {
+        Map<K, V> puts = new java.util.LinkedHashMap<>();
+        Set<K> deletes = new java.util.LinkedHashSet<>();
+        try (DataInputStream batch = new DataInputStream(new ByteArrayInputStream(payload))) {
+            int deleteCount = batch.readInt();
+            for (int i = 0; i < deleteCount; i++) {
+                deletes.add((K) walMapper.readValue(readBytes(batch), Object.class));
+            }
+            int putCount = batch.readInt();
+            for (int i = 0; i < putCount; i++) {
+                K key = (K) walMapper.readValue(readBytes(batch), Object.class);
+                V value = walMapper.readValue(readBytes(batch),
+                        walMapper.constructType(typeReference.getType()).getContentType());
+                puts.put(key, value);
+            }
+            if (batch.available() != 0) {
+                throw new IOException("Unexpected trailing bytes in WAL batch");
+            }
+        }
+        deletes.forEach(store::remove);
+        store.putAll(puts);
+    }
+
+    private static byte[] readBytes(DataInputStream in) throws IOException {
+        int length = in.readInt();
+        byte[] value = in.readNBytes(length);
+        if (value.length < length) {
+            throw new EOFException("Incomplete WAL batch value");
+        }
+        return value;
     }
 
     private void openWalWriter() {

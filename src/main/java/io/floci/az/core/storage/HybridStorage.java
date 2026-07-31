@@ -38,6 +38,7 @@ public class HybridStorage<K, V> implements StorageBackend<K, V> {
     private final TypeReference<Map<K, V>> typeReference;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean dirty = new AtomicBoolean(false);
+    private final Object mutationLock = new Object();
 
     public HybridStorage(Path filePath, TypeReference<Map<K, V>> typeReference, long flushIntervalMs) {
         this.filePath = filePath;
@@ -57,8 +58,10 @@ public class HybridStorage<K, V> implements StorageBackend<K, V> {
 
     @Override
     public void put(K key, V value) {
-        store.put(key, value);
-        dirty.set(true);
+        synchronized (mutationLock) {
+            store.put(key, value);
+            dirty.set(true);
+        }
     }
 
     @Override
@@ -68,8 +71,19 @@ public class HybridStorage<K, V> implements StorageBackend<K, V> {
 
     @Override
     public void delete(K key) {
-        store.remove(key);
-        dirty.set(true);
+        synchronized (mutationLock) {
+            store.remove(key);
+            dirty.set(true);
+        }
+    }
+
+    @Override
+    public void applyBatch(Map<K, V> puts, Set<K> deletes) {
+        synchronized (mutationLock) {
+            deletes.forEach(store::remove);
+            store.putAll(puts);
+            dirty.set(true);
+        }
     }
 
     @Override
@@ -138,16 +152,19 @@ public class HybridStorage<K, V> implements StorageBackend<K, V> {
         }
     }
 
-    private synchronized void persistToDisk() {
-        try {
-            Files.createDirectories(filePath.getParent());
-            Path tempFile = filePath.resolveSibling(filePath.getFileName() + ".tmp");
-            objectMapper.writeValue(tempFile.toFile(), store);
-            Files.move(tempFile, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            LOG.debugv("Flushed {0} entries to {1}", store.size(), filePath);
-        } catch (IOException e) {
-            LOG.errorv(e, "Failed to persist data to {0}", filePath);
-            dirty.set(true);
+    private void persistToDisk() {
+        synchronized (mutationLock) {
+            try {
+                Files.createDirectories(filePath.getParent());
+                Path tempFile = filePath.resolveSibling(filePath.getFileName() + ".tmp");
+                objectMapper.writeValue(tempFile.toFile(), store);
+                Files.move(tempFile, filePath,
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                LOG.debugv("Flushed {0} entries to {1}", store.size(), filePath);
+            } catch (IOException e) {
+                LOG.errorv(e, "Failed to persist data to {0}", filePath);
+                dirty.set(true);
+            }
         }
     }
 }

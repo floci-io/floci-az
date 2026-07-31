@@ -834,10 +834,14 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
 
         if (!failed) {
-            original.keySet().stream()
+            Set<String> deletes = original.keySet().stream()
                     .filter(key -> !staged.containsKey(key))
-                    .forEach(store::delete);
-            staged.forEach(store::put);
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            Map<String, StoredObject> puts = staged.entrySet().stream()
+                    .filter(entry -> !entry.getValue().equals(original.get(entry.getKey())))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                            (left, right) -> left, LinkedHashMap::new));
+            store.applyBatch(puts, deletes);
         }
 
         try {

@@ -45,7 +45,7 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
     }
 
     @Override
-    public void put(K key, V value) {
+    public synchronized void put(K key, V value) {
         store.put(key, value);
         persistToDisk();
     }
@@ -56,7 +56,7 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
     }
 
     @Override
-    public void delete(K key) {
+    public synchronized void delete(K key) {
         store.remove(key);
         persistToDisk();
     }
@@ -66,6 +66,13 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
         Optional<V> removed = Optional.ofNullable(store.remove(key));
         removed.ifPresent(v -> persistToDisk());
         return removed;
+    }
+
+    @Override
+    public synchronized void applyBatch(Map<K, V> puts, Set<K> deletes) {
+        deletes.forEach(store::remove);
+        store.putAll(puts);
+        persistToDisk();
     }
 
     @Override
