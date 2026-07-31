@@ -3,6 +3,7 @@ package io.floci.az.core.storage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,6 +35,12 @@ public class InMemoryStorage<K, V> implements StorageBackend<K, V> {
     @Override
     public Optional<V> remove(K key) {
         return Optional.ofNullable(store.remove(key));
+    }
+
+    @Override
+    public synchronized void applyBatch(Map<K, V> puts, Set<K> deletes) {
+        deletes.forEach(store::remove);
+        store.putAll(puts);
     }
 
     @Override

@@ -1,6 +1,7 @@
 package io.floci.az.core.storage;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -21,6 +22,9 @@ public interface StorageBackend<K, V> {
 
     /** Atomically removes and returns the value, so a concurrent caller can never observe it twice. */
     Optional<V> remove(K key);
+
+    /** Applies related puts and deletes as one durable mutation. */
+    void applyBatch(Map<K, V> puts, Set<K> deletes);
 
     /**
      * Return a new mutable list of values whose keys pass the filter. Callers may sort,
