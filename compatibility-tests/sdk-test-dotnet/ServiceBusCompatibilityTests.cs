@@ -17,6 +17,7 @@ public sealed class ServiceBusCompatibilityTests
         int.Parse(Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673");
 
     [Test]
+    [NotInParallel("servicebus-broker")]
     [Timeout(90_000)]
     public async Task DotnetSdkSupportsSettlementOperations(CancellationToken cancellationToken)
     {
@@ -244,6 +245,7 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
+    [NotInParallel("servicebus-broker")]
     [Timeout(120_000)]
     public async Task EntityAndMessageTtlExpireIntoDeadLetterQueue(
         CancellationToken cancellationToken)
