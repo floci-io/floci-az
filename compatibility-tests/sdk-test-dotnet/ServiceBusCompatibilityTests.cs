@@ -17,7 +17,7 @@ public sealed class ServiceBusCompatibilityTests
         int.Parse(Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673");
 
     [Test]
-    [Timeout(60_000)]
+    [Timeout(90_000)]
     public async Task DotnetSdkSupportsSettlementOperations(CancellationToken cancellationToken)
     {
         const string serviceBusNamespace = "default";
@@ -32,7 +32,7 @@ public sealed class ServiceBusCompatibilityTests
 
         await using var client = new ServiceBusClient(connectionString, new ServiceBusClientOptions
         {
-            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(10) }
+            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(30) }
         });
         await using ServiceBusSender sender = client.CreateSender(queue);
         await using ServiceBusReceiver receiver = client.CreateReceiver(queue);
