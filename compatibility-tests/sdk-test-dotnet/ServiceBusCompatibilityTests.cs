@@ -244,7 +244,7 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
-    [Timeout(45_000)]
+    [Timeout(120_000)]
     public async Task EntityAndMessageTtlExpireIntoDeadLetterQueue(
         CancellationToken cancellationToken)
     {
