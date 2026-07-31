@@ -50,6 +50,7 @@ public class ServiceBusNamespaceManager {
     private static final int AMQPS_PORT = 5671;
     private static final int JOLOKIA_PORT = 8161;
     private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$DeadLetterQueue";
+    private static final String SUBSCRIPTION_DIVERT_SUFFIX = "/$Divert";
 
     /**
      * Immutable snapshot of a running namespace.
@@ -267,8 +268,10 @@ public class ServiceBusNamespaceManager {
     }
 
     /**
-     * Provisions a durable MULTICAST queue (subscription) bound to the topic address.
-     * The queue name follows the Azure convention: {@code {topicName}/Subscriptions/{subName}}.
+     * Provisions a durable subscription queue with its own address and dead-letter queue.
+     * A divert copies matching messages from the MULTICAST topic address to the subscription's
+     * ANYCAST address. The queue name follows the Azure convention:
+     * {@code {topicName}/Subscriptions/{subName}}.
      *
      * @param filter Artemis core filter (SQL92 selector) applied to the queue — the compiled
      *               form of the subscription's rules; empty string matches everything
@@ -276,41 +279,75 @@ public class ServiceBusNamespaceManager {
     public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName,
                                            String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
+        String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
+        String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
+        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
+        String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
+                + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
+                + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
-            // address=topicName (MULTICAST), queue name=topicName/Subscriptions/subName
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createAddress(java.lang.String,java.lang.String)",
+                    jsonArr(queueName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(topicName, "MULTICAST", queueName, filter, true, -1, false, false));
+                    jsonArr(queueName, "ANYCAST", queueName, "", true, -1, false, false));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createAddress(java.lang.String,java.lang.String)",
+                    jsonArr(deadLetterQueue, "ANYCAST"));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
+                    jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "addAddressSettings(java.lang.String,java.lang.String)",
+                    jsonArr(queueName, addressSettings));
+            jolokiaCreateSubscriptionDivert(http, baseUrl, auth, mbean,
+                    divertName, topicName, queueName, filter);
         });
     }
 
     /**
-     * Replaces the filter of an existing subscription queue in place via
-     * {@code ActiveMQServerControl.updateQueue(String queueConfiguration)}. The broker applies
-     * the new filter to future routing only ({@code Queue.setFilter}), matching Azure's
-     * rule-change semantics: messages already routed to the subscription stay, attached
-     * receivers stay connected.
+     * Replaces the filter of an existing subscription divert. The broker applies the new filter
+     * to future routing only, matching Azure's rule-change semantics: messages already routed to
+     * the subscription stay, and attached receivers stay connected to the unchanged queue.
      */
     public void jolokiaUpdateSubscriptionFilter(String namespaceName, String topicName, String subName,
                                                  String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
-        // QueueConfiguration JSON uses kebab-case keys ("filter-string", not "filterString")
-        String queueConfigJson = "{\"name\":" + jsonString(queueName)
-                + ",\"filter-string\":" + jsonString(filter) + "}";
+        String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "updateQueue(java.lang.String)",
-                    jsonArr(queueConfigJson));
+                    "destroyDivert(java.lang.String)",
+                    jsonArr(divertName));
+            jolokiaCreateSubscriptionDivert(http, baseUrl, auth, mbean,
+                    divertName, topicName, queueName, filter);
         });
     }
 
-    /** Removes a subscription queue from the running Artemis broker. */
+    /** Removes a subscription queue, divert, dead-letter queue, and address settings. */
     public void jolokiaDeleteSubscription(String namespaceName, String topicName, String subName) {
         String queueName = topicName + "/Subscriptions/" + subName;
+        String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
+        String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyDivert(java.lang.String)",
+                    jsonArr(divertName));
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(queueName, true, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "deleteAddress(java.lang.String,boolean)",
+                    jsonArr(queueName, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyQueue(java.lang.String,boolean,boolean)",
+                    jsonArr(deadLetterQueue, true, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "deleteAddress(java.lang.String,boolean)",
+                    jsonArr(deadLetterQueue, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "removeAddressSettings(java.lang.String)",
+                    jsonArr(queueName));
         });
     }
 
@@ -348,6 +385,15 @@ public class ServiceBusNamespaceManager {
     @FunctionalInterface
     interface JolokiaAction {
         void run(HttpClient http, String baseUrl, String auth, String mbean) throws Exception;
+    }
+
+    private void jolokiaCreateSubscriptionDivert(HttpClient http, String baseUrl, String auth,
+                                                   String mbean, String divertName,
+                                                   String topicName, String queueName,
+                                                   String filter) {
+        jolokiaExec(http, baseUrl, auth, mbean,
+                "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
+                jsonArr(divertName, divertName, topicName, queueName, false, filter, null));
     }
 
     private void withJolokia(String namespaceName, JolokiaAction action) {

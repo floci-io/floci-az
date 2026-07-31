@@ -15,7 +15,7 @@ public sealed class ServiceBusCompatibilityTests
         int.Parse(Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673");
 
     [Test]
-    [Timeout(30_000)]
+    [Timeout(60_000)]
     public async Task DotnetSdkSupportsSettlementOperations(CancellationToken cancellationToken)
     {
         const string serviceBusNamespace = "default";
@@ -57,6 +57,27 @@ public sealed class ServiceBusCompatibilityTests
         ServiceBusReceivedMessage fromDeadLetterQueue = await Receive(deadLetterReceiver, cancellationToken);
         await Assert.That(fromDeadLetterQueue.Body.ToString()).IsEqualTo("dead-letter");
         await deadLetterReceiver.CompleteMessageAsync(fromDeadLetterQueue, cancellationToken);
+
+        string topic = $"dotnet-topic-{Guid.NewGuid():N}";
+        string subscription = $"dotnet-sub-{Guid.NewGuid():N}";
+        await EnsureTopic(serviceBusNamespace, topic, cancellationToken);
+        await EnsureSubscription(serviceBusNamespace, topic, subscription, cancellationToken);
+
+        await using ServiceBusSender topicSender = client.CreateSender(topic);
+        await using ServiceBusReceiver subscriptionReceiver = client.CreateReceiver(topic, subscription);
+        await topicSender.SendMessageAsync(new ServiceBusMessage("subscription-dead-letter"), cancellationToken);
+        ServiceBusReceivedMessage subscriptionMessage = await Receive(subscriptionReceiver, cancellationToken);
+        await subscriptionReceiver.DeadLetterMessageAsync(
+            subscriptionMessage, cancellationToken: cancellationToken);
+
+        await using ServiceBusReceiver subscriptionDeadLetterReceiver = client.CreateReceiver(
+            topic, subscription, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+        ServiceBusReceivedMessage subscriptionDeadLetter =
+            await Receive(subscriptionDeadLetterReceiver, cancellationToken);
+        await Assert.That(subscriptionDeadLetter.Body.ToString())
+            .IsEqualTo("subscription-dead-letter");
+        await subscriptionDeadLetterReceiver.CompleteMessageAsync(
+            subscriptionDeadLetter, cancellationToken);
     }
 
     private static async Task<ServiceBusReceivedMessage> Receive(
@@ -93,5 +114,35 @@ public sealed class ServiceBusCompatibilityTests
         await Assert.That(response.IsSuccessStatusCode)
             .IsTrue()
             .Because($"Queue creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync(cancellationToken)}");
+    }
+
+    private static async Task EnsureTopic(
+        string serviceBusNamespace, string topic, CancellationToken cancellationToken)
+    {
+        await EnsureEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/topics/{topic}",
+            "Topic", cancellationToken);
+    }
+
+    private static async Task EnsureSubscription(
+        string serviceBusNamespace, string topic, string subscription,
+        CancellationToken cancellationToken)
+    {
+        await EnsureEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/topics/{topic}/subscriptions/{subscription}",
+            "Subscription", cancellationToken);
+    }
+
+    private static async Task EnsureEntity(
+        string url, string entityType, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var request = new HttpRequestMessage(HttpMethod.Put, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/atom+xml"));
+        request.Content = new StringContent("", Encoding.UTF8, "application/atom+xml");
+        HttpResponseMessage response = await http.SendAsync(request, cancellationToken);
+        await Assert.That(response.IsSuccessStatusCode)
+            .IsTrue()
+            .Because($"{entityType} creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync(cancellationToken)}");
     }
 }

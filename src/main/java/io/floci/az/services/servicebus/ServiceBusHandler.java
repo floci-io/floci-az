@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -585,10 +586,19 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
 
         String subPrefix = subPrefix(account, namespace, topicName);
+        List<ServiceBusModels.SubscriptionEntity> subscriptions = scanDirectChildren(subPrefix)
+                .stream()
+                .map(obj -> fromBytes(obj.data(), ServiceBusModels.SubscriptionEntity.class))
+                .filter(Objects::nonNull)
+                .toList();
         store.scan(k -> k.startsWith(subPrefix)).forEach(obj -> store.delete(obj.key()));
         store.delete(topicKey);
 
         try {
+            for (ServiceBusModels.SubscriptionEntity subscription : subscriptions) {
+                namespaceManager.jolokiaDeleteSubscription(
+                        namespace, topicName, subscription.name());
+            }
             namespaceManager.jolokiaDeleteTopic(namespace, topicName);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to remove topic '%s' from Artemis for namespace '%s'", topicName, namespace);
