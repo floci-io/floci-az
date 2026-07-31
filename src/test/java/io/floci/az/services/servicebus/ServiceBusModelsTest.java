@@ -37,4 +37,39 @@ class ServiceBusModelsTest {
 
         assertEquals(600, topic.duplicateDetectionHistorySeconds());
     }
+
+    @Test
+    void legacyEntitiesUseDefaultMessageTtl() throws Exception {
+        ServiceBusModels.QueueEntity queue = objectMapper.readValue("""
+                {
+                  "name": "legacy-queue",
+                  "maxDeliveryCount": 10,
+                  "lockDurationSeconds": 60,
+                  "maxSizeInMegabytes": 1024,
+                  "requiresSession": false
+                }
+                """, ServiceBusModels.QueueEntity.class);
+        ServiceBusModels.TopicEntity topic = objectMapper.readValue("""
+                {
+                  "name": "legacy-topic",
+                  "maxSizeInMegabytes": 1024
+                }
+                """, ServiceBusModels.TopicEntity.class);
+        ServiceBusModels.SubscriptionEntity subscription = objectMapper.readValue("""
+                {
+                  "topicName": "legacy-topic",
+                  "name": "legacy-subscription",
+                  "maxDeliveryCount": 10,
+                  "lockDurationSeconds": 60,
+                  "requiresSession": false
+                }
+                """, ServiceBusModels.SubscriptionEntity.class);
+
+        assertEquals(ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS,
+                queue.defaultMessageTtlMillis());
+        assertEquals(ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS,
+                topic.defaultMessageTtlMillis());
+        assertEquals(ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS,
+                subscription.defaultMessageTtlMillis());
+    }
 }

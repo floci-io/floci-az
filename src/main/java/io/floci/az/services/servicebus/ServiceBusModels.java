@@ -34,6 +34,9 @@ public final class ServiceBusModels {
                 duplicateDetectionHistorySeconds =
                         ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
             }
+            if (defaultMessageTtlMillis == 0) {
+                defaultMessageTtlMillis = ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS;
+            }
         }
 
         static QueueEntity defaults(String name, int maxDeliveryCount,
@@ -62,6 +65,9 @@ public final class ServiceBusModels {
             if (duplicateDetectionHistorySeconds == 0) {
                 duplicateDetectionHistorySeconds =
                         ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
+            }
+            if (defaultMessageTtlMillis == 0) {
+                defaultMessageTtlMillis = ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS;
             }
         }
 
@@ -128,6 +134,12 @@ public final class ServiceBusModels {
             boolean deadLetteringOnMessageExpiration,
             Instant createdAt,
             Instant updatedAt) {
+
+        public SubscriptionEntity {
+            if (defaultMessageTtlMillis == 0) {
+                defaultMessageTtlMillis = ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS;
+            }
+        }
 
         static SubscriptionEntity defaults(String topicName, String name,
                                             int maxDeliveryCount, long lockDurationSeconds,
