@@ -4,9 +4,13 @@ import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.postoffice.RoutingStatus;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
+import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.RoutingContext;
+import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.impl.AckReason;
 import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
+import org.apache.activemq.artemis.core.transaction.Transaction;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -14,6 +18,7 @@ import java.lang.management.ManagementFactory;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -31,6 +36,8 @@ public final class ServiceBusExpiryPlugin
     public static final String OBJECT_NAME = "io.floci.az.artemis:type=ServiceBusExpiry";
 
     private final ConcurrentHashMap<String, ExpirySettings> settingsByQueue =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ExpiryKey, ScheduledFuture<?>> scheduledExpirations =
             new ConcurrentHashMap<>();
     private volatile ActiveMQServer server;
     private volatile ObjectName objectName;
@@ -67,6 +74,8 @@ public final class ServiceBusExpiryPlugin
             LOG.log(System.Logger.Level.WARNING,
                     "Could not unregister message expiry MBean during broker shutdown", e);
         } finally {
+            scheduledExpirations.values().forEach(task -> task.cancel(false));
+            scheduledExpirations.clear();
             settingsByQueue.clear();
             server = null;
         }
@@ -89,6 +98,12 @@ public final class ServiceBusExpiryPlugin
     @Override
     public void remove(String queueName) {
         settingsByQueue.remove(queueName);
+        scheduledExpirations.forEach((key, task) -> {
+            if (key.queueName().equals(queueName)
+                    && scheduledExpirations.remove(key, task)) {
+                task.cancel(false);
+            }
+        });
     }
 
     @Override
@@ -117,10 +132,32 @@ public final class ServiceBusExpiryPlugin
             long delayMillis = effectiveDelay(
                     message.getExpiration(), now, settings.defaultTtlMillis());
             long messageId = message.getMessageID();
-            activeServer.getScheduledPool().schedule(
-                    () -> expire(queue, messageId, settings.deadLetterAddress()),
-                    delayMillis, TimeUnit.MILLISECONDS);
+            scheduleExpiry(activeServer, queue, messageId, settings, delayMillis);
         }
+    }
+
+    @Override
+    public void messageAcknowledged(MessageReference reference, AckReason reason) {
+        cancelExpiry(reference);
+    }
+
+    @Override
+    public void messageExpired(
+            MessageReference reference, SimpleString expiryAddress, ServerConsumer consumer) {
+        cancelExpiry(reference);
+    }
+
+    @Override
+    public void messageMoved(
+            Transaction transaction,
+            MessageReference reference,
+            AckReason reason,
+            SimpleString destinationAddress,
+            Long destinationQueueId,
+            ServerConsumer consumer,
+            Message newMessage,
+            RoutingStatus result) {
+        cancelExpiry(reference);
     }
 
     private static long effectiveDelay(long messageExpiration, long now, long defaultTtlMillis) {
@@ -128,6 +165,37 @@ public final class ServiceBusExpiryPlugin
             return defaultTtlMillis;
         }
         return Math.min(defaultTtlMillis, Math.max(0, messageExpiration - now));
+    }
+
+    private void scheduleExpiry(
+            ActiveMQServer activeServer,
+            Queue queue,
+            long messageId,
+            ExpirySettings settings,
+            long delayMillis) {
+        ExpiryKey key = new ExpiryKey(queue.getName().toString(), messageId);
+        synchronized (scheduledExpirations) {
+            if (scheduledExpirations.containsKey(key)) {
+                return;
+            }
+            ScheduledFuture<?> task = activeServer.getScheduledPool().schedule(() -> {
+                try {
+                    expire(queue, messageId, settings.deadLetterAddress());
+                } finally {
+                    scheduledExpirations.remove(key);
+                }
+            }, delayMillis, TimeUnit.MILLISECONDS);
+            scheduledExpirations.put(key, task);
+        }
+    }
+
+    private void cancelExpiry(MessageReference reference) {
+        ExpiryKey key = new ExpiryKey(
+                reference.getQueue().getName().toString(), reference.getMessageID());
+        ScheduledFuture<?> task = scheduledExpirations.remove(key);
+        if (task != null) {
+            task.cancel(false);
+        }
     }
 
     private static void expire(Queue queue, long messageId, String deadLetterAddress) {
@@ -145,4 +213,6 @@ public final class ServiceBusExpiryPlugin
     }
 
     private record ExpirySettings(long defaultTtlMillis, String deadLetterAddress) {}
+
+    private record ExpiryKey(String queueName, long messageId) {}
 }
