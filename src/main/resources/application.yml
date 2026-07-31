@@ -174,7 +174,7 @@ floci-az:
       mocked: true
       amqp-port: 5673
       amqp-tls-port: 5674
-      artemis-image: "apache/activemq-artemis:latest"
+      artemis-image: "apache/activemq-artemis:2.44.0"
       max-delivery-count: 10
       lock-duration-seconds: 60
     monitor:

@@ -75,11 +75,11 @@ docker run --rm --network $(COMPAT_NETWORK) \
 endef
 
 # Full session: build + start emulator, build suite image, run suite, always stop.
-# $(call COMPAT_SESSION,<suite>,<results-subdir>,<env args>,<late args>,<container cmd>)
+# $(call COMPAT_SESSION,<suite>,<results-subdir>,<suite env>,<late args>,<container cmd>,<emulator env>)
 define COMPAT_SESSION
 @mkdir -p $(COMPAT_RESULTS)/$(2)
 $(MAKE) compat-build
-$(MAKE) compat-run
+$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(6)"
 @EXIT=0; \
 $(MAKE) compat-$(1)-image || EXIT=$$?; \
 if [ $$EXIT -eq 0 ]; then \
@@ -270,7 +270,7 @@ test-blob:
 	@echo "==> Blob Storage SDK compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/blob-python $(COMPAT_RESULTS)/blob-node $(COMPAT_RESULTS)/blob-java
 	$(MAKE) compat-build
-	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(6)"
+	$(MAKE) compat-run
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \

@@ -138,7 +138,7 @@ services:
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED` | `true` | Mocked mode (management plane only, no Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` | `5673` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_TLS_PORT` | `5674` | Host port for AMQPS |
-| `FLOCI_AZ_SERVICES_SERVICE_BUS_ARTEMIS_IMAGE` | `apache/activemq-artemis:latest` | Artemis image |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_ARTEMIS_IMAGE` | `apache/activemq-artemis:2.44.0` | Artemis image; must match bundled protocol patches |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_MAX_DELIVERY_COUNT` | `10` | Max delivery attempts before dead-lettering |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS` | `60` | Peek-lock duration |
 
@@ -152,7 +152,7 @@ floci-az:
       mocked: true              # true = management plane only, no Docker. false = real Artemis sidecar
       amqp-port: 5673
       amqp-tls-port: 5674
-      artemis-image: "apache/activemq-artemis:latest"
+      artemis-image: "apache/activemq-artemis:2.44.0"
       max-delivery-count: 10
       lock-duration-seconds: 60
 ```

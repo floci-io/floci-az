@@ -362,7 +362,7 @@ public interface EmulatorConfig {
         @WithDefault("5674")
         int amqpTlsPort();
 
-        @WithDefault("apache/activemq-artemis:latest")
+        @WithDefault("apache/activemq-artemis:2.44.0")
         String artemisImage();
 
         @WithDefault("10")
