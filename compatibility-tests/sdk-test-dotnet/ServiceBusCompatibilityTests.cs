@@ -174,13 +174,11 @@ public sealed class ServiceBusCompatibilityTests
         await Assert.That(processedMessages[processorSessionB]).IsEqualTo("processor-b");
     }
 
-    [Fact]
-    public async Task DotnetSdkSuppressesDuplicateMessageIdsForQueuesAndTopics()
+    [Test]
+    [Timeout(50_000)]
+    public async Task DotnetSdkSuppressesDuplicateMessageIdsForQueuesAndTopics(
+        CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
-            TestContext.Current.CancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(50));
-        CancellationToken cancellationToken = timeout.Token;
         const string serviceBusNamespace = "default";
         string queue = $"duplicate-{Guid.NewGuid():N}";
         await EnsureNamespace(serviceBusNamespace, cancellationToken);
@@ -202,15 +200,16 @@ public sealed class ServiceBusCompatibilityTests
             new ServiceBusMessage("duplicate") { MessageId = messageId }, cancellationToken);
 
         ServiceBusReceivedMessage first = await Receive(receiver, cancellationToken);
-        Assert.Equal("first", first.Body.ToString());
+        await Assert.That(first.Body.ToString()).IsEqualTo("first");
         await receiver.CompleteMessageAsync(first, cancellationToken);
-        Assert.Null(await receiver.ReceiveMessageAsync(TimeSpan.FromSeconds(2), cancellationToken));
+        await Assert.That(await receiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(2), cancellationToken)).IsNull();
 
         await Task.Delay(TimeSpan.FromSeconds(21), cancellationToken);
         await sender.SendMessageAsync(
             new ServiceBusMessage("after-window") { MessageId = messageId }, cancellationToken);
         ServiceBusReceivedMessage afterWindow = await Receive(receiver, cancellationToken);
-        Assert.Equal("after-window", afterWindow.Body.ToString());
+        await Assert.That(afterWindow.Body.ToString()).IsEqualTo("after-window");
         await receiver.CompleteMessageAsync(afterWindow, cancellationToken);
 
         string topic = $"duplicate-topic-{Guid.NewGuid():N}";
@@ -227,10 +226,10 @@ public sealed class ServiceBusCompatibilityTests
             new ServiceBusMessage("topic-duplicate") { MessageId = messageId }, cancellationToken);
         ServiceBusReceivedMessage topicFirst =
             await Receive(subscriptionReceiver, cancellationToken);
-        Assert.Equal("topic-first", topicFirst.Body.ToString());
+        await Assert.That(topicFirst.Body.ToString()).IsEqualTo("topic-first");
         await subscriptionReceiver.CompleteMessageAsync(topicFirst, cancellationToken);
-        Assert.Null(await subscriptionReceiver.ReceiveMessageAsync(
-            TimeSpan.FromSeconds(2), cancellationToken));
+        await Assert.That(await subscriptionReceiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(2), cancellationToken)).IsNull();
     }
 
     private static async Task<ServiceBusReceivedMessage> Receive(
