@@ -11,9 +11,12 @@ import org.jboss.logging.Logger;
 /**
  * Lifecycle manager for Service Bus sidecar containers.
  *
- * When {@code mocked = false} (default), the default namespace starts automatically on boot.
- * Additional namespaces can be started on-demand via PUT /{account}-servicebus/namespaces/{ns}.
- * All running namespaces are stopped on application shutdown.
+ * When {@code mocked = false} (the default), a namespace starts on its first entity-management
+ * call -- not on boot. Namespaces can also be started explicitly via
+ * PUT /{account}-servicebus/namespaces/{ns}. All running namespaces are stopped on shutdown.
+ *
+ * <p>When {@code mocked = true}, no container is started and the namespace is management-plane
+ * state only: there is no AMQP data plane.
  */
 @ApplicationScoped
 public class ServiceBusContainerManager {

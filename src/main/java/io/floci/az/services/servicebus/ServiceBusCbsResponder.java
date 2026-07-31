@@ -34,6 +34,7 @@ public class ServiceBusCbsResponder {
     private static final Logger LOG = Logger.getLogger(ServiceBusCbsResponder.class);
     private static final String CBS_ADDRESS = "$cbs";
     private static final String CBS_INTERCEPT_ADDRESS = "$cbs-intercept";
+    private static final long RECONNECT_BACKOFF_MS = 2_000;
 
     private final String host;
     private final int port;
@@ -67,22 +68,42 @@ public class ServiceBusCbsResponder {
 
     private void run() {
         while (running) {
+            Reactor reactor = null;
             try {
-                Reactor reactor = Proton.reactor(new CbsHandler());
+                reactor = Proton.reactor(new CbsHandler());
                 currentReactor = reactor;
                 reactor.run();
             } catch (Exception e) {
                 if (running) {
                     LOG.debugv("CBS responder reconnecting ({0}:{1}): {2}", host, port, e.getMessage());
-                    try {
-                        Thread.sleep(2_000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
                 }
             } finally {
                 currentReactor = null;
+                if (reactor != null) {
+                    try {
+                        reactor.free();
+                    } catch (Exception e) {
+                        LOG.debugv("CBS responder failed to free reactor ({0}:{1}): {2}",
+                                host, port, e.getMessage());
+                    }
+                }
+            }
+
+            // Back off between reactor lifecycles.
+            //
+            // This MUST sit outside the catch. The reactor also returns *normally* when the broker
+            // is unreachable or the connection closes -- no exception is thrown -- so a backoff
+            // that only runs on the exception path never fires in the common case. The loop then
+            // re-creates a Reactor (and its selector + wakeup pipe, i.e. fresh file descriptors)
+            // as fast as the CPU allows, exhausting the process FD limit within a second and
+            // taking down every unrelated socket in the JVM with it.
+            if (running) {
+                try {
+                    Thread.sleep(RECONNECT_BACKOFF_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
     }
