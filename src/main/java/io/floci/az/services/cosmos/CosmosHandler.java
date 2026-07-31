@@ -941,7 +941,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
         if (!(body.get("operations") instanceof List<?> rawOperations)) return batchResultError(400);
 
-        List<Map<String, Object>> operations = (List<Map<String, Object>>) rawOperations;
+        List<Map<String, Object>> operations = new ArrayList<>(rawOperations.size());
+        for (Object rawOperation : rawOperations) {
+            if (!(rawOperation instanceof Map<?, ?> operation)) return batchResultError(400);
+            operations.add((Map<String, Object>) operation);
+        }
         Map<String, Object> document = parseData(found.get());
         applyPatchOperations(document, operations);
 
