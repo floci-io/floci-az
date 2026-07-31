@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
 using Azure.Messaging.ServiceBus;
-using Xunit;
 
 namespace FlociAz.Compatibility;
 
@@ -15,13 +14,10 @@ public sealed class ServiceBusCompatibilityTests
     private static readonly int ServiceBusPort =
         int.Parse(Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673");
 
-    [Fact]
-    public async Task DotnetSdkSupportsSettlementOperations()
+    [Test]
+    [Timeout(30_000)]
+    public async Task DotnetSdkSupportsSettlementOperations(CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
-            TestContext.Current.CancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        CancellationToken cancellationToken = timeout.Token;
         const string serviceBusNamespace = "default";
         string queue = $"dotnet-{Guid.NewGuid():N}";
         await EnsureNamespace(serviceBusNamespace, cancellationToken);
@@ -41,15 +37,15 @@ public sealed class ServiceBusCompatibilityTests
 
         await sender.SendMessageAsync(new ServiceBusMessage("complete"), cancellationToken);
         ServiceBusReceivedMessage completed = await Receive(receiver, cancellationToken);
-        Assert.Equal("complete", completed.Body.ToString());
+        await Assert.That(completed.Body.ToString()).IsEqualTo("complete");
         await receiver.CompleteMessageAsync(completed, cancellationToken);
 
         await sender.SendMessageAsync(new ServiceBusMessage("abandon"), cancellationToken);
         ServiceBusReceivedMessage abandoned = await Receive(receiver, cancellationToken);
         await receiver.AbandonMessageAsync(abandoned, cancellationToken: cancellationToken);
         ServiceBusReceivedMessage redelivered = await Receive(receiver, cancellationToken);
-        Assert.Equal("abandon", redelivered.Body.ToString());
-        Assert.True(redelivered.DeliveryCount >= 1);
+        await Assert.That(redelivered.Body.ToString()).IsEqualTo("abandon");
+        await Assert.That(redelivered.DeliveryCount).IsGreaterThanOrEqualTo(1);
         await receiver.CompleteMessageAsync(redelivered, cancellationToken);
 
         await sender.SendMessageAsync(new ServiceBusMessage("dead-letter"), cancellationToken);
@@ -59,7 +55,7 @@ public sealed class ServiceBusCompatibilityTests
         await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
             queue, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
         ServiceBusReceivedMessage fromDeadLetterQueue = await Receive(deadLetterReceiver, cancellationToken);
-        Assert.Equal("dead-letter", fromDeadLetterQueue.Body.ToString());
+        await Assert.That(fromDeadLetterQueue.Body.ToString()).IsEqualTo("dead-letter");
         await deadLetterReceiver.CompleteMessageAsync(fromDeadLetterQueue, cancellationToken);
     }
 
@@ -68,7 +64,8 @@ public sealed class ServiceBusCompatibilityTests
     {
         ServiceBusReceivedMessage? message =
             await receiver.ReceiveMessageAsync(ReceiveTimeout, cancellationToken);
-        return Assert.IsType<ServiceBusReceivedMessage>(message);
+        await Assert.That(message).IsNotNull();
+        return message!;
     }
 
     private static async Task EnsureNamespace(
@@ -79,8 +76,9 @@ public sealed class ServiceBusCompatibilityTests
         HttpResponseMessage response = await http.PutAsync(
             $"{EmulatorEndpoint}/devstoreaccount1-servicebus/namespaces/{serviceBusNamespace}",
             body, cancellationToken);
-        Assert.True(response.IsSuccessStatusCode,
-            $"Namespace creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        await Assert.That(response.IsSuccessStatusCode)
+            .IsTrue()
+            .Because($"Namespace creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync(cancellationToken)}");
     }
 
     private static async Task EnsureQueue(
@@ -92,7 +90,8 @@ public sealed class ServiceBusCompatibilityTests
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/atom+xml"));
         request.Content = new StringContent("", Encoding.UTF8, "application/atom+xml");
         HttpResponseMessage response = await http.SendAsync(request, cancellationToken);
-        Assert.True(response.IsSuccessStatusCode,
-            $"Queue creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+        await Assert.That(response.IsSuccessStatusCode)
+            .IsTrue()
+            .Because($"Queue creation failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync(cancellationToken)}");
     }
 }

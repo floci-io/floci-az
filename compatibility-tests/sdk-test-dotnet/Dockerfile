@@ -8,4 +8,4 @@ COPY ServiceBusCompatibilityTests.cs .
 RUN dotnet build --no-restore
 
 RUN mkdir -p /results
-ENTRYPOINT ["dotnet", "test", "--no-build", "--logger:junit;LogFilePath=/results/servicebus-dotnet.xml"]
+ENTRYPOINT ["dotnet", "run", "--no-build", "--", "--junit-output-path", "/results/servicebus-dotnet.xml"]
