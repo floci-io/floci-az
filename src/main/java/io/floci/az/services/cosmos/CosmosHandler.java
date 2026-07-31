@@ -130,7 +130,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         return notImplemented();
     }
 
-    private Response routeDocs(AzureRequest req, String[] segs, String dbId, String collId) {
+    private synchronized Response routeDocs(AzureRequest req, String[] segs, String dbId, String collId) {
         String m      = req.method().toUpperCase();
         // Query plan requests use x-ms-cosmos-is-query-plan-request: True (no isquery header)
         boolean planRequest = "True".equalsIgnoreCase(
@@ -773,8 +773,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
         if (collFound.isEmpty()) return notFound(collId);
 
-        String pk    = extractPartitionKeyValue(req);
-        String pkEnc = encodeKey(pk);
+        String pkEnc = encodeKey(extractPartitionKeyValue(req));
         Object defaultTtl = containerDefaultTtl(collFound);
 
         List<Map<String, Object>> operations;
@@ -785,7 +784,14 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             return errorResponse(400, "BadRequest", "Invalid batch request body.");
         }
 
+        String partitionPrefix = docKey(req.accountName(), dbId, collId, pkEnc, "");
+        Map<String, StoredObject> original = store.scan(k -> k.startsWith(partitionPrefix)).stream()
+                .collect(Collectors.toMap(StoredObject::key, object -> object,
+                        (left, right) -> left, LinkedHashMap::new));
+        Map<String, StoredObject> staged = new LinkedHashMap<>(original);
+
         List<Map<String, Object>> results = new ArrayList<>();
+        boolean failed = false;
         for (Map<String, Object> op : operations) {
             String opType = op.get("operationType") instanceof String t ? t : "";
             String docId  = op.get("id") instanceof String s ? s : null;
@@ -794,18 +800,37 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             String ifMatch = op.get("ifMatch") instanceof String value ? value : null;
             String ifNoneMatch = op.get("ifNoneMatch") instanceof String value ? value : null;
 
-            results.add(switch (opType) {
-                case "Create"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, false, defaultTtl,
-                        ifMatch, ifNoneMatch);
-                case "Upsert"  -> batchCreate(req.accountName(), dbId, collId, pk, pkEnc, body, true, defaultTtl,
-                        ifMatch, ifNoneMatch);
-                case "Read"    -> batchRead(req.accountName(), dbId, collId, pkEnc, docId, defaultTtl);
-                case "Replace" -> batchReplace(req.accountName(), dbId, collId, pkEnc, docId, body,
+            Map<String, Object> result = switch (opType) {
+                case "Create"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, false,
                         defaultTtl, ifMatch, ifNoneMatch);
-                case "Delete"  -> batchDelete(req.accountName(), dbId, collId, pkEnc, docId,
+                case "Upsert"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, true,
+                        defaultTtl, ifMatch, ifNoneMatch);
+                case "Read"    -> batchRead(staged, req.accountName(), dbId, collId, pkEnc, docId, defaultTtl);
+                case "Replace" -> batchReplace(staged, req.accountName(), dbId, collId, pkEnc, docId, body,
+                        defaultTtl, ifMatch, ifNoneMatch);
+                case "Delete"  -> batchDelete(staged, req.accountName(), dbId, collId, pkEnc, docId,
                         defaultTtl, ifMatch, ifNoneMatch);
                 default        -> batchResultError(400);
-            });
+            };
+            results.add(result);
+
+            if (((Number) result.get("statusCode")).intValue() >= 400) {
+                for (int previous = 0; previous < results.size() - 1; previous++) {
+                    results.set(previous, batchResultError(424));
+                }
+                while (results.size() < operations.size()) {
+                    results.add(batchResultError(424));
+                }
+                failed = true;
+                break;
+            }
+        }
+
+        if (!failed) {
+            original.keySet().stream()
+                    .filter(key -> !staged.containsKey(key))
+                    .forEach(store::delete);
+            staged.forEach(store::put);
         }
 
         try {
@@ -821,8 +846,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> batchCreate(String account, String dbId, String collId,
-            String pk, String pkEnc, Map<String, Object> body, boolean upsert,
+    private Map<String, Object> batchCreate(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
+            String pkEnc, Map<String, Object> body, boolean upsert,
             Object defaultTtl, String ifMatch, String ifNoneMatch) {
         if (body == null) return batchResultError(400);
 
@@ -831,7 +857,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("id", id);
 
         String key = docKey(account, dbId, collId, pkEnc, id);
-        Optional<StoredObject> existing = liveDoc(store.get(key), defaultTtl);
+        Optional<StoredObject> existing = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
         boolean existed = existing.isPresent();
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, existing.orElse(null))) {
             return batchResultError(412);
@@ -848,22 +874,18 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("_ts",          now.getEpochSecond());
         body.put("_attachments", "attachments/");
 
-        store.put(key, stored(key, body, now, etag));
+        documents.put(key, stored(key, body, now, etag));
         return batchResultOk(upsert && existed ? 200 : 201, etag, body);
     }
 
-    private Map<String, Object> batchRead(String account, String dbId, String collId,
+    private Map<String, Object> batchRead(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId, Object defaultTtl) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
-        if (found.isEmpty()) {
-            // Fallback scan for cases where PK is unknown/encoded differently
-            String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst(), defaultTtl);
-        }
+        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        if (found.isEmpty()) found = liveDoc(findBatchDocument(documents, docId), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
 
         Map<String, Object> doc = parseData(found.get());
@@ -871,13 +893,14 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> batchReplace(String account, String dbId, String collId,
+    private Map<String, Object> batchReplace(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId, Map<String, Object> body,
             Object defaultTtl, String ifMatch, String ifNoneMatch) {
         if (docId == null || body == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
+        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
 
@@ -894,26 +917,29 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("_ts",          now.getEpochSecond());
         body.put("_attachments", "attachments/");
 
-        store.put(key, stored(key, body, now, etag));
+        documents.put(key, stored(key, body, now, etag));
         return batchResultOk(200, etag, body);
     }
 
-    private Map<String, Object> batchDelete(String account, String dbId, String collId,
+    private Map<String, Object> batchDelete(Map<String, StoredObject> documents,
+            String account, String dbId, String collId,
             String pkEnc, String docId, Object defaultTtl, String ifMatch, String ifNoneMatch) {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(store.get(key), defaultTtl);
-        if (found.isEmpty()) {
-            String prefix = account + K_DOC + dbId + "|" + collId + "|";
-            found = liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
-                    .stream().findFirst(), defaultTtl);
-        }
+        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        if (found.isEmpty()) found = liveDoc(findBatchDocument(documents, docId), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
 
-        store.delete(found.get().key());
+        documents.remove(found.get().key());
         return batchResultOk(204, null, null);
+    }
+
+    private Optional<StoredObject> findBatchDocument(Map<String, StoredObject> documents, String docId) {
+        return documents.values().stream()
+                .filter(object -> object.key().endsWith("|" + docId))
+                .findFirst();
     }
 
     private Response itemPreconditionFailure(AzureRequest req, StoredObject existing) {

@@ -4,7 +4,17 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.is;
 
 @QuarkusTest
@@ -93,6 +103,64 @@ class CosmosItemConditionTest {
                 .then().statusCode(200).body("[0].statusCode", is(412));
 
         readDocument().then().statusCode(200).body("value", is(1));
+    }
+
+    @Test
+    void batchPreconditionFailureRollsBackEarlierMutation() {
+        String etag = createDocument(1);
+
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
+                .header("x-ms-cosmos-is-batch-request", "true")
+                .body("""
+                        [
+                          {
+                            "operationType": "Replace",
+                            "id": "one",
+                            "ifMatch": "%s",
+                            "resourceBody": {"id":"one","pk":"p","value":2}
+                          },
+                          {
+                            "operationType": "Replace",
+                            "id": "one",
+                            "ifMatch": "\\\"stale\\\"",
+                            "resourceBody": {"id":"one","pk":"p","value":3}
+                          }
+                        ]""".formatted(etag.replace("\"", "\\\"")))
+                .post(DOCS)
+                .then().statusCode(200)
+                .body("statusCode", contains(424, 412));
+
+        readDocument().then().statusCode(200).body("value", is(1));
+    }
+
+    @Test
+    void concurrentMutationsWithSameEtagAllowOnlyOne() throws Exception {
+        String etag = createDocument(1);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Integer> first = executor.submit(() -> replaceAfterSignal(2, etag, ready, start));
+            Future<Integer> second = executor.submit(() -> replaceAfterSignal(3, etag, ready, start));
+            ready.await(5, TimeUnit.SECONDS);
+            start.countDown();
+
+            assertThat(List.of(first.get(), second.get()), containsInAnyOrder(200, 412));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private int replaceAfterSignal(int value, String etag, CountDownLatch ready,
+                                   CountDownLatch start) throws InterruptedException {
+        ready.countDown();
+        start.await();
+        return given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
+                .header("If-Match", etag)
+                .body("{\"id\":\"one\",\"pk\":\"p\",\"value\":" + value + "}")
+                .put(DOCS + "/one").statusCode();
     }
 
     private String createDocument(int value) {
