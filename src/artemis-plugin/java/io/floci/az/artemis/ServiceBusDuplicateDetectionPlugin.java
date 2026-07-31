@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 public final class ServiceBusDuplicateDetectionPlugin
         implements ActiveMQServerPlugin, ServiceBusDuplicateDetectionPluginMBean {
 
+    private static final System.Logger LOG =
+            System.getLogger(ServiceBusDuplicateDetectionPlugin.class.getName());
     public static final String OBJECT_NAME =
             "io.floci.az.artemis:type=ServiceBusDuplicateDetection";
 
@@ -61,8 +63,9 @@ public final class ServiceBusDuplicateDetectionPlugin
             if (objectName != null && mBeanServer.isRegistered(objectName)) {
                 mBeanServer.unregisterMBean(objectName);
             }
-        } catch (Exception ignored) {
-            // Broker shutdown must continue even if JMX has already stopped.
+        } catch (Exception e) {
+            LOG.log(System.Logger.Level.WARNING,
+                    "Could not unregister duplicate detection MBean during broker shutdown", e);
         } finally {
             windowsByAddress.clear();
             expiresByKey.clear();
@@ -89,8 +92,9 @@ public final class ServiceBusDuplicateDetectionPlugin
         if (activeServer != null) {
             try {
                 activeServer.getPostOffice().getDuplicateIDCache(SimpleString.of(address)).clear();
-            } catch (Exception ignored) {
-                // Removing an entity is best effort during broker teardown.
+            } catch (Exception e) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "Could not clear duplicate detection cache for " + address, e);
             }
         }
     }

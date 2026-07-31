@@ -67,8 +67,10 @@ public sealed class ServiceBusCompatibilityTests
 
         await using ServiceBusSender topicSender = client.CreateSender(topic);
         await using ServiceBusReceiver subscriptionReceiver = client.CreateReceiver(topic, subscription);
-        await topicSender.SendMessageAsync(new ServiceBusMessage("subscription-dead-letter"), cancellationToken);
-        ServiceBusReceivedMessage subscriptionMessage = await Receive(subscriptionReceiver, cancellationToken);
+        await topicSender.SendMessageAsync(
+            new ServiceBusMessage("subscription-dead-letter"), cancellationToken);
+        ServiceBusReceivedMessage subscriptionMessage =
+            await Receive(subscriptionReceiver, cancellationToken);
         await subscriptionReceiver.DeadLetterMessageAsync(
             subscriptionMessage, cancellationToken: cancellationToken);
 

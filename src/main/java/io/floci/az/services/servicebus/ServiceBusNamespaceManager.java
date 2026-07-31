@@ -322,7 +322,7 @@ public class ServiceBusNamespaceManager {
         });
     }
 
-    /** Removes a MULTICAST address and all its subscription queues from the running Artemis broker. */
+    /** Removes a topic ingress address and its hidden fan-out address from Artemis. */
     public void jolokiaDeleteTopic(String namespaceName, String topicName) {
         String topicAddress = topicName + TOPIC_ADDRESS_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
@@ -511,7 +511,6 @@ public class ServiceBusNamespaceManager {
         jolokiaExec(http, baseUrl, auth, mbean,
                 "updateQueue(java.lang.String)", jsonArr(queueConfiguration));
     }
-
     private void withJolokia(String namespaceName, JolokiaAction action) {
         NamespaceState state = namespaces.get(namespaceName);
         if (state == null) {
