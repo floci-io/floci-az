@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 public final class ServiceBusExpiryPlugin
         implements ActiveMQServerPlugin, ServiceBusExpiryPluginMBean {
 
+    private static final System.Logger LOG =
+            System.getLogger(ServiceBusExpiryPlugin.class.getName());
     public static final String OBJECT_NAME = "io.floci.az.artemis:type=ServiceBusExpiry";
 
     private final ConcurrentHashMap<String, ExpirySettings> settingsByQueue =
@@ -61,8 +63,9 @@ public final class ServiceBusExpiryPlugin
             if (objectName != null && mBeanServer.isRegistered(objectName)) {
                 mBeanServer.unregisterMBean(objectName);
             }
-        } catch (Exception ignored) {
-            // Broker shutdown must continue if JMX already stopped.
+        } catch (Exception e) {
+            LOG.log(System.Logger.Level.WARNING,
+                    "Could not unregister message expiry MBean during broker shutdown", e);
         } finally {
             settingsByQueue.clear();
             server = null;

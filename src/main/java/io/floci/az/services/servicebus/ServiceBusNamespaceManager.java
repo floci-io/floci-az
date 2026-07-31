@@ -340,6 +340,12 @@ public class ServiceBusNamespaceManager {
                     "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(topicName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyDivert(java.lang.String)",
+                    jsonArr(topicName + TOPIC_DIVERT_SUFFIX));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyQueue(java.lang.String,boolean,boolean)",
+                    jsonArr(topicName, true, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
                     "deleteAddress(java.lang.String,boolean)",
                     jsonArr(topicName, true));
             jolokiaExec(http, baseUrl, auth, mbean,

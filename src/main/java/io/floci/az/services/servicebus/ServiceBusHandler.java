@@ -746,12 +746,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private Response handleDeleteSubscription(String account, String namespace,
                                                String topicName, String subName) {
         String key = subKey(account, namespace, topicName, subName);
-        Optional<StoredObject> storedSubscription = store.get(key);
-        if (storedSubscription.isEmpty()) {
+        if (store.get(key).isEmpty()) {
             return notFoundAtom("Subscription not found: " + subName);
         }
-        ServiceBusModels.SubscriptionEntity subscription = fromBytes(
-                storedSubscription.get().data(), ServiceBusModels.SubscriptionEntity.class);
         String rulePrefix = rulePrefix(account, namespace, topicName, subName);
         store.scan(k -> k.startsWith(rulePrefix)).forEach(obj -> store.delete(obj.key()));
         store.delete(key);
