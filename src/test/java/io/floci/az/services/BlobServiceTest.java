@@ -36,7 +36,9 @@ public class BlobServiceTest {
             .statusCode(200)
             .contentType("application/xml")
             .body(startsWith("<StorageServiceProperties>"))
-            .body("StorageServiceProperties.Logging.Version", equalTo("1.0"));
+            .body("StorageServiceProperties.Logging.Version", equalTo("1.0"))
+            .body(containsString("<StaticWebsite>"))
+            .body(not(containsString("XmlBuilder@")));
     }
 
     @Test
@@ -57,18 +59,6 @@ public class BlobServiceTest {
         given()
             .when().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
             .then().statusCode(409);
-    }
-
-    @Test
-    void getBlobServicePropertiesReturnsXml() {
-        given()
-            .when().get("/{account}?restype=service&comp=properties", ACCOUNT)
-            .then()
-            .statusCode(200)
-            .contentType(containsString("xml"))
-            .body(containsString("<StorageServiceProperties>"))
-            .body(containsString("<StaticWebsite>"))
-            .body(not(containsString("XmlBuilder@")));
     }
 
     @Test
