@@ -371,9 +371,14 @@ public class ServiceBusNamespaceManager {
      * @param filter Artemis core filter (SQL92 selector) applied to the queue — the compiled
      *               form of the subscription's rules; empty string matches everything
      */
-    public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName,
-                                           String filter, boolean requiresSession,
-                                           long lockDurationSeconds) {
+    public void jolokiaCreateSubscription(
+            String namespaceName,
+            String topicName,
+            String subName,
+            String filter,
+            boolean requiresSession,
+            long lockDurationSeconds,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
@@ -403,6 +408,8 @@ public class ServiceBusNamespaceManager {
                     jsonArr(queueName, addressSettings));
             jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
                     topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
+            configureDuplicateDetection(
+                    http, baseUrl, auth, queueName, duplicateDetection);
         });
     }
 
@@ -448,6 +455,7 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "removeAddressSettings(java.lang.String)",
                     jsonArr(queueName));
+            removeDuplicateDetection(http, baseUrl, auth, queueName);
         });
     }
 

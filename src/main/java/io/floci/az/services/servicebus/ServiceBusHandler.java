@@ -672,9 +672,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private Response handleCreateSubscription(String account, String namespace,
                                                 String topicName, String subName,
                                                 boolean requiresSession, String body) {
-        if (store.get(topicKey(account, namespace, topicName)).isEmpty()) {
+        Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
+        if (storedTopic.isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
         }
+        ServiceBusModels.TopicEntity topic = fromBytes(
+                storedTopic.get().data(), ServiceBusModels.TopicEntity.class);
 
         String key = subKey(account, namespace, topicName, subName);
         if (store.get(key).isPresent()) {
@@ -704,8 +707,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         warnOnActionIgnored(initialRule);
 
         try {
-            namespaceManager.jolokiaCreateSubscription(namespace, topicName, subName, selector,
-                    sub.requiresSession(), sub.lockDurationSeconds());
+            namespaceManager.jolokiaCreateSubscription(
+                    namespace, topicName, subName, selector,
+                    sub.requiresSession(), sub.lockDurationSeconds(),
+                    new ServiceBusEntityXml.DuplicateDetectionSettings(
+                            topic.requiresDuplicateDetection(),
+                            topic.duplicateDetectionHistorySeconds()));
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision subscription '%s/%s' in Artemis for namespace '%s'",
                     topicName, subName, namespace);

@@ -177,7 +177,7 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
-    [Timeout(90_000)]
+    [Timeout(120_000)]
     public async Task DotnetSdkSuppressesDuplicateMessageIdsForQueuesAndTopics(
         CancellationToken cancellationToken)
     {
@@ -204,8 +204,11 @@ public sealed class ServiceBusCompatibilityTests
         ServiceBusReceivedMessage first = await Receive(receiver, cancellationToken);
         await Assert.That(first.Body.ToString()).IsEqualTo("first");
         await receiver.CompleteMessageAsync(first, cancellationToken);
-        await Assert.That(await receiver.ReceiveMessageAsync(
-            TimeSpan.FromSeconds(2), cancellationToken)).IsNull();
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("marker") { MessageId = "queue-marker" }, cancellationToken);
+        ServiceBusReceivedMessage marker = await Receive(receiver, cancellationToken);
+        await Assert.That(marker.Body.ToString()).IsEqualTo("marker");
+        await receiver.CompleteMessageAsync(marker, cancellationToken);
 
         await Task.Delay(TimeSpan.FromSeconds(21), cancellationToken);
         await sender.SendMessageAsync(
@@ -216,7 +219,8 @@ public sealed class ServiceBusCompatibilityTests
 
         string topic = $"duplicate-topic-{Guid.NewGuid():N}";
         const string subscription = "subscriber";
-        await EnsureTopic(serviceBusNamespace, topic, cancellationToken);
+        await EnsureTopic(
+            serviceBusNamespace, topic, cancellationToken, duplicateDetection: true);
         await EnsureSubscription(serviceBusNamespace, topic, subscription, cancellationToken);
         await using ServiceBusSender topicSender = client.CreateSender(topic);
         await using ServiceBusReceiver subscriptionReceiver =
@@ -230,8 +234,13 @@ public sealed class ServiceBusCompatibilityTests
             await Receive(subscriptionReceiver, cancellationToken);
         await Assert.That(topicFirst.Body.ToString()).IsEqualTo("topic-first");
         await subscriptionReceiver.CompleteMessageAsync(topicFirst, cancellationToken);
-        await Assert.That(await subscriptionReceiver.ReceiveMessageAsync(
-            TimeSpan.FromSeconds(2), cancellationToken)).IsNull();
+        await topicSender.SendMessageAsync(
+            new ServiceBusMessage("topic-marker") { MessageId = "topic-marker" },
+            cancellationToken);
+        ServiceBusReceivedMessage topicMarker =
+            await Receive(subscriptionReceiver, cancellationToken);
+        await Assert.That(topicMarker.Body.ToString()).IsEqualTo("topic-marker");
+        await subscriptionReceiver.CompleteMessageAsync(topicMarker, cancellationToken);
     }
 
     private static async Task<ServiceBusReceivedMessage> Receive(
@@ -288,15 +297,15 @@ public sealed class ServiceBusCompatibilityTests
     {
         string description = duplicateDetection
             ? """
-              <entry xmlns="http://www.w3.org/2005/Atom">
-                <content type="application/xml">
-                  <TopicDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
-                    <RequiresDuplicateDetection>true</RequiresDuplicateDetection>
-                    <DuplicateDetectionHistoryTimeWindow>PT20S</DuplicateDetectionHistoryTimeWindow>
-                  </TopicDescription>
-                </content>
-              </entry>
-              """
+            <entry xmlns="http://www.w3.org/2005/Atom">
+              <content type="application/xml">
+                <TopicDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
+                  <RequiresDuplicateDetection>true</RequiresDuplicateDetection>
+                  <DuplicateDetectionHistoryTimeWindow>PT20S</DuplicateDetectionHistoryTimeWindow>
+                </TopicDescription>
+              </content>
+            </entry>
+            """
             : "";
         await PutEntity(
             $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/topics/{topic}",
