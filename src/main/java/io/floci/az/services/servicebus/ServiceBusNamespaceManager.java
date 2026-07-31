@@ -79,6 +79,7 @@ public class ServiceBusNamespaceManager {
     private static final String SESSION_METADATA_PREFIX = "floci-az:servicebus-session:";
     private static final String DUPLICATE_DETECTION_MBEAN =
             "io.floci.az.artemis:type=ServiceBusDuplicateDetection";
+    private static final String EXPIRY_MBEAN = "io.floci.az.artemis:type=ServiceBusExpiry";
 
     /**
      * Immutable snapshot of a running namespace.
@@ -245,7 +246,8 @@ public class ServiceBusNamespaceManager {
             String queueName,
             boolean requiresSession,
             long lockDurationSeconds,
-            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
@@ -273,6 +275,9 @@ public class ServiceBusNamespaceManager {
                     jsonArr(queueName, addressSettings));
             configureDuplicateDetection(
                     http, baseUrl, auth, queueName, duplicateDetection);
+            configureExpiry(
+                    http, baseUrl, auth, queueName, lifetime.ttlMillis(),
+                    lifetime.deadLetterOnExpiration() ? deadLetterQueue : "");
         });
     }
 
@@ -293,6 +298,7 @@ public class ServiceBusNamespaceManager {
                     "removeAddressSettings(java.lang.String)",
                     jsonArr(queueName));
             removeDuplicateDetection(http, baseUrl, auth, queueName);
+            removeExpiry(http, baseUrl, auth, queueName);
         });
     }
 
@@ -378,7 +384,8 @@ public class ServiceBusNamespaceManager {
             String filter,
             boolean requiresSession,
             long lockDurationSeconds,
-            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection) {
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
@@ -410,6 +417,9 @@ public class ServiceBusNamespaceManager {
                     topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
             configureDuplicateDetection(
                     http, baseUrl, auth, queueName, duplicateDetection);
+            configureExpiry(
+                    http, baseUrl, auth, queueName, lifetime.ttlMillis(),
+                    lifetime.deadLetterOnExpiration() ? deadLetterQueue : "");
         });
     }
 
@@ -456,9 +466,23 @@ public class ServiceBusNamespaceManager {
                     "removeAddressSettings(java.lang.String)",
                     jsonArr(queueName));
             removeDuplicateDetection(http, baseUrl, auth, queueName);
+            removeExpiry(http, baseUrl, auth, queueName);
         });
     }
 
+    private void configureExpiry(
+            HttpClient http, String baseUrl, String auth, String queueName, long ttlMillis,
+            String deadLetterAddress) {
+        jolokiaExec(http, baseUrl, auth, EXPIRY_MBEAN,
+                "configure(java.lang.String,long,java.lang.String)",
+                jsonArr(queueName, ttlMillis, deadLetterAddress));
+    }
+
+    private void removeExpiry(
+            HttpClient http, String baseUrl, String auth, String queueName) {
+        jolokiaExec(http, baseUrl, auth, EXPIRY_MBEAN,
+                "remove(java.lang.String)", jsonArr(queueName));
+    }
     // ── Private helpers ───────────────────────────────────────────────────────
 
     String containerName(String namespaceName) {

@@ -55,6 +55,9 @@ public class ServiceBusConfigGenerator {
                   .startAttr("broker-plugin", "class-name",
                           "io.floci.az.artemis.ServiceBusDuplicateDetectionPlugin")
                   .end("broker-plugin")
+                  .startAttr("broker-plugin", "class-name",
+                          "io.floci.az.artemis.ServiceBusExpiryPlugin")
+                  .end("broker-plugin")
                 .end("broker-plugins")
                 .start("address-settings")
                   .startAttr("address-setting", "match", "#")

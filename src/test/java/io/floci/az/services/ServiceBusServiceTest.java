@@ -115,6 +115,58 @@ public class ServiceBusServiceTest {
                 .body(containsString("between PT20S and P7D"));
     }
 
+    @Test
+    void queuePersistsMessageLifetimeSettings() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<DefaultMessageTimeToLive>PT2S</DefaultMessageTimeToLive>"
+                + "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/ttl-queue")
+                .then().statusCode(201)
+                .body(containsString("<DefaultMessageTimeToLive>PT2S</DefaultMessageTimeToLive>"))
+                .body(containsString(
+                        "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>"));
+
+        given().when().get(BASE + "/ttl-queue")
+                .then().statusCode(200)
+                .body(containsString("<DefaultMessageTimeToLive>PT2S</DefaultMessageTimeToLive>"))
+                .body(containsString(
+                        "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>"));
+    }
+
+    @Test
+    void topicAndSubscriptionPersistIndependentMessageLifetimeSettings() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\">"
+                        + "<DefaultMessageTimeToLive>PT3S</DefaultMessageTimeToLive>"
+                        + "</TopicDescription>"))
+                .when().put(BASE + "/ttl-topic")
+                .then().statusCode(201)
+                .body(containsString("<DefaultMessageTimeToLive>PT3S</DefaultMessageTimeToLive>"));
+
+        String subscriptionBody = entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
+                + "<DefaultMessageTimeToLive>PT4S</DefaultMessageTimeToLive>"
+                + "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>"
+                + "</SubscriptionDescription>");
+        given().body(subscriptionBody)
+                .when().put(BASE + "/ttl-topic/subscriptions/ttl-subscription")
+                .then().statusCode(201)
+                .body(containsString("<DefaultMessageTimeToLive>PT4S</DefaultMessageTimeToLive>"))
+                .body(containsString(
+                        "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>"));
+    }
+
+    @Test
+    void rejectsNonPositiveDefaultMessageTimeToLive() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<DefaultMessageTimeToLive>PT0S</DefaultMessageTimeToLive>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/invalid-ttl")
+                .then().statusCode(400)
+                .body(containsString("DefaultMessageTimeToLive must be positive"));
+    }
+
     private static String entry(String description) {
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
                 + description + "</content></entry>";

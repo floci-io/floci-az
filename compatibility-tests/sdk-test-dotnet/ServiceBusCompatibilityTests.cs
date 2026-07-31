@@ -243,6 +243,57 @@ public sealed class ServiceBusCompatibilityTests
         await subscriptionReceiver.CompleteMessageAsync(topicMarker, cancellationToken);
     }
 
+    [Fact]
+    public async Task EntityAndMessageTtlExpireIntoDeadLetterQueue()
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        CancellationToken cancellationToken = timeout.Token;
+        const string serviceBusNamespace = "default";
+        string entityTtlQueue = $"entity-ttl-{Guid.NewGuid():N}";
+        string messageTtlQueue = $"message-ttl-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureQueue(
+            serviceBusNamespace, entityTtlQueue, TimeSpan.FromSeconds(2), cancellationToken);
+        await EnsureQueue(
+            serviceBusNamespace, messageTtlQueue, TimeSpan.FromSeconds(10), cancellationToken);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        await using var client = new ServiceBusClient(connectionString);
+
+        await AssertExpiresIntoDeadLetterQueue(
+            client, entityTtlQueue, new ServiceBusMessage("entity-default"), cancellationToken);
+        await AssertExpiresIntoDeadLetterQueue(
+            client, messageTtlQueue,
+            new ServiceBusMessage("message-override") { TimeToLive = TimeSpan.FromSeconds(1) },
+            cancellationToken);
+    }
+
+    private static async Task AssertExpiresIntoDeadLetterQueue(
+        ServiceBusClient client,
+        string queue,
+        ServiceBusMessage message,
+        CancellationToken cancellationToken)
+    {
+        await using ServiceBusSender sender = client.CreateSender(queue);
+        await sender.SendMessageAsync(message, cancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+
+        await using ServiceBusReceiver normalReceiver = client.CreateReceiver(queue);
+        Assert.Null(await normalReceiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(1), cancellationToken));
+
+        await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
+            queue, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+        ServiceBusReceivedMessage expired = await Receive(deadLetterReceiver, cancellationToken);
+        Assert.Equal(message.Body.ToString(), expired.Body.ToString());
+        await deadLetterReceiver.CompleteMessageAsync(expired, cancellationToken);
+    }
+
     private static async Task<ServiceBusReceivedMessage> Receive(
         ServiceBusReceiver receiver, CancellationToken cancellationToken)
     {
@@ -325,6 +376,30 @@ public sealed class ServiceBusCompatibilityTests
             "",
             "Subscription",
             cancellationToken);
+
+    private static async Task EnsureQueue(
+        string serviceBusNamespace,
+        string queue,
+        TimeSpan defaultMessageTtl,
+        CancellationToken cancellationToken,
+        bool deadLetterOnExpiration = true)
+    {
+        string body = $"""
+            <entry xmlns="http://www.w3.org/2005/Atom">
+              <content type="application/xml">
+                <QueueDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
+                  <DefaultMessageTimeToLive>{System.Xml.XmlConvert.ToString(defaultMessageTtl)}</DefaultMessageTimeToLive>
+                  <DeadLetteringOnMessageExpiration>{deadLetterOnExpiration.ToString().ToLowerInvariant()}</DeadLetteringOnMessageExpiration>
+                </QueueDescription>
+              </content>
+            </entry>
+            """;
+        await PutEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/queues/{queue}",
+            body,
+            "Queue",
+            cancellationToken);
+    }
 
     private static async Task PutEntity(
         string url, string content, string entityType, CancellationToken cancellationToken)

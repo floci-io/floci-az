@@ -36,6 +36,8 @@ class ServiceBusConfigGeneratorTest {
         assertEquals(2, brokerXml.split("anycastPrefix=/", -1).length - 1);
         assertTrue(brokerXml.contains(
                 "class-name=\"io.floci.az.artemis.ServiceBusDuplicateDetectionPlugin\""));
+        assertTrue(brokerXml.contains(
+                "class-name=\"io.floci.az.artemis.ServiceBusExpiryPlugin\""));
     }
 
     @Test
@@ -77,6 +79,26 @@ class ServiceBusConfigGeneratorTest {
                     .get();
 
             assertTrue(factory instanceof org.apache.activemq.artemis.protocol.amqp.sasl.ServerSASLFactory);
+        }
+    }
+
+    @Test
+    void packagesMessageExpiryPluginForTheArtemisSidecar() throws Exception {
+        try (InputStream stream = getClass().getResourceAsStream(
+                ServiceBusNamespaceManager.ARTEMIS_EXTENSION_RESOURCE)) {
+            assertNotNull(stream, "Artemis extension JAR must be embedded in the application");
+            try (JarInputStream jar = new JarInputStream(stream)) {
+                Set<String> expectedClasses = Set.of(
+                        "io/floci/az/artemis/ServiceBusExpiryPlugin.class",
+                        "io/floci/az/artemis/ServiceBusExpiryPluginMBean.class");
+                Set<String> packagedClasses = new HashSet<>();
+                for (var entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
+                    if (expectedClasses.contains(entry.getName())) {
+                        packagedClasses.add(entry.getName());
+                    }
+                }
+                assertEquals(expectedClasses, packagedClasses);
+            }
         }
     }
 
