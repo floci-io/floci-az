@@ -14,6 +14,8 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.37.4</quarkus.platform.version>
+        <artemis.version>2.44.0</artemis.version>
+        <proton-j.version>0.34.1</proton-j.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
     </properties>
@@ -107,7 +109,13 @@
         <dependency>
             <groupId>org.apache.qpid</groupId>
             <artifactId>proton-j</artifactId>
-            <version>0.34.1</version>
+            <version>${proton-j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>artemis-amqp-protocol</artifactId>
+            <version>${artemis.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -145,11 +153,181 @@
                 </executions>
             </plugin>
             <plugin>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.8.1</version>
+                <executions>
+                    <execution>
+                        <id>unpack-servicebus-proton-j</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.qpid</groupId>
+                                    <artifactId>proton-j</artifactId>
+                                    <version>${proton-j.version}</version>
+                                    <outputDirectory>${project.build.directory}/artemis-proton-classes</outputDirectory>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>unpack-servicebus-artemis-amqp</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.activemq</groupId>
+                                    <artifactId>artemis-amqp-protocol</artifactId>
+                                    <version>${artemis.version}</version>
+                                    <outputDirectory>${project.build.directory}/artemis-amqp-classes</outputDirectory>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>unpack-servicebus-artemis-amqp-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <overWriteReleases>true</overWriteReleases>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.activemq</groupId>
+                                    <artifactId>artemis-amqp-protocol</artifactId>
+                                    <version>${artemis.version}</version>
+                                    <classifier>sources</classifier>
+                                    <outputDirectory>${project.build.directory}/artemis-amqp-patch-sources</outputDirectory>
+                                    <includes>
+                                        org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java,
+                                        org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java,
+                                        org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java
+                                    </includes>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>patch-servicebus-artemis-amqp-sources</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="deliveryCount &gt; 1"
+                                    value="deliveryCount &gt; 0"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="protonSender.setReceiverSettleMode(ReceiverSettleMode.FIRST);"
+                                    value="protonSender.setReceiverSettleMode(protonSender.getRemoteReceiverSettleMode());"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="doAck(message);"
+                                    value="doAck(message); delivery.disposition(Accepted.getInstance());"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="if (settleImmediate) {"
+                                    value="if (settleImmediate) { delivery.disposition(remoteState);"
+                                    failOnNoReplacements="true" />
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>package-servicebus-artemis-patches</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy todir="${project.build.directory}/artemis-plugin-classes">
+                                    <fileset dir="${project.basedir}/src/artemis-plugin/resources" />
+                                </copy>
+                                <mkdir dir="${project.build.directory}/classes/artemis" />
+                                <jar
+                                    destfile="${project.build.directory}/classes/artemis/servicebus-artemis-extension.jar"
+                                    basedir="${project.build.directory}/artemis-plugin-classes" />
+                                <jar
+                                    destfile="${project.build.directory}/classes/artemis/proton-j-${proton-j.version}-floci-az-proton-patch.jar"
+                                    basedir="${project.build.directory}/artemis-proton-classes" />
+                                <jar
+                                    destfile="${project.build.directory}/classes/artemis/artemis-amqp-protocol-${artemis.version}-floci-az-artemis-amqp-patch.jar"
+                                    basedir="${project.build.directory}/artemis-amqp-classes" />
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${compiler-plugin.version}</version>
                 <configuration>
                     <parameters>true</parameters>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>compile-servicebus-artemis-extension</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <release>21</release>
+                            <compileSourceRoots>
+                                <compileSourceRoot>${project.basedir}/src/artemis-plugin/java</compileSourceRoot>
+                            </compileSourceRoots>
+                            <outputDirectory>${project.build.directory}/artemis-plugin-classes</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-servicebus-proton-patch</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <release>21</release>
+                            <compileSourceRoots>
+                                <compileSourceRoot>${project.basedir}/src/artemis-patch/java</compileSourceRoot>
+                            </compileSourceRoots>
+                            <outputDirectory>${project.build.directory}/artemis-proton-classes</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>compile-servicebus-artemis-amqp-patch</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <release>21</release>
+                            <compileSourceRoots>
+                                <compileSourceRoot>${project.basedir}/src/artemis-amqp-patch/java</compileSourceRoot>
+                                <compileSourceRoot>${project.build.directory}/artemis-amqp-patch-sources</compileSourceRoot>
+                            </compileSourceRoots>
+                            <outputDirectory>${project.build.directory}/artemis-amqp-classes</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>

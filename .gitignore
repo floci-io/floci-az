@@ -27,6 +27,8 @@ go.sum
 package-lock.json
 test-results.xml
 test-results/
+compatibility-tests/sdk-test-dotnet/bin/
+compatibility-tests/sdk-test-dotnet/obj/
 
 *.log
 

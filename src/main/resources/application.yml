@@ -168,11 +168,7 @@ floci-az:
       default-port: 0        # 0 = OS picks a free port per server (recommended)
     service-bus:
       enabled: true
-      # Deliberately mocked: the Artemis sidecar starts fine, but every SDK send fails with
-      # "payload exceeded maximum message size: 0 kb" -- Artemis attaches the link with
-      # max-message-size=0 ("no limit" per AMQP 1.0) and azure-core-amqp reads it literally
-      # (ReactorSender.getLinkSize). The maxMessageSize=... on the acceptor below is NOT a real
-      # Artemis parameter and is silently ignored. See local/full-parity.md (C1) before flipping.
+      # Keep the broker opt-in because each namespace owns an Artemis sidecar.
       mocked: true
       amqp-port: 5673
       amqp-tls-port: 5674

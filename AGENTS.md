@@ -268,6 +268,8 @@ Current per-suite env vars that must stay in sync:
 | `sdk-test-java` | `-e SERVICEBUS_AMQPS_PORT=5671` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
 | `sdk-test-java` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
+| `sdk-test-dotnet` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
+| `sdk-test-dotnet` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-python` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
 | `sdk-test-node` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
 

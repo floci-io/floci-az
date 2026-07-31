@@ -98,6 +98,19 @@ with ServiceBusClient.from_connection_string(CONN) as client:
             receiver.complete_message(msg)
 ```
 
+## .NET SDK
+
+```csharp
+await using var client = new ServiceBusClient(
+    "Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;" +
+    "SharedAccessKey=devkey;UseDevelopmentEmulator=true;");
+ServiceBusSender sender = client.CreateSender("myqueue");
+await sender.SendMessageAsync(new ServiceBusMessage("hello world"));
+```
+
+The Artemis sidecar includes the `MSSBCBS` anonymous SASL mechanism expected by
+`Azure.Messaging.ServiceBus`; authorization continues through the standard CBS link.
+
 ## Configuration
 
 ### Docker Compose

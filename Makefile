@@ -1,7 +1,7 @@
 .PHONY: build run run-docker stop stop-docker require-emulator \
-        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-node-image compat-terraform-image compat-opentofu-image compat-azcli-image \
+        compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-dotnet-image compat-node-image compat-terraform-image compat-opentofu-image compat-azcli-image \
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
-        test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-node-compat test-node-compat-local test-servicebus-compat \
+        test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-dotnet-compat test-node-compat test-node-compat-local test-servicebus-compat \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
         test-entra-node test-entra-node-local \
         test-apim-java \
@@ -14,6 +14,7 @@ PID_FILE       = emulator.pid
 PYTHON_DIR     = compatibility-tests/sdk-test-python
 JAVA_DIR       = compatibility-tests/sdk-test-java
 NODE_DIR       = compatibility-tests/sdk-test-node
+DOTNET_DIR     = compatibility-tests/sdk-test-dotnet
 TERRAFORM_DIR  = compatibility-tests/compat-terraform
 OPENTOFU_DIR   = compatibility-tests/compat-opentofu
 AZCLI_DIR      = compatibility-tests/compat-azcli
@@ -23,6 +24,7 @@ FLOCI_AZ_IMAGE = floci-az:test
 PYTHON_IMAGE   = compat-sdk-test-python
 JAVA_IMAGE     = compat-sdk-test-java
 NODE_IMAGE     = compat-sdk-test-node
+DOTNET_IMAGE   = compat-sdk-test-dotnet
 TERRAFORM_IMAGE = compat-terraform
 OPENTOFU_IMAGE  = compat-opentofu
 AZCLI_IMAGE     = compat-azcli
@@ -40,18 +42,22 @@ SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_AMQPS_PORT=5671 \
 	-e SERVICEBUS_NAMESPACE=default
 SUITE_ENV_NODE   = $(POD_IDENTITY_ENV)
+SUITE_ENV_DOTNET = -e SERVICEBUS_HOST=floci-az-servicebus-default \
+	-e SERVICEBUS_AMQP_PORT=5672
 
 # Per-suite build context and image tag, keyed by suite name.
-SUITES = python java node terraform opentofu azcli
+SUITES = python java dotnet node terraform opentofu azcli
 SUITE_DIR_python    = $(PYTHON_DIR)
 SUITE_DIR_java      = $(JAVA_DIR)
 SUITE_DIR_node      = $(NODE_DIR)
+SUITE_DIR_dotnet    = $(DOTNET_DIR)
 SUITE_DIR_terraform = $(TERRAFORM_DIR)
 SUITE_DIR_opentofu  = $(OPENTOFU_DIR)
 SUITE_DIR_azcli     = $(AZCLI_DIR)
 SUITE_IMAGE_python    = $(PYTHON_IMAGE)
 SUITE_IMAGE_java      = $(JAVA_IMAGE)
 SUITE_IMAGE_node      = $(NODE_IMAGE)
+SUITE_IMAGE_dotnet    = $(DOTNET_IMAGE)
 SUITE_IMAGE_terraform = $(TERRAFORM_IMAGE)
 SUITE_IMAGE_opentofu  = $(OPENTOFU_IMAGE)
 SUITE_IMAGE_azcli     = $(AZCLI_IMAGE)
@@ -138,6 +144,7 @@ compat-run: compat-network
 		-e FLOCI_AZ_SERVICES_DOCKER_NETWORK=$(COMPAT_NETWORK) \
 		-e FLOCI_AZ_TLS_ENABLED=true \
 		-e FLOCI_AZ_HOSTNAME=floci-az \
+		$(FLOCI_AZ_COMPAT_EXTRA_ENV) \
 		$(FLOCI_AZ_IMAGE)
 	@echo "Waiting for floci-az Docker emulator to start on port $(PORT)..."
 	@until curl -sf http://127.0.0.1:$(PORT)/health > /dev/null; do sleep 1; done
@@ -212,6 +219,10 @@ test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
 	$(call COMPAT_SESSION,node,node,$(SUITE_ENV_NODE),,)
 
+test-dotnet-compat:
+	@echo "==> .NET Service Bus SDK compatibility tests (Docker)"
+	$(call COMPAT_SESSION,dotnet,dotnet,$(SUITE_ENV_DOTNET),,,-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false)
+
 test-python-compat-local:
 	@echo "==> Python SDK compatibility tests (all services, local emulator)"
 	@cd $(PYTHON_DIR) && \
@@ -259,7 +270,7 @@ test-blob:
 	@echo "==> Blob Storage SDK compatibility tests (Docker)"
 	@mkdir -p $(COMPAT_RESULTS)/blob-python $(COMPAT_RESULTS)/blob-node $(COMPAT_RESULTS)/blob-java
 	$(MAKE) compat-build
-	$(MAKE) compat-run
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(6)"
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
@@ -379,12 +390,13 @@ test-azcli:
 
 compat-docker:
 	$(MAKE) compat-build
-	$(MAKE) compat-run
-	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false"
+	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-java-image || EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-dotnet-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-terraform-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-opentofu-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-azcli-image || EXIT=$$?; fi; \
@@ -401,6 +413,11 @@ compat-docker:
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Java SDK tests"; \
 		$(call RUN_SUITE,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,); \
+		EXIT=$$?; \
+	fi; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "==> .NET SDK tests"; \
+		$(call RUN_SUITE,dotnet,dotnet,$(SUITE_ENV_DOTNET),,); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \

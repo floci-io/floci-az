@@ -81,6 +81,12 @@ jobs:
               -e SERVICEBUS_AMQPS_PORT=5671
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
+          - test: sdk-test-dotnet
+            emulator_env: >-
+              -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
+            extra_env: >-
+              -e SERVICEBUS_HOST=floci-az-servicebus-default
+              -e SERVICEBUS_AMQP_PORT=5672
           - test: sdk-test-node
             extra_env: >-
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
@@ -109,6 +115,7 @@ jobs:
             -e FLOCI_AZ_SERVICES_DOCKER_NETWORK=compat-net \
             -e FLOCI_AZ_TLS_ENABLED=true \
             -e FLOCI_AZ_HOSTNAME=floci-az \
+            ${{ matrix.emulator_env }} \
             floci-az:test-native
 
       - name: Wait for floci-az to be ready

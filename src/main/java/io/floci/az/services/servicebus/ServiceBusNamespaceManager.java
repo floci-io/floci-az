@@ -12,6 +12,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -36,9 +37,19 @@ public class ServiceBusNamespaceManager {
 
     private static final Logger LOG = Logger.getLogger(ServiceBusNamespaceManager.class);
 
+    static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
+    static final String PROTON_PATCH_RESOURCE = "/artemis/proton-j-0.34.1-floci-az-proton-patch.jar";
+    static final String ARTEMIS_AMQP_PATCH_RESOURCE =
+            "/artemis/artemis-amqp-protocol-2.44.0-floci-az-artemis-amqp-patch.jar";
+    private static final String ARTEMIS_EXTENSION_PATH =
+            "/var/lib/artemis-instance/lib/floci-az-servicebus-extension.jar";
+    private static final String PROTON_J_PATH = "/opt/activemq-artemis/lib/proton-j-0.34.1.jar";
+    private static final String ARTEMIS_AMQP_PATH =
+            "/opt/activemq-artemis/lib/artemis-amqp-protocol-2.44.0.jar";
     private static final int AMQP_PORT = 5672;
     private static final int AMQPS_PORT = 5671;
     private static final int JOLOKIA_PORT = 8161;
+    private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$DeadLetterQueue";
 
     /**
      * Immutable snapshot of a running namespace.
@@ -113,6 +124,12 @@ public class ServiceBusNamespaceManager {
                 "/var/lib/artemis-instance/etc-override/broker.xml");
         lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
                 "/var/lib/artemis-instance/etc-override/artemis.p12");
+        lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
+                ARTEMIS_EXTENSION_PATH);
+        lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
+                PROTON_J_PATH);
+        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
+                ARTEMIS_AMQP_PATH);
 
         ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
 
@@ -188,6 +205,11 @@ public class ServiceBusNamespaceManager {
 
     /** Provisions an ANYCAST queue in the running Artemis broker. */
     public void jolokiaCreateQueue(String namespaceName, String queueName) {
+        String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
+        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
+        String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
+                + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
+                + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
@@ -195,15 +217,34 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(queueName, "ANYCAST", queueName, "", true, -1, false, false));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createAddress(java.lang.String,java.lang.String)",
+                    jsonArr(deadLetterQueue, "ANYCAST"));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
+                    jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "addAddressSettings(java.lang.String,java.lang.String)",
+                    jsonArr(queueName, addressSettings));
         });
     }
 
     /** Removes an ANYCAST queue from the running Artemis broker. */
     public void jolokiaDeleteQueue(String namespaceName, String queueName) {
+        String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(queueName, true, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "destroyQueue(java.lang.String,boolean,boolean)",
+                    jsonArr(deadLetterQueue, true, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "deleteAddress(java.lang.String,boolean)",
+                    jsonArr(deadLetterQueue, true));
+            jolokiaExec(http, baseUrl, auth, mbean,
+                    "removeAddressSettings(java.lang.String)",
+                    jsonArr(queueName));
         });
     }
 
@@ -277,6 +318,22 @@ public class ServiceBusNamespaceManager {
 
     String containerName(String namespaceName) {
         return ContainerStorageHelper.dockerName(config, "servicebus-" + namespaceName);
+    }
+
+    private static byte[] loadArtemisExtension() {
+        return loadResource(ARTEMIS_EXTENSION_RESOURCE);
+    }
+
+    private static byte[] loadResource(String resource) {
+        try (InputStream stream = ServiceBusNamespaceManager.class.getResourceAsStream(
+                resource)) {
+            if (stream == null) {
+                throw new IllegalStateException("Embedded Artemis resource not found: " + resource);
+            }
+            return stream.readAllBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read embedded Artemis resource: " + resource, e);
+        }
     }
 
     private static String rootMessage(Throwable error) {

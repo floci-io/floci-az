@@ -25,7 +25,7 @@ import java.util.Map;
  *
  * The Azure Service Bus SDK always sends a PUT TOKEN request to the {@code $cbs} address
  * before opening any entity links. This responder receives those requests and replies with
- * status-code 200 on the {@code cbs-client-reply-to} address, unblocking the SDK.
+ * status-code 200 on the {@code $cbs} response link, unblocking the SDK.
  *
  * Uses proton-j directly since it is the same low-level AMQP library the SDK uses internally.
  */
