@@ -67,13 +67,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private final StorageSasAuthorization sasAuthorization;
     private final DataLakePathOperations dataLakePathOperations;
 
+    private final BlobLeaseService leaseService;
+
     @Inject
     public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
                               UserDelegationKeyService userDelegationKeyService,
-                              StorageSasAuthorization sasAuthorization) {
+                              StorageSasAuthorization sasAuthorization,
+                              BlobLeaseService leaseService) {
         this.config = config;
         this.userDelegationKeyService = userDelegationKeyService;
         this.sasAuthorization = sasAuthorization;
+        this.leaseService = leaseService;
         this.store = storageFactory.create("blob");
         this.dataLakePathOperations = new DataLakePathOperations(store);
     }
@@ -164,7 +168,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = notImplemented();
                 }
             } else {
-                if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
+                if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
+                    response = leaseBlob(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "metadata".equals(comp)) {
@@ -208,6 +214,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response notImplemented() {
         return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                 .toXmlResponse(501);
+    }
+
+    /** PUT /{container}/{blob}?comp=lease — Lease Blob (acquire/renew/change/release/break). */
+    private Response leaseBlob(AzureRequest request, String containerName, String blobName) {
+        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        if (object.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        return leaseService.handleLeaseOp(request, objKey(request.accountName(), containerName, blobName),
+                object.get().etag(), RFC1123_DATE_TIME.format(object.get().lastModified()));
     }
 
     /**
@@ -302,6 +319,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix))
                 .toList()
                 .forEach(store::delete);
+        leaseService.onContainerDeleted(objPrefix);
         return Response.status(Response.Status.ACCEPTED).build();
     }
 
@@ -347,6 +365,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Response conditionFailure = validateBlobConditions(request, existing);
             if (conditionFailure != null) {
                 return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
             }
 
             byte[] data = request.bodyStream().readAllBytes();
@@ -435,10 +458,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("Accept-Ranges", "bytes")
                 // Get Blob always reports these. Strict SDK clients (e.g. the Azure SDK for C++)
                 // read x-ms-creation-time and x-ms-server-encrypted unconditionally and throw when
-                // they are absent. Leases are not modelled, so the values are those of an unleased blob.
+                // they are absent.
                 .header("x-ms-creation-time", RFC1123_DATE_TIME.format(creationTime(so)))
-                .header("x-ms-lease-status", "unlocked")
-                .header("x-ms-lease-state", "available")
                 .header("x-ms-server-encrypted", "true");
         for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
@@ -446,6 +467,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 rb.header(header, value);
             }
         }
+        leaseService.addLeaseHeaders(rb, objKey(request.accountName(), containerName, blobName));
         if (isRangeRequest) {
             rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
         }
@@ -477,7 +499,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (conditionFailure != null) {
             return conditionFailure;
         }
+        Response leaseFailure = leaseService.validateWrite(request,
+                objKey(request.accountName(), containerName, blobName));
+        if (leaseFailure != null) {
+            return leaseFailure;
+        }
         store.delete(objKey(request.accountName(), containerName, blobName));
+        leaseService.onBlobDeleted(objKey(request.accountName(), containerName, blobName));
         return Response.status(Response.Status.ACCEPTED).build();
     }
 
@@ -519,6 +547,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         Response conditionFailure = validateBlobConditions(request, object);
         if (conditionFailure != null) {
             return conditionFailure;
+        }
+
+        Response leaseFailure = leaseService.validateWrite(request,
+                objKey(request.accountName(), containerName, blobName));
+        if (leaseFailure != null) {
+            return leaseFailure;
         }
 
         StoredObject so = object.get();
@@ -689,6 +723,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         "Value for one of the query parameters specified in the request URI is invalid.")
                         .toXmlResponse(400);
             }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
             byte[] data = request.bodyStream().readAllBytes();
             store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
                     new StoredObject(blockId, data, Map.of("BlockId", blockId), Instant.now(),
@@ -717,6 +756,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                 return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
             }
 
             List<String> blockIds = parseBlockList(request.bodyStream().readAllBytes());
@@ -945,6 +990,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     public void clear() {
         store.clear();
+        leaseService.clear();
     }
 
     public void ensureContainer(String accountName, String containerName) {

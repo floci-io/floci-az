@@ -17,6 +17,8 @@ import com.azure.storage.blob.models.BlockListType;
 import com.azure.storage.blob.models.LeaseStateType;
 import com.azure.storage.blob.models.LeaseStatusType;
 import com.azure.storage.blob.models.ListBlobsOptions;
+import com.azure.storage.blob.specialized.BlobLeaseClient;
+import com.azure.storage.blob.specialized.BlobLeaseClientBuilder;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
@@ -458,5 +460,97 @@ class BlobCompatibilityTest {
         assertNotNull(props.getLogging());
         assertNotNull(props.getHourMetrics());
         assertNotNull(props.getMinuteMetrics());
+    }
+
+    // --- Leases (the WebJobs/Durable Functions host backplane primitive) ---
+
+    private BlobClient leasedBlob(BlobContainerClient container, String blobName) {
+        BlobClient blob = container.getBlobClient(blobName);
+        byte[] content = "lock".getBytes(StandardCharsets.UTF_8);
+        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        return blob;
+    }
+
+    @Test
+    @DisplayName("blob lease lifecycle: acquire → renew → release")
+    void blobLeaseLifecycle() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = leasedBlob(container, "singleton-lock");
+        BlobLeaseClient lease = new BlobLeaseClientBuilder().blobClient(blob).buildClient();
+
+        String leaseId = lease.acquireLease(-1);
+        assertNotNull(leaseId);
+
+        BlobProperties props = blob.getProperties();
+        assertEquals(LeaseStatusType.LOCKED, props.getLeaseStatus());
+        assertEquals(LeaseStateType.LEASED, props.getLeaseState());
+
+        assertEquals(leaseId, lease.renewLease());
+        lease.releaseLease();
+
+        props = blob.getProperties();
+        assertEquals(LeaseStatusType.UNLOCKED, props.getLeaseStatus());
+        assertEquals(LeaseStateType.AVAILABLE, props.getLeaseState());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("leased blob: writes require the lease id")
+    void leasedBlobWriteGuards() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = leasedBlob(container, "guarded");
+        BlobLeaseClient lease = new BlobLeaseClientBuilder().blobClient(blob).buildClient();
+        String leaseId = lease.acquireLease(-1);
+
+        BlobStorageException ex = assertThrows(BlobStorageException.class,
+            () -> blob.setMetadata(Map.of("owner", "nobody")));
+        assertEquals(412, ex.getStatusCode());
+        assertEquals(BlobErrorCode.LEASE_ID_MISSING, ex.getErrorCode());
+
+        blob.setMetadataWithResponse(Map.of("owner", "host-a"),
+            new BlobRequestConditions().setLeaseId(leaseId), null, Context.NONE);
+        assertEquals("host-a", blob.getProperties().getMetadata().get("owner"));
+
+        lease.releaseLease();
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("competing acquire fails, then succeeds after break (lease steal)")
+    void leaseStealViaBreak() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = leasedBlob(container, "partition-lease");
+        BlobLeaseClient first = new BlobLeaseClientBuilder().blobClient(blob).buildClient();
+        first.acquireLease(-1);
+
+        BlobLeaseClient second = new BlobLeaseClientBuilder().blobClient(blob).buildClient();
+        BlobStorageException ex = assertThrows(BlobStorageException.class,
+            () -> second.acquireLease(-1));
+        assertEquals(409, ex.getStatusCode());
+        assertEquals(BlobErrorCode.LEASE_ALREADY_PRESENT, ex.getErrorCode());
+
+        first.breakLease();
+        assertNotNull(second.acquireLease(-1));
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("change lease: ownership handoff to a proposed id")
+    void changeLeaseHandsOff() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = leasedBlob(container, "handoff");
+        BlobLeaseClient lease = new BlobLeaseClientBuilder().blobClient(blob).buildClient();
+        lease.acquireLease(-1);
+
+        String proposed = UUID.randomUUID().toString();
+        assertEquals(proposed, lease.changeLease(proposed));
+
+        client.deleteBlobContainer(name);
     }
 }
