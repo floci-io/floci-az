@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
@@ -90,5 +91,44 @@ public class TableServiceTest {
             .statusCode(404)
             .contentType(containsString("json"))
             .body(containsString("ResourceNotFound"));
+    }
+
+    @Test
+    void duplicateCreateTableReturnsODataErrorEnvelope() {
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"DupCreate\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"DupCreate\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "TableAlreadyExists")
+            .contentType(containsString("odata=minimalmetadata"))
+            .body("'odata.error'.code", equalTo("TableAlreadyExists"))
+            .body("'odata.error'.message.lang", equalTo("en-US"))
+            .body("'odata.error'.message.value", containsString("already exists"));
+    }
+
+    @Test
+    void getMissingEntityReturnsODataErrorEnvelope() {
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"EnvelopeMiss\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/EnvelopeMiss(PartitionKey='p',RowKey='absent')", ACCOUNT)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "ResourceNotFound")
+            .contentType(containsString("odata=minimalmetadata"))
+            .body("'odata.error'.code", equalTo("ResourceNotFound"))
+            .body("'odata.error'.message.value", containsString("does not exist"));
     }
 }

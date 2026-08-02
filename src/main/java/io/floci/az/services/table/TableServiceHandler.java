@@ -116,7 +116,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 response = deleteTable(request, extractTableNameFromTablesPath(path));
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                        .toJsonResponse(501);
+                        .toODataResponse(501);
             }
         } else {
             String tableName;
@@ -142,7 +142,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 response = updateEntity(request, tableName, pkRkPart);
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                        .toJsonResponse(501);
+                        .toODataResponse(501);
             }
         }
 
@@ -189,7 +189,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             String key = nsKey(request.accountName(), req.TableName());
             if (store.get(key).isPresent()) {
                 return new AzureErrorResponse("TableAlreadyExists", "The table specified already exists.")
-                        .toJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                        .toODataResponse(Response.Status.CONFLICT.getStatusCode());
             }
             store.put(key, NS_SENTINEL);
             return Response.status(Response.Status.CREATED)
@@ -236,7 +236,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             if (pk == null || rk == null) {
                 return new AzureErrorResponse("PropertiesNeedValue",
                         "PartitionKey and RowKey are required.")
-                        .toJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                        .toODataResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
             String key = pk + "_" + rk;
             String etag = UUID.randomUUID().toString();
@@ -272,7 +272,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
         if (object.isEmpty()) {
             return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
-                    .toJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+                    .toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
 
         try {
@@ -448,7 +448,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         Optional<StoredObject> existing = store.get(storeKey);
         if (existing.isEmpty()) {
             return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
-                    .toJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+                    .toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
 
         String ifMatch = request.headers().getHeaderString("If-Match");
@@ -478,7 +478,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             if (pk.isEmpty() || rk.isEmpty()) {
                 return new AzureErrorResponse("PropertiesNeedValue",
                         "PartitionKey and RowKey are required.")
-                        .toJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                        .toODataResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
             String key = pk + "_" + rk;
             String storeKey = objKey(request.accountName(), tableName, key);
@@ -533,7 +533,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             // Entity must exist
             if (stored == null) {
                 return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
-                        .toJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+                        .toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
             }
             return null; // exists, pass
         }
@@ -579,7 +579,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             String outerBoundary = extractBoundary(contentType);
             if (outerBoundary == null) {
                 return new AzureErrorResponse("InvalidInput", "Missing or invalid Content-Type boundary.")
-                        .toJsonResponse(400);
+                        .toODataResponse(400);
             }
 
             // Split on outer boundary
@@ -781,7 +781,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             return deleteEntityDirect(accountName, tableName, pkRkPart, ifMatch);
         } else {
             return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
-                    .toJsonResponse(501);
+                    .toODataResponse(501);
         }
     }
 
@@ -792,14 +792,14 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         try {
             if (entityBody == null) {
                 return new AzureErrorResponse("PropertiesNeedValue", "Entity body is required.")
-                        .toJsonResponse(400);
+                        .toODataResponse(400);
             }
             Map<String, Object> entity = new LinkedHashMap<>(entityBody);
             String pk = (String) entity.get("PartitionKey");
             String rk = (String) entity.get("RowKey");
             if (pk == null || rk == null) {
                 return new AzureErrorResponse("PropertiesNeedValue", "PartitionKey and RowKey are required.")
-                        .toJsonResponse(400);
+                        .toODataResponse(400);
             }
             String key = pk + "_" + rk;
             String etag = UUID.randomUUID().toString();
@@ -836,7 +836,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             }
             if (pk == null || pk.isEmpty() || rk == null || rk.isEmpty()) {
                 return new AzureErrorResponse("PropertiesNeedValue", "PartitionKey and RowKey are required.")
-                        .toJsonResponse(400);
+                        .toODataResponse(400);
             }
             String key = pk + "_" + rk;
             String storeKey = objKey(accountName, tableName, key);
@@ -883,7 +883,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         Optional<StoredObject> existing = store.get(storeKey);
         if (existing.isEmpty()) {
             return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
-                    .toJsonResponse(404);
+                    .toODataResponse(404);
         }
 
         Response etagCheck = checkEtag(ifMatch, existing.get());

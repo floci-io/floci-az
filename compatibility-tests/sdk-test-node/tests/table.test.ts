@@ -79,11 +79,13 @@ test("get missing entity → 404", async () => {
   await client.deleteTable(name);
 });
 
-test("create duplicate table → 409", async () => {
+test("create duplicate table: resolves (SDK swallows TableAlreadyExists)", async () => {
   const name = tableName();
   await client.createTable(name);
 
-  await expect(client.createTable(name)).rejects.toMatchObject({ statusCode: 409 });
+  // The SDK resolves rather than throws on a duplicate create, but only when it
+  // can parse TableAlreadyExists out of the OData error envelope on the 409.
+  await expect(client.createTable(name)).resolves.not.toThrow();
 
   await client.deleteTable(name);
 });

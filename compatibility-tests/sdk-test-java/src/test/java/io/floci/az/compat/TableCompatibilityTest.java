@@ -5,6 +5,7 @@ import com.azure.data.tables.TableServiceClient;
 import com.azure.data.tables.TableServiceClientBuilder;
 import com.azure.data.tables.models.ListEntitiesOptions;
 import com.azure.data.tables.models.TableEntity;
+import com.azure.data.tables.models.TableErrorCode;
 import com.azure.data.tables.models.TableEntityUpdateMode;
 import com.azure.data.tables.models.TableServiceException;
 import com.azure.data.tables.models.TableServiceProperties;
@@ -119,6 +120,20 @@ class TableCompatibilityTest {
         TableServiceException ex = assertThrows(TableServiceException.class,
             () -> client.createTable(name));
         assertEquals(409, ex.getResponse().getStatusCode());
+        assertEquals(TableErrorCode.TABLE_ALREADY_EXISTS, ex.getValue().getErrorCode());
+
+        client.deleteTable(name);
+    }
+
+    @Test
+    @DisplayName("createTableIfNotExists on existing table → silent no-op (odata.error envelope)")
+    void createTableIfNotExistsOnExistingTable() {
+        // The SDK only treats the 409 as "already exists" when the body carries
+        // the OData error envelope; a flat error body makes this throw instead.
+        String name = tableName();
+        client.createTable(name);
+
+        assertDoesNotThrow(() -> client.createTableIfNotExists(name));
 
         client.deleteTable(name);
     }
