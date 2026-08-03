@@ -40,9 +40,7 @@ public class BlobLeaseService {
             case "change" -> change(request, blobKey, lease, now);
             case "release" -> release(request, blobKey, lease, now);
             case "break" -> breakLease(request, blobKey, lease, now);
-            default -> new AzureErrorResponse("InvalidHeaderValue",
-                    "The value for one of the HTTP headers is not in the correct format.")
-                    .toXmlResponse(400);
+            default -> invalidHeaderValue();
         };
         if (response.getStatus() >= 400) {
             return response;
@@ -62,11 +60,12 @@ public class BlobLeaseService {
             duration = 0;
         }
         if (duration != -1 && (duration < 15 || duration > 60)) {
-            return new AzureErrorResponse("InvalidHeaderValue",
-                    "The value for one of the HTTP headers is not in the correct format.")
-                    .toXmlResponse(400);
+            return invalidHeaderValue();
         }
         String proposed = header(request, "x-ms-proposed-lease-id");
+        if (proposed != null && !isGuid(proposed)) {
+            return invalidHeaderValue();
+        }
 
         if (lease != null && lease.activeAt(now)) {
             boolean reacquireSameId = lease.stateAt(now) == BlobLease.State.LEASED
@@ -86,6 +85,9 @@ public class BlobLeaseService {
 
     private Response renew(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
         String leaseId = header(request, "x-ms-lease-id");
+        if (leaseId == null || leaseId.isBlank()) {
+            return missingRequiredHeader();
+        }
         if (lease == null) {
             return leaseNotPresent();
         }
@@ -107,6 +109,12 @@ public class BlobLeaseService {
     private Response change(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
         String leaseId = header(request, "x-ms-lease-id");
         String proposed = header(request, "x-ms-proposed-lease-id");
+        if (leaseId == null || leaseId.isBlank() || proposed == null || proposed.isBlank()) {
+            return missingRequiredHeader();
+        }
+        if (!isGuid(proposed)) {
+            return invalidHeaderValue();
+        }
         if (lease == null || !lease.activeAt(now)) {
             return leaseNotPresent();
         }
@@ -122,6 +130,9 @@ public class BlobLeaseService {
 
     private Response release(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
         String leaseId = header(request, "x-ms-lease-id");
+        if (leaseId == null || leaseId.isBlank()) {
+            return missingRequiredHeader();
+        }
         if (lease == null) {
             return leaseNotPresent();
         }
@@ -142,11 +153,12 @@ public class BlobLeaseService {
         String breakPeriodHeader = header(request, "x-ms-lease-break-period");
         if (breakPeriodHeader != null) {
             try {
-                breakPeriod = Math.max(0, Integer.parseInt(breakPeriodHeader));
+                breakPeriod = Integer.parseInt(breakPeriodHeader);
             } catch (NumberFormatException e) {
-                return new AzureErrorResponse("InvalidHeaderValue",
-                        "The value for one of the HTTP headers is not in the correct format.")
-                        .toXmlResponse(400);
+                return invalidHeaderValue();
+            }
+            if (breakPeriod < 0 || breakPeriod > 60) {
+                return invalidHeaderValue();
             }
         } else {
             // Default: infinite leases break immediately, fixed leases run out their term.
@@ -166,11 +178,45 @@ public class BlobLeaseService {
                 "There is currently no lease on the blob.").toXmlResponse(409);
     }
 
+    private static Response missingRequiredHeader() {
+        return new AzureErrorResponse("MissingRequiredHeader",
+                "An HTTP header that's mandatory for this request is not specified.")
+                .toXmlResponse(400);
+    }
+
+    private static Response invalidHeaderValue() {
+        return new AzureErrorResponse("InvalidHeaderValue",
+                "The value for one of the HTTP headers is not in the correct format.")
+                .toXmlResponse(400);
+    }
+
+    private static boolean isGuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Run a blob mutation under the lease guard, atomically with respect to
+     * lease transitions: this holds the same monitor as {@link #handleLeaseOp},
+     * so a competing acquire/break cannot slip between the guard check and the
+     * store mutation. Returns the guard's 412 instead when the lease forbids
+     * the write.
+     */
+    public synchronized Response guardedWrite(AzureRequest request, String blobKey,
+                                              java.util.function.Supplier<Response> operation) {
+        Response failure = validateWrite(request, blobKey);
+        return failure != null ? failure : operation.get();
+    }
+
     /**
      * Lease guard for write/delete operations on a blob. Returns null when the
      * operation may proceed, otherwise the 412 the Blob service contract requires.
      */
-    public Response validateWrite(AzureRequest request, String blobKey) {
+    private Response validateWrite(AzureRequest request, String blobKey) {
         String requestLeaseId = header(request, "x-ms-lease-id");
         BlobLease lease = leases.get(blobKey);
         Instant now = Instant.now();

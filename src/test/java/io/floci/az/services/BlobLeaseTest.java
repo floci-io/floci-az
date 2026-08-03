@@ -216,4 +216,49 @@ public class BlobLeaseTest {
         given().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
             .then().statusCode(200).body(equalTo("lock"));
     }
+
+    // ── Malformed lease headers ──────────────────────────────────────────────
+
+    @Test
+    void changeWithoutProposedIdIsRejectedAndLeaseSurvives() {
+        String id = acquire();
+        leaseOp("change", "x-ms-lease-id", id)
+            .then().statusCode(400).header("x-ms-error-code", equalTo("MissingRequiredHeader"));
+
+        // The lease must not be orphaned by the rejected change.
+        leaseOp("renew", "x-ms-lease-id", id).then().statusCode(200);
+    }
+
+    @Test
+    void leaseOpsWithoutLeaseIdHeaderAreRejected() {
+        acquire();
+        leaseOp("renew")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("MissingRequiredHeader"));
+        leaseOp("release")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("MissingRequiredHeader"));
+        leaseOp("change", "x-ms-proposed-lease-id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("MissingRequiredHeader"));
+    }
+
+    @Test
+    void breakPeriodOutsideRangeIsRejected() {
+        String id = acquire();
+        leaseOp("break", "x-ms-lease-break-period", "99999")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("InvalidHeaderValue"));
+        leaseOp("break", "x-ms-lease-break-period", "-1")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("InvalidHeaderValue"));
+
+        // Still an active lease after the rejected breaks.
+        leaseOp("renew", "x-ms-lease-id", id).then().statusCode(200);
+    }
+
+    @Test
+    void malformedProposedLeaseIdIsRejected() {
+        leaseOp("acquire", "x-ms-lease-duration", "-1", "x-ms-proposed-lease-id", "not-a-guid")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("InvalidHeaderValue"));
+
+        String id = acquire();
+        leaseOp("change", "x-ms-lease-id", id, "x-ms-proposed-lease-id", "not-a-guid")
+            .then().statusCode(400).header("x-ms-error-code", equalTo("InvalidHeaderValue"));
+    }
 }
