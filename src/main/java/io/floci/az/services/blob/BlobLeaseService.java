@@ -200,23 +200,24 @@ public class BlobLeaseService {
     }
 
     /**
-     * Run a blob mutation under the lease guard, atomically with respect to
-     * lease transitions: this holds the same monitor as {@link #handleLeaseOp},
-     * so a competing acquire/break cannot slip between the guard check and the
-     * store mutation. Returns the guard's 412 instead when the lease forbids
-     * the write.
+     * Run a blob operation atomically with respect to lease transitions: this
+     * holds the same monitor as {@link #handleLeaseOp}, so a competing
+     * acquire/break/release cannot interleave with the supplied operation.
+     * Every mutation of blob or lease state — including its precondition
+     * checks (existence, conditional headers, {@link #validateWrite}) — must
+     * run inside this to stay linearized with lease operations and with
+     * container deletion sweeps.
      */
-    public synchronized Response guardedWrite(AzureRequest request, String blobKey,
-                                              java.util.function.Supplier<Response> operation) {
-        Response failure = validateWrite(request, blobKey);
-        return failure != null ? failure : operation.get();
+    public synchronized Response exclusively(java.util.function.Supplier<Response> operation) {
+        return operation.get();
     }
 
     /**
      * Lease guard for write/delete operations on a blob. Returns null when the
-     * operation may proceed, otherwise the 412 the Blob service contract requires.
+     * operation may proceed, otherwise the 412 the Blob service contract
+     * requires. Call only inside {@link #exclusively}.
      */
-    private Response validateWrite(AzureRequest request, String blobKey) {
+    Response validateWrite(AzureRequest request, String blobKey) {
         String requestLeaseId = header(request, "x-ms-lease-id");
         BlobLease lease = leases.get(blobKey);
         Instant now = Instant.now();
@@ -259,15 +260,15 @@ public class BlobLeaseService {
         }
     }
 
-    public void onBlobDeleted(String blobKey) {
+    public synchronized void onBlobDeleted(String blobKey) {
         leases.remove(blobKey);
     }
 
-    public void onContainerDeleted(String blobKeyPrefix) {
+    public synchronized void onContainerDeleted(String blobKeyPrefix) {
         leases.keySet().removeIf(k -> k.startsWith(blobKeyPrefix));
     }
 
-    public void clear() {
+    public synchronized void clear() {
         leases.clear();
     }
 

@@ -217,6 +217,20 @@ public class BlobLeaseTest {
             .then().statusCode(200).body(equalTo("lock"));
     }
 
+    @Test
+    void containerDeleteSweepsLeaseState() {
+        acquire();
+        given().delete("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+
+        // Recreate container and blob: a stale lease would make this PUT 412.
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        given().body("lock").put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+        leaseOp("acquire", "x-ms-lease-duration", "-1").then().statusCode(201);
+    }
+
     // ── Malformed lease headers ──────────────────────────────────────────────
 
     @Test
