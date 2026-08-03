@@ -720,6 +720,59 @@ public class BlobServiceTest {
             .header("Content-MD5", equalTo("XrY7u+Ae7tCTyyK7j1rNww=="));
     }
 
+    // HEAD carries no body (RFC 9110 9.3.2), so an error response must not advertise a content type
+    // either: the Azure SDK for C++ parses the body whenever content-type contains "xml", and an empty
+    // buffer throws std::runtime_error out of the RequestFailedException constructor -> terminate().
+    // Azurite gates both the content type and the body on the method for the same reason.
+    @Test
+    void headMissingBlobOmitsContentType() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "no-such-blob.txt")
+            .then()
+            .statusCode(404)
+            .header("Content-Type", nullValue())
+            .header("x-ms-error-code", "BlobNotFound");
+    }
+
+    @Test
+    void headMissingContainerOmitsContentType() {
+        given()
+            .when().head("/{account}/{container}?restype=container", ACCOUNT, "no-such-container")
+            .then()
+            .statusCode(404)
+            .header("Content-Type", nullValue())
+            .header("x-ms-error-code", "ContainerNotFound");
+    }
+
+    // Counterpart guard: GET is allowed a body, so the <Error> document and its content type must stay.
+    @Test
+    void getMissingBlobStillReturnsErrorBody() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "no-such-blob.txt")
+            .then()
+            .statusCode(404)
+            .contentType(containsString("xml"))
+            .header("x-ms-error-code", "BlobNotFound")
+            .body(containsString("<Code>BlobNotFound</Code>"));
+    }
+
+    // Get Blob Properties documents Content-Type among its 200 response headers, so a successful HEAD
+    // must keep it. Guards against the fix being applied to every bodyless response.
+    @Test
+    void headExistingBlobKeepsContentType() {
+        putTestBlob(BLOB_CONTENT);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", not(emptyOrNullString()));
+    }
+
     private static void putTestBlob(String content) {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

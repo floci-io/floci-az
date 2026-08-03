@@ -323,4 +323,28 @@ public class QueueServiceTest {
             .statusCode(200)
             .body(containsString("delayed"));
     }
+
+    // A bodyless HEAD error must not advertise a content type: the Azure SDK for C++ parses the body
+    // whenever content-type contains "xml" without guarding against an empty buffer, and crashes.
+    @Test
+    void headMissingQueueOmitsContentType() {
+        given()
+            .when().head("/{account}/{queue}", ACCOUNT, "no-such-queue")
+            .then()
+            .statusCode(404)
+            .header("Content-Type", nullValue())
+            .header("x-ms-error-code", "QueueNotFound");
+    }
+
+    // GET is allowed a body, so the <Error> document and its content type must survive.
+    @Test
+    void getMissingQueueStillReturnsErrorBody() {
+        given()
+            .when().get("/{account}/{queue}", ACCOUNT, "no-such-queue")
+            .then()
+            .statusCode(404)
+            .contentType(containsString("xml"))
+            .header("x-ms-error-code", "QueueNotFound")
+            .body(containsString("<Code>QueueNotFound</Code>"));
+    }
 }

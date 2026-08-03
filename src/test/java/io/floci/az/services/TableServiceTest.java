@@ -8,6 +8,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 @QuarkusTest
@@ -66,5 +67,28 @@ public class TableServiceTest {
             .statusCode(200)
             .header("Content-Type", startsWith("application/json"))
             .body("value.TableName", hasItem("mytable"));
+    }
+
+    // The JSON error path carries the same crash class: the Azure SDK for C++ calls json::parse on the
+    // body whenever content-type contains "json", also without an empty-buffer guard.
+    @Test
+    void headOnUnsupportedTableOperationOmitsContentType() {
+        given()
+            .when().head("/{account}/Tables", ACCOUNT)
+            .then()
+            .statusCode(501)
+            .header("Content-Type", nullValue())
+            .header("x-ms-error-code", "NotImplemented");
+    }
+
+    // GET is allowed a body, so the JSON error document and its content type must survive.
+    @Test
+    void getMissingEntityStillReturnsErrorBody() {
+        given()
+            .when().get("/{account}/no-such-table(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then()
+            .statusCode(404)
+            .contentType(containsString("json"))
+            .body(containsString("ResourceNotFound"));
     }
 }
