@@ -587,13 +587,13 @@ public class PostgresHandler implements AzureServiceHandler, Resettable {
      * Stops all running PostgreSQL containers and wipes state.
      * Used by {@code POST /_admin/reset} for test isolation.
      */
-    public void clearAll() {
+    public void clear() {
         state.listServers().forEach(entry -> {
             try { serverManager.stopServer(entry); } catch (Exception e) {
                 LOG.warnf(e, "Error stopping PostgreSQL container during reset: server=%s", entry.serverName());
             }
         });
-        state.clearAll();
+        state.clear();
         startLocks.clear();
     }
 }

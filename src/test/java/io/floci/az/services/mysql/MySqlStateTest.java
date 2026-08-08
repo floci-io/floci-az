@@ -147,10 +147,10 @@ class MySqlStateTest {
     }
 
     @Test
-    @DisplayName("clearAll empties state")
-    void clearAll() {
+    @DisplayName("clear empties state")
+    void clear() {
         state.putServer(server("x"));
-        state.clearAll();
+        state.clear();
         assertEquals(0, state.listServers().size());
     }
 }

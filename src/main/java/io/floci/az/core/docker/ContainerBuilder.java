@@ -18,7 +18,19 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Fluent builder for {@link ContainerSpec} instances.
+ * Fluent builder for constructing {@link ContainerSpec} instances.
+ * Provides sensible defaults and integrates with floci-az configuration.
+ *
+ * <p>Example usage:
+ * <pre>{@code
+ * ContainerSpec spec = containerBuilder.newContainer("nginx:latest")
+ *     .withName("floci-az-my-service")
+ *     .withEnv("MY_VAR", "value")
+ *     .withDynamicPort(8080)
+ *     .withDockerNetwork(config.services().myService().dockerNetwork())
+ *     .withLogRotation()
+ *     .build();
+ * }</pre>
  */
 @ApplicationScoped
 public class ContainerBuilder {
@@ -39,11 +51,57 @@ public class ContainerBuilder {
         this.currentContainerNetworkResolver = currentContainerNetworkResolver;
     }
 
+    /**
+     * Creates a new builder for a container with the specified image.
+     *
+     * @param image Docker image name (e.g., "nginx:latest")
+     * @return a new Builder instance
+     */
     public Builder newContainer(String image) {
-        return new Builder(image, config, dockerHostResolver, embeddedDnsServer,
+        return new Builder(resolveImage(image), config, dockerHostResolver, embeddedDnsServer,
                 currentContainerNetworkResolver);
     }
 
+    private String resolveImage(String image) {
+        return resolveImage(image, configuredImageRegistryBase(config));
+    }
+
+    /**
+     * Prefixes {@code image} with the configured registry base (mirror) unless the image
+     * already carries it. A missing/blank base leaves the image untouched.
+     */
+    static String resolveImage(String image, Optional<String> imageRegistryBase) {
+        if (image == null || image.isBlank()) {
+            return image;
+        }
+        return normalizeImageRegistryBase(imageRegistryBase)
+                .filter(base -> !image.startsWith(base + "/"))
+                .map(base -> base + "/" + image)
+                .orElse(image);
+    }
+
+    private static Optional<String> configuredImageRegistryBase(EmulatorConfig config) {
+        // floci-az's DockerConfig does not expose an image-registry-base property yet;
+        // once it does, read it here (config.docker().imageRegistryBase()) so every image
+        // funnelled through newContainer() is rewritten against the configured mirror.
+        return Optional.empty();
+    }
+
+    private static Optional<String> normalizeImageRegistryBase(Optional<String> imageRegistryBase) {
+        return imageRegistryBase
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> {
+                    while (value.endsWith("/")) {
+                        value = value.substring(0, value.length() - 1);
+                    }
+                    return value;
+                });
+    }
+
+    /**
+     * Fluent builder for constructing ContainerSpec instances.
+     */
     public static class Builder {
         private final String image;
         private final EmulatorConfig config;
@@ -66,6 +124,9 @@ public class ContainerBuilder {
         private final Map<String, String> labels = new HashMap<>();
         private LogConfig logConfig;
         private boolean privileged;
+        private String cgroupnsMode;
+        private String user;
+        private final List<String> groupAdd = new ArrayList<>();
         private final List<String> dnsServers = new ArrayList<>();
 
         Builder(String image, EmulatorConfig config, DockerHostResolver dockerHostResolver,
@@ -78,66 +139,107 @@ public class ContainerBuilder {
             this.currentContainerNetworkResolver = currentContainerNetworkResolver;
         }
 
+        /**
+         * Sets the container name.
+         */
         public Builder withName(String name) {
             this.name = name;
             return this;
         }
 
+        /**
+         * Adds a single environment variable.
+         */
         public Builder withEnv(String key, String value) {
             this.env.add(key + "=" + value);
             return this;
         }
 
+        /**
+         * Adds multiple environment variables from a list of "KEY=value" strings.
+         */
         public Builder withEnv(List<String> env) {
             this.env.addAll(env);
             return this;
         }
 
+        /**
+         * Sets the container command (overrides image CMD).
+         */
         public Builder withCmd(List<String> cmd) {
             this.cmd = cmd;
             return this;
         }
 
+        /**
+         * Sets the container command from a single string (for simple commands).
+         */
         public Builder withCmd(String cmd) {
             this.cmd = List.of(cmd);
             return this;
         }
 
+        /**
+         * Sets the container entrypoint (overrides image ENTRYPOINT).
+         */
         public Builder withEntrypoint(List<String> entrypoint) {
             this.entrypoint = entrypoint;
             return this;
         }
 
+        /**
+         * Sets the working directory inside the container (overrides image WORKDIR).
+         */
         public Builder withWorkingDir(String workingDir) {
             this.workingDir = workingDir;
             return this;
         }
 
+        /**
+         * Sets the memory limit in megabytes.
+         */
         public Builder withMemoryMb(int memoryMb) {
             this.memoryBytes = (long) memoryMb * 1024 * 1024;
             return this;
         }
 
+        /**
+         * Sets the memory limit in bytes.
+         */
         public Builder withMemoryBytes(long memoryBytes) {
             this.memoryBytes = memoryBytes;
             return this;
         }
 
+        /**
+         * Adds a port binding from container port to a specific host port.
+         */
         public Builder withPortBinding(int containerPort, int hostPort) {
             this.portBindings.put(containerPort, hostPort);
             this.exposedPorts.add(containerPort);
             return this;
         }
 
+        /**
+         * Adds a port binding with dynamic host port allocation.
+         * Use this when you don't care which host port is used.
+         */
         public Builder withDynamicPort(int containerPort) {
             return withPortBinding(containerPort, 0);
         }
 
+        /**
+         * Exposes a port without creating a host binding.
+         * Useful when containers communicate via Docker network.
+         */
         public Builder withExposedPort(int port) {
             this.exposedPorts.add(port);
             return this;
         }
 
+        /**
+         * Sets the Docker network mode directly.
+         */
         public Builder withNetworkMode(String networkMode) {
             this.networkMode = networkMode;
             return this;
@@ -158,6 +260,9 @@ public class ContainerBuilder {
             return this;
         }
 
+        /**
+         * Adds a bind mount from host path to container path.
+         */
         public Builder withBind(String hostPath, String containerPath) {
             this.binds.add(new Bind(hostPath, new Volume(containerPath)));
             return this;
@@ -168,19 +273,38 @@ public class ContainerBuilder {
             return this;
         }
 
+        /**
+         * Adds a read-write named volume mount.
+         */
         public Builder withNamedVolume(String volumeName, String containerPath) {
+            return withNamedVolume(volumeName, containerPath, false);
+        }
+
+        /**
+         * Adds a named volume mount, read-only when {@code readOnly} is true.
+         */
+        public Builder withNamedVolume(String volumeName, String containerPath, boolean readOnly) {
             this.mounts.add(new Mount()
                     .withType(MountType.VOLUME)
                     .withSource(volumeName)
-                    .withTarget(containerPath));
+                    .withTarget(containerPath)
+                    .withReadOnly(readOnly));
             return this;
         }
 
+        /**
+         * Adds a mount (any type: volume, bind, tmpfs).
+         */
         public Builder withMount(Mount mount) {
             this.mounts.add(mount);
             return this;
         }
 
+        /**
+         * Adds the host.docker.internal extra host entry on Linux.
+         * This allows containers to reach the host via a consistent hostname
+         * across all platforms (already exists on Docker Desktop).
+         */
         public Builder withHostDockerInternalOnLinux() {
             if (dockerHostResolver.isLinuxHost()) {
                 this.extraHosts.add("host.docker.internal:host-gateway");
@@ -188,25 +312,44 @@ public class ContainerBuilder {
             return this;
         }
 
+        /**
+         * Adds a Docker label, merged over the default emulator labels at create time.
+         */
         public Builder withLabel(String key, String value) {
             this.labels.put(key, value);
             return this;
         }
 
+        /**
+         * Adds multiple Docker labels, merged over the default emulator labels at create time.
+         */
         public Builder withLabels(Map<String, String> labels) {
             this.labels.putAll(labels);
             return this;
         }
 
+        /**
+         * Adds a custom extra host entry.
+         */
         public Builder withExtraHost(String hostname, String ip) {
             this.extraHosts.add(hostname + ":" + ip);
             return this;
         }
 
+        /**
+         * Enables log rotation with default settings from configuration.
+         * Uses json-file driver with max-size and max-file from config.
+         */
         public Builder withLogRotation() {
             return withLogRotation(config.docker().logMaxSize(), config.docker().logMaxFile());
         }
 
+        /**
+         * Enables log rotation with custom settings.
+         *
+         * @param maxSize maximum log file size (e.g., "10m", "100k", "1g")
+         * @param maxFile maximum number of log files to retain
+         */
         public Builder withLogRotation(String maxSize, String maxFile) {
             this.logConfig = new LogConfig(
                     LogConfig.LoggingType.JSON_FILE,
@@ -214,21 +357,66 @@ public class ContainerBuilder {
             return this;
         }
 
+        /**
+         * Sets a custom log configuration.
+         */
         public Builder withLogConfig(LogConfig logConfig) {
             this.logConfig = logConfig;
             return this;
         }
 
+        /**
+         * Runs the container in privileged mode (required for k3s and similar containers
+         * that need full system access).
+         */
         public Builder withPrivileged(boolean privileged) {
             this.privileged = privileged;
             return this;
         }
 
+        /**
+         * Sets the Docker cgroup namespace mode (for example, "host").
+         */
+        public Builder withCgroupnsMode(String cgroupnsMode) {
+            this.cgroupnsMode = cgroupnsMode;
+            return this;
+        }
+
+        /**
+         * Sets the user the container process runs as, formatted {@code "uid[:gid]"}
+         * (Docker's top-level container user). Null or blank leaves the image {@code USER}
+         * in effect.
+         */
+        public Builder withUser(String user) {
+            this.user = user;
+            return this;
+        }
+
+        /**
+         * Adds a supplementary group id to the container process (Docker {@code --group-add}),
+         * so it can access group-owned resources without changing its primary uid/gid. Blank
+         * ids are ignored.
+         */
+        public Builder withGroupAdd(String groupId) {
+            if (groupId != null && !groupId.isBlank()) {
+                this.groupAdd.add(groupId);
+            }
+            return this;
+        }
+
+        /**
+         * Injects floci-az's embedded DNS server into the container so emulated hostnames
+         * resolve to floci-az's Docker network IP. No-op when the embedded DNS server is
+         * not running.
+         */
         public Builder withEmbeddedDns() {
             embeddedDnsServer.getServerIp().ifPresent(dnsServers::add);
             return this;
         }
 
+        /**
+         * Builds the immutable ContainerSpec.
+         */
         public ContainerSpec build() {
             return new ContainerSpec(
                     image,
@@ -246,8 +434,11 @@ public class ContainerBuilder {
                     Map.copyOf(labels),
                     logConfig,
                     privileged,
+                    cgroupnsMode,
                     List.copyOf(dnsServers),
-                    workingDir
+                    workingDir,
+                    user,
+                    List.copyOf(groupAdd)
             );
         }
     }

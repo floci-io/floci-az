@@ -1,0 +1,25 @@
+ARG VERSION=latest
+FROM floci/floci-az:${VERSION}
+
+LABEL org.opencontainers.image.title="floci-az (compat)" \
+      org.opencontainers.image.description="floci-az compatibility image with the Azure CLI and the azfloci helper pre-installed" \
+      org.opencontainers.image.url="https://floci.io" \
+      org.opencontainers.image.source="https://github.com/floci-io/floci-az" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="Floci"
+
+# Azure CLI from Microsoft's RHEL 9 production RPM repository (the
+# yumrepos/azure-cli repo only carries legacy el7 x86_64 builds; rhel/9.0/prod
+# ships current multi-arch azure-cli). python3 is required by the azfloci
+# helper's shebang.
+RUN rpm --import https://packages.microsoft.com/keys/microsoft.asc \
+    && printf '[packages-microsoft-com-prod]\nname=Microsoft Production\nbaseurl=https://packages.microsoft.com/rhel/9.0/prod/\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc\n' \
+        > /etc/yum.repos.d/microsoft-prod.repo \
+    && microdnf install -y --nodocs azure-cli python3 \
+    && microdnf clean all \
+    && rm -f /etc/yum.repos.d/microsoft-prod.repo
+
+COPY --chmod=755 azfloci/azfloci.py /usr/local/bin/azfloci
+
+# No USER directive on purpose: the base image stays root so entrypoint.sh can
+# fix up /app/data ownership and drop to uid 1001 through gosu.

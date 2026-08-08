@@ -1170,7 +1170,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all Service Bus data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 }

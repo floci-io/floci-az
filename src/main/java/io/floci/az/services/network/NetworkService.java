@@ -108,7 +108,7 @@ public class NetworkService {
                 .toList();
     }
 
-    public void clearAll() {
+    public void clear() {
         resources.clear();
     }
 

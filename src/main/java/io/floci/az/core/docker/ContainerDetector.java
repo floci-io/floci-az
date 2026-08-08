@@ -10,18 +10,19 @@ import java.util.Locale;
 
 /**
  * Detects whether the application is running inside a container.
- *
+ * <p>
  * Supports detection for Docker, Moby, Docker Desktop, and Podman
  * on Linux, macOS, and Windows.
- *
+ * <p>
  * Detection heuristics (checked in order):
- *   1. Presence of {@code /.dockerenv} marker file (Docker / Moby / Docker Desktop)
- *   2. Presence of {@code /run/.containerenv} (Podman)
- *   3. The {@code container} environment variable set by some runtimes
- *   4. {@code /proc/1/cgroup} containing docker/kubepods/libpod (cgroup v1)
- *   5. {@code /proc/self/mountinfo} containing overlay paths (cgroup v2 / Podman)
- *   6. Windows: {@code CONTAINER} or {@code DOTNET_RUNNING_IN_CONTAINER} env var
- *
+ * <ol>
+ *   <li>Presence of the {@code /.dockerenv} marker file (Docker / Moby / Docker Desktop)</li>
+ *   <li>Presence of {@code /run/.containerenv} (Podman)</li>
+ *   <li>The {@code container} environment variable set by some runtimes (e.g. Podman sets it to {@code "podman"})</li>
+ *   <li>{@code /proc/1/cgroup} containing {@code docker}, {@code kubepods}, or {@code libpod} (cgroup v1)</li>
+ *   <li>{@code /proc/self/mountinfo} root mount containing {@code /docker/} or {@code /libpod-} overlay paths (cgroup v2 / Podman)</li>
+ *   <li>On Windows: the {@code CONTAINER} or {@code DOTNET_RUNNING_IN_CONTAINER} environment variable</li>
+ * </ol>
  */
 @ApplicationScoped
 public class ContainerDetector {
@@ -53,36 +54,49 @@ public class ContainerDetector {
     }
 
     private boolean detect() {
+        // 1. Docker / Moby / Docker Desktop marker file (Linux & macOS containers)
         if (fileExists(DOCKER_ENV_MARKER)) {
             LOG.debugv("Detected container via {0}", DOCKER_ENV_MARKER);
             return true;
         }
+
+        // 2. Podman marker file
         if (fileExists(PODMAN_ENV_MARKER)) {
             LOG.debugv("Detected container via {0}", PODMAN_ENV_MARKER);
             return true;
         }
+
+        // 3. Environment variable set by some container runtimes
         if (hasContainerEnvVariable()) {
             LOG.debugv("Detected container via environment variable");
             return true;
         }
+
+        // 4. cgroup v1 markers (Linux)
         if (hasCgroupV1Markers()) {
             LOG.debugv("Detected container via cgroup v1 markers in {0}", CGROUP_V1_FILE);
             return true;
         }
+
+        // 5. cgroup v2 / overlay mount markers (Linux)
         if (hasMountInfoMarkers()) {
             LOG.debugv("Detected container via mount markers in {0}", MOUNTINFO_FILE);
             return true;
         }
+
         return false;
     }
 
     private boolean hasContainerEnvVariable() {
+        // Podman sets "container=podman"; systemd-nspawn sets "container=systemd-nspawn"
         String containerEnv = getEnv("container");
         if (containerEnv != null && !containerEnv.isBlank()) return true;
 
+        // Docker Desktop on Windows sometimes exposes this (.NET convention reused by some images)
         String dotnetContainer = getEnv("DOTNET_RUNNING_IN_CONTAINER");
         if ("true".equalsIgnoreCase(dotnetContainer)) return true;
 
+        // Generic CONTAINER env var used in some Windows container images
         String genericContainer = getEnv("CONTAINER");
         return genericContainer != null && !genericContainer.isBlank();
     }

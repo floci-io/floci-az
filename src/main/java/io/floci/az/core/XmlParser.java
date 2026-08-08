@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.jboss.logging.Logger;
 
 /**
  * Lightweight StAX-based helpers for parsing XML request bodies.
@@ -19,6 +20,8 @@ import java.util.Map;
  * All methods silently return empty collections on malformed input.
  */
 public final class XmlParser {
+
+    private static final Logger LOG = Logger.getLogger(XmlParser.class);
 
     private static final XMLInputFactory FACTORY;
 
@@ -84,7 +87,9 @@ public final class XmlParser {
                 }
             }
             r.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
         return result;
     }
 
@@ -139,7 +144,9 @@ public final class XmlParser {
                 }
             }
             r.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
         return result;
     }
 
@@ -181,7 +188,9 @@ public final class XmlParser {
                 }
             }
             r.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
         return result;
     }
 
@@ -222,7 +231,9 @@ public final class XmlParser {
                 }
             }
             r.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
         return result;
     }
 
@@ -271,7 +282,57 @@ public final class XmlParser {
                 }
             }
             r.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Returns the local names of the direct child elements of the first
+     * {@code parentElement}, in document order, or an empty list when the
+     * parent is absent. Unlike {@link #extractGroups(String, String)}, children
+     * are reported whether they are leaves or containers.
+     *
+     * <pre>{@code
+     * List<String> children = XmlParser.childElementNames(body, "Filters");
+     * // <Filters><CorrelationFilter>...</CorrelationFilter></Filters> → [CorrelationFilter]
+     * }</pre>
+     */
+    public static List<String> childElementNames(String xml, String parentElement) {
+        List<String> result = new ArrayList<>();
+        if (xml == null || xml.isEmpty()) {
+            return result;
+        }
+        try {
+            XMLStreamReader r = FACTORY.createXMLStreamReader(new StringReader(xml));
+            boolean inParent = false;
+            int depth = 0;
+            while (r.hasNext()) {
+                int event = r.next();
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    if (!inParent) {
+                        if (parentElement.equals(r.getLocalName())) {
+                            inParent = true;
+                            depth = 1;
+                        }
+                    } else {
+                        if (depth == 1) {
+                            result.add(r.getLocalName());
+                        }
+                        depth++;
+                    }
+                } else if (event == XMLStreamConstants.END_ELEMENT && inParent) {
+                    depth--;
+                    if (depth == 0) {
+                        break;
+                    }
+                }
+            }
+            r.close();
+        } catch (Exception e) {
+            LOG.debugv("Ignoring malformed XML during parse: {0}", e.getMessage());
+        }
         return result;
     }
 }

@@ -350,7 +350,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 

@@ -95,7 +95,7 @@ public class ManagedIdentityStore {
                 .findFirst();
     }
 
-    public void clearAll() {
+    public void clear() {
         identities.clear();
         federatedCredentials.clear();
     }

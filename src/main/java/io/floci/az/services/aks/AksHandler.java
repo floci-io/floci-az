@@ -637,7 +637,7 @@ public class AksHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all AKS data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         storage.clear();
     }
 }

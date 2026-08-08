@@ -5,7 +5,8 @@ name: Nightly
 # Can also be triggered manually.
 #
 # Published tags:
-#   floci/floci-az:nightly   floci/floci-az:nightly-mmddyyyy
+#   Native:  floci/floci-az:nightly          floci/floci-az:nightly-mmddyyyy
+#   Compat:  floci/floci-az:nightly-compat   floci/floci-az:nightly-mmddyyyy-compat
 #
 # Required secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
 
@@ -46,7 +47,7 @@ jobs:
         with:
           ref: main
 
-      - uses: graalvm/setup-graalvm@6f3fa030c4b8f77c1f554a860f593a654538fa38 # v1
+      - uses: graalvm/setup-graalvm@0def53c0fd8534bc13416c9469f5be45265824fd # v1
         with:
           java-version: '25'
           distribution: 'mandrel'
@@ -81,7 +82,7 @@ jobs:
         with:
           ref: main
 
-      - uses: graalvm/setup-graalvm@6f3fa030c4b8f77c1f554a860f593a654538fa38 # v1
+      - uses: graalvm/setup-graalvm@0def53c0fd8534bc13416c9469f5be45265824fd # v1
         with:
           java-version: '25'
           distribution: 'mandrel'
@@ -104,9 +105,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # ── Push native Docker image (multi-arch manifest) ────────────────────────
+  # ── Push native + compat Docker images ───────────────────────────────────
   push-native:
-    name: Push native Docker image
+    name: Push native and compat Docker images
     needs: [prepare, build-native-amd64, build-native-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -126,8 +127,11 @@ jobs:
           name: native-arm64
           path: native/arm64/
 
-      - name: Make binaries executable
-        run: chmod +x native/amd64/*-runner native/arm64/*-runner
+      - name: Stage binaries under a fixed name
+        run: |
+          for arch in amd64 arm64; do
+            mv native/$arch/*-runner native/$arch/application
+          done
 
       - name: Set created timestamp
         id: created
@@ -137,9 +141,9 @@ jobs:
         id: source_date
         run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -156,6 +160,30 @@ jobs:
           tags: |
             floci/floci-az:nightly
             floci/floci-az:nightly-${{ needs.prepare.outputs.version }}
+          build-args: |
+            VERSION=nightly-${{ needs.prepare.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=nightly-${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.created.outputs.created }}
+            version=nightly-${{ needs.prepare.outputs.version }}
+            build-date=${{ steps.created.outputs.created }}
+            vcs-ref=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push compat nightly image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
+        with:
+          context: .
+          file: docker/Dockerfile.compat
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            floci/floci-az:nightly-compat
+            floci/floci-az:nightly-${{ needs.prepare.outputs.version }}-compat
           build-args: |
             VERSION=nightly-${{ needs.prepare.outputs.version }}
           labels: |

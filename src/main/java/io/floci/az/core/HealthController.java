@@ -5,20 +5,32 @@ import io.floci.az.core.tls.TlsConfigSource;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Path("/")
+@Produces(MediaType.APPLICATION_JSON)
 public class HealthController {
 
     @Inject EmulatorConfig config;
 
+    private static final String VERSION = resolveVersion();
+
+    static String resolveVersion() {
+        String env = System.getenv("FLOCI_AZ_VERSION");
+        if (env != null && !env.isBlank()) {
+            return env;
+        }
+        return "dev";
+    }
+
     @GET
     @Path("{path:(health|_floci/health)}")
     public Response health() {
-        String version = System.getenv("FLOCI_AZ_VERSION");
-        if (version == null) version = "dev";
+        String version = VERSION;
 
         return Response.ok(Map.of(
             "status", "UP",

@@ -171,7 +171,7 @@ public class MariaDbState {
 
     // ── Reset ─────────────────────────────────────────────────────────────────
 
-    public synchronized void clearAll() {
+    public synchronized void clear() {
         servers.clear();
         store.clear();
     }

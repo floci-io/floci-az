@@ -552,7 +552,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all ACR data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         storage.clear();
     }
 }

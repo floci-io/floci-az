@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 /**
  * JSON file-backed persistent storage.
  * Write-through on every put/delete.
+ * Loads all data into memory on startup.
  * Uses atomic writes (temp file + rename) for safety.
  */
 public class PersistentStorage<K, V> implements StorageBackend<K, V> {
@@ -97,7 +98,25 @@ public class PersistentStorage<K, V> implements StorageBackend<K, V> {
             store.putAll(data);
             LOG.infov("Loaded {0} entries from {1}", store.size(), filePath);
         } catch (IOException e) {
-            LOG.errorv(e, "Failed to load data from {0}", filePath);
+            // Starting empty here silently drops all persisted state for this store, which can leave
+            // other services referencing resources that now appear missing. Quarantine the unreadable
+            // file and log loudly so the data loss is detectable rather than masquerading as an
+            // empty store.
+            quarantineUnreadableFile(e);
+        }
+    }
+
+    private void quarantineUnreadableFile(IOException cause) {
+        Path quarantine = filePath.resolveSibling(filePath.getFileName() + ".corrupt");
+        try {
+            Files.move(filePath, quarantine, StandardCopyOption.REPLACE_EXISTING);
+            LOG.errorv(cause, "Failed to load persisted data from {0}; moved the unreadable file to "
+                    + "{1} and started with an empty store. This store's state was lost.",
+                    filePath, quarantine);
+        } catch (IOException moveError) {
+            LOG.errorv(cause, "Failed to load persisted data from {0}; could not quarantine it ({1}). "
+                    + "Starting with an empty store. This store's state was lost.",
+                    filePath, moveError.getMessage());
         }
     }
 

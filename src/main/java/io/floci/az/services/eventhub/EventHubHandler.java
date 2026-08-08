@@ -349,7 +349,7 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
      * Stops all Event Hubs sidecar containers (Artemis, Redpanda) and clears namespace state.
      * Used by {@code POST /_admin/reset} for test isolation.
      */
-    public void clearAll() {
+    public void clear() {
         namespaceManager.shutdownAll();
         kafkaManager.stop();
     }

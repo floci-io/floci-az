@@ -187,7 +187,7 @@ public class PostgresState {
      * cache and the persistence backend.
      * Callers are responsible for stopping running containers beforehand.
      */
-    public synchronized void clearAll() {
+    public synchronized void clear() {
         servers.clear();
         store.clear();
     }

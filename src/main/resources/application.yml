@@ -38,6 +38,7 @@ floci-az:
   tls:
     enabled: false    # set to true to enable HTTP+HTTPS on the same port via protocol-sniffing proxy
     self-signed: true  # auto-generate self-signed cert when no cert-path/key-path provided
+    https-port: 443    # FLOCI_AZ_TLS_HTTPS_PORT — also bind 443 so Azure SDK default-HTTPS clients reach floci-az (0 disables)
   base-url: http://localhost:4577
   storage:
     # Global default — applies to every service unless overridden below.
@@ -73,11 +74,20 @@ floci-az:
         flush-interval-ms: 5000
 
   dns:
-  # When floci-az runs inside Docker, an embedded DNS server is started on port 53
-  # and injected into every Azure Functions container as their resolver. It resolves
-  # *.hostname (above) and any extra suffixes to floci-az's Docker network IP.
-  # extra-suffixes:
-  #   - myapp.internal
+    # When floci-az runs inside Docker, an embedded DNS server is started on port 53
+    # and injected into every Azure Functions container as their resolver. It resolves
+    # *.hostname (above) and any extra suffixes to floci-az's Docker network IP.
+    # extra-suffixes:
+    #   - myapp.internal
+
+    # Public resolvers used as the fallback upstream for floci-az's own DNS forwarder,
+    # so function containers can resolve public hostnames even if the resolv.conf
+    # resolver cannot answer. Disable in offline/locked-down networks where these
+    # resolvers are blocked.
+    container-fallback-enabled: true              # FLOCI_AZ_DNS_CONTAINER_FALLBACK_ENABLED
+    container-fallback-servers:                   # FLOCI_AZ_DNS_CONTAINER_FALLBACK_SERVERS=1.1.1.1,1.0.0.1
+      - 8.8.8.8
+      - 8.8.4.4
 
   docker:
     docker-host: unix:///var/run/docker.sock

@@ -133,8 +133,8 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public void clearAll() {
-        store.clearAll();
+    public void clear() {
+        store.clear();
     }
 
     /** ARM-shaped identities in a resource group, for ArmHandler's RG resource listing. */

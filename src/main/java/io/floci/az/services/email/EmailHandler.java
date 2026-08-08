@@ -483,7 +483,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all email data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         emailStorage.clear();
         communicationServices.clear();
         emailServices.clear();

@@ -9,8 +9,9 @@ import java.security.Security;
 
 /**
  * Ensures the BouncyCastle security provider is registered at application startup.
- * Required when TLS self-signed cert generation is used — BouncyCastle must be
- * registered before any crypto operations attempt to use it.
+ * floci-az does not configure {@code quarkus.security.security-providers=BC}, so this
+ * registration is required — BouncyCastle must be registered before any crypto
+ * operations (e.g. TLS self-signed cert generation) attempt to use it.
  */
 @ApplicationScoped
 @Startup
@@ -22,6 +23,8 @@ public class BouncyCastleInitializer {
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
             Security.addProvider(new BouncyCastleProvider());
             LOG.debug("Registered BouncyCastle security provider");
+        } else {
+            LOG.debug("BouncyCastle provider already registered");
         }
     }
 

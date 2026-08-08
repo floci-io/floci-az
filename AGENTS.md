@@ -316,7 +316,7 @@ When adding a new HTTP-based service:
 7. Add storage wiring if needed
 8. Update `BannerLogger`
 9. Add compatibility tests
-10. Update docs (`docs/services/<svc>.md`, `docs/services/index.md`, `mkdocs.yml`, `README.md`, `CHANGELOG.md`)
+10. Update docs (`docs/services/<svc>.md`, `docs/services/index.md`, `mkdocs.yml`, `README.md`)
 
 When adding a sidecar-based service, additionally:
 
@@ -374,6 +374,17 @@ Conventional commits:
 - `chore:` — build, CI, dependencies
 
 Do not add `Co-Authored-By` trailers for AI tools in commit messages.
+
+Releases:
+
+- Releases are cut by dispatching the "Release Cut" workflow
+  (`.github/workflows/release-cut.yml`) from `main` — semantic-release computes
+  the next version from Conventional Commits, updates `pom.xml`/`CHANGELOG.md`,
+  tags, and publishes the GitHub Release; the tag push triggers `release.yml`.
+- The `GH_TOKEN` repo secret must be a PAT (fine-grained, contents: write) —
+  tags pushed with the default `GITHUB_TOKEN` do not trigger `release.yml`.
+- Use the workflow's `dry-run` input to preview the next version and notes
+  without tagging.
 
 ---
 

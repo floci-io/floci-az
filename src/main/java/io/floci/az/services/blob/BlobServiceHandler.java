@@ -736,7 +736,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         return ids;
     }
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 

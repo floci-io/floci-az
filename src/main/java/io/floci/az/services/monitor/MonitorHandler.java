@@ -679,7 +679,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             .toList();
     }
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 }

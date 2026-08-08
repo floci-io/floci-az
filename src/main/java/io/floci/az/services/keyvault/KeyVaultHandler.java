@@ -660,7 +660,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all Key Vault data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 }

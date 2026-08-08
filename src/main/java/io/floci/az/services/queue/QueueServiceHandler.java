@@ -580,7 +580,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 

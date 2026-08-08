@@ -12,10 +12,15 @@ import org.jboss.logging.Logger;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Factory that creates {@link StorageBackend} instances based on configuration.
+ * Tracks all created backends for lifecycle management.
+ */
 @ApplicationScoped
 public class StorageFactory {
 
@@ -24,6 +29,10 @@ public class StorageFactory {
     static final TypeReference<Map<String, StoredObject>> TYPE_REF = new TypeReference<>() {};
 
     private final EmulatorConfig config;
+    private final List<StorageBackend<?, ?>> allBackends = new ArrayList<>();
+    // A file path identifies one logical store: callers sharing a path are expected to agree on
+    // its value type and storage mode. The first create() wins; repeat calls reuse that backend.
+    private final Map<Path, StorageBackend<String, StoredObject>> backendsByPath = new HashMap<>();
     private final List<HybridStorage<?, ?>> hybridBackends = new ArrayList<>();
     private final List<WalStorage<?, ?>> walBackends = new ArrayList<>();
 
@@ -37,13 +46,22 @@ public class StorageFactory {
      * Resolves storage mode by checking the service-level override first,
      * falling back to the global persistence mode.
      */
-    public StorageBackend<String, StoredObject> create(String serviceName) {
+    public synchronized StorageBackend<String, StoredObject> create(String serviceName) {
         String mode           = resolveMode(serviceName);
         long flushIntervalMs  = resolveFlushInterval(serviceName);
         Path basePath         = Path.of(config.storage().persistentPath());
         Path filePath         = basePath.resolve(serviceName + ".json");
 
-        LOG.infov("Creating [{0}] storage backend: {1}", mode, serviceName);
+        // Reuse an existing backend for the same file. Handing out a second backend bound to the
+        // same path creates a duplicate in-memory store; on shutdown the stale duplicate flushes
+        // after the active instance and clobbers persisted state.
+        StorageBackend<String, StoredObject> existing = backendsByPath.get(filePath);
+        if (existing != null) {
+            LOG.debugv("Reusing existing [{0}] storage backend: {1} (file: {2})", mode, serviceName, filePath);
+            return existing;
+        }
+
+        LOG.debugv("Creating [{0}] storage backend: {1} (file: {2})", mode, serviceName, filePath);
 
         StorageBackend<String, StoredObject> backend = switch (mode) {
             case "memory"     -> new InMemoryStorage<>();
@@ -65,6 +83,8 @@ public class StorageFactory {
         };
 
         backend.load();
+        allBackends.add(backend);
+        backendsByPath.put(filePath, backend);
         return backend;
     }
 
@@ -72,9 +92,33 @@ public class StorageFactory {
         shutdownAll();
     }
 
-    public void shutdownAll() {
+    /** Load all storage backends from disk. */
+    public synchronized void loadAll() {
+        for (StorageBackend<?, ?> backend : allBackends) {
+            backend.load();
+        }
+    }
+
+    /** Flush all storage backends to disk. */
+    public synchronized void flushAll() {
+        for (StorageBackend<?, ?> backend : allBackends) {
+            backend.flush();
+        }
+    }
+
+    /** Clear all storage backends. */
+    public synchronized void clearAll() {
+        for (StorageBackend<?, ?> backend : allBackends) {
+            backend.clear();
+        }
+        flushAll();
+    }
+
+    /** Shutdown all managed backends (stop schedulers, flush final state). */
+    public synchronized void shutdownAll() {
         hybridBackends.forEach(HybridStorage::shutdown);
         walBackends.forEach(WalStorage::shutdown);
+        flushAll();
     }
 
     private String resolveMode(String serviceName) {

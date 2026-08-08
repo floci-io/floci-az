@@ -304,8 +304,8 @@ class SqlStateTest {
     }
 
     @Test
-    @DisplayName("clearAll removes entries from both in-memory cache and backend")
-    void clearAllPurgesBackend() {
+    @DisplayName("clear removes entries from both in-memory cache and backend")
+    void clearPurgesBackend() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
         SqlState s = new SqlState(sharedBackend);
 
@@ -313,7 +313,7 @@ class SqlStateTest {
         s.putServer(server("s2"));
         assertEquals(2, s.listServers().size());
 
-        s.clearAll();
+        s.clear();
         assertEquals(0, s.listServers().size(), "in-memory cache cleared");
 
         // A fresh load from the same backend must also be empty

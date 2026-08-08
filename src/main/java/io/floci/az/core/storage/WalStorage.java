@@ -265,12 +265,13 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
                     store.remove(key);
                     replayed++;
                 } else {
-                    LOG.errorv("Unknown WAL op: {0}, stopping replay", op);
+                    LOG.errorv("Unknown WAL op byte: {0}, stopping replay", op);
                     break;
                 }
             }
         } catch (IOException e) {
-            LOG.errorv(e, "Failed to replay WAL (replayed {0} entries before error)", replayed);
+            LOG.errorv(e, "Failed to replay WAL from {0} (replayed {1} entries before error)",
+                    walPath, replayed);
         }
         return replayed;
     }

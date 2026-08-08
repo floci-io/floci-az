@@ -41,6 +41,13 @@ public class CertificateGenerator {
 
     public record GeneratedCertificate(String certificatePem, String privateKeyPem) {}
 
+    /**
+     * Generates a genuinely self-signed certificate (issuer == subject, marked as a CA) suitable
+     * for use as a <em>trust anchor</em>: a client that adds this certificate to its CA store can
+     * verify a TLS connection that presents it. Used for floci-az's own HTTPS server certificate
+     * so that containers making HTTPS calls back to floci-az can trust it once the certificate is
+     * installed in their CA bundle.
+     */
     public GeneratedCertificate generateCertificate(List<String> sans) {
         try {
             // Use the JDK's built-in RSA provider — BC's RSA JCA registration is
@@ -56,7 +63,7 @@ public class CertificateGenerator {
 
             var certBuilder = new JcaX509v3CertificateBuilder(
                     name, serial,
-                    Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
+                    Date.from(now), Date.from(now.plus(365, ChronoUnit.DAYS)),
                     name, keyPair.getPublic());
 
             GeneralName[] sanEntries = sans.stream()
@@ -65,11 +72,13 @@ public class CertificateGenerator {
                     .toArray(GeneralName[]::new);
 
             certBuilder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(sanEntries));
-            certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+            // A trust anchor must be a CA so clients accept it as one, and it needs keyCertSign
+            // so it can act as its own issuer.
+            certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
             certBuilder.addExtension(Extension.keyUsage, true,
-                    new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
+                    new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment | KeyUsage.keyCertSign));
 
-            ContentSigner signer = new JcaContentSignerBuilder("SHA256WithRSA")
+            ContentSigner signer = new JcaContentSignerBuilder("SHA512WithRSA")
                     .build(keyPair.getPrivate());
 
             X509Certificate cert = new JcaX509CertificateConverter()

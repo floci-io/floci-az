@@ -1091,7 +1091,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     // Utility helpers
     // -------------------------------------------------------------------------
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 

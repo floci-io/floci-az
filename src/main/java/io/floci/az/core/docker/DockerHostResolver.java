@@ -55,6 +55,8 @@ public class DockerHostResolver {
                 }
             }
 
+            // Use this container's own IP so function containers on the same network
+            // can reach servers bound to all interfaces inside this container.
             try {
                 String ip = InetAddress.getLocalHost().getHostAddress();
                 LOG.infov("Running in Docker — using container IP for function containers: {0}", ip);

@@ -744,7 +744,7 @@ public class ApiManagementService {
                 .toString().replace("-", "");
     }
 
-    public void clearAll() {
+    public void clear() {
         services.clear();
         apis.clear();
         operations.clear();

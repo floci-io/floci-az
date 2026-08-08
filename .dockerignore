@@ -1,5 +1,6 @@
 *
 !native/**
+!azfloci/azfloci.py
 !docker/entrypoint.sh
 !pom.xml
 !src/**

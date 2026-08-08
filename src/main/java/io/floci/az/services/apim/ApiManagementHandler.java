@@ -79,7 +79,7 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable, Ar
     }
 
     @Override
-    public void clearAll() {
-        service.clearAll();
+    public void clear() {
+        service.clear();
     }
 }

@@ -546,7 +546,7 @@ public class VmHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Wipes all VM data — used by {@code POST /_admin/reset}. */
-    public void clearAll() {
+    public void clear() {
         storage.clear();
     }
 }

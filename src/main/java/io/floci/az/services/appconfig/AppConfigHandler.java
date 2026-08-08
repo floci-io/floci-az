@@ -919,7 +919,7 @@ public class AppConfigHandler implements AzureServiceHandler, Resettable {
     // Public API
     // -------------------------------------------------------------------------
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
         syncTokens.clear();
     }

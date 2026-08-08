@@ -59,32 +59,55 @@ public class CurrentContainerNetworkResolver {
             return Optional.empty();
         }
 
-        try {
-            String containerId = readContainerId();
-            if (containerId == null || containerId.isBlank()) {
-                LOG.debugv("Could not determine container ID from {0}", HOSTNAME_FILE);
-                return Optional.empty();
-            }
+        String containerId = currentContainerId();
+        if (containerId.isBlank()) {
+            LOG.debug("Could not determine current Docker container id");
+            return Optional.empty();
+        }
 
+        try {
             InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
             Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
             if (networks == null || networks.isEmpty()) {
                 return Optional.empty();
             }
 
-            Map.Entry<String, ContainerNetwork> first = networks.entrySet().iterator().next();
-            String networkName = first.getKey();
-            String ipAddress = first.getValue().getIpAddress();
-
-            LOG.infov("Detected current container network: {0}, IP: {1}", networkName, ipAddress);
-            return Optional.of(new CurrentContainerNetwork(networkName, ipAddress));
+            Optional<CurrentContainerNetwork> selected = selectNetwork(networks);
+            selected.ifPresent(network -> LOG.infov(
+                    "Detected current Docker network for spawned containers: {0} ({1})",
+                    network.name(), network.ipAddress()));
+            return selected;
         } catch (Exception e) {
-            LOG.debugv("Could not detect current container network: {0}", e.getMessage());
+            LOG.debugv("Could not inspect current Docker container {0}: {1}", containerId, e.getMessage());
             return Optional.empty();
         }
     }
 
-    private String readContainerId() {
+    /**
+     * Prefers a usable user-defined network over Docker's built-in bridge/host/none networks,
+     * so spawned sibling containers join a network where DNS-based service discovery works.
+     * Falls back to any network with a usable IP when no user-defined network is attached.
+     */
+    private Optional<CurrentContainerNetwork> selectNetwork(Map<String, ContainerNetwork> networks) {
+        return networks.entrySet().stream()
+                .filter(entry -> isUsable(entry.getValue()))
+                .filter(entry -> isUserDefinedNetwork(entry.getKey()))
+                .findFirst()
+                .or(() -> networks.entrySet().stream()
+                        .filter(entry -> isUsable(entry.getValue()))
+                        .findFirst())
+                .map(entry -> new CurrentContainerNetwork(entry.getKey(), entry.getValue().getIpAddress()));
+    }
+
+    private boolean isUsable(ContainerNetwork network) {
+        return network != null && network.getIpAddress() != null && !network.getIpAddress().isBlank();
+    }
+
+    private boolean isUserDefinedNetwork(String networkName) {
+        return !"bridge".equals(networkName) && !"host".equals(networkName) && !"none".equals(networkName);
+    }
+
+    String currentContainerId() {
         try {
             String hostname = System.getenv("HOSTNAME");
             if (hostname != null && !hostname.isBlank()) {
@@ -97,7 +120,7 @@ public class CurrentContainerNetworkResolver {
         } catch (Exception e) {
             LOG.debugv("Could not read container ID: {0}", e.getMessage());
         }
-        return null;
+        return "";
     }
 
     record CurrentContainerNetwork(String name, String ipAddress) {}

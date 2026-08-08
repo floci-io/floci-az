@@ -238,8 +238,8 @@ class PostgresStateTest {
     }
 
     @Test
-    @DisplayName("clearAll removes entries from both in-memory cache and backend")
-    void clearAllPurgesBackend() {
+    @DisplayName("clear removes entries from both in-memory cache and backend")
+    void clearPurgesBackend() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
         PostgresState s = new PostgresState(sharedBackend);
 
@@ -247,7 +247,7 @@ class PostgresStateTest {
         s.putServer(server("s2"));
         assertEquals(2, s.listServers().size());
 
-        s.clearAll();
+        s.clear();
         assertEquals(0, s.listServers().size(), "in-memory cache cleared");
 
         PostgresState reloaded = new PostgresState(sharedBackend);

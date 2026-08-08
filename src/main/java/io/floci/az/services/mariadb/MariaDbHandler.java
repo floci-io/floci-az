@@ -631,13 +631,13 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable {
                 "message", "Azure Database for MariaDB service is disabled on this emulator."))).build();
     }
 
-    public void clearAll() {
+    public void clear() {
         state.listServers().forEach(entry -> {
             try { serverManager.stopServer(entry); } catch (Exception e) {
                 LOG.warnf(e, "Error stopping MariaDB container during reset: server=%s", entry.serverName());
             }
         });
-        state.clearAll();
+        state.clear();
         startLocks.clear();
     }
 }

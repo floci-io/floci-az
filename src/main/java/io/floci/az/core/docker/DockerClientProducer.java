@@ -30,6 +30,9 @@ public class DockerClientProducer {
     /**
      * Normalizes a Docker host value by prepending {@code tcp://} when no recognized
      * URI scheme ({@code tcp://}, {@code unix://}, {@code npipe://}) is present.
+     *
+     * @param dockerHost the raw Docker host configuration value
+     * @return the normalized Docker host value, or the original value if it already has a scheme
      */
     static String normalizeDockerHost(String dockerHost) {
         if (dockerHost == null) {
@@ -48,8 +51,14 @@ public class DockerClientProducer {
     }
 
     /**
-     * Resolves the effective Docker host. Prefers {@code DOCKER_HOST} env var over the
-     * configured default (unix socket), and normalizes bare host:port values to tcp://.
+     * Resolves the effective Docker host to use when creating the client.
+     *
+     * Priority:
+     * 1. If {@code floci-az.docker.docker-host} is explicitly configured (non-default), use it.
+     * 2. Otherwise fall back to the standard {@code DOCKER_HOST} env var (normalized).
+     * 3. Otherwise use the default unix socket.
+     *
+     * Both the configured value and the env var are normalized to ensure a valid URI scheme.
      */
     static String resolveEffectiveDockerHost(String configuredHost, String dockerHostEnv) {
         String normalizedEnvHost = normalizeDockerHost(dockerHostEnv);
@@ -81,6 +90,11 @@ public class DockerClientProducer {
                 config.docker().dockerHost(), System.getenv("DOCKER_HOST"));
         LOG.infov("Creating DockerClient for host: {0}", dockerHost);
 
+        // createDefaultConfigBuilder() reads DOCKER_HOST directly from System.getenv() and passes
+        // it to withDockerHost(), which calls URI.create() immediately. If DOCKER_HOST is set
+        // without a URI scheme (e.g. "10.37.124.101:2375" in Bitbucket Pipelines), the
+        // URI.create() call throws before floci-az's override takes effect. Fall back to a fresh
+        // builder in that case so we can supply the normalized host ourselves.
         DefaultDockerClientConfig.Builder builder = createDockerConfigBuilder();
         builder.withDockerHost(dockerHost);
         config.docker().dockerConfigPath().ifPresent(path -> {

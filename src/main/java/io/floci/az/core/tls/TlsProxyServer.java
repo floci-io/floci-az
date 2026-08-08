@@ -2,6 +2,7 @@ package io.floci.az.core.tls;
 
 import io.floci.az.config.EmulatorConfig;
 import io.quarkus.runtime.Startup;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetServer;
@@ -11,6 +12,11 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * A TCP proxy server that enables HTTP and HTTPS on the same port.
@@ -22,6 +28,12 @@ import org.jboss.logging.Logger;
  *   <li>{@code 0x16} (TLS ClientHello) → proxy to HTTPS backend (port {@value HTTPS_BACKEND_PORT})</li>
  *   <li>Anything else → proxy to HTTP backend (port {@value HTTP_BACKEND_PORT})</li>
  * </ul>
+ *
+ * <p>The same protocol-detecting handler is also bound on the configurable
+ * {@code floci-az.tls.https-port} (443 by default). Azure SDKs default to {@code https://}
+ * endpoints on the conventional 443 unless an explicit port is configured; binding 443 lets
+ * those clients reach floci-az. The extra binding is skipped when the port is {@code 0} or
+ * equals the public port.
  *
  * <p>This bean is only active when {@code floci-az.tls.enabled=true}. When TLS is disabled,
  * Quarkus serves HTTP directly on the public port and this proxy is not started.
@@ -40,13 +52,22 @@ public class TlsProxyServer {
 
     private final Vertx vertx;
     private final EmulatorConfig config;
-    private NetServer proxyServer;
+    private final int httpBackendPort;
+    private final int httpsBackendPort;
+    private final List<NetServer> proxyServers = new ArrayList<>();
     private NetClient client;
 
     @Inject
     public TlsProxyServer(Vertx vertx, EmulatorConfig config) {
+        this(vertx, config, HTTP_BACKEND_PORT, HTTPS_BACKEND_PORT);
+    }
+
+    /** Visible for testing — lets tests point the proxy at backends on non-default ports. */
+    TlsProxyServer(Vertx vertx, EmulatorConfig config, int httpBackendPort, int httpsBackendPort) {
         this.vertx = vertx;
         this.config = config;
+        this.httpBackendPort = httpBackendPort;
+        this.httpsBackendPort = httpsBackendPort;
         startIfTlsEnabled();
     }
 
@@ -55,15 +76,57 @@ public class TlsProxyServer {
             return;
         }
 
-        int publicPort = config.port();
-        NetServerOptions options = new NetServerOptions()
-                .setHost("0.0.0.0")
-                .setPort(publicPort);
-
-        proxyServer = vertx.createNetServer(options);
         client = vertx.createNetClient();
+        Handler<NetSocket> connectHandler = buildConnectHandler();
 
-        proxyServer.connectHandler(frontSocket -> {
+        for (int port : listenPorts()) {
+            NetServerOptions options = new NetServerOptions()
+                    .setHost("0.0.0.0")
+                    .setPort(port);
+            NetServer server = vertx.createNetServer(options);
+            server.connectHandler(connectHandler);
+            proxyServers.add(server);
+            server.listen().onComplete(ar -> {
+                if (ar.succeeded()) {
+                    LOG.infov("TLS proxy: listening on port {0} (HTTP→{1}, HTTPS→{2})",
+                            String.valueOf(port), String.valueOf(httpBackendPort), String.valueOf(httpsBackendPort));
+                } else if (port == config.port()) {
+                    LOG.errorv("TLS proxy: failed to start on public port {0}: {1}",
+                            String.valueOf(port), ar.cause().getMessage());
+                } else {
+                    // The extra HTTPS port (443 by default) is privileged; binding it fails in
+                    // unprivileged environments (e.g. CI/test). Non-fatal — HTTPS on that port is
+                    // simply unavailable. Set floci-az.tls.https-port=0 to skip the attempt.
+                    LOG.warnv("TLS proxy: could not bind HTTPS port {0} ({1}); HTTPS on {0} unavailable. "
+                            + "Binding privileged ports needs elevated privileges — set floci-az.tls.https-port=0 to disable.",
+                            String.valueOf(port), ar.cause().getMessage());
+                }
+            });
+        }
+    }
+
+    /**
+     * The set of ports the proxy listens on: always the public floci-az
+     * {@link EmulatorConfig#port()}, plus {@code floci-az.tls.https-port} (443 by default) so
+     * Azure-style HTTPS clients reach floci-az. Deduplicated (a coinciding https-port yields a
+     * single listener); a non-positive https-port disables the extra binding.
+     */
+    Set<Integer> listenPorts() {
+        Set<Integer> ports = new LinkedHashSet<>();
+        ports.add(config.port());
+        int httpsPort = config.tls().httpsPort();
+        if (httpsPort > 0) {
+            ports.add(httpsPort);
+        }
+        return ports;
+    }
+
+    /**
+     * Builds the shared connect handler that peeks the first byte to detect TLS and pipes the
+     * connection to the matching backend. A single instance is reused across all listen ports.
+     */
+    private Handler<NetSocket> buildConnectHandler() {
+        return frontSocket -> {
             // Pause incoming data until we've peeked at the first byte
             frontSocket.pause();
 
@@ -76,9 +139,9 @@ public class TlsProxyServer {
                 // Inspect first byte to determine protocol
                 int backendPort;
                 if (buffer.length() > 0 && buffer.getByte(0) == TLS_HANDSHAKE) {
-                    backendPort = HTTPS_BACKEND_PORT;
+                    backendPort = httpsBackendPort;
                 } else {
-                    backendPort = HTTP_BACKEND_PORT;
+                    backendPort = httpBackendPort;
                 }
 
                 // Connect to the appropriate backend
@@ -97,7 +160,7 @@ public class TlsProxyServer {
                                 LOG.debugv("TLS proxy: pipe back→front failed: {0}", err.getMessage()));
                     } else {
                         LOG.warnv("TLS proxy: failed to connect to backend port {0}: {1}",
-                                backendPort, ar.cause().getMessage());
+                                String.valueOf(backendPort), ar.cause().getMessage());
                         frontSocket.close();
                     }
                 });
@@ -105,23 +168,13 @@ public class TlsProxyServer {
 
             // Resume to receive the first buffer
             frontSocket.resume();
-        });
-
-        proxyServer.listen().onComplete(ar -> {
-            if (ar.succeeded()) {
-                LOG.infov("TLS proxy: listening on port {0} (HTTP→{1}, HTTPS→{2})",
-                        String.valueOf(publicPort), String.valueOf(HTTP_BACKEND_PORT), String.valueOf(HTTPS_BACKEND_PORT));
-            } else {
-                LOG.errorv("TLS proxy: failed to start on port {0}: {1}",
-                        String.valueOf(publicPort), ar.cause().getMessage());
-            }
-        });
+        };
     }
 
     @PreDestroy
     void stop() {
-        if (proxyServer != null) {
-            proxyServer.close();
+        for (NetServer server : proxyServers) {
+            server.close();
         }
         if (client != null) {
             client.close();

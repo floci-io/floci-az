@@ -98,8 +98,8 @@ public class EventGridHandler implements AzureServiceHandler, Resettable, ArmPro
                 + path + "\"}}").type("application/json").build();
     }
 
-    public void clearAll() {
-        service.clearAll();
+    public void clear() {
+        service.clear();
     }
 
     private static String stripQuery(String path) {

@@ -36,7 +36,7 @@ public class AdminController {
     /**
      * Wipes all emulator state across every service. Every state-holding
      * component self-registers by implementing {@link Resettable}; each
-     * {@code clearAll()} is self-contained (services with sidecar containers
+     * {@code clear()} is self-contained (services with sidecar containers
      * stop them themselves). The reset is best-effort: a failing handler is
      * logged and skipped so the remaining services still get cleared — CDI
      * iteration order is non-deterministic, so one failure must not decide
@@ -48,7 +48,7 @@ public class AdminController {
     public Response reset() {
         for (Resettable resettable : resettables) {
             try {
-                resettable.clearAll();
+                resettable.clear();
             } catch (Exception e) {
                 LOG.errorf(e, "Reset failed for %s — continuing with remaining services",
                         resettable.getClass().getSimpleName());

@@ -64,6 +64,11 @@ public class TlsConfigSource implements ConfigSource {
             return;
         }
 
+        // BouncyCastle may not be registered yet — this ConfigSource runs before CDI
+        // (@Startup beans such as BouncyCastleInitializer). Register it up front so every
+        // certificate operation below works, whichever branch is taken.
+        ensureBouncyCastleRegistered();
+
         String certPath       = resolveProperty("floci-az.tls.cert-path", "");
         String keyPath        = resolveProperty("floci-az.tls.key-path", "");
         String selfSigned     = resolveProperty("floci-az.tls.self-signed", "true");
@@ -178,9 +183,11 @@ public class TlsConfigSource implements ConfigSource {
 
     private static List<String> buildSanList(List<String> customHostnames) {
         List<String> all = new ArrayList<>();
+        // host.docker.internal: how function containers reach floci-az when it runs on the host
+        // (not in a container).
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
-                "*.vault.azure.net"));
+                "*.vault.azure.net", "host.docker.internal"));
         all.addAll(customHostnames);
         return all;
     }
@@ -219,14 +226,16 @@ public class TlsConfigSource implements ConfigSource {
                 || hostname.equals("0.0.0.0");
     }
 
+    private static void ensureBouncyCastleRegistered() {
+        if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+            Security.addProvider(new BouncyCastleProvider());
+        }
+    }
+
     private void generateSelfSignedCert(Path tlsDir, Path certFile, Path keyFile, List<String> sans) {
         try {
             Files.createDirectories(tlsDir);
-
-            // BouncyCastle may not be registered yet — ConfigSource runs before CDI
-            if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
-                Security.addProvider(new BouncyCastleProvider());
-            }
+            ensureBouncyCastleRegistered();
 
             CertificateGenerator.GeneratedCertificate generated =
                     new CertificateGenerator().generateCertificate(sans);
@@ -248,7 +257,7 @@ public class TlsConfigSource implements ConfigSource {
             if (version == null || version.isBlank()) {
                 version = "dev";
             }
-            Map<String, Object> metadata = Map.of("hostnames", hostnames, "version", version);
+            CertificateMetadata metadata = new CertificateMetadata(hostnames, version);
             String json = OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(metadata);
             Files.writeString(metadataFile, json);
             LOG.debugv("TLS: persisted certificate metadata: {0}", metadataFile);
@@ -265,10 +274,8 @@ public class TlsConfigSource implements ConfigSource {
         }
         try {
             String json = Files.readString(metadataFile);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> metadata = OBJECT_MAPPER.readValue(json, Map.class);
-            @SuppressWarnings("unchecked")
-            List<String> previousSans = (List<String>) metadata.get("hostnames");
+            CertificateMetadata metadata = OBJECT_MAPPER.readValue(json, CertificateMetadata.class);
+            List<String> previousSans = metadata.getHostnames();
             if (previousSans == null) {
                 LOG.warnv("TLS: metadata file has no hostnames field, regenerating certificate");
                 return true;

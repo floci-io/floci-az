@@ -22,13 +22,21 @@ public interface StorageBackend<K, V> {
     /** Atomically removes and returns the value, so a concurrent caller can never observe it twice. */
     Optional<V> remove(K key);
 
+    /**
+     * Return a new mutable list of values whose keys pass the filter. Callers may sort,
+     * filter, or otherwise mutate the returned list without affecting the underlying store.
+     */
     List<V> scan(Predicate<K> keyFilter);
 
+    /** Return all keys in this store. */
     Set<K> keys();
 
+    /** Persist data to disk if applicable. */
     void flush();
 
+    /** Load data from disk on startup. */
     void load();
 
+    /** Clear all data. */
     void clear();
 }

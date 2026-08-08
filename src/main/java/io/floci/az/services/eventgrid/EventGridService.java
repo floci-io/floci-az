@@ -253,7 +253,7 @@ public class EventGridService {
                 .toList();
     }
 
-    public void clearAll() {
+    public void clear() {
         store.clear();
     }
 

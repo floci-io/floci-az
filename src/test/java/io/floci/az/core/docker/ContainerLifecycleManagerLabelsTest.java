@@ -77,7 +77,7 @@ class ContainerLifecycleManagerLabelsTest {
         ContainerSpec spec = new ContainerSpec(
                 "busybox:stable", null, List.of(), null, null, null, Map.of(), List.of(), null,
                 List.of(), List.of(), List.of(), Map.of("floci_service", "functions"), null, false,
-                List.of(), null);
+                null, List.of(), null, null, List.of());
 
         manager().create(spec);
 

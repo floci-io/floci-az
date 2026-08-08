@@ -74,7 +74,7 @@ class TlsConfigSourceCertificateGenerationTest {
     }
 
     @Test
-    void certificateWithDefaultConfigHasSixDefaultSans() throws Exception {
+    void certificateWithDefaultConfigHasDefaultSans() throws Exception {
         new TlsConfigSource();
 
         Path certFile = tempDir.resolve("tls/floci-az-selfsigned.crt");
@@ -84,8 +84,10 @@ class TlsConfigSourceCertificateGenerationTest {
         assertTrue(sans.contains("localhost"));
         assertTrue(sans.contains("127.0.0.1"));
         assertTrue(sans.contains("0.0.0.0"));
-        assertEquals(7, sans.size(),
-            "Default cert should have exactly 7 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net)");
+        assertTrue(sans.contains("host.docker.internal"),
+            "SANs should include 'host.docker.internal' so function containers can reach floci-az on the host");
+        assertEquals(8, sans.size(),
+            "Default cert should have exactly 8 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, host.docker.internal)");
     }
 
     @Test
