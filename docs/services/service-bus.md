@@ -67,6 +67,17 @@ dead-lettering).
 - Rule changes update the subscription's filter in place (messages already routed to the
   subscription stay, receivers stay attached) and, as on Azure, apply to future messages only.
 
+## Message sessions
+
+Queues and subscriptions created with `RequiresSession` support Azure SDK session receivers.
+Set `SessionId` on sent messages, then use a specific-session receiver, an accept-next-session
+receiver, or a session processor. The broker translates Azure's AMQP session filter into an
+Artemis `JMSXGroupID` selector, which keeps each session on one receiver and preserves FIFO order
+within that session. Attach responses include Azure's `com.microsoft:locked-until-utc` property.
+
+Session ownership lasts for the receiver link. Session state and explicit session-lock renewal are
+not currently emulated.
+
 ## Connection String
 
 ```
@@ -159,6 +170,7 @@ floci-az:
 
 ## Out of scope (future work)
 
-- Sessions, scheduled/deferred messages, and auto-forwarding
+- Session state and explicit session-lock renewal
+- Deferred messages and auto-forwarding
 - Duplicate detection and message transactions
 - Geo-disaster recovery and partitioned entities

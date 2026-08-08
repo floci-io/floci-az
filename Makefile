@@ -213,7 +213,7 @@ test-python-compat:
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,)
+	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false)
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"

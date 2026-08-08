@@ -234,9 +234,49 @@
                                     value="deliveryCount &gt; 0"
                                     failOnNoReplacements="true" />
                                 <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="final int amqpDeliveryCount = deliveryCount - 1;"
+                                    value="final int amqpDeliveryCount = deliveryCount;"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="AMQPMessageSupport.SCHEDULED_DELIVERY_TIME, AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY};"
+                                    value="AMQPMessageSupport.SCHEDULED_DELIVERY_TIME, AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY, Symbol.valueOf(&quot;x-opt-scheduled-enqueue-time&quot;)};"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="AMQPMessageSymbolSearch.kmpNeedleOf(AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY)};"
+                                    value="AMQPMessageSymbolSearch.kmpNeedleOf(AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY), AMQPMessageSymbolSearch.kmpNeedleOf(Symbol.valueOf(&quot;x-opt-scheduled-enqueue-time&quot;))};"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="Object objdelay = getMessageAnnotation(AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY);"
+                                    value="Object objdelay = getMessageAnnotation(AMQPMessageSupport.SCHEDULED_DELIVERY_DELAY); Object objAzureScheduledTime = getMessageAnnotation(Symbol.valueOf(&quot;x-opt-scheduled-enqueue-time&quot;));"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
+                                    token="if (objscheduledTime != null &amp;&amp; objscheduledTime instanceof Number number) {"
+                                    value="if (objAzureScheduledTime instanceof java.util.Date date) { this.scheduledTime = date.getTime(); } else if (objAzureScheduledTime instanceof Number number) { this.scheduledTime = number.longValue(); } else if (objscheduledTime != null &amp;&amp; objscheduledTime instanceof Number number) {"
+                                    failOnNoReplacements="true" />
+                                <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="protonSender.setReceiverSettleMode(ReceiverSettleMode.FIRST);"
                                     value="protonSender.setReceiverSettleMode(protonSender.getRemoteReceiverSettleMode());"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="final String sourceAddress = ParameterisedAddress.extractAddress(source.getAddress());"
+                                    value="final String sourceAddress = ServiceBusSessionSupport.normalizeEntityPath(ParameterisedAddress.extractAddress(source.getAddress()));"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="source.setFilter(supportedFilters.isEmpty() ? null : supportedFilters);"
+                                    value="selector = ServiceBusSessionSupport.configure(sessionSPI.getProtocolManager().getServer(), queue, source, supportedFilters, protonSender, selector); source.setFilter(supportedFilters.isEmpty() ? null : supportedFilters);"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="public void close(boolean remoteClose) throws Exception {"
+                                    value="public void close(boolean remoteClose) throws Exception { ServiceBusSessionSupport.release(protonSender);"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
@@ -247,6 +287,11 @@
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="if (settleImmediate) {"
                                     value="if (settleImmediate) { delivery.disposition(remoteState);"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="if (Boolean.TRUE.equals(modification.getDeliveryFailed())) {"
+                                    value="if (!Boolean.TRUE.equals(modification.getUndeliverableHere())) {"
                                     failOnNoReplacements="true" />
                             </target>
                         </configuration>

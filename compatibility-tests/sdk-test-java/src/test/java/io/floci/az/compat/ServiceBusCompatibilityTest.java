@@ -372,6 +372,54 @@ class ServiceBusCompatibilityTest {
         }
     }
 
+    @Test
+    @DisplayName("accept-next-session preserves FIFO ordering and isolates sessions")
+    void acceptNextSessionPreservesOrder() throws Exception {
+        String queue = uniqueSessionQueue();
+        String sessionA = "next-a-" + UUID.randomUUID().toString().substring(0, 6);
+        String sessionB = "next-b-" + UUID.randomUUID().toString().substring(0, 6);
+
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            for (int i = 0; i < 2; i++) {
+                ServiceBusMessage message = new ServiceBusMessage("a-" + i);
+                message.setSessionId(sessionA);
+                sender.sendMessage(message);
+            }
+            ServiceBusMessage message = new ServiceBusMessage("b-0");
+            message.setSessionId(sessionB);
+            sender.sendMessage(message);
+        }
+
+        try (ServiceBusSessionReceiverClient sessionReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .sessionReceiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+             ServiceBusReceiverClient receiver = sessionReceiver.acceptNextSession()) {
+            assertEquals(sessionA, receiver.getSessionId());
+            List<ServiceBusReceivedMessage> messages = receiver.receiveMessages(2, RECV_TIMEOUT)
+                    .stream().toList();
+            assertEquals(List.of("a-0", "a-1"), messages.stream()
+                    .map(message -> message.getBody().toString()).toList());
+            messages.forEach(receiver::complete);
+        }
+
+        try (ServiceBusSessionReceiverClient sessionReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .sessionReceiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+             ServiceBusReceiverClient receiver = sessionReceiver.acceptNextSession()) {
+            assertEquals(sessionB, receiver.getSessionId());
+            ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(message);
+            assertEquals("b-0", message.getBody().toString());
+            receiver.complete(message);
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String uniqueQueue() throws Exception {

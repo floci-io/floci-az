@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using Azure.Messaging.ServiceBus;
 
 namespace FlociAz.Compatibility;
 
+[NotInParallel]
 public sealed class ServiceBusCompatibilityTests
 {
     private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(10);
@@ -80,6 +82,98 @@ public sealed class ServiceBusCompatibilityTests
             subscriptionDeadLetter, cancellationToken);
     }
 
+    [Test]
+    [Timeout(60_000)]
+    public async Task DotnetSdkSupportsSessionReceivers(CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string queue = $"dotnet-session-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureQueue(serviceBusNamespace, queue, cancellationToken, requiresSession: true);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+
+        await using var client = new ServiceBusClient(connectionString, new ServiceBusClientOptions
+        {
+            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(10) }
+        });
+        await using ServiceBusSender sender = client.CreateSender(queue);
+
+        string firstSession = $"session-a-{Guid.NewGuid():N}";
+        string secondSession = $"session-b-{Guid.NewGuid():N}";
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("a-0") { SessionId = firstSession }, cancellationToken);
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("a-1") { SessionId = firstSession }, cancellationToken);
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("b-0") { SessionId = secondSession }, cancellationToken);
+
+        await using (ServiceBusSessionReceiver firstReceiver = await client.AcceptNextSessionAsync(
+            queue, new ServiceBusSessionReceiverOptions(), cancellationToken))
+        {
+            await Assert.That(firstReceiver.SessionId).IsEqualTo(firstSession);
+            IReadOnlyList<ServiceBusReceivedMessage> firstMessages = await firstReceiver.ReceiveMessagesAsync(
+                2, ReceiveTimeout, cancellationToken);
+            await Assert.That(firstMessages.Count).IsEqualTo(2);
+            await Assert.That(firstMessages[0].Body.ToString()).IsEqualTo("a-0");
+            await Assert.That(firstMessages[1].Body.ToString()).IsEqualTo("a-1");
+            foreach (ServiceBusReceivedMessage message in firstMessages)
+            {
+                await firstReceiver.CompleteMessageAsync(message, cancellationToken);
+            }
+        }
+
+        await using (ServiceBusSessionReceiver secondReceiver = await client.AcceptSessionAsync(
+            queue, secondSession, new ServiceBusSessionReceiverOptions(), cancellationToken))
+        {
+            ServiceBusReceivedMessage secondMessage = await Receive(secondReceiver, cancellationToken);
+            await Assert.That(secondMessage.SessionId).IsEqualTo(secondSession);
+            await Assert.That(secondMessage.Body.ToString()).IsEqualTo("b-0");
+            await secondReceiver.CompleteMessageAsync(secondMessage, cancellationToken);
+        }
+
+        string processorSessionA = $"session-processor-a-{Guid.NewGuid():N}";
+        string processorSessionB = $"session-processor-b-{Guid.NewGuid():N}";
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("processor-a") { SessionId = processorSessionA }, cancellationToken);
+        await sender.SendMessageAsync(
+            new ServiceBusMessage("processor-b") { SessionId = processorSessionB }, cancellationToken);
+        var processedMessages = new ConcurrentDictionary<string, string>();
+        var processingComplete = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        await using ServiceBusSessionProcessor processor = client.CreateSessionProcessor(
+            queue,
+            new ServiceBusSessionProcessorOptions
+            {
+                AutoCompleteMessages = false,
+                MaxConcurrentSessions = 2,
+                MaxConcurrentCallsPerSession = 1
+            });
+        processor.ProcessMessageAsync += async args =>
+        {
+            await args.CompleteMessageAsync(args.Message, cancellationToken);
+            processedMessages[args.SessionId] = args.Message.Body.ToString();
+            if (processedMessages.Count == 2)
+            {
+                processingComplete.TrySetResult();
+            }
+        };
+        processor.ProcessErrorAsync += args =>
+        {
+            processingComplete.TrySetException(args.Exception);
+            return Task.CompletedTask;
+        };
+
+        await processor.StartProcessingAsync(cancellationToken);
+        await processingComplete.Task.WaitAsync(ReceiveTimeout, cancellationToken);
+        await processor.StopProcessingAsync(cancellationToken);
+        await Assert.That(processedMessages[processorSessionA]).IsEqualTo("processor-a");
+        await Assert.That(processedMessages[processorSessionB]).IsEqualTo("processor-b");
+    }
+
     private static async Task<ServiceBusReceivedMessage> Receive(
         ServiceBusReceiver receiver, CancellationToken cancellationToken)
     {
@@ -103,13 +197,19 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     private static async Task EnsureQueue(
-        string serviceBusNamespace, string queue, CancellationToken cancellationToken)
+        string serviceBusNamespace, string queue, CancellationToken cancellationToken,
+        bool requiresSession = false)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         using var request = new HttpRequestMessage(HttpMethod.Put,
             $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/queues/{queue}");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/atom+xml"));
-        request.Content = new StringContent("", Encoding.UTF8, "application/atom+xml");
+        string body = requiresSession
+            ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">" +
+              "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">" +
+              "<RequiresSession>true</RequiresSession></QueueDescription></content></entry>"
+            : "";
+        request.Content = new StringContent(body, Encoding.UTF8, "application/atom+xml");
         HttpResponseMessage response = await http.SendAsync(request, cancellationToken);
         await Assert.That(response.IsSuccessStatusCode)
             .IsTrue()
