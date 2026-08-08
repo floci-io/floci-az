@@ -271,7 +271,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="source.setFilter(supportedFilters.isEmpty() ? null : supportedFilters);"
-                                    value="selector = ServiceBusSessionSupport.configure(sessionSPI.getProtocolManager().getServer(), queue, source, supportedFilters, protonSender, selector); source.setFilter(supportedFilters.isEmpty() ? null : supportedFilters);"
+                                    value="selector = ServiceBusSessionSupport.configure(sessionSPI.getProtocolManager().getServer(), queue, source, supportedFilters, protonSender, senderContext, selector); source.setFilter(supportedFilters.isEmpty() ? null : supportedFilters);"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"

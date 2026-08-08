@@ -53,6 +53,7 @@ public class ServiceBusNamespaceManager {
     private static final String SUBSCRIPTION_DIVERT_SUFFIX = "/$Divert";
     private static final String TOPIC_ADDRESS_SUFFIX = "/$Topic";
     private static final String TOPIC_DIVERT_SUFFIX = "/$TopicDivert";
+    private static final String SESSION_METADATA_PREFIX = "floci-az:servicebus-session:";
 
     /**
      * Immutable snapshot of a running namespace.
@@ -207,7 +208,8 @@ public class ServiceBusNamespaceManager {
     // ── Jolokia entity management ─────────────────────────────────────────────
 
     /** Provisions an ANYCAST queue in the running Artemis broker. */
-    public void jolokiaCreateQueue(String namespaceName, String queueName) {
+    public void jolokiaCreateQueue(String namespaceName, String queueName,
+                                    boolean requiresSession, long lockDurationSeconds) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
@@ -226,6 +228,10 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            applySessionMetadata(http, baseUrl, auth, mbean, queueName,
+                    requiresSession, lockDurationSeconds);
+            applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
+                    requiresSession, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
@@ -301,7 +307,8 @@ public class ServiceBusNamespaceManager {
      *               form of the subscription's rules; empty string matches everything
      */
     public void jolokiaCreateSubscription(String namespaceName, String topicName, String subName,
-                                           String filter) {
+                                           String filter, boolean requiresSession,
+                                           long lockDurationSeconds) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
@@ -322,6 +329,10 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            applySessionMetadata(http, baseUrl, auth, mbean, queueName,
+                    requiresSession, lockDurationSeconds);
+            applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
+                    requiresSession, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
@@ -418,6 +429,22 @@ public class ServiceBusNamespaceManager {
                 "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
                 jsonArr(divertName, divertName, sourceAddress, forwardingAddress,
                         exclusive, filter, null));
+    }
+
+    private void applySessionMetadata(HttpClient http, String baseUrl, String auth,
+                                      String mbean, String queueName,
+                                      boolean requiresSession, long lockDurationSeconds) {
+        if (!requiresSession) {
+            return;
+        }
+
+        // Artemis security is disabled in this sidecar, so QueueConfiguration.user can carry
+        // internal metadata that the patched AMQP protocol handler reads during link attach.
+        String metadata = SESSION_METADATA_PREFIX + lockDurationSeconds;
+        String queueConfiguration = "{\"name\":" + jsonString(queueName)
+                + ",\"user\":" + jsonString(metadata) + "}";
+        jolokiaExec(http, baseUrl, auth, mbean,
+                "updateQueue(java.lang.String)", jsonArr(queueConfiguration));
     }
 
     private void withJolokia(String namespaceName, JolokiaAction action) {

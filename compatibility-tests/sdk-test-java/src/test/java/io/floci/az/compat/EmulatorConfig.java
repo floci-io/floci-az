@@ -484,16 +484,30 @@ public final class EmulatorConfig {
 
     /** Creates a subscription via the floci-az management API. */
     static void ensureServiceBusSubscription(String topicName, String subName) throws Exception {
+        ensureServiceBusSubscription(topicName, subName, false);
+    }
+
+    /** Creates a subscription via the floci-az management API. */
+    static void ensureServiceBusSubscription(String topicName, String subName,
+                                             boolean requiresSession) throws Exception {
         String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
                 + "/topics/" + topicName + "/subscriptions/" + subName;
+        String body = requiresSession
+                ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
+                  + "<SubscriptionDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
+                  + "<RequiresSession>true</RequiresSession></SubscriptionDescription></content></entry>"
+                : "";
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
         HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
         conn.setRequestMethod("PUT");
         conn.setDoOutput(true);
         conn.setConnectTimeout(5_000);
         conn.setReadTimeout(30_000);
         conn.setRequestProperty("Content-Type", "application/atom+xml;charset=utf-8");
-        conn.setRequestProperty("Content-Length", "0");
-        conn.getOutputStream().close();
+        conn.setRequestProperty("Content-Length", String.valueOf(bodyBytes.length));
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(bodyBytes);
+        }
         int status = conn.getResponseCode();
         if (status != 200 && status != 201) {
             throw new RuntimeException(

@@ -17,6 +17,7 @@ RUN mvn surefire:test -Dsurefire.failIfNoSpecifiedTests=false -Dtest=nonexistent
 ENV FLOCI_AZ_ENDPOINT=http://floci-az:4577
 ENV EVENTHUB_HOST=floci-az-artemis-emulatorNs1
 ENV EVENTHUB_AMQP_PORT=5672
+ENV SERVICEBUS_SESSION_LOCK_DURATION_SECONDS=5
 
 RUN mkdir -p /results
 ENTRYPOINT ["bash", "-c", \

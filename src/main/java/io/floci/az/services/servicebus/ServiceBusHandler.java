@@ -503,7 +503,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         store.put(key, toStoredObject(key, queue));
 
         try {
-            namespaceManager.jolokiaCreateQueue(namespace, queueName);
+            namespaceManager.jolokiaCreateQueue(
+                    namespace, queueName, queue.requiresSession(), queue.lockDurationSeconds());
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision queue '%s' in Artemis for namespace '%s'", queueName, namespace);
         }
@@ -681,7 +682,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         warnOnActionIgnored(initialRule);
 
         try {
-            namespaceManager.jolokiaCreateSubscription(namespace, topicName, subName, selector);
+            namespaceManager.jolokiaCreateSubscription(namespace, topicName, subName, selector,
+                    sub.requiresSession(), sub.lockDurationSeconds());
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision subscription '%s/%s' in Artemis for namespace '%s'",
                     topicName, subName, namespace);

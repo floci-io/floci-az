@@ -44,6 +44,9 @@ SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 SUITE_ENV_NODE   = $(POD_IDENTITY_ENV)
 SUITE_ENV_DOTNET = -e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQP_PORT=5672
+SERVICEBUS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
+JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
+	-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
 
 # Per-suite build context and image tag, keyed by suite name.
 SUITES = python java dotnet node terraform opentofu azcli
@@ -151,6 +154,8 @@ compat-run: compat-network
 	@echo "floci-az Docker emulator is up!"
 
 compat-stop:
+	@SIDECARS=$$(docker ps -aq --filter "network=$(COMPAT_NETWORK)" --filter "name=floci-az-servicebus-"); \
+	if [ -n "$$SIDECARS" ]; then docker rm -f $$SIDECARS >/dev/null 2>&1 || true; fi
 	@docker rm -f floci-az >/dev/null 2>&1 || true
 	@docker network rm $(COMPAT_NETWORK) >/dev/null 2>&1 || true
 
@@ -213,7 +218,7 @@ test-python-compat:
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false)
+	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,$(JAVA_SERVICEBUS_EMULATOR_ENV))
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
@@ -221,7 +226,7 @@ test-node-compat:
 
 test-dotnet-compat:
 	@echo "==> .NET Service Bus SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,dotnet,dotnet,$(SUITE_ENV_DOTNET),,,-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false)
+	$(call COMPAT_SESSION,dotnet,dotnet,$(SUITE_ENV_DOTNET),,,$(SERVICEBUS_EMULATOR_ENV))
 
 test-python-compat-local:
 	@echo "==> Python SDK compatibility tests (all services, local emulator)"
@@ -390,7 +395,7 @@ test-azcli:
 
 compat-docker:
 	$(MAKE) compat-build
-	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false"
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_SERVICEBUS_EMULATOR_ENV)"
 	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \

@@ -79,6 +79,7 @@ jobs:
           - test: sdk-test-java
             emulator_env: >-
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
+              -e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
             extra_env: >-
               -e SERVICEBUS_HOST=floci-az-servicebus-default
               -e SERVICEBUS_AMQPS_PORT=5671
