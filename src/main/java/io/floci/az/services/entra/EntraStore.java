@@ -3,6 +3,7 @@ package io.floci.az.services.entra;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -35,7 +36,7 @@ import java.util.Set;
  * <p>PR1 only reads the seed to populate token claims. Full admin CRUD is layered on in PR2.
  */
 @ApplicationScoped
-public class EntraStore {
+public class EntraStore implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(EntraStore.class);
 
@@ -94,6 +95,13 @@ public class EntraStore {
             addMember(DEV_GROUP_OBJECT_ID, DEV_USER_OBJECT_ID);
             LOG.infov("Seeded Entra dev user/group (upn={0}, group={1})", DEV_USER_UPN, DEV_GROUP_NAME);
         }
+    }
+
+    /** Wipes all directory/authorization-code state, then reseeds the zero-setup dev fixtures. */
+    @Override
+    public void clear() {
+        store.clear();
+        seed();
     }
 
     public Optional<Tenant> getTenant(String id) {

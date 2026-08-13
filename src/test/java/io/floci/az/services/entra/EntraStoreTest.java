@@ -91,6 +91,27 @@ class EntraStoreTest {
     }
 
     @Test
+    void clearWipesMembershipStateAndReseedsDevFixtures() {
+        String userId = "user-" + java.util.UUID.randomUUID();
+        store.putUser(new User(userId, userId + "@floci-az.local", "test user", null, "tenant"));
+        store.addMember(EntraStore.DEV_GROUP_OBJECT_ID, userId);
+        assertTrue(store.memberGroups(userId).contains(EntraStore.DEV_GROUP_OBJECT_ID));
+
+        store.clear();
+
+        assertTrue(store.getUser(userId).isEmpty(), "clear() must drop state created after seeding");
+        assertTrue(store.memberGroups(userId).isEmpty(),
+            "clear() must drop membership rows created after seeding");
+        assertTrue(store.getUser(EntraStore.DEV_USER_OBJECT_ID).isPresent(),
+            "clear() must reseed the zero-setup dev user");
+        assertEquals(Set.of(EntraStore.DEV_GROUP_OBJECT_ID),
+            store.memberGroups(EntraStore.DEV_USER_OBJECT_ID),
+            "clear() must reseed the dev user's group membership, not just the bare records");
+        assertTrue(store.findAppByClientId(EntraStore.DEV_CLIENT_ID).isPresent(),
+            "clear() must reseed the zero-setup dev app registration");
+    }
+
+    @Test
     void concurrentMembershipMutationsAreNotLost() throws Exception {
         String groupId = "group-" + java.util.UUID.randomUUID();
         store.putGroup(new Group(groupId, "concurrent group", "tenant", true));

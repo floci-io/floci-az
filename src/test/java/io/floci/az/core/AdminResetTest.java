@@ -1,12 +1,16 @@
 package io.floci.az.core;
 
+import io.floci.az.services.entra.EntraModels.User;
+import io.floci.az.services.entra.EntraStore;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.hasItem;
 
 @QuarkusTest
 @DisplayName("/_admin/reset — every state-holding service self-registers via Resettable")
@@ -15,6 +19,46 @@ class AdminResetTest {
     private static final String APIM_SERVICE =
             "/subscriptions/reset-sub/resourceGroups/reset-rg"
                     + "/providers/Microsoft.ApiManagement/service/reset-apim?api-version=2024-05-01";
+
+    @Inject EntraStore entraStore;
+
+    @Test
+    void resetClearsGraphMembershipWrittenThroughEntraStore() {
+        String userId = "reset-user-" + java.util.UUID.randomUUID();
+        entraStore.putUser(new User(userId, userId + "@floci-az.local", "reset test user", null, "reset-tenant"));
+
+        given()
+          .contentType("application/json")
+          .body("{\"@odata.id\": \"https://graph.microsoft.com/v1.0/directoryObjects/" + userId + "\"}")
+          .when().post("/v1.0/groups/{id}/members/$ref", EntraStore.DEV_GROUP_OBJECT_ID)
+          .then().statusCode(204);
+
+        given()
+          .contentType("application/json")
+          .body("{}")
+          .when().post("/v1.0/users/{id}/getMemberGroups", userId)
+          .then().statusCode(200)
+          .body("value", hasItem(EntraStore.DEV_GROUP_OBJECT_ID));
+
+        given().when().post("/_admin/reset")
+          .then().statusCode(204);
+
+        // EntraStore didn't self-register as Resettable before — this Graph-written
+        // membership (and the user backing it) used to survive a reset.
+        given()
+          .contentType("application/json")
+          .body("{}")
+          .when().post("/v1.0/users/{id}/getMemberGroups", userId)
+          .then().statusCode(404);
+
+        // the zero-setup dev fixtures must still work after a reset
+        given()
+          .contentType("application/json")
+          .body("{}")
+          .when().post("/v1.0/users/{id}/getMemberGroups", EntraStore.DEV_USER_OBJECT_ID)
+          .then().statusCode(200)
+          .body("value", hasItem(EntraStore.DEV_GROUP_OBJECT_ID));
+    }
 
     @Test
     void resetClearsApimEmailAndAppConfigState() {
