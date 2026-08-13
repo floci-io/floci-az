@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **postgres:** mutating operations on Flexible Servers (and their databases, firewall rules and configurations) now answer `202 Accepted` with a `Location` header pointing at the resource, instead of `200`/`201`. ARM models these as long-running operations and the provider's accepted status codes narrowed between majors: azurerm 3.x accepts 200/201/202 on PUT, but **4.x accepts only 202**, so every `azurerm_postgresql_flexible_server*` apply failed against the emulator with `unexpected status 201 (201 Created)`. 202 is the only value both majors accept. Because the work is already complete when we answer, the `Location` header points back at the resource itself and the SDK's poller finishes on its first poll. `DELETE` is unchanged at 204, which both majors already accept ([#135](https://github.com/floci-io/floci-az/pull/135))
-
 ## [0.10.0] - 2026-07-31
 
 ### Added
