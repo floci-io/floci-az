@@ -14,6 +14,17 @@ public class JacksonConfig implements ObjectMapperCustomizer {
 
     @Override
     public void customize(ObjectMapper mapper) {
+        applyLargePayloadConstraints(mapper);
+    }
+
+    /**
+     * Apply the large-payload stream-read constraints to a mapper.
+     *
+     * <p>The customizer above only reaches the CDI-managed {@link ObjectMapper}. Handlers that
+     * construct their own mapper keep Jackson's 20 MB default string limit unless they call this,
+     * which would reject payloads real Azure accepts.
+     */
+    public static void applyLargePayloadConstraints(ObjectMapper mapper) {
         mapper.getFactory().setStreamReadConstraints(
                 StreamReadConstraints.builder()
                         .maxStringLength(MAX_STRING_LENGTH)

@@ -1,6 +1,7 @@
 package io.floci.az.services.functions;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.core.JacksonConfig;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
@@ -58,6 +59,10 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
         this.mapper    = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // This mapper is built here rather than injected, so the ObjectMapperCustomizer that
+        // raises Jackson's string-length limit does not reach it — without this a function ZIP
+        // over 20 MB is rejected, which real Azure Functions accepts.
+        JacksonConfig.applyLargePayloadConstraints(this.mapper);
     }
 
     @Override public String getServiceType() { return "functions"; }

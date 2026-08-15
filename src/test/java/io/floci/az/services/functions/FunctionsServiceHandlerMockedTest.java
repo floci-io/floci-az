@@ -65,6 +65,32 @@ class FunctionsServiceHandlerMockedTest {
     }
 
     @Test
+    @DisplayName("a function ZIP larger than Jackson's 20 MB string default is accepted")
+    void deployAcceptsZipBeyondJacksonStringDefault() {
+        // Real Azure Functions puts no ~20 MB cap on the deployment package; a Python function
+        // bundling a few SDKs easily exceeds it. Jackson's default maxStringLength is 20,000,000
+        // characters, so the base64 field has to be longer than that to cover the regression.
+        String zipBase64 = "A".repeat(24_000_000);
+
+        given()
+            .contentType("application/json")
+            .body("{\"runtime\":\"python\",\"linuxFxVersion\":\"Python|3.12\"}")
+            .when().put(FN + "/admin/apps/bigapp")
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/json")
+            .body("{\"handler\":\"function_app.handler\",\"zipBase64\":\"" + zipBase64 + "\"}")
+            .when().put(FN + "/admin/apps/bigapp/functions/big")
+            .then().statusCode(201);
+
+        given()
+            .when().get(FN + "/admin/apps/bigapp/functions")
+            .then().statusCode(200)
+            .body("value", hasSize(1));
+    }
+
+    @Test
     @DisplayName("invoking an unknown function still returns 404 in mocked mode")
     void unknownFunctionStill404() {
         given()
