@@ -868,7 +868,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("id", id);
 
         String key = docKey(account, dbId, collId, pkEnc, id);
-        Optional<StoredObject> existing = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        Optional<StoredObject> existing = liveBatchDocument(documents, key, defaultTtl);
         boolean existed = existing.isPresent();
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, existing.orElse(null))) {
             return batchResultError(412);
@@ -895,7 +895,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        Optional<StoredObject> found = liveBatchDocument(documents, key, defaultTtl);
         if (found.isEmpty()) found = liveDoc(findBatchDocument(documents, docId), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
 
@@ -911,7 +911,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (docId == null || body == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        Optional<StoredObject> found = liveBatchDocument(documents, key, defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
 
@@ -940,7 +940,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (docId == null || body == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        Optional<StoredObject> found = liveBatchDocument(documents, key, defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
         if (!(body.get("operations") instanceof List<?> rawOperations)) return batchResultError(400);
@@ -967,7 +967,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (docId == null) return batchResultError(400);
 
         String key = docKey(account, dbId, collId, pkEnc, docId);
-        Optional<StoredObject> found = liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
+        Optional<StoredObject> found = liveBatchDocument(documents, key, defaultTtl);
         if (found.isEmpty()) found = liveDoc(findBatchDocument(documents, docId), defaultTtl);
         if (found.isEmpty()) return batchResultError(404);
         if (itemPreconditionFailed(ifMatch, ifNoneMatch, found.get())) return batchResultError(412);
@@ -980,6 +980,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         return documents.values().stream()
                 .filter(object -> object.key().endsWith("|" + docId))
                 .findFirst();
+    }
+
+    private Optional<StoredObject> liveBatchDocument(Map<String, StoredObject> documents,
+            String key, Object defaultTtl) {
+        return liveDoc(Optional.ofNullable(documents.get(key)), defaultTtl);
     }
 
     private Response itemPreconditionFailure(AzureRequest req, StoredObject existing) {

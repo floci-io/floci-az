@@ -52,12 +52,12 @@ public class CosmosContainerTtlTest {
                 .when().put(BASE + "/dbs/" + DB + "/colls/" + id);
     }
 
-    private void insertDoc(String coll, String docJson) {
-        given().contentType("application/json")
+    private io.restassured.response.Response insertDoc(String coll, String docJson) {
+        return given().contentType("application/json")
                 .header("x-ms-documentdb-partitionkey", "[\"x\"]")
                 .body(docJson)
                 .when().post(BASE + "/dbs/" + DB + "/colls/" + coll + "/docs")
-                .then().statusCode(201);
+                .then().statusCode(201).extract().response();
     }
 
     private int getDocStatus(String coll, String docId) {
@@ -170,7 +170,7 @@ public class CosmosContainerTtlTest {
         createContainer("events", "2").then().statusCode(201);
         createContainer("keep", null).then().statusCode(201);
 
-        insertDoc("events", "{\"id\":\"a\",\"category\":\"x\"}");
+        String expiredEtag = insertDoc("events", "{\"id\":\"a\",\"category\":\"x\"}").header("ETag");
         insertDoc("events", "{\"id\":\"b\",\"category\":\"x\",\"ttl\":-1}");
         insertDoc("keep",   "{\"id\":\"c\",\"category\":\"x\",\"ttl\":1}");
 
@@ -199,14 +199,35 @@ public class CosmosContainerTtlTest {
                 .body("_count", is(1))
                 .body("Documents[0].id", is("b"));
 
-        // transactional batch sees the expired doc as gone too
+        // transactional batch sees the expired doc as gone and fails later operations atomically
         given().contentType("application/json")
                 .header("x-ms-cosmos-is-batch-request", "true")
                 .header("x-ms-documentdb-partitionkey", "[\"x\"]")
                 .body("[{\"operationType\":\"Read\",\"id\":\"a\"},{\"operationType\":\"Read\",\"id\":\"b\"}]")
                 .when().post(BASE + "/dbs/" + DB + "/colls/events/docs")
                 .then().statusCode(200)
-                .body("statusCode", contains(404, 200));
+                .body("statusCode", contains(404, 424));
+
+        // conditional point and batch mutations also treat the expired doc as absent
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", "[\"x\"]")
+                .header("If-Match", expiredEtag)
+                .body("{\"id\":\"a\",\"category\":\"x\"}")
+                .when().put(BASE + "/dbs/" + DB + "/colls/events/docs/a")
+                .then().statusCode(404);
+
+        given().contentType("application/json")
+                .header("x-ms-cosmos-is-batch-request", "true")
+                .header("x-ms-documentdb-partitionkey", "[\"x\"]")
+                .body("""
+                        [{
+                          "operationType": "Replace",
+                          "id": "a",
+                          "ifMatch": "%s",
+                          "resourceBody": {"id":"a","category":"x"}
+                        }]""".formatted(expiredEtag.replace("\"", "\\\"")))
+                .when().post(BASE + "/dbs/" + DB + "/colls/events/docs")
+                .then().statusCode(200).body("[0].statusCode", is(404));
 
         // an expired doc no longer blocks re-creating the same id
         insertDoc("events", "{\"id\":\"a\",\"category\":\"x\"}");
