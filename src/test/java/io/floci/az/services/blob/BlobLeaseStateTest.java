@@ -53,6 +53,25 @@ class BlobLeaseStateTest {
     }
 
     @Test
+    void breakPeriodLongerThanRemainingTimeCapsAtNaturalExpiry() {
+        // 15s lease, broken at t+10 with a 60s period: the break period is used
+        // only if it is shorter than the remaining lease time, so the lease
+        // must be BROKEN at its natural expiry (t+15), not at t+70.
+        BlobLease lease = BlobLease.acquire(ID, 15, T0).broken(60, T0.plusSeconds(10));
+        assertEquals(BlobLease.State.BREAKING, lease.stateAt(T0.plusSeconds(14)));
+        assertEquals(5, lease.remainingBreakSeconds(T0.plusSeconds(10)));
+        assertEquals(BlobLease.State.BROKEN, lease.stateAt(T0.plusSeconds(15)));
+        assertFalse(lease.activeAt(T0.plusSeconds(15)));
+    }
+
+    @Test
+    void breakPeriodShorterThanRemainingTimeIsUsed() {
+        BlobLease lease = BlobLease.acquire(ID, 60, T0).broken(5, T0);
+        assertEquals(BlobLease.State.BREAKING, lease.stateAt(T0.plusSeconds(4)));
+        assertEquals(BlobLease.State.BROKEN, lease.stateAt(T0.plusSeconds(5)));
+    }
+
+    @Test
     void changeKeepsTimingButSwapsId() {
         BlobLease lease = BlobLease.acquire(ID, 15, T0).changed("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         assertEquals("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", lease.leaseId());

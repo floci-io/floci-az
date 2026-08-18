@@ -31,7 +31,13 @@ public record BlobLease(String leaseId, int durationSeconds, Instant expiresAt, 
     }
 
     public BlobLease broken(int breakPeriodSeconds, Instant now) {
-        return new BlobLease(leaseId, durationSeconds, expiresAt, now.plusSeconds(breakPeriodSeconds));
+        Instant breakAt = now.plusSeconds(breakPeriodSeconds);
+        // The break period is used only if it is shorter than the lease's
+        // remaining time; a fixed lease never outlives its natural expiry.
+        if (expiresAt != null && expiresAt.isBefore(breakAt)) {
+            breakAt = expiresAt;
+        }
+        return new BlobLease(leaseId, durationSeconds, expiresAt, breakAt);
     }
 
     public State stateAt(Instant now) {
