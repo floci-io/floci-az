@@ -482,6 +482,41 @@ public class BlobServiceTest {
     }
 
     @Test
+    void snapshotScopedSasCanReadOnlyItsSnapshot() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String snapshot = given()
+            .when().put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("changed")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String snapshotSas = snapshotSas("r", CONTAINER, BLOB, snapshot);
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB, snapshotSas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("original"));
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    snapshotSas.replace("snapshot=" + snapshot + "&", ""))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
     void createOnlySasCanCreateButCannotOverwriteBlob() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         String createOnlySas = sas("c", "b", CONTAINER, BLOB);
@@ -1375,6 +1410,31 @@ public class BlobServiceTest {
         OffsetDateTime keyStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
         OffsetDateTime keyExpiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
         return sasSignedWith(base64Key, permissions, resource, container, blobName, keyStart, keyExpiry);
+    }
+
+    private String snapshotSas(String permissions, String container, String blobName, String snapshot) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String version = "2024-11-04";
+        String key = keyMaterial.signingKeyForAccount(ACCOUNT);
+        String stringToSign = String.join("\n",
+                permissions, start.toString(), expiry.toString(), canonicalName(container, blobName),
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID, UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                start.toString(), expiry.toString(), "b", version,
+                "", "", "", "", "", version, "bs", snapshot, "", "", "", "", "", "");
+        return "sv=" + version
+                + "&st=" + start
+                + "&se=" + expiry
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + start
+                + "&ske=" + expiry
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=bs"
+                + "&snapshot=" + snapshot
+                + "&sp=" + permissions
+                + "&sig=" + hmac(key, stringToSign);
     }
 
     private static String sasSignedWith(
