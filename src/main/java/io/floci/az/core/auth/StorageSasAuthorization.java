@@ -1,6 +1,7 @@
 package io.floci.az.core.auth;
 
 import io.floci.az.core.AzureErrorResponse;
+import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -10,7 +11,9 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
@@ -27,32 +30,36 @@ public class StorageSasAuthorization {
         this.keyMaterial = keyMaterial;
     }
 
-    public Optional<Response> authorizeRead(String account, String container, String path, StorageSasToken token) {
-        return authorize(account, container, path, token, Operation.READ);
+    public Optional<Response> authorizeRead(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.READ);
     }
 
-    public Optional<Response> authorizeList(String account, String container, StorageSasToken token) {
-        return authorize(account, container, null, token, Operation.LIST);
+    public Optional<Response> authorizeList(AzureRequest request, String container, StorageSasToken token) {
+        return authorize(request, container, null, token, Operation.LIST);
     }
 
-    public Optional<Response> authorizeList(String account, String container, String path, StorageSasToken token) {
-        return authorize(account, container, path, token, Operation.LIST);
+    public Optional<Response> authorizeList(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.LIST);
     }
 
-    public Optional<Response> authorizeCreate(String account, String container, String path, StorageSasToken token) {
-        return authorize(account, container, path, token, Operation.CREATE);
+    public Optional<Response> authorizeCreate(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.CREATE);
     }
 
-    public Optional<Response> authorizeWrite(String account, String container, String path, StorageSasToken token) {
-        return authorize(account, container, path, token, Operation.WRITE);
+    public Optional<Response> authorizeWrite(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.WRITE);
     }
 
-    public Optional<Response> authorizeDelete(String account, String container, String path, StorageSasToken token) {
-        return authorize(account, container, path, token, Operation.DELETE);
+    public Optional<Response> authorizeDelete(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.DELETE);
+    }
+
+    public Optional<Response> authorizeAppend(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.APPEND);
     }
 
     private Optional<Response> authorize(
-            String account,
+            AzureRequest request,
             String container,
             String path,
             StorageSasToken token,
@@ -61,16 +68,17 @@ public class StorageSasAuthorization {
         if (token.resource() == null || token.permissions() == null || token.expiryTime() == null) {
             return Optional.of(authenticationFailed());
         }
-        if (!isSupportedResource(token.resource())) {
+        if (!isSupportedResource(token.resource()) || layoutFor(token.version()) == null
+                || token.delegatedUserTenantId() != null || token.delegatedUserObjectId() != null) {
             return Optional.of(authenticationFailed());
         }
         if (!delegationKeyValid(token)) {
             return Optional.of(authenticationFailed());
         }
-        if (!signatureMatches(account, container, path, token)) {
+        if (!signatureMatches(request, container, path, token)) {
             return Optional.of(authenticationFailed());
         }
-        if (!resourceCoversPath(token, path)) {
+        if (!resourceCoversPath(request, token, path)) {
             return Optional.of(authorizationPermissionMismatch());
         }
         if (!operation.allowedBy(token)) {
@@ -100,9 +108,9 @@ public class StorageSasAuthorization {
                 && !sasExpiry.get().isAfter(keyExpiry.get());
     }
 
-    private boolean signatureMatches(String account, String container, String path, StorageSasToken token) {
-        String canonicalName = canonicalName(account, container, signedPath(token, path));
-        String expected = hmac(keyMaterial.signingKeyForAccount(account), stringToSign(token, canonicalName));
+    private boolean signatureMatches(AzureRequest request, String container, String path, StorageSasToken token) {
+        String canonicalName = canonicalName(request.accountName(), container, signedPath(token, path));
+        String expected = hmac(keyMaterial.signingKeyForAccount(request.accountName()), stringToSign(request, token, canonicalName));
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8),
                 token.signature().getBytes(StandardCharsets.UTF_8)
@@ -126,8 +134,12 @@ public class StorageSasAuthorization {
         return "/blob/" + account + "/" + container + "/" + normalizePath(path);
     }
 
-    private static String stringToSign(StorageSasToken token, String canonicalName) {
-        return String.join("\n",
+    private static String stringToSign(AzureRequest request, StorageSasToken token, String canonicalName) {
+        SasLayout layout = layoutFor(token.version());
+        if (layout == null) {
+            throw new IllegalArgumentException("Unsupported SAS version");
+        }
+        var fields = new java.util.ArrayList<>(Arrays.asList(
                 value(token.permissions()),
                 value(token.startTime()),
                 value(token.expiryTime()),
@@ -140,19 +152,95 @@ public class StorageSasAuthorization {
                 value(token.signedKeyVersion()),
                 value(token.preauthorizedAgentObjectId()),
                 value(token.agentObjectId()),
-                value(token.correlationId()),
+                value(token.correlationId())
+        ));
+        if (layout.includesDelegatedUser()) {
+            fields.add(value(token.delegatedUserTenantId()));
+            fields.add(value(token.delegatedUserObjectId()));
+        }
+        fields.addAll(Arrays.asList(
                 value(token.ipRange()),
                 value(token.protocol()),
                 value(token.version()),
-                value(token.resource()),
-                "",
-                value(token.encryptionScope()),
+                value(token.resource())
+        ));
+        if (layout.includesSnapshot()) {
+            fields.add(value(token.snapshotTime()));
+        }
+        if (layout.includesEncryptionScope()) {
+            fields.add(value(token.encryptionScope()));
+        }
+        if (layout.includesRequestConstraints()) {
+            fields.add(canonicalizedHeaders(request, token.signedRequestHeaders()));
+            fields.add(canonicalizedQueryParameters(request, token.signedRequestQueryParameters()));
+        }
+        fields.addAll(Arrays.asList(
                 value(token.cacheControl()),
                 value(token.contentDisposition()),
                 value(token.contentEncoding()),
                 value(token.contentLanguage()),
                 value(token.contentType())
-        );
+        ));
+        return String.join("\n", fields);
+    }
+
+    private static String canonicalizedHeaders(AzureRequest request, String names) {
+        if (names == null) {
+            return "";
+        }
+        var result = new StringBuilder();
+        for (String name : names.split(",", -1)) {
+            String header = name.trim().toLowerCase(java.util.Locale.ROOT);
+            if (header.isEmpty()) {
+                return "__invalid__";
+            }
+            String value = request.headers().getHeaderString(header);
+            if (value == null) {
+                return "__missing__";
+            }
+            result.append(header).append(':').append(value).append('\n');
+        }
+        return result.toString();
+    }
+
+    private static String canonicalizedQueryParameters(AzureRequest request, String names) {
+        if (names == null) {
+            return "";
+        }
+        var result = new StringBuilder();
+        for (String name : names.split(",", -1)) {
+            String parameter = name.trim();
+            String value = request.queryParams().get(parameter);
+            if (parameter.isEmpty() || value == null) {
+                return "__missing__";
+            }
+            result.append('\n').append(parameter).append('=').append(value);
+        }
+        return result.toString();
+    }
+
+    private static SasLayout layoutFor(String version) {
+        try {
+            LocalDate parsed = LocalDate.parse(version);
+            if (parsed.isBefore(LocalDate.parse("2018-11-09"))) {
+                return null;
+            }
+            if (!parsed.isBefore(LocalDate.parse("2026-04-06"))) {
+                return SasLayout.REQUEST_CONSTRAINTS;
+            }
+            if (!parsed.isBefore(LocalDate.parse("2025-07-05"))) {
+                return SasLayout.DELEGATED_USER;
+            }
+            if (!parsed.isBefore(LocalDate.parse("2020-12-06"))) {
+                return SasLayout.ENCRYPTION_SCOPE;
+            }
+            if (!parsed.isBefore(LocalDate.parse("2020-02-10"))) {
+                return SasLayout.SNAPSHOT;
+            }
+            return SasLayout.LEGACY;
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private static String hmac(String base64Key, String stringToSign) {
@@ -165,12 +253,15 @@ public class StorageSasAuthorization {
         }
     }
 
-    private static boolean resourceCoversPath(StorageSasToken token, String path) {
+    private static boolean resourceCoversPath(AzureRequest request, StorageSasToken token, String path) {
         String normalizedPath = normalizePath(path);
         return switch (token.resource()) {
             case "c" -> true;
             case "b" -> normalizedPath != null && !normalizedPath.isBlank();
             case "d" -> signedDirectoryPath(token, normalizedPath) != null;
+            case "bs" -> normalizedPath != null && !normalizedPath.isBlank()
+                    && token.snapshotTime() != null
+                    && token.snapshotTime().equals(request.queryParams().get("snapshot"));
             default -> false;
         };
     }
@@ -199,7 +290,7 @@ public class StorageSasAuthorization {
     }
 
     private static boolean isSupportedResource(String resource) {
-        return "c".equals(resource) || "b".equals(resource) || "d".equals(resource);
+        return "c".equals(resource) || "b".equals(resource) || "d".equals(resource) || "bs".equals(resource);
     }
 
     private static String normalizePath(String path) {
@@ -259,8 +350,37 @@ public class StorageSasAuthorization {
             boolean allowedBy(StorageSasToken token) {
                 return token.hasPermission('d');
             }
+        },
+        APPEND {
+            @Override
+            boolean allowedBy(StorageSasToken token) {
+                return token.hasPermission('a');
+            }
         };
 
         abstract boolean allowedBy(StorageSasToken token);
+    }
+
+    private enum SasLayout {
+        LEGACY(false, false, false),
+        SNAPSHOT(false, true, false),
+        ENCRYPTION_SCOPE(false, true, true),
+        DELEGATED_USER(true, true, true),
+        REQUEST_CONSTRAINTS(true, true, true);
+
+        private final boolean delegatedUser;
+        private final boolean snapshot;
+        private final boolean encryptionScope;
+
+        SasLayout(boolean delegatedUser, boolean snapshot, boolean encryptionScope) {
+            this.delegatedUser = delegatedUser;
+            this.snapshot = snapshot;
+            this.encryptionScope = encryptionScope;
+        }
+
+        boolean includesDelegatedUser() { return delegatedUser; }
+        boolean includesSnapshot() { return snapshot; }
+        boolean includesEncryptionScope() { return encryptionScope; }
+        boolean includesRequestConstraints() { return this == REQUEST_CONSTRAINTS; }
     }
 }

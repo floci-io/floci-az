@@ -30,7 +30,12 @@ public record StorageSasToken(
         String contentEncoding,
         String contentLanguage,
         String contentType,
-        String encryptionScope
+        String encryptionScope,
+        String snapshotTime,
+        String delegatedUserTenantId,
+        String delegatedUserObjectId,
+        String signedRequestHeaders,
+        String signedRequestQueryParameters
 ) {
 
     public static Optional<StorageSasToken> from(Map<String, String> query) {
@@ -64,7 +69,12 @@ public record StorageSasToken(
                 blankToNull(query.get("rsce")),
                 blankToNull(query.get("rscl")),
                 blankToNull(query.get("rsct")),
-                blankToNull(query.get("ses"))
+                blankToNull(query.get("ses")),
+                blankToNull(query.get("snapshot")),
+                blankToNull(query.get("skdutid")),
+                blankToNull(query.get("sduoid")),
+                blankToNull(query.get("srh")),
+                blankToNull(query.get("srq"))
         ));
     }
 
