@@ -14,7 +14,7 @@ import static org.hamcrest.Matchers.equalTo;
  * {@code putBlob} for every unrecognised {@code comp} value.
  *
  * <p>Azure's blob endpoint multiplexes many operations onto {@code PUT /{container}/{blob}},
- * discriminated by {@code comp} (lease, snapshot, properties, tier, tags, page, appendblock) or by
+ * discriminated by {@code comp} (lease, snapshot, properties, tier, tags, page) or by
  * a header ({@code x-ms-copy-source}). None of those are implemented here. Before this guard they
  * were all routed to {@code putBlob}, which <em>replaced the blob with the request body</em> —
  * usually empty — and answered {@code 201 Created}. The SDK saw success while the data was gone.
@@ -57,7 +57,7 @@ public class BlobCompDispatchTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "snapshot", "properties", "tier", "tags",
-            "page", "appendblock", "undelete", "expiry", "seal"
+            "page", "undelete", "expiry", "seal"
     })
     void unimplementedBlobCompIsNotMistakenForPutBlob(String comp) {
         given()
