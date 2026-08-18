@@ -458,6 +458,30 @@ public class BlobServiceTest {
     }
 
     @Test
+    void appendOnlySasCanAppendToAppendBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "AppendBlob")
+            .body("")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .body("first")
+            .when().put("/{account}/{container}/{blob}?comp=appendblock&{sas}",
+                    ACCOUNT, CONTAINER, BLOB, sas("a", "b", CONTAINER, BLOB))
+            .then()
+            .statusCode(201)
+            .header("x-ms-blob-append-offset", "0")
+            .header("x-ms-blob-committed-block-count", "1");
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo("first"));
+    }
+
+    @Test
     void createOnlySasCanCreateButCannotOverwriteBlob() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         String createOnlySas = sas("c", "b", CONTAINER, BLOB);

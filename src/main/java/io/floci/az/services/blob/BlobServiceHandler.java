@@ -173,6 +173,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = putBlock(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "blocklist".equals(comp)) {
                     response = putBlockList(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && "appendblock".equals(comp)) {
+                    response = appendBlock(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "blocklist".equals(comp)) {
                     response = getBlockList(request, containerName, blobName);
@@ -461,6 +463,41 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         return rb.build();
+    }
+
+    private Response appendBlock(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeAppend(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+        if (existing.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        StoredObject blob = existing.get();
+        if (!"AppendBlob".equals(blob.metadata().get("BlobType"))) {
+            return new AzureErrorResponse("InvalidBlobType", "The blob type is invalid for this operation.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        try {
+            byte[] appended = request.bodyStream().readAllBytes();
+            byte[] data = Arrays.copyOf(blob.data(), blob.data().length + appended.length);
+            System.arraycopy(appended, 0, data, blob.data().length, appended.length);
+            Map<String, String> metadata = new HashMap<>(blob.metadata());
+            int blockCount = Integer.parseInt(metadata.getOrDefault("AppendBlockCount", "0")) + 1;
+            metadata.put("AppendBlockCount", Integer.toString(blockCount));
+            String etag = UUID.randomUUID().toString();
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(blobName, data, metadata, Instant.now(), etag));
+            return Response.status(Response.Status.CREATED)
+                    .header("ETag", etag)
+                    .header("x-ms-blob-append-offset", blob.data().length)
+                    .header("x-ms-blob-committed-block-count", blockCount)
+                    .build();
+        } catch (IOException e) {
+            return Response.serverError().build();
+        }
     }
 
     private Response deleteBlob(AzureRequest request, String containerName, String blobName) {
