@@ -212,6 +212,11 @@ public class BlobLeaseService {
         return operation.get();
     }
 
+    /** {@link #exclusively(java.util.function.Supplier)} for mutations that produce no response. */
+    public synchronized void exclusively(Runnable operation) {
+        operation.run();
+    }
+
     /**
      * Lease guard for write/delete operations on a blob. Returns null when the
      * operation may proceed, otherwise the 412 the Blob service contract

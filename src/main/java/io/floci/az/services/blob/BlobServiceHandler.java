@@ -300,15 +300,21 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
         String key = nsKey(request.accountName(), containerName);
-        if (store.get(key).isPresent()) {
-            return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
-                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-        }
-        store.put(key, NS_SENTINEL);
-        return Response.status(Response.Status.CREATED)
-                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                .header("ETag", UUID.randomUUID().toString())
-                .build();
+        // Check-and-create must share the lease monitor, or a create that
+        // observed absence can re-put the sentinel after a concurrent deletion
+        // sweep (resurrecting the container after DELETE answered 202), and
+        // two concurrent creates can both answer 201.
+        return leaseService.exclusively(() -> {
+            if (store.get(key).isPresent()) {
+                return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
+                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            store.put(key, NS_SENTINEL);
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                    .header("ETag", UUID.randomUUID().toString())
+                    .build();
+        });
     }
 
     private Response deleteContainer(AzureRequest request, String containerName) {
@@ -1006,12 +1012,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     public void clear() {
-        store.clear();
-        leaseService.clear();
+        leaseService.exclusively(() -> {
+            store.clear();
+            leaseService.clear();
+        });
     }
 
     public void ensureContainer(String accountName, String containerName) {
-        store.put(nsKey(accountName, containerName), NS_SENTINEL);
+        leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), NS_SENTINEL));
     }
 
     private static String nsKey(String accountName, String containerName) {
