@@ -364,20 +364,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response putBlob(AzureRequest request, String containerName, String blobName) {
         try {
-            Response authFailure = store.get(objKey(request.accountName(), containerName, blobName)).isPresent()
-                    ? authorizeWrite(request, containerName, blobName)
-                    : authorizeCreate(request, containerName, blobName);
-            if (authFailure != null) {
-                return authFailure;
-            }
             byte[] data = request.bodyStream().readAllBytes();
             return leaseService.exclusively(() -> {
+                // Create-vs-write is classified from blob existence, so the
+                // classification must read the same snapshot the mutation
+                // uses: outside the monitor, a create-only SAS that observed
+                // absence could overwrite a concurrently created blob.
+                Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+                Response authFailure = existing.isPresent()
+                        ? authorizeWrite(request, containerName, blobName)
+                        : authorizeCreate(request, containerName, blobName);
+                if (authFailure != null) {
+                    return authFailure;
+                }
                 if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                     return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                             .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
                 }
 
-                Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
                 Response conditionFailure = validateBlobConditions(request, existing);
                 if (conditionFailure != null) {
                     return conditionFailure;
