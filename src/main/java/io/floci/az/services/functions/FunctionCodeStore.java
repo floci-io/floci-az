@@ -30,7 +30,7 @@ public class FunctionCodeStore {
             "@app\\.route\\s*\\((.*?)\\)\\s*(?:\\r?\\n\\s*@[^\\r\\n]+)*\\s*def\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
             Pattern.DOTALL);
     private static final Pattern ROUTE_VALUE = Pattern.compile(
-            "\\broute\\s*=\\s*[\\\"']([^\\\"']*)[\\\"']");
+            "(?:\\broute\\s*=\\s*)?[\\\"']([^\\\"']*)[\\\"']");
 
     private final EmulatorConfig config;
     private final FunctionZipExtractor extractor;

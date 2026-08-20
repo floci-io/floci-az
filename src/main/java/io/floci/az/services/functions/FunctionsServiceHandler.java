@@ -216,7 +216,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
         return Response.noContent().build();
     }
 
-    private Response deployFunction(AzureRequest request, String appName, String funcName) {
+    private synchronized Response deployFunction(AzureRequest request, String appName, String funcName) {
         // Verify app exists and get runtime
         Optional<StoredObject> appSo = store.get(appKey(request.accountName(), appName));
         if (appSo.isEmpty()) {
