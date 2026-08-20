@@ -29,8 +29,10 @@ public class FunctionCodeStore {
     private static final Pattern ROUTE_DECORATOR = Pattern.compile(
             "@app\\.route\\s*\\((.*?)\\)\\s*(?:\\r?\\n\\s*@[^\\r\\n]+)*\\s*def\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
             Pattern.DOTALL);
-    private static final Pattern ROUTE_VALUE = Pattern.compile(
-            "(?:\\broute\\s*=\\s*)?[\\\"']([^\\\"']*)[\\\"']");
+        private static final Pattern NAMED_ROUTE = Pattern.compile(
+            "\\broute\\s*=\\s*[\\\"']([^\\\"']*)[\\\"']");
+        private static final Pattern POSITIONAL_ROUTE = Pattern.compile(
+            "^\\s*[\\\"']([^\\\"']*)[\\\"']");
 
     private final EmulatorConfig config;
     private final FunctionZipExtractor extractor;
@@ -82,8 +84,13 @@ public class FunctionCodeStore {
             if (!methodName.equals(decorator.group(2))) {
                 continue;
             }
-            Matcher route = ROUTE_VALUE.matcher(decorator.group(1));
-            return route.find() ? route.group(1) : methodName;
+            String arguments = decorator.group(1);
+            Matcher namedRoute = NAMED_ROUTE.matcher(arguments);
+            if (namedRoute.find()) {
+                return namedRoute.group(1);
+            }
+            Matcher positionalRoute = POSITIONAL_ROUTE.matcher(arguments);
+            return positionalRoute.find() ? positionalRoute.group(1) : methodName;
         }
         return null;
     }
