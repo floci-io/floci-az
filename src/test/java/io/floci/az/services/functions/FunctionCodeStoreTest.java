@@ -89,6 +89,19 @@ class FunctionCodeStoreTest {
         }
     }
 
+    @Test
+    void detectsPositionalDecoratedRoute() throws Exception {
+        Path basePath = Files.createTempDirectory("function-store-");
+        try {
+            FunctionCodeStore store = newStore(basePath);
+            Path stored = store.storeCode("account", "app", "hello", positionalRouteZip());
+
+            assertEquals("welcome", store.functionRoute(stored, "function_app.greet"));
+        } finally {
+            deleteRecursively(basePath);
+        }
+    }
+
     private static byte[] pythonV2Zip() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
@@ -112,6 +125,20 @@ class FunctionCodeStoreTest {
                     """);
             addEntry(zip, "host.json",
                     "{\"version\":\"2.0\",\"extensions\":{\"http\":{\"routePrefix\":\"\"}}}");
+        }
+        return bytes.toByteArray();
+    }
+
+    private static byte[] positionalRouteZip() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            addEntry(zip, "function_app.py", """
+                    import azure.functions as func
+                    app = func.FunctionApp()
+                    @app.route("welcome")
+                    def greet(req: func.HttpRequest) -> func.HttpResponse:
+                        return func.HttpResponse("ok")
+                    """);
         }
         return bytes.toByteArray();
     }
