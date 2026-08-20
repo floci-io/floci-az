@@ -73,12 +73,24 @@ paths accept the same setting under `properties.siteConfig.linuxFxVersion` and
 }
 ```
 
-The ZIP must contain your function code in the Azure Functions v4 layout:
+For the Node.js and Python v1 model, the ZIP must contain your function code in
+the Azure Functions v4 layout:
 ```
 host.json
 {funcName}/function.json
 {funcName}/index.js   (or handler file for the runtime)
 ```
+
+Python v2 model packages are also supported. A Python v2 ZIP is identified by
+`function_app.py` at its root and is extracted to the application root:
+```
+host.json
+function_app.py
+.python_packages/lib/site-packages/   (optional)
+```
+The package's `host.json` is preserved. Its `extensions.http.routePrefix`
+controls the internal worker route; when omitted, the default is `/api`.
+The emulator's public invocation URL remains `/api/{appName}/{funcName}`.
 
 ### Invocation
 
