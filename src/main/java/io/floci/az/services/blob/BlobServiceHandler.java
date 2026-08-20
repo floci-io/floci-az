@@ -603,7 +603,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
-        if (directory != null && !directory.isBlank()
+        if (directory != null && !directory.isEmpty()
                 && !dataLakePathOperations.pathExists(request.accountName(), filesystem, directory)) {
             return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
