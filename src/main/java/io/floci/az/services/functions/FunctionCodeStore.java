@@ -1,5 +1,7 @@
 package io.floci.az.services.functions;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -9,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Manages function code packages on disk.
@@ -18,6 +21,7 @@ import java.util.Comparator;
 public class FunctionCodeStore {
 
     private static final Logger LOG = Logger.getLogger(FunctionCodeStore.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final EmulatorConfig config;
     private final FunctionZipExtractor extractor;
@@ -42,6 +46,20 @@ public class FunctionCodeStore {
 
     public Path getCodePath(String account, String appName, String funcName) {
         return codeDir(account, appName, funcName);
+    }
+
+    public boolean isPackageRootLayout(Path codePath) {
+        return Files.isRegularFile(codePath.resolve("function_app.py"));
+    }
+
+    public String routePrefix(Path codePath) throws IOException {
+        Path hostJson = codePath.resolve("host.json");
+        if (!Files.isRegularFile(hostJson)) {
+            return null;
+        }
+        JsonNode root = MAPPER.readTree(Files.readString(hostJson, StandardCharsets.UTF_8));
+        JsonNode routePrefix = root.path("extensions").path("http").get("routePrefix");
+        return routePrefix != null && routePrefix.isTextual() ? routePrefix.asText() : null;
     }
 
     public void deleteCode(String account, String appName, String funcName) {

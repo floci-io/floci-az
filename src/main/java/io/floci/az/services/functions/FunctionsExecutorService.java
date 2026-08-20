@@ -57,7 +57,7 @@ public class FunctionsExecutorService {
         ContainerHandle handle = null;
         try {
             handle = warmPool.acquire(def, appDefs);
-            return proxy(handle, request, def.funcName(), def.timeoutSeconds());
+            return proxy(handle, request, def, def.timeoutSeconds());
         } catch (Exception e) {
             LOG.errorv("Invocation failed for {0}: {1}", def.appKey(), e.getMessage());
             if (handle != null) {
@@ -76,8 +76,11 @@ public class FunctionsExecutorService {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private Response proxy(ContainerHandle handle, AzureRequest request,
-                           String funcName, int timeoutSeconds) throws IOException, InterruptedException {
-        String targetUrl = "http://" + handle.host() + ":" + handle.port() + "/api/" + funcName;
+                   FunctionDefinition def, int timeoutSeconds) throws IOException, InterruptedException {
+        String routePrefix = def.effectiveRoutePrefix();
+        String targetPath = routePrefix.isBlank() ? "" : "/" + routePrefix.strip().replaceAll("^/+|/+$", "");
+        String targetUrl = "http://" + handle.host() + ":" + handle.port()
+            + targetPath + "/" + def.funcName();
 
         // Append query string
         if (!request.queryParams().isEmpty()) {
@@ -112,7 +115,7 @@ public class FunctionsExecutorService {
             }
         });
 
-        LOG.debugv("Proxying {0} {1} → {2}", request.method(), funcName, targetUrl);
+        LOG.debugv("Proxying {0} {1} → {2}", request.method(), def.funcName(), targetUrl);
 
         HttpResponse<byte[]> resp = httpClient.send(reqBuilder.build(),
                 HttpResponse.BodyHandlers.ofByteArray());

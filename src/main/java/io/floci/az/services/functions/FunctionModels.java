@@ -32,7 +32,9 @@ public class FunctionModels {
             int timeoutSeconds,
             @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, String> environment,
             @JsonInclude(JsonInclude.Include.NON_NULL) String codeLocalPath,
-            Instant createdAt
+            Instant createdAt,
+            boolean packageRootLayout,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String routePrefix
     ) {
         /** Pool key — all functions in one app share one container. */
         public String appKey() {
@@ -41,6 +43,10 @@ public class FunctionModels {
 
         public String functionKey() {
             return accountName + "/" + appName + "/" + funcName;
+        }
+
+        public String effectiveRoutePrefix() {
+            return routePrefix == null ? "/api" : routePrefix;
         }
     }
 

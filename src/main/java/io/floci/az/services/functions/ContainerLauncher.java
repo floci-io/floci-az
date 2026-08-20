@@ -115,15 +115,21 @@ public class ContainerLauncher {
         String containerId = lifecycleManager.create(spec);
         LOG.infov("Created container {0} ({1})", containerName, containerId.substring(0, 12));
 
-        // Inject a shared host.json at the wwwroot root so the Functions host starts
-        // correctly when each function's code is in its own subdirectory.
-        injectHostJson(containerId);
+        boolean hasRootLayout = appDefs.stream().anyMatch(FunctionDefinition::packageRootLayout);
+        if (!hasRootLayout) {
+            // The v1 layout has no app-level host.json in the stored package.
+            injectHostJson(containerId);
+        }
 
-        // Inject code for every function in the app before starting so the Functions
-        // host finds them all at /home/site/wwwroot/{funcName}/ on startup.
+        // v1 functions are isolated by name; Python v2 packages are app roots.
         for (FunctionDefinition fn : appDefs) {
             if (fn.codeLocalPath() != null && Files.exists(Path.of(fn.codeLocalPath()))) {
-                copyCodeToContainer(containerId, Path.of(fn.codeLocalPath()), fn.funcName());
+                Path codePath = Path.of(fn.codeLocalPath());
+                if (fn.packageRootLayout()) {
+                    copyCodeRootToContainer(containerId, codePath);
+                } else {
+                    copyCodeToContainer(containerId, codePath, fn.funcName());
+                }
             }
         }
 
@@ -179,6 +185,11 @@ public class ContainerLauncher {
         env.add("WEBSITE_HOSTNAME=localhost");
         env.add("AzureWebJobsSecretStorageType=files");
         env.add("AZURE_FUNCTIONS_ENVIRONMENT=Development");
+
+        if (def.packageRootLayout()) {
+            env.add("AzureWebJobsScriptRoot=" + WWWROOT);
+            env.add("PYTHONPATH=" + WWWROOT + "/.python_packages/lib/site-packages:" + WWWROOT);
+        }
 
         if (def.environment() != null) {
             def.environment().forEach((k, v) -> env.add(k + "=" + v));
@@ -242,6 +253,29 @@ public class ContainerLauncher {
             LOG.debugv("Injected code for {0} into {1}", funcName, WWWROOT);
         } catch (Exception e) {
             LOG.warnv("Failed to copy code for {0}: {1}", funcName, e.getMessage());
+        }
+    }
+
+    private void copyCodeRootToContainer(String containerId, Path codeDir) {
+        try (PipedOutputStream pos = new PipedOutputStream();
+             PipedInputStream pis = new PipedInputStream(pos, 256 * 1024)) {
+            Thread tarThread = new Thread(() -> {
+                try (pos) {
+                    createTarWithPrefix(codeDir, pos, "home/site/wwwroot/");
+                } catch (IOException e) {
+                    LOG.errorv("Failed to stream root-layout TAR: {0}", e.getMessage());
+                }
+            }, "tar-function-app");
+            tarThread.setDaemon(true);
+            tarThread.start();
+
+            dockerClient.copyArchiveToContainerCmd(containerId)
+                    .withRemotePath("/")
+                    .withTarInputStream(pis)
+                    .exec();
+            LOG.debugv("Injected root-layout code into {0}", WWWROOT);
+        } catch (Exception e) {
+            LOG.warnv("Failed to copy root-layout code: {0}", e.getMessage());
         }
     }
 

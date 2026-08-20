@@ -21,6 +21,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -239,6 +240,16 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
                         request.accountName(), appName, funcName, zipBytes).toString();
             }
 
+            boolean packageRootLayout = false;
+            String routePrefix = null;
+            if (codePath != null) {
+                Path storedCode = Path.of(codePath);
+                packageRootLayout = codeStore.isPackageRootLayout(storedCode);
+                if (packageRootLayout) {
+                    routePrefix = codeStore.routePrefix(storedCode);
+                }
+            }
+
             // Merge environment: app-level + function-level
             Map<String, String> env = new LinkedHashMap<>();
             if (app.environment() != null) env.putAll(app.environment());
@@ -252,7 +263,9 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
                     body.timeoutSeconds() > 0 ? body.timeoutSeconds() : 230,
                     env.isEmpty() ? null : env,
                     codePath,
-                    Instant.now());
+                    Instant.now(),
+                    packageRootLayout,
+                    routePrefix);
 
             // Drain the app container on redeploy — container must restart with updated code.
             warmPool.drain(def.appKey());
