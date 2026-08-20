@@ -69,6 +69,26 @@ class FunctionCodeStoreTest {
         }
     }
 
+    @Test
+    void detectsDecoratedRouteAndNormalizesLegacyDefinition() throws Exception {
+        Path basePath = Files.createTempDirectory("function-store-");
+        try {
+            FunctionCodeStore store = newStore(basePath);
+            Path stored = store.storeCode("account", "app", "hello", decoratedPythonV2Zip());
+            FunctionModels.FunctionDefinition legacy = new FunctionModels.FunctionDefinition(
+                    "app", "hello", "account", "python", "Python|3.12", "function_app.greet",
+                    60, null, stored.toString(), java.time.Instant.now(), false, null, null);
+
+            FunctionModels.FunctionDefinition normalized = store.normalize(legacy);
+
+            assertTrue(normalized.packageRootLayout());
+            assertEquals("", normalized.routePrefix());
+            assertEquals("welcome", normalized.functionRoute());
+        } finally {
+            deleteRecursively(basePath);
+        }
+    }
+
     private static byte[] pythonV2Zip() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
@@ -76,6 +96,22 @@ class FunctionCodeStoreTest {
             addEntry(zip, "host.json",
                     "{\"version\":\"2.0\",\"extensions\":{\"http\":{\"routePrefix\":\"\"}}}");
             addEntry(zip, ".python_packages/lib/site-packages/example.py", "VALUE = 1\n");
+        }
+        return bytes.toByteArray();
+    }
+
+    private static byte[] decoratedPythonV2Zip() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            addEntry(zip, "function_app.py", """
+                    import azure.functions as func
+                    app = func.FunctionApp()
+                    @app.route(route="welcome")
+                    def greet(req: func.HttpRequest) -> func.HttpResponse:
+                        return func.HttpResponse("ok")
+                    """);
+            addEntry(zip, "host.json",
+                    "{\"version\":\"2.0\",\"extensions\":{\"http\":{\"routePrefix\":\"\"}}}");
         }
         return bytes.toByteArray();
     }

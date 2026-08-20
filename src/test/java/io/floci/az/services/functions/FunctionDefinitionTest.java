@@ -33,6 +33,6 @@ class FunctionDefinitionTest {
     private static FunctionDefinition definition(String routePrefix) {
         return new FunctionDefinition(
                 "app", "hello", "account", "python", "Python|3.12", "function_app.hello",
-                60, null, "/tmp/functions/hello", Instant.now(), true, routePrefix);
+                60, null, "/tmp/functions/hello", Instant.now(), true, routePrefix, null);
     }
 }

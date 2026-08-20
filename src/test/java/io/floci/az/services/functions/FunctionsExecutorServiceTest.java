@@ -32,7 +32,17 @@ class FunctionsExecutorServiceTest {
         assertProxiedPath(null, "/api/hello");
     }
 
+    @Test
+    void decoratedRouteIsUsedInsteadOfDeploymentName() throws Exception {
+        assertProxiedPath("", "/welcome", "welcome");
+    }
+
     private static void assertProxiedPath(String routePrefix, String expectedPath) throws Exception {
+        assertProxiedPath(routePrefix, expectedPath, null);
+    }
+
+    private static void assertProxiedPath(String routePrefix, String expectedPath,
+                                          String functionRoute) throws Exception {
         AtomicReference<String> receivedPath = new AtomicReference<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
@@ -48,7 +58,7 @@ class FunctionsExecutorServiceTest {
         try {
             FunctionDefinition definition = new FunctionDefinition(
                     "app", "hello", "account", "python", "Python|3.12", "function_app.hello",
-                    10, null, "/tmp/functions/hello", Instant.now(), true, routePrefix);
+                    10, null, "/tmp/functions/hello", Instant.now(), true, routePrefix, functionRoute);
             WarmPool pool = mock(WarmPool.class);
             ContainerHandle handle = new ContainerHandle(
                     "container", definition.appKey(), "127.0.0.1", server.getAddress().getPort());
