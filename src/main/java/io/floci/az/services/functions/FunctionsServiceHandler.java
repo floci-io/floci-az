@@ -242,12 +242,22 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
 
             boolean packageRootLayout = false;
             String routePrefix = null;
+            String functionRoute = null;
             if (codePath != null) {
                 Path storedCode = Path.of(codePath);
                 packageRootLayout = codeStore.isPackageRootLayout(storedCode);
                 if (packageRootLayout) {
                     routePrefix = codeStore.routePrefix(storedCode);
+                    functionRoute = codeStore.functionRoute(storedCode,
+                            body.handler() != null ? body.handler() : "index.handler");
                 }
+            }
+
+            if (hasIncompatibleLayout(request.accountName(), appName, funcName, packageRootLayout)) {
+                codeStore.deleteCode(request.accountName(), appName, funcName);
+                return error("IncompatibleFunctionLayout",
+                        "Function app '" + appName + "' cannot mix Python v2 app-root packages "
+                                + "with v1 function directories or multiple app-root packages", 409);
             }
 
             // Merge environment: app-level + function-level
@@ -265,7 +275,8 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
                     codePath,
                     Instant.now(),
                     packageRootLayout,
-                    routePrefix);
+                    routePrefix,
+                    functionRoute);
 
             // Drain the app container on redeploy — container must restart with updated code.
             warmPool.drain(def.appKey());
@@ -282,7 +293,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
         return store.get(fnKey(request.accountName(), appName, funcName))
                 .map(so -> {
                     try {
-                        FunctionDefinition def = mapper.readValue(so.data(), FunctionDefinition.class);
+                        FunctionDefinition def = readDefinition(so);
                         return Response.ok(toFunctionResponse(def, request.accountName()))
                                 .type(MediaType.APPLICATION_JSON).build();
                     } catch (IOException e) {
@@ -298,7 +309,7 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
         List<FunctionResponse> fns = store.scan(k -> k.startsWith(prefix)).stream()
                 .map(so -> {
                     try { return toFunctionResponse(
-                            mapper.readValue(so.data(), FunctionDefinition.class), request.accountName()); }
+                            readDefinition(so), request.accountName()); }
                     catch (IOException e) { return null; }
                 })
                 .filter(Objects::nonNull)
@@ -347,14 +358,14 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
         }
 
         try {
-            FunctionDefinition def = mapper.readValue(fnSo.get().data(), FunctionDefinition.class);
+            FunctionDefinition def = readDefinition(fnSo.get());
 
             // All functions in the app share one container — collect them all so the
             // launcher can inject every function's code before starting the host.
             String fnPrefix = fnScanPrefix(request.accountName(), appName);
             List<FunctionModels.FunctionDefinition> appDefs = store.scan(k -> k.startsWith(fnPrefix)).stream()
                     .map(so -> {
-                        try { return mapper.readValue(so.data(), FunctionDefinition.class); }
+                        try { return readDefinition(so); }
                         catch (IOException e) { return null; }
                     })
                     .filter(Objects::nonNull)
@@ -370,6 +381,24 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
 
     public void clear() {
         store.clear();
+    }
+
+    private FunctionDefinition readDefinition(StoredObject stored) throws IOException {
+        return codeStore.normalize(mapper.readValue(stored.data(), FunctionDefinition.class));
+    }
+
+    private boolean hasIncompatibleLayout(String accountName, String appName,
+                                          String funcName, boolean packageRootLayout) {
+        String prefix = fnScanPrefix(accountName, appName);
+        return store.scan(key -> key.startsWith(prefix)).stream()
+                .filter(stored -> !stored.key().equals(fnKey(accountName, appName, funcName)))
+                .map(stored -> {
+                    try { return readDefinition(stored); }
+                    catch (IOException e) { return null; }
+                })
+                .filter(Objects::nonNull)
+                .filter(definition -> definition.codeLocalPath() != null)
+                .anyMatch(definition -> packageRootLayout || definition.packageRootLayout());
     }
 
     private StoredObject toStoredObject(Object obj) {

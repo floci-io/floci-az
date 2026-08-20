@@ -80,7 +80,7 @@ public class FunctionsExecutorService {
         String routePrefix = def.effectiveRoutePrefix();
         String targetPath = routePrefix.isBlank() ? "" : "/" + routePrefix.strip().replaceAll("^/+|/+$", "");
         String targetUrl = "http://" + handle.host() + ":" + handle.port()
-            + targetPath + "/" + def.funcName();
+            + targetPath + "/" + def.effectiveFunctionRoute().replaceAll("^/+|/+$", "");
 
         // Append query string
         if (!request.queryParams().isEmpty()) {
