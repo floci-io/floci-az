@@ -58,6 +58,9 @@ public class ServiceBusConfigGenerator {
                   .startAttr("broker-plugin", "class-name",
                           "io.floci.az.artemis.ServiceBusExpiryPlugin")
                   .end("broker-plugin")
+                  .startAttr("broker-plugin", "class-name",
+                          "io.floci.az.artemis.ServiceBusPeekPlugin")
+                  .end("broker-plugin")
                 .end("broker-plugins")
                 .start("address-settings")
                   .startAttr("address-setting", "match", "#")
@@ -65,6 +68,7 @@ public class ServiceBusConfigGenerator {
                     .elem("dead-letter-address", "DLQ")
                     .elem("auto-create-queues", false)
                     .elem("auto-create-addresses", false)
+                    .elem("enable-ingress-timestamp", true)
                   .end("address-setting")
                 .end("address-settings")
                 .start("diverts")
@@ -82,9 +86,7 @@ public class ServiceBusConfigGenerator {
                     .end("anycast")
                   .end("address")
                   .startAttr("address", "name", "$cbs")
-                    .start("anycast")
-                      .selfClose("queue", "name", "$cbs")
-                    .end("anycast")
+                    .selfClose("multicast")
                   .end("address")
                   .startAttr("address", "name", "$cbs-intercept")
                     .start("anycast")

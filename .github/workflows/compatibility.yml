@@ -92,7 +92,12 @@ jobs:
               -e SERVICEBUS_HOST=floci-az-servicebus-default
               -e SERVICEBUS_AMQP_PORT=5672
           - test: sdk-test-node
+            emulator_env: >-
+              -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
             extra_env: >-
+              -e SERVICEBUS_HOST=floci-az-servicebus-default
+              -e SERVICEBUS_AMQP_PORT=5672
+              -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
           - test: compat-terraform
           - test: compat-opentofu

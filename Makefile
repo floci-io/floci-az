@@ -41,7 +41,10 @@ SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQPS_PORT=5671 \
 	-e SERVICEBUS_NAMESPACE=default
-SUITE_ENV_NODE   = $(POD_IDENTITY_ENV)
+SUITE_ENV_NODE   = $(POD_IDENTITY_ENV) \
+	-e SERVICEBUS_HOST=floci-az-servicebus-default \
+	-e SERVICEBUS_AMQP_PORT=5672 \
+	-e SERVICEBUS_NAMESPACE=default
 SUITE_ENV_DOTNET = -e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQP_PORT=5672
 SERVICEBUS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
@@ -222,7 +225,7 @@ test-java-compat:
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,node,node,$(SUITE_ENV_NODE),,)
+	$(call COMPAT_SESSION,node,node,$(SUITE_ENV_NODE),,,$(SERVICEBUS_EMULATOR_ENV))
 
 test-dotnet-compat:
 	@echo "==> .NET Service Bus SDK compatibility tests (Docker)"
@@ -261,11 +264,11 @@ test-blob-java:
 
 test-blob-node:
 	@echo "==> Blob Storage Node.js SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,node,blob-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts)
+	$(call COMPAT_SESSION,node,blob-node,$(SUITE_ENV_NODE) -e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts)
 
 test-entra-node:
 	@echo "==> Entra ID / Graph Node.js SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,node,entra-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/entra.test.ts)
+	$(call COMPAT_SESSION,node,entra-node,$(SUITE_ENV_NODE) -e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/entra.test.ts)
 
 test-apim-java:
 	@echo "==> API Management Java compatibility tests (Docker)"
@@ -285,7 +288,7 @@ test-blob:
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \
-		$(call RUN_SUITE,node,blob-node,-e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts); \
+		$(call RUN_SUITE,node,blob-node,$(SUITE_ENV_NODE) -e JEST_JUNIT_OUTPUT_DIR=/results -e JEST_JUNIT_OUTPUT_NAME=junit.xml,--entrypoint npm,test -- --runTestsByPath tests/blob.test.ts); \
 		EXIT=$$?; \
 	fi; \
 	if [ $$EXIT -eq 0 ]; then \

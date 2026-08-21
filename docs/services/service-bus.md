@@ -78,6 +78,13 @@ within that session. Attach responses include Azure's `com.microsoft:locked-unti
 Session ownership lasts for the receiver link. Session state and explicit session-lock renewal are
 not currently emulated.
 
+## Message peeking
+
+Queue and subscription receivers support Azure SDK `peekMessages()` calls through each entity's
+AMQP `$management` node. Peeking preserves message bodies, system properties, and application
+properties; supports `maxMessages` and `fromSequenceNumber`; and does not lock, remove, or change
+delivery count. Empty entities return an empty result.
+
 ## Connection String
 
 ```
