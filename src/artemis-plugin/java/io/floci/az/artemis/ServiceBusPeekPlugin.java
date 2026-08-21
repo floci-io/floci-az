@@ -44,6 +44,8 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
     private static final String MESSAGE = "message";
     private static final String STATUS_CODE = "statusCode";
     private static final String STATUS_DESCRIPTION = "statusDescription";
+    private static final int MAX_MESSAGE_COUNT = 250;
+    private static final int MAX_RESPONSE_PAYLOAD_BYTES = 1_048_576;
     private static final Symbol SEQUENCE_NUMBER = Symbol.valueOf("x-opt-sequence-number");
     private static final Symbol ENQUEUED_TIME = Symbol.valueOf("x-opt-enqueued-time");
 
@@ -102,11 +104,12 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
     private void sendPeekResponse(AMQPMessage request) throws Exception {
         Map<?, ?> body = requestBody(request);
         long fromSequenceNumber = number(body, FROM_SEQUENCE_NUMBER).longValue();
-        int messageCount = number(body, MESSAGE_COUNT).intValue();
-        if (fromSequenceNumber < 0 || messageCount <= 0) {
+        int requestedMessageCount = number(body, MESSAGE_COUNT).intValue();
+        if (fromSequenceNumber < 0 || requestedMessageCount <= 0) {
             sendResponse(request, 400, "Bad Request", Map.of());
             return;
         }
+        int messageCount = Math.min(requestedMessageCount, MAX_MESSAGE_COUNT);
 
         String entityPath = normalizeEntityPath(
                 request.getAddress().substring(0,
@@ -150,7 +153,8 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
             int messageCount,
             String sessionId,
             boolean omitMessageBody) {
-        List<Map<String, Object>> messages = new ArrayList<>(Math.min(messageCount, 256));
+        List<Map<String, Object>> messages = new ArrayList<>(messageCount);
+        int responsePayloadBytes = 0;
         try (LinkedListIterator<MessageReference> iterator = queue.browserIterator()) {
             while (iterator.hasNext() && messages.size() < messageCount) {
                 MessageReference reference = iterator.next();
@@ -159,8 +163,13 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
                         || !matchesSession(source, sessionId)) {
                     continue;
                 }
-                messages.add(Map.of(MESSAGE,
-                        new Binary(encodePeekedMessage(source, reference, omitMessageBody))));
+                byte[] encodedMessage = encodePeekedMessage(source, reference, omitMessageBody);
+                if (!messages.isEmpty()
+                        && encodedMessage.length > MAX_RESPONSE_PAYLOAD_BYTES - responsePayloadBytes) {
+                    break;
+                }
+                messages.add(Map.of(MESSAGE, new Binary(encodedMessage)));
+                responsePayloadBytes += encodedMessage.length;
             }
         }
         return messages;

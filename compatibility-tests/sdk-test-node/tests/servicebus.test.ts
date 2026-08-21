@@ -149,6 +149,29 @@ test("empty queue peek returns no messages", async () => {
   }
 }, 30_000);
 
+test("peek caps responses at the Azure 250-message limit", async () => {
+  const queue = uniqueName("peek-limit");
+  await createEntity(`queues/${queue}`);
+  const client = new ServiceBusClient(CONNECTION_STRING);
+  const sender = client.createSender(queue);
+  const receiver = client.createReceiver(queue);
+
+  try {
+    for (let index = 0; index <= 250; index++) {
+      await sender.sendMessages({ body: `message-${index}` });
+    }
+
+    const peeked = await receiver.peekMessages(1_000);
+    expect(peeked).toHaveLength(250);
+    expect(peeked[0].body).toBe("message-0");
+    expect(peeked[249].body).toBe("message-249");
+  } finally {
+    await receiver.close();
+    await sender.close();
+    await client.close();
+  }
+}, 60_000);
+
 test("concurrent clients receive their correlated peek responses", async () => {
   const queue = uniqueName("peek-concurrent");
   await createEntity(`queues/${queue}`);

@@ -83,7 +83,8 @@ not currently emulated.
 Queue and subscription receivers support Azure SDK `peekMessages()` calls through each entity's
 AMQP `$management` node. Peeking preserves message bodies, system properties, and application
 properties; supports `maxMessages` and `fromSequenceNumber`; and does not lock, remove, or change
-delivery count. Empty entities return an empty result.
+delivery count. Each call returns at most Azure's 250-message limit and may return fewer messages
+when needed to keep the AMQP response bounded. Empty entities return an empty result.
 
 ## Connection String
 
