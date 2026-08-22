@@ -209,6 +209,8 @@ public class SqlState {
                         e.serverName(), e.subscriptionId(), e.resourceGroupName(),
                         e.location(), e.administratorLogin(), e.administratorLoginPassword(),
                         null, 0, "localhost",   // containerId / hostPort / host are always reset on load
+                        e.provisioningState() != null ? e.provisioningState() : "Creating",
+                        e.failureCode(), e.failureMessage(),
                         new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
                         new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
                         new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
@@ -250,11 +252,26 @@ public class SqlState {
             String containerId,                   // null until container starts; not persisted
             int hostPort,                         // 0 until container starts; not persisted
             String host,                          // reachable host: "localhost" or the container name on a shared Docker network; not persisted
+            String provisioningState,
+            String failureCode,
+            String failureMessage,
             Map<String, String> tags,
             Map<String, SqlDatabaseEntry> databases,
             Map<String, SqlFirewallRule> firewallRules,
             Instant createdAt
     ) {
+        public SqlServerEntry(String serverName, String subscriptionId, String resourceGroupName,
+                              String location, String administratorLogin,
+                              String administratorLoginPassword, String containerId, int hostPort,
+                              String host, Map<String, String> tags,
+                              Map<String, SqlDatabaseEntry> databases,
+                              Map<String, SqlFirewallRule> firewallRules, Instant createdAt) {
+            this(serverName, subscriptionId, resourceGroupName, location, administratorLogin,
+                administratorLoginPassword, containerId, hostPort, host,
+                containerId == null ? "Creating" : "Ready", null, null,
+                tags, databases, firewallRules, createdAt);
+        }
+
         public String armId() {
             return String.format(
                 "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Sql/servers/%s",
@@ -264,7 +281,15 @@ public class SqlState {
         public SqlServerEntry withContainer(String id, int port, String reachableHost) {
             return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, administratorLogin, administratorLoginPassword,
-                id, port, reachableHost, tags, databases, firewallRules, createdAt);
+                id, port, reachableHost, "Ready", null, null,
+                tags, databases, firewallRules, createdAt);
+        }
+
+        public SqlServerEntry withProvisioningState(String newState, String code, String message) {
+            return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
+                location, administratorLogin, administratorLoginPassword,
+                containerId, hostPort, host, newState, code, message,
+                tags, databases, firewallRules, createdAt);
         }
 
         /** Azure-shaped public hostname returned by ARM resource responses. */

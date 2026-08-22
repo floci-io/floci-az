@@ -18,9 +18,9 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
@@ -54,16 +54,16 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
     private final SqlState state;
     private final SqlServerManager serverManager;
+    private final SqlProvisioningService provisioningService;
     private final ObjectMapper mapper;
 
-    /** Guards concurrent server-start operations (per server name). */
-    private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
-
     @Inject
-    public SqlHandler(EmulatorConfig config, SqlState state, SqlServerManager serverManager) {
+    public SqlHandler(EmulatorConfig config, SqlState state, SqlServerManager serverManager,
+                      SqlProvisioningService provisioningService) {
         this.config = config;
         this.state = state;
         this.serverManager = serverManager;
+        this.provisioningService = provisioningService;
         this.mapper = new ObjectMapper();
     }
 
@@ -95,6 +95,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         // ── checkNameAvailability ──────────────────────────────────────────
         if ("checkNameAvailability".equalsIgnoreCase(tail) && "POST".equals(method)) {
             return handleCheckNameAvailability(request);
+        }
+
+        // Azure SQL server create long-running operation polling.
+        if (tail.matches("locations/[^/]+/serverOperationResults/[^/]+")
+            && "GET".equals(method)) {
+            return getProvisioningOperation(request, segment(tail, 3));
         }
 
         // ── Convenience /connect (server level) ───────────────────────────
@@ -183,7 +189,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         };
     }
 
-    private Response createOrUpdateServer(AzureRequest request, String serverName) {
+    private synchronized Response createOrUpdateServer(AzureRequest request, String serverName) {
         if (!config.services().sql().enabled()) {
             return serviceDisabled();
         }
@@ -198,72 +204,154 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
             String login     = props.path("administratorLogin").asText();
             String password  = props.path("administratorLoginPassword").asText();
 
-            if (login.isBlank()) return badRequest("administratorLogin is required");
-            if (password.isBlank()) return badRequest("administratorLoginPassword is required");
+            if (login.isBlank()) {
+                return badRequest("administratorLogin is required");
+            }
+            if (password.isBlank()) {
+                return badRequest("administratorLoginPassword is required");
+            }
 
             Map<String, String> tags = parseTags(body.path("tags"));
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
-            // Upsert — if server exists, update metadata but do NOT restart container
-            boolean isNew = !state.serverExists(serverName);
-            SqlState.SqlServerEntry entry;
-            if (isNew) {
-                var databases     = new java.util.concurrent.ConcurrentHashMap<String, SqlState.SqlDatabaseEntry>();
-                var firewallRules = new java.util.concurrent.ConcurrentHashMap<String, SqlState.SqlFirewallRule>();
-                entry = new SqlState.SqlServerEntry(
-                    serverName, sub, rg, location, login, password,
-                    null, 0, "localhost", tags, databases, firewallRules, Instant.now());
-                state.putServer(entry);
+            Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
+            boolean isNew = current.isEmpty();
 
-                if (config.services().sql().dataPlaneProvider() == NONE) {
-                    // Control-plane-only mode: no Docker access or EULA requirement.
+            if (config.services().sql().dataPlaneProvider() == NONE) {
+                SqlState.SqlServerEntry ready = desiredEntry(current, serverName, sub, rg,
+                    location, login, password, tags, "Ready");
+                state.putServer(ready);
+                if (!state.databaseExists(serverName, "master")) {
                     state.putDatabase(serverName, SqlState.SqlDatabaseEntry.master(serverName));
-                    return Response.status(201).entity(serverResponse(entry)).build();
                 }
-
-                // Start container (may take 15-30s)
-                try {
-                    Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                    synchronized (lock) {
-                        // Re-check after acquiring lock — another thread may have started it
-                        Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
-                        if (current.isPresent() && current.get().containerId() != null) {
-                            entry = current.get();
-                        } else {
-                            entry = serverManager.startServer(entry);
-                            // Auto-create master database in state
-                            state.putServer(entry);
-                            state.putDatabase(serverName, SqlState.SqlDatabaseEntry.master(serverName));
-                        }
-                    }
-                } catch (SqlServerManager.EulaNotAcceptedException e) {
-                    state.removeServer(serverName);
-                    return ArmErrors.error(503, "EulaNotAccepted", e.getMessage());
-                } catch (Exception e) {
-                    state.removeServer(serverName);
-                    LOG.errorf(e, "Failed to start SQL Server container for server=%s", serverName);
-                    return ArmErrors.error(500, "ContainerStartFailed", e.getMessage());
-                }
-            } else {
-                entry = state.getServer(serverName).get();
-                // Update mutable fields
-                state.putServer(new SqlState.SqlServerEntry(
-                    serverName, sub, rg, location, login,
-                    password.isBlank() ? entry.administratorLoginPassword() : password,
-                    entry.containerId(), entry.hostPort(), entry.host(), tags,
-                    entry.databases(), entry.firewallRules(), entry.createdAt()));
-                entry = state.getServer(serverName).get();
+                return Response.status(isNew ? 201 : 200).entity(serverResponse(ready)).build();
             }
 
-            return Response.status(isNew ? 201 : 200)
-                .entity(serverResponse(entry))
-                .build();
+            serverManager.requireEulaAccepted();
+            if (current.isPresent() && "Creating".equals(current.get().provisioningState())) {
+                if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
+                    return ArmErrors.error(409, "ConflictingServerOperation",
+                        "A conflicting create or update operation is in progress for SQL server '"
+                            + serverName + "'.");
+                }
+                Optional<SqlProvisioningService.SqlProvisioningOperation> active =
+                    provisioningService.activeOperation(serverName);
+                if (active.isPresent()) {
+                    return accepted(request, active.get(), current.get());
+                }
+                current = state.getServer(serverName);
+            }
 
+            if (current.isPresent() && "Ready".equals(current.get().provisioningState())) {
+                SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
+                    location, login, password, tags, "Ready");
+                state.putServer(updated);
+                return Response.ok(serverResponse(updated)).build();
+            }
+
+            SqlState.SqlServerEntry desired = desiredEntry(current, serverName, sub, rg,
+                location, login, password, tags, "Creating");
+            state.putServer(desired);
+            SqlProvisioningService.SqlProvisioningOperation operation =
+                provisioningService.begin(desired);
+            return accepted(request, operation, desired);
+
+        } catch (SqlServerManager.EulaNotAcceptedException e) {
+            return ArmErrors.error(503, "EulaNotAccepted", e.getMessage());
         } catch (Exception e) {
             LOG.errorf(e, "Error creating SQL server %s", serverName);
-            return Response.status(500).entity(Map.of("error", e.getMessage())).build();
+            return ArmErrors.error(500, "InternalServerError", e.getMessage());
         }
+    }
+
+    private Response getProvisioningOperation(AzureRequest request, String operationId) {
+        return provisioningService.get(operationId)
+            .map(operation -> operationResponse(request, operation))
+            .orElse(ArmErrors.error(404, "OperationIdNotFound",
+                "SQL provisioning operation '" + operationId + "' was not found."));
+    }
+
+    private Response operationResponse(AzureRequest request,
+                                       SqlProvisioningService.SqlProvisioningOperation operation) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", operation.id());
+        body.put("status", operation.status());
+        body.put("startTime", operation.startTime());
+        if (operation.endTime() != null) {
+            body.put("endTime", operation.endTime());
+        }
+        if (operation.errorCode() != null) {
+            body.put("error", Map.of(
+                "code", operation.errorCode(),
+                "message", operation.errorMessage()));
+        }
+        Response.ResponseBuilder response = Response.status(operation.inProgress() ? 202 : 200)
+            .entity(body);
+        if (operation.inProgress()) {
+            response.header("Location", operationLocation(request, operation));
+            response.header("Retry-After", "1");
+        }
+        return response.build();
+    }
+
+    private Response accepted(AzureRequest request,
+                              SqlProvisioningService.SqlProvisioningOperation operation,
+                              SqlState.SqlServerEntry server) {
+        return Response.status(202)
+            .header("Location", operationLocation(request, operation))
+            .header("Retry-After", "1")
+            .entity(serverResponse(server))
+            .build();
+    }
+
+    private String operationLocation(AzureRequest request,
+                                     SqlProvisioningService.SqlProvisioningOperation operation) {
+        String host = request.headers().getHeaderString("Host");
+        if (host == null || host.isBlank()) {
+            host = "localhost:" + config.port();
+        }
+        String scheme = request.headers().getHeaderString("X-Forwarded-Proto");
+        if (scheme == null || scheme.isBlank()) {
+            scheme = request.secure() ? "https" : "http";
+        }
+        String apiVersion = request.queryParams().getOrDefault("api-version", "2021-11-01");
+        String location = operation.location().toLowerCase(Locale.ROOT).replace(" ", "");
+        return scheme + "://" + host + "/subscriptions/"
+            + extractSubscriptionId(operation.resourceId())
+            + "/resourceGroups/" + extractResourceGroup(operation.resourceId())
+            + "/providers/Microsoft.Sql/locations/" + location
+            + "/serverOperationResults/" + operation.id() + "?api-version=" + apiVersion;
+    }
+
+    private static SqlState.SqlServerEntry desiredEntry(
+            Optional<SqlState.SqlServerEntry> current, String serverName, String subscriptionId,
+            String resourceGroup, String location, String login, String password,
+            Map<String, String> tags, String provisioningState) {
+        Map<String, SqlState.SqlDatabaseEntry> databases = current
+            .map(SqlState.SqlServerEntry::databases)
+            .orElseGet(java.util.concurrent.ConcurrentHashMap::new);
+        Map<String, SqlState.SqlFirewallRule> firewallRules = current
+            .map(SqlState.SqlServerEntry::firewallRules)
+            .orElseGet(java.util.concurrent.ConcurrentHashMap::new);
+        Instant createdAt = current.map(SqlState.SqlServerEntry::createdAt).orElseGet(Instant::now);
+        String containerId = current.map(SqlState.SqlServerEntry::containerId).orElse(null);
+        int hostPort = current.map(SqlState.SqlServerEntry::hostPort).orElse(0);
+        String host = current.map(SqlState.SqlServerEntry::host).orElse("localhost");
+        return new SqlState.SqlServerEntry(serverName, subscriptionId, resourceGroup, location,
+            login, password, containerId, hostPort, host, provisioningState, null, null,
+            tags, databases, firewallRules, createdAt);
+    }
+
+    private static boolean equivalent(SqlState.SqlServerEntry current, String subscriptionId,
+                                      String resourceGroup, String location, String login,
+                                      String password, Map<String, String> tags) {
+        return current.subscriptionId().equalsIgnoreCase(subscriptionId)
+            && current.resourceGroupName().equalsIgnoreCase(resourceGroup)
+            && current.location().equalsIgnoreCase(location)
+            && current.administratorLogin().equals(login)
+            && current.administratorLoginPassword().equals(password)
+            && current.tags().equals(tags);
     }
 
     private Response getServer(String serverName) {
@@ -273,12 +361,19 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response deleteServer(String serverName) {
-        Optional<SqlState.SqlServerEntry> entry = state.getServer(serverName);
-        if (entry.isEmpty()) return notFound("Server '" + serverName + "' not found");
-        state.removeServer(serverName);
-        try { serverManager.stopServer(entry.get()); } catch (Exception e) {
-            LOG.warnf(e, "Error stopping SQL container for server %s", serverName);
+        if (!state.serverExists(serverName)) {
+            return notFound("Server '" + serverName + "' not found");
         }
+        provisioningService.cancel(serverName);
+        Optional<SqlState.SqlServerEntry> entry = state.getServer(serverName);
+        state.removeServer(serverName);
+        entry.ifPresent(server -> {
+            try {
+                serverManager.stopServer(server);
+            } catch (Exception e) {
+                LOG.warnf(e, "Error stopping SQL container for server %s", serverName);
+            }
+        });
         return Response.status(204).build();
     }
 
@@ -456,8 +551,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("administratorLogin", s.administratorLogin());
         props.put("version", "12.0");
-        props.put("state", (config.services().sql().dataPlaneProvider() == NONE
-            || s.containerId() != null) ? "Ready" : "Creating");
+        props.put("state", s.provisioningState());
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("minimalTlsVersion", "None");
         props.put("publicNetworkAccess", "Enabled");
@@ -626,12 +720,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
      * Used by {@code POST /_admin/reset} for test isolation.
      */
     public void clear() {
+        provisioningService.clear();
         state.listServers().forEach(entry -> {
             try { serverManager.stopServer(entry); } catch (Exception e) {
                 LOG.warnf(e, "Error stopping SQL container during reset: server=%s", entry.serverName());
             }
         });
         state.clear();
-        startLocks.clear();
     }
 }

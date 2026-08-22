@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.sql.*;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -71,26 +72,28 @@ class SqlCompatibilityTest {
         // Reset emulator state to ensure a clean slate
         send("POST", BASE + "/_admin/reset", null);
 
-        // PUT the logical server — this starts the Docker container
+        // PUT the logical server — managed container startup continues asynchronously.
         String serverBody = String.format(
             "{\"location\":\"eastus\",\"properties\":{"
             + "\"administratorLogin\":\"%s\","
             + "\"administratorLoginPassword\":\"%s\"}}",
             LOGIN, PWD);
 
-        // Allow up to 8 minutes: first-time image pull (~1.5 GB) + container start + readiness wait.
-        // Subsequent runs (image cached by Docker) will complete in under 60 seconds.
         HttpResponse<String> resp = send("PUT",
             ARM_BASE + "/servers/" + SERVER + "?api-version=2021-11-01",
-            serverBody, Duration.ofMinutes(8));
+            serverBody, Duration.ofSeconds(10));
 
         // 503 = EULA not accepted — skip gracefully (Docker SQL Server needs explicit consent)
         assumeTrue(resp.statusCode() != 503,
             "SQL Server EULA not accepted — set FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y and restart emulator");
 
-        // Azure returns 201 Created for new resources, 200 OK for updates — both are valid
-        assertTrue(resp.statusCode() == 200 || resp.statusCode() == 201,
+        assertTrue(resp.statusCode() == 200 || resp.statusCode() == 201 || resp.statusCode() == 202,
             "PUT server failed (" + resp.statusCode() + "): " + resp.body());
+        if (resp.statusCode() == 202) {
+            String operationLocation = resp.headers().firstValue("Location").orElseThrow(() ->
+                new AssertionError("Managed SQL create returned 202 without Location"));
+            awaitProvisioning(operationLocation, Duration.ofMinutes(8));
+        }
 
         // Fetch connection info for the master database
         HttpResponse<String> connectResp = send("GET",
@@ -408,7 +411,7 @@ class SqlCompatibilityTest {
 
     /**
      * Like {@link #send(String, String, String)} but with an explicit request timeout.
-     * Use a long timeout (e.g. 3 minutes) for calls that start Docker containers.
+     * Long-running operations use their polling URL instead of extending this request timeout.
      */
     private static HttpResponse<String> send(String method, String url, String jsonBody,
                                              Duration timeout) throws Exception {
@@ -423,6 +426,26 @@ class SqlCompatibilityTest {
             builder.method(method, HttpRequest.BodyPublishers.noBody());
         }
         return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static void awaitProvisioning(String operationLocation, Duration timeout)
+            throws Exception {
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            HttpResponse<String> response = send("GET", operationLocation, null);
+            if (response.statusCode() == 200) {
+                assertTrue(response.body().contains("\"status\":\"Succeeded\""),
+                    "SQL provisioning failed: " + response.body());
+                return;
+            }
+            assertEquals(202, response.statusCode(),
+                "Unexpected SQL operation response: " + response.body());
+            long retrySeconds = response.headers().firstValue("Retry-After")
+                .map(Long::parseLong)
+                .orElse(1L);
+            Thread.sleep(Duration.ofSeconds(retrySeconds));
+        }
+        fail("SQL provisioning did not complete within " + timeout);
     }
 
     /**
