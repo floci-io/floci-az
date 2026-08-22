@@ -21,7 +21,7 @@ import static org.hamcrest.Matchers.*;
  *   <li>checkNameAvailability</li>
  *   <li>Firewall rule CRUD (metadata, no Docker)</li>
  *   <li>Connection policy default</li>
- *   <li>EULA guard — 503 when ACCEPT_EULA is not set</li>
+ *   <li>Default control-plane-only provisioning without Docker or EULA</li>
  * </ul>
  *
  * <p>Tests that require an actual SQL Server container (CREATE DATABASE, JDBC
@@ -122,20 +122,27 @@ class SqlHandlerTest {
             .body("error.message", containsString("administratorLoginPassword"));
     }
 
-    // ── EULA guard ────────────────────────────────────────────────────────────
+    // ── Default data-plane provider ──────────────────────────────────────────
 
     @Test
-    @DisplayName("PUT server returns 503 when EULA not accepted")
-    void putServerEulaNotAccepted() {
-        // Default config has acceptEula="" — should get 503
+    @DisplayName("default provider creates Azure-shaped control-plane state without EULA")
+    void putServerDefaultsToControlPlaneOnly() {
         given()
             .contentType("application/json")
             .body("{\"location\":\"eastus\",\"properties\":{"
                 + "\"administratorLogin\":\"sa\","
                 + "\"administratorLoginPassword\":\"FlociAz_Strong123!\"}}")
-            .when().put(BASE + "/servers/eulatest?api-version=2021-11-01")
-            .then().statusCode(503)
-            .body("error", equalTo("EulaNotAccepted"));
+            .when().put(BASE + "/servers/controlplane?api-version=2021-11-01")
+            .then().statusCode(201)
+            .body("properties.state", equalTo("Ready"))
+            .body("properties.fullyQualifiedDomainName",
+                equalTo("controlplane.database.windows.net"))
+            .body("properties", not(hasKey("localPort")));
+
+        given()
+            .when().get("/" + ACCOUNT + "-sql/servers/controlplane/connect")
+            .then().statusCode(409)
+            .body("error.code", equalTo("DataPlaneNotEnabled"));
     }
 
     // ── Firewall rules (no container needed) ─────────────────────────────────

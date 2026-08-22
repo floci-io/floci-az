@@ -13,12 +13,11 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Tests for {@link SqlHandler} in {@code mocked=true} mode: servers are created in state with no
- * SQL Server container and no EULA requirement, transitioning immediately to {@code state=Ready}.
+ * Verifies the deprecated {@code mocked=true} alias still selects the control-plane-only provider.
  */
 @QuarkusTest
 @TestProfile(SqlHandlerMockedTest.MockedProfile.class)
-@DisplayName("SqlHandler — mocked mode (no Docker, no EULA)")
+@DisplayName("SqlHandler — legacy mocked mode compatibility")
 @SuppressWarnings("unused")
 class SqlHandlerMockedTest {
 
@@ -51,6 +50,8 @@ class SqlHandlerMockedTest {
             .then().statusCode(201)
             .body("name", equalTo("mockedserver"))
             .body("properties.state", equalTo("Ready"))
+            .body("properties.fullyQualifiedDomainName",
+                equalTo("mockedserver.database.windows.net"))
             .body("properties", not(hasKey("localPort")));
     }
 

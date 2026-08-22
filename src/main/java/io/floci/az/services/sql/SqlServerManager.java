@@ -141,7 +141,7 @@ public class SqlServerManager {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private void requireEulaAccepted() {
+    void requireEulaAccepted() {
         String eula = config.services().sql().acceptEula();
         if (!"Y".equalsIgnoreCase(eula)) {
             throw new EulaNotAcceptedException(

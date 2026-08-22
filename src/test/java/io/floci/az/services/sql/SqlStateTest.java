@@ -47,6 +47,8 @@ class SqlStateTest {
         Optional<SqlState.SqlServerEntry> found = state.getServer("myserver");
         assertTrue(found.isPresent());
         assertEquals("myserver", found.get().serverName());
+        assertEquals("myserver.database.windows.net", found.get().fullyQualifiedDomainName());
+        assertEquals("localhost", found.get().dataPlaneHost());
     }
 
     @Test
@@ -217,7 +219,8 @@ class SqlStateTest {
         assertEquals("new-container", updated.containerId());
         assertEquals(14444, updated.hostPort());
         assertEquals("floci-az-sql-srv", updated.host());
-        assertEquals("floci-az-sql-srv", updated.fullyQualifiedDomainName());
+        assertEquals("floci-az-sql-srv", updated.dataPlaneHost());
+        assertEquals("srv.database.windows.net", updated.fullyQualifiedDomainName());
         // original is immutable
         assertEquals("container-abc", original.containerId());
     }

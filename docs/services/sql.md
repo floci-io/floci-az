@@ -1,26 +1,48 @@
 # Azure SQL Database
 
-Compatible with the `mssql-jdbc`, `pyodbc`, `System.Data.SqlClient`, and any TDS-speaking client.
-
-> **Requires Docker** — each logical SQL Server maps to one SQL Server 2025 container.
-> The data plane (TDS/port 1433) goes **directly** to the container; floci-az only handles
-> the management plane (ARM REST API).
+Management-plane operations work without Docker by default. Set the data-plane provider to
+`managed` to use `mssql-jdbc`, `pyodbc`, `System.Data.SqlClient`, or another TDS-speaking client
+against a real SQL Server 2025 container.
 
 ---
 
 ## Features
 
-- **Servers** — create, get, list, delete; one Docker container per logical server
+- **Servers** — create, get, list, delete; immediate ARM state by default
 - **Databases** — create (with optional collation), get, list, delete; guarded against dropping `master`
 - **Firewall rules** — full CRUD; metadata-only (no actual IP filtering in dev mode)
 - **Connection policy** — GET returns `Default` (read-only)
 - **Name availability check** — `POST .../checkNameAvailability`
-- **Connection strings** — convenience endpoint returns JDBC, ADO.NET, pyodbc, and EF Core strings ready to use
-- **EULA guard** — server creation returns `503` until `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y` is set
+- **Data-plane providers** — `none` (default), `managed`, and reserved `external`
+- **Asynchronous managed provisioning** — server `PUT` returns `202` with Azure `Location` polling
+- **Connection strings** — managed mode returns JDBC, ADO.NET, pyodbc, and EF Core strings
+- **EULA guard** — managed server creation requires `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y`
 
 ---
 
-## EULA Requirement
+## Data-plane providers
+
+| Provider | Behavior |
+|---|---|
+| `none` | Default. Azure-compatible ARM state only; no Docker access, image pull, EULA, or TDS endpoint. |
+| `managed` | Starts one real SQL Server container per logical server. Requires Docker and EULA acceptance. |
+| `external` | Reserved for a later release. Requests currently return `DataPlaneProviderUnavailable`. |
+
+When `none` is selected, `/connect` returns `409 DataPlaneNotEnabled`. ARM responses still expose
+the Azure-shaped `{server}.database.windows.net` hostname and never include emulator-only port data.
+
+The deprecated `mocked` setting remains a compatibility alias when `data-plane.provider` is absent:
+`true` maps to `none`; `false` maps to `managed`.
+
+Managed server creation does not wait for image pull or engine startup on the request thread. A new
+server is persisted with `state=Creating` and returns `202 Accepted`, `Location`, and `Retry-After`.
+Poll `Location` until it returns `200` with `status=Succeeded` or `status=Failed`. Server GET exposes
+the corresponding `Creating`, `Ready`, or `Failed` resource state. Equivalent PUT retries reuse the
+same operation; conflicting updates during provisioning return `409 ConflictingServerOperation`.
+
+---
+
+## EULA Requirement (managed provider only)
 
 SQL Server is covered by the [Microsoft SQL Server EULA](https://go.microsoft.com/fwlink/?linkid=857698).
 You must explicitly accept it before the emulator will start any container:
@@ -33,10 +55,10 @@ FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y
 -Dfloci-az.services.sql.accept-eula=Y
 ```
 
-Without it, `PUT /servers/{name}` returns:
+Without it, managed `PUT /servers/{name}` returns:
 
 ```json
-{ "error": "EulaNotAccepted", "message": "..." }
+{ "error": { "code": "EulaNotAccepted", "message": "..." } }
 ```
 
 ---
@@ -65,6 +87,9 @@ The `/connect` endpoints are a **floci-az addition** — they return all connect
 
 ## Quickstart
 
+This data-plane quickstart assumes `data-plane.provider: managed`, Docker access, and accepted EULA.
+For ARM-only use, keep the default `none` provider and stop after creating management resources.
+
 ### 1 — Create a server
 
 ```bash
@@ -80,8 +105,8 @@ curl -s -X PUT \
   }'
 ```
 
-> First call starts the container and waits for the SQL Server engine to become ready (~30 s with
-> a cached image, longer on the first pull of the SQL Server image).
+> In managed mode, first call returns promptly with `202 Accepted`; image pull and SQL Server startup
+> continue in the background. Follow the `Location` header before requesting connection strings.
 
 ### 2 — Get connection strings
 
@@ -235,12 +260,8 @@ PORT=$(curl -s "http://localhost:4577/devstoreaccount1-sql/servers/myserver/conn
        | python3 -c "import sys,json; print(json.load(sys.stdin)['port'])")
 ```
 
-**The server GET response (`localPort` property):**
-
-```bash
-curl -s "http://localhost:4577/subscriptions/my-sub/resourceGroups/my-rg/providers/Microsoft.Sql/servers/myserver?api-version=2021-11-01" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['properties']['localPort'])"
-```
+ARM resources intentionally omit the emulator-specific port. Use `/connect` for reachable endpoint
+details in data-plane modes.
 
 ---
 
@@ -296,7 +317,8 @@ floci-az:
   services:
     sql:
       enabled: true
-      mocked: false                                 # false (default) = real SQL Server container (needs accept-eula=Y). true = management plane only, no Docker, no EULA
+      data-plane:
+        provider: managed                           # none (default) | managed | external (reserved)
       accept-eula: "Y"                              # Required to start containers
       image: "mcr.microsoft.com/mssql/server:2025-latest"
       startup-timeout-seconds: 60
@@ -305,16 +327,12 @@ floci-az:
 Microsoft supports SQL Server Linux container images only on Intel and AMD x86-64 hosts.
 ARM64 hosts require an explicitly configured alternative image or unsupported CPU emulation.
 
-In **mocked** mode (`mocked: true`) servers are created in state and report
-`state=Ready` with no SQL Server container and no EULA required — useful for
-management-plane testing without Docker. The data plane is unavailable (no live
-JDBC endpoint), so the `/connect` endpoints return no usable port.
-
 | Environment Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SQL_ENABLED` | `true` | Enable or disable the SQL service |
-| `FLOCI_AZ_SERVICES_SQL_MOCKED` | `false` | Mocked mode (management plane only, no Docker, no EULA) |
-| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA |
+| `FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER` | `none` | Data-plane provider: `none`, `managed`, or reserved `external` |
+| `FLOCI_AZ_SERVICES_SQL_MOCKED` | _(unset)_ | Deprecated alias used only when provider is unset: `true` = `none`, `false` = `managed` |
+| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | `N` | Set to `Y` to accept the Microsoft SQL Server EULA in managed mode |
 | `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/mssql/server:2025-latest` | Docker image to use for SQL Server containers |
 | `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for the SQL Server engine to become ready |
 
@@ -332,6 +350,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # required for SQL + Functions
     environment:
+      FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER: managed
       FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA: "Y"
       # SQL Server containers bind a random port directly to the host.
       # Do NOT add those ports here — floci-az manages them via Docker socket.
@@ -359,5 +378,6 @@ services:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The management plane (ARM API) goes through floci-az on port 4577.
-The data plane (TDS protocol) connects **directly** to the SQL Server container on its dynamic port — floci-az is not in the data path.
+The management plane (ARM API) always goes through floci-az on port 4577. With `provider=managed`,
+the data plane connects **directly** to the SQL Server container on its dynamic port. With
+`provider=none`, no data-plane container or port exists.

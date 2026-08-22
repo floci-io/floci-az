@@ -22,8 +22,8 @@ public record SqlConnectionInfo(
     /**
      * Builds connection strings for the given host/port and credentials.
      *
-     * @param host      hostname — always {@code localhost} in single-node dev mode
-     * @param port      the host port that the SQL Server container is bound to
+     * @param host      reachable data-plane hostname
+     * @param port      reachable SQL Server port
      * @param login     SQL Server login (typically {@code sa})
      * @param password  SQL Server password
      * @param database  database name, or {@code null} / empty for server-level strings
