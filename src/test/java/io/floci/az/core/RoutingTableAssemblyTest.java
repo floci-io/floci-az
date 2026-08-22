@@ -76,6 +76,7 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.ManagedIdentity/", "managedidentity"),
         Map.entry("/providers/Microsoft.ContainerService/", "aks"),
         Map.entry("/providers/Microsoft.ContainerRegistry/", "acr"),
+        Map.entry("/providers/Microsoft.ContainerInstance/", "aci"),
         Map.entry("/providers/Microsoft.Sql/", "sql"),
         Map.entry("/providers/Microsoft.DBforPostgreSQL/", "postgres"),
         Map.entry("/providers/Microsoft.DBforMySQL/", "mysql"),
