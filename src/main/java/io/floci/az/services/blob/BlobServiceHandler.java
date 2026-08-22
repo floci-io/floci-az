@@ -67,13 +67,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private final StorageSasAuthorization sasAuthorization;
     private final DataLakePathOperations dataLakePathOperations;
 
+    private final BlobLeaseService leaseService;
+
     @Inject
     public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
                               UserDelegationKeyService userDelegationKeyService,
-                              StorageSasAuthorization sasAuthorization) {
+                              StorageSasAuthorization sasAuthorization,
+                              BlobLeaseService leaseService) {
         this.config = config;
         this.userDelegationKeyService = userDelegationKeyService;
         this.sasAuthorization = sasAuthorization;
+        this.leaseService = leaseService;
         this.store = storageFactory.create("blob");
         this.dataLakePathOperations = new DataLakePathOperations(store);
     }
@@ -164,7 +168,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = notImplemented();
                 }
             } else {
-                if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
+                if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
+                    response = leaseBlob(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "metadata".equals(comp)) {
@@ -208,6 +214,21 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response notImplemented() {
         return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                 .toXmlResponse(501);
+    }
+
+    /** PUT /{container}/{blob}?comp=lease — Lease Blob (acquire/renew/change/release/break). */
+    private Response leaseBlob(AzureRequest request, String containerName, String blobName) {
+        // The existence check must share the lease monitor, or an acquire can
+        // install a lease for a blob a concurrent delete just removed.
+        return leaseService.exclusively(() -> {
+            Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            return leaseService.handleLeaseOp(request, objKey(request.accountName(), containerName, blobName),
+                    object.get().etag(), RFC1123_DATE_TIME.format(object.get().lastModified()));
+        });
     }
 
     /**
@@ -279,15 +300,21 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
         String key = nsKey(request.accountName(), containerName);
-        if (store.get(key).isPresent()) {
-            return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
-                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-        }
-        store.put(key, NS_SENTINEL);
-        return Response.status(Response.Status.CREATED)
-                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                .header("ETag", UUID.randomUUID().toString())
-                .build();
+        // Check-and-create must share the lease monitor, or a create that
+        // observed absence can re-put the sentinel after a concurrent deletion
+        // sweep (resurrecting the container after DELETE answered 202), and
+        // two concurrent creates can both answer 201.
+        return leaseService.exclusively(() -> {
+            if (store.get(key).isPresent()) {
+                return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
+                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            store.put(key, NS_SENTINEL);
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                    .header("ETag", UUID.randomUUID().toString())
+                    .build();
+        });
     }
 
     private Response deleteContainer(AzureRequest request, String containerName) {
@@ -295,14 +322,19 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        store.delete(nsKey(request.accountName(), containerName));
-        String objPrefix = request.accountName() + "/" + containerName + "/";
-        String blkPrefix = BLK_PREFIX + objPrefix;
-        store.keys().stream()
-                .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix))
-                .toList()
-                .forEach(store::delete);
-        return Response.status(Response.Status.ACCEPTED).build();
+        // The sweep runs under the lease monitor so no lease op or guarded
+        // write can interleave and resurrect blob or lease state mid-deletion.
+        return leaseService.exclusively(() -> {
+            store.delete(nsKey(request.accountName(), containerName));
+            String objPrefix = request.accountName() + "/" + containerName + "/";
+            String blkPrefix = BLK_PREFIX + objPrefix;
+            store.keys().stream()
+                    .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix))
+                    .toList()
+                    .forEach(store::delete);
+            leaseService.onContainerDeleted(objPrefix);
+            return Response.status(Response.Status.ACCEPTED).build();
+        });
     }
 
     private Response listContainers(AzureRequest request) {
@@ -332,46 +364,57 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response putBlob(AzureRequest request, String containerName, String blobName) {
         try {
-            Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
-            Response authFailure = existing.isPresent()
-                    ? authorizeWrite(request, containerName, blobName)
-                    : authorizeCreate(request, containerName, blobName);
-            if (authFailure != null) {
-                return authFailure;
-            }
-            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
-                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
-                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-            }
-
-            Response conditionFailure = validateBlobConditions(request, existing);
-            if (conditionFailure != null) {
-                return conditionFailure;
-            }
-
             byte[] data = request.bodyStream().readAllBytes();
-            Map<String, String> metadata = new HashMap<>();
-            String blobType = request.headers().getHeaderString("x-ms-blob-type");
-            metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
-            addBlobHttpProperties(request, metadata);
-            String dataLakeResourceType = request.queryParams().get("resource");
-            if ("file".equals(dataLakeResourceType) || "directory".equals(dataLakeResourceType)) {
-                metadata.put("DataLakeResourceType", dataLakeResourceType);
-            }
-            metadata.put("Name", blobName);
-            metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
-            metadata.putAll(readUserMetadata(request));
+            return leaseService.exclusively(() -> {
+                // Create-vs-write is classified from blob existence, so the
+                // classification must read the same snapshot the mutation
+                // uses: outside the monitor, a create-only SAS that observed
+                // absence could overwrite a concurrently created blob.
+                Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+                Response authFailure = existing.isPresent()
+                        ? authorizeWrite(request, containerName, blobName)
+                        : authorizeCreate(request, containerName, blobName);
+                if (authFailure != null) {
+                    return authFailure;
+                }
+                if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                    return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                            .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+                }
 
-            String etag = UUID.randomUUID().toString();
-            store.put(objKey(request.accountName(), containerName, blobName),
-                    new StoredObject(blobName, data, metadata, Instant.now(), etag));
+                Response conditionFailure = validateBlobConditions(request, existing);
+                if (conditionFailure != null) {
+                    return conditionFailure;
+                }
+                Response leaseFailure = leaseService.validateWrite(request,
+                        objKey(request.accountName(), containerName, blobName));
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
 
-            return Response.status(Response.Status.CREATED)
-                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                    .header("ETag", etag)
-                    .header("x-ms-request-server-encrypted", "true")
-                    .header("Content-Length", 0)
-                    .build();
+                Map<String, String> metadata = new HashMap<>();
+                String blobType = request.headers().getHeaderString("x-ms-blob-type");
+                metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
+                addBlobHttpProperties(request, metadata);
+                String dataLakeResourceType = request.queryParams().get("resource");
+                if ("file".equals(dataLakeResourceType) || "directory".equals(dataLakeResourceType)) {
+                    metadata.put("DataLakeResourceType", dataLakeResourceType);
+                }
+                metadata.put("Name", blobName);
+                metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
+                metadata.putAll(readUserMetadata(request));
+
+                String etag = UUID.randomUUID().toString();
+                store.put(objKey(request.accountName(), containerName, blobName),
+                        new StoredObject(blobName, data, metadata, Instant.now(), etag));
+
+                return Response.status(Response.Status.CREATED)
+                        .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                        .header("ETag", etag)
+                        .header("x-ms-request-server-encrypted", "true")
+                        .header("Content-Length", 0)
+                        .build();
+            });
         } catch (IOException e) {
             return Response.serverError().build();
         }
@@ -435,10 +478,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("Accept-Ranges", "bytes")
                 // Get Blob always reports these. Strict SDK clients (e.g. the Azure SDK for C++)
                 // read x-ms-creation-time and x-ms-server-encrypted unconditionally and throw when
-                // they are absent. Leases are not modelled, so the values are those of an unleased blob.
+                // they are absent.
                 .header("x-ms-creation-time", RFC1123_DATE_TIME.format(creationTime(so)))
-                .header("x-ms-lease-status", "unlocked")
-                .header("x-ms-lease-state", "available")
                 .header("x-ms-server-encrypted", "true");
         for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
@@ -446,6 +487,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 rb.header(header, value);
             }
         }
+        leaseService.addLeaseHeaders(rb, objKey(request.accountName(), containerName, blobName));
         if (isRangeRequest) {
             rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
         }
@@ -468,17 +510,25 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
-        if (object.isEmpty()) {
-            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
-                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-        }
-        Response conditionFailure = validateBlobConditions(request, object);
-        if (conditionFailure != null) {
-            return conditionFailure;
-        }
-        store.delete(objKey(request.accountName(), containerName, blobName));
-        return Response.status(Response.Status.ACCEPTED).build();
+        return leaseService.exclusively(() -> {
+            Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response conditionFailure = validateBlobConditions(request, object);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+            store.delete(objKey(request.accountName(), containerName, blobName));
+            leaseService.onBlobDeleted(objKey(request.accountName(), containerName, blobName));
+            return Response.status(Response.Status.ACCEPTED).build();
+        });
     }
 
     private Response getBlobMetadata(AzureRequest request, String containerName, String blobName) {
@@ -510,34 +560,41 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
-        if (object.isEmpty()) {
-            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
-                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-        }
-
-        Response conditionFailure = validateBlobConditions(request, object);
-        if (conditionFailure != null) {
-            return conditionFailure;
-        }
-
-        StoredObject so = object.get();
-        Map<String, String> metadata = new HashMap<>();
-        so.metadata().forEach((key, value) -> {
-            if (!key.startsWith(USER_METADATA_PREFIX)) {
-                metadata.put(key, value);
+        return leaseService.exclusively(() -> {
+            Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
             }
+
+            Response conditionFailure = validateBlobConditions(request, object);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+
+            StoredObject so = object.get();
+            Map<String, String> metadata = new HashMap<>();
+            so.metadata().forEach((key, value) -> {
+                if (!key.startsWith(USER_METADATA_PREFIX)) {
+                    metadata.put(key, value);
+                }
+            });
+            metadata.putAll(readUserMetadata(request));
+
+            String etag = UUID.randomUUID().toString();
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(so.key(), so.data(), metadata, Instant.now(), etag));
+
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                    .header("ETag", etag)
+                    .build();
         });
-        metadata.putAll(readUserMetadata(request));
-
-        String etag = UUID.randomUUID().toString();
-        store.put(objKey(request.accountName(), containerName, blobName),
-                new StoredObject(so.key(), so.data(), metadata, Instant.now(), etag));
-
-        return Response.ok()
-                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                .header("ETag", etag)
-                .build();
     }
 
     private Response listBlobs(AzureRequest request, String containerName) {
@@ -679,10 +736,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (authFailure != null) {
                 return authFailure;
             }
-            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
-                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
-                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-            }
             String blockId = request.queryParams().get("blockid");
             if (blockId == null || blockId.isBlank()) {
                 return new AzureErrorResponse("InvalidQueryParameterValue",
@@ -690,13 +743,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         .toXmlResponse(400);
             }
             byte[] data = request.bodyStream().readAllBytes();
-            store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
-                    new StoredObject(blockId, data, Map.of("BlockId", blockId), Instant.now(),
-                            UUID.randomUUID().toString()));
-            return Response.status(Response.Status.CREATED)
-                    .header("x-ms-request-server-encrypted", "true")
-                    .header("Content-Length", 0)
-                    .build();
+            return leaseService.exclusively(() -> {
+                if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                    return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                            .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+                }
+                Response leaseFailure = leaseService.validateWrite(request,
+                        objKey(request.accountName(), containerName, blobName));
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+                store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
+                        new StoredObject(blockId, data, Map.of("BlockId", blockId), Instant.now(),
+                                UUID.randomUUID().toString()));
+                return Response.status(Response.Status.CREATED)
+                        .header("x-ms-request-server-encrypted", "true")
+                        .header("Content-Length", 0)
+                        .build();
+            });
         } catch (IOException e) {
             LOGGER.errorf(e, "putBlock I/O error: container=%s blob=%s", containerName, blobName);
             return Response.serverError().build();
@@ -714,68 +778,76 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (authFailure != null) {
                 return authFailure;
             }
-            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
-                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
-                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-            }
-
             List<String> blockIds = parseBlockList(request.bodyStream().readAllBytes());
 
-            // Resolve every block ID → staged data
-            List<byte[]> chunks = new ArrayList<>(blockIds.size());
-            List<String> committedMeta = new ArrayList<>(blockIds.size()); // "base64id:size"
-
-            for (String blockId : blockIds) {
-                Optional<StoredObject> staged = store.get(
-                        blockStagingKey(request.accountName(), containerName, blobName, blockId));
-                if (staged.isEmpty()) {
-                    return new AzureErrorResponse("InvalidBlockList",
-                            "The specified block list is invalid.")
-                            .toXmlResponse(400);
+            return leaseService.exclusively(() -> {
+                if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                    return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                            .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
                 }
-                byte[] blockData = staged.get().data();
-                chunks.add(blockData);
-                committedMeta.add(blockId + ":" + blockData.length);
-            }
 
-            // Concatenate all block data into the final blob body
-            int totalSize = chunks.stream().mapToInt(c -> c.length).sum();
-            byte[] assembled = new byte[totalSize];
-            int offset = 0;
-            for (byte[] chunk : chunks) {
-                System.arraycopy(chunk, 0, assembled, offset, chunk.length);
-                offset += chunk.length;
-            }
+                // Resolve every block ID → staged data
+                List<byte[]> chunks = new ArrayList<>(blockIds.size());
+                List<String> committedMeta = new ArrayList<>(blockIds.size()); // "base64id:size"
 
-            // Build blob metadata
-            Map<String, String> metadata = new HashMap<>();
-            String blobType = request.headers().getHeaderString("x-ms-blob-type");
-            metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
-            addBlobHttpProperties(request, metadata);
-            metadata.put("Name", blobName);
-            metadata.put(CREATION_TIME_KEY, createdOn(
-                    store.get(objKey(request.accountName(), containerName, blobName))).toString());
-            // Persist committed block list for future GetBlockList calls
-            metadata.put("CommittedBlocks", String.join("|", committedMeta));
-            metadata.putAll(readUserMetadata(request));
+                for (String blockId : blockIds) {
+                    Optional<StoredObject> staged = store.get(
+                            blockStagingKey(request.accountName(), containerName, blobName, blockId));
+                    if (staged.isEmpty()) {
+                        return new AzureErrorResponse("InvalidBlockList",
+                                "The specified block list is invalid.")
+                                .toXmlResponse(400);
+                    }
+                    byte[] blockData = staged.get().data();
+                    chunks.add(blockData);
+                    committedMeta.add(blockId + ":" + blockData.length);
+                }
 
-            String etag = UUID.randomUUID().toString();
-            store.put(objKey(request.accountName(), containerName, blobName),
-                    new StoredObject(blobName, assembled, metadata, Instant.now(), etag));
+                // Concatenate all block data into the final blob body
+                int totalSize = chunks.stream().mapToInt(c -> c.length).sum();
+                byte[] assembled = new byte[totalSize];
+                int offset = 0;
+                for (byte[] chunk : chunks) {
+                    System.arraycopy(chunk, 0, assembled, offset, chunk.length);
+                    offset += chunk.length;
+                }
 
-            // Clean up all staged blocks for this blob
-            String stagePrefix = blockStagingPrefix(request.accountName(), containerName, blobName);
-            store.keys().stream()
-                    .filter(k -> k.startsWith(stagePrefix))
-                    .toList()
-                    .forEach(store::delete);
+                Response leaseFailure = leaseService.validateWrite(request,
+                        objKey(request.accountName(), containerName, blobName));
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
 
-            return Response.status(Response.Status.CREATED)
-                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                    .header("ETag", etag)
-                    .header("x-ms-request-server-encrypted", "true")
-                    .header("Content-Length", 0)
-                    .build();
+                // Build blob metadata
+                Map<String, String> metadata = new HashMap<>();
+                String blobType = request.headers().getHeaderString("x-ms-blob-type");
+                metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
+                addBlobHttpProperties(request, metadata);
+                metadata.put("Name", blobName);
+                metadata.put(CREATION_TIME_KEY, createdOn(
+                        store.get(objKey(request.accountName(), containerName, blobName))).toString());
+                // Persist committed block list for future GetBlockList calls
+                metadata.put("CommittedBlocks", String.join("|", committedMeta));
+                metadata.putAll(readUserMetadata(request));
+
+                String etag = UUID.randomUUID().toString();
+                store.put(objKey(request.accountName(), containerName, blobName),
+                        new StoredObject(blobName, assembled, metadata, Instant.now(), etag));
+
+                // Clean up all staged blocks for this blob
+                String stagePrefix = blockStagingPrefix(request.accountName(), containerName, blobName);
+                store.keys().stream()
+                        .filter(k -> k.startsWith(stagePrefix))
+                        .toList()
+                        .forEach(store::delete);
+
+                return Response.status(Response.Status.CREATED)
+                        .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                        .header("ETag", etag)
+                        .header("x-ms-request-server-encrypted", "true")
+                        .header("Content-Length", 0)
+                        .build();
+            });
         } catch (IOException e) {
             LOGGER.errorf(e, "putBlockList I/O error: container=%s blob=%s", containerName, blobName);
             return Response.serverError().build();
@@ -944,11 +1016,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     public void clear() {
-        store.clear();
+        leaseService.exclusively(() -> {
+            store.clear();
+            leaseService.clear();
+        });
     }
 
     public void ensureContainer(String accountName, String containerName) {
-        store.put(nsKey(accountName, containerName), NS_SENTINEL);
+        leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), NS_SENTINEL));
     }
 
     private static String nsKey(String accountName, String containerName) {
