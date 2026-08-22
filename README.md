@@ -21,7 +21,9 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
   <a href="https://github.com/floci-io/floci-az/releases/latest"><img src="https://img.shields.io/github/v/release/floci-io/floci-az?label=latest%20release&color=blue" alt="Latest Release"></a>
   <a href="https://github.com/floci-io/floci-az/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/floci-io/floci-az/release.yml?label=build" alt="Build Status"></a>
   <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/pulls/floci/floci-az?label=docker%20pulls" alt="Docker Pulls"></a>
+  <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/image-size/floci/floci-az/latest?label=image%20size" alt="Docker Image Size"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <a href="https://github.com/floci-io/floci-az/stargazers"><img src="https://img.shields.io/github/stars/floci-io/floci-az?style=flat" alt="GitHub Stars"></a>
 </p>
 
 <p align="center">
