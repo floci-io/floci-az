@@ -9,16 +9,21 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
+
 @ApplicationScoped
 public class BannerLogger {
 
     private static final Logger LOGGER = Logger.getLogger(BannerLogger.class);
 
-    @Inject
-    EmulatorConfig config;
+    private final EmulatorConfig config;
+    private final CosmosEngineRegistry cosmosEngineRegistry;
 
     @Inject
-    CosmosEngineRegistry cosmosEngineRegistry;
+    public BannerLogger(EmulatorConfig config, CosmosEngineRegistry cosmosEngineRegistry) {
+        this.config = config;
+        this.cosmosEngineRegistry = cosmosEngineRegistry;
+    }
 
     void onStart(@Observes StartupEvent ev) {
         LOGGER.info("=== FLOCI - AZ Starting ===");
@@ -72,6 +77,12 @@ public class BannerLogger {
         }
         if (config.services().keyVault().enabled()) {
             sb.append(serviceStatus("keyvault", true, getStorageMode("keyvault")));
+        }
+        if (config.services().sql().enabled()) {
+            String provider = config.services().sql().dataPlaneProvider().name()
+                .toLowerCase(Locale.ROOT);
+            sb.append(String.format("   %-9s [%s]  data-plane: %-8s storage: %s\n",
+                "sql", "enabled ", provider, getStorageMode("sql")));
         }
         if (config.services().eventHub().enabled()) {
             String amqpInfo = "amqp:" + config.services().eventHub().amqpPort()
@@ -156,6 +167,7 @@ public class BannerLogger {
             case "cosmos"    -> config.storage().services().cosmos().mode().orElse(config.storage().mode());
             case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
             case "servicebus" -> config.storage().services().serviceBus().mode().orElse(config.storage().mode());
+            case "sql"       -> config.storage().services().sql().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

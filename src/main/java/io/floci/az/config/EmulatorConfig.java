@@ -532,12 +532,24 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /**
-         * When {@code true}, no SQL Server container is started; servers are created in state and
-         * transition immediately to {@code state=Ready} (no EULA required). The data plane is
-         * unavailable (no live JDBC endpoint). Useful for tests without Docker.
+         * Legacy data-plane switch. Prefer {@code data-plane.provider}. When the provider is not
+         * explicitly configured, {@code true} maps to {@link SqlDataPlaneProvider#NONE} and
+         * {@code false} maps to {@link SqlDataPlaneProvider#MANAGED}.
          */
-        @WithDefault("false")
-        boolean mocked();
+        @Deprecated
+        Optional<Boolean> mocked();
+
+        SqlDataPlaneConfig dataPlane();
+
+        /**
+         * Resolves the explicit provider, then the legacy {@code mocked} alias, then the
+         * control-plane-only default.
+         */
+        default SqlDataPlaneProvider dataPlaneProvider() {
+            return dataPlane().provider().orElseGet(() -> mocked()
+                .map(value -> value ? SqlDataPlaneProvider.NONE : SqlDataPlaneProvider.MANAGED)
+                .orElse(SqlDataPlaneProvider.NONE));
+        }
 
         /**
          * Must be set to "Y" to accept the Microsoft SQL Server EULA.
@@ -568,6 +580,17 @@ public interface EmulatorConfig {
         /** Default host port. 0 lets the OS pick a free port (recommended when running multiple servers). */
         @WithDefault("0")
         int defaultPort();
+    }
+
+    interface SqlDataPlaneConfig {
+        /** Azure SQL data-plane provider: none, managed, or external. */
+        Optional<SqlDataPlaneProvider> provider();
+    }
+
+    enum SqlDataPlaneProvider {
+        NONE,
+        MANAGED,
+        EXTERNAL
     }
 
     /**
