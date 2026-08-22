@@ -243,7 +243,9 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
                 current = state.getServer(serverName);
             }
 
-            if (current.isPresent() && "Ready".equals(current.get().provisioningState())) {
+            if (current.isPresent()
+                    && "Ready".equals(current.get().provisioningState())
+                    && hasDataPlaneRuntime(current.get())) {
                 SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
                     location, login, password, tags, "Ready");
                 state.putServer(updated);
@@ -352,6 +354,10 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
             && current.administratorLogin().equals(login)
             && current.administratorLoginPassword().equals(password)
             && current.tags().equals(tags);
+    }
+
+    private static boolean hasDataPlaneRuntime(SqlState.SqlServerEntry server) {
+        return server.containerId() != null && server.hostPort() > 0;
     }
 
     private Response getServer(String serverName) {

@@ -5,6 +5,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -35,6 +37,9 @@ class SqlHandlerAsyncManagedTest {
 
     @InjectMock
     SqlServerManager serverManager;
+
+    @Inject
+    SqlState state;
 
     private CountDownLatch startEntered;
     private CountDownLatch releaseStart;
@@ -113,6 +118,31 @@ class SqlHandlerAsyncManagedTest {
             .when().get("/devstoreaccount1-sql/servers/asyncserver/connect")
             .then().statusCode(200)
             .body("host", equalTo("localhost"))
+            .body("port", equalTo(14330));
+    }
+
+    @Test
+    void managedPutReprovisionsRestoredReadyServerWithoutRuntime() throws Exception {
+        state.putServer(new SqlState.SqlServerEntry(
+            "asyncserver", "test-sub", "test-rg", "eastus", "sa",
+            "FlociAz_Strong123!", null, 0, "localhost", "Ready", null, null,
+            Map.of(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
+
+        Response retry = given()
+            .contentType("application/json")
+            .body(BODY)
+            .when().put(SERVER_URL);
+
+        assertEquals(202, retry.statusCode());
+        assertEquals("Creating", retry.jsonPath().getString("properties.state"));
+        assertTrue(startEntered.await(2, TimeUnit.SECONDS));
+
+        releaseStart.countDown();
+        awaitSucceeded(retry.header("Location"), Duration.ofSeconds(5));
+
+        given()
+            .when().get("/devstoreaccount1-sql/servers/asyncserver/connect")
+            .then().statusCode(200)
             .body("port", equalTo(14330));
     }
 
