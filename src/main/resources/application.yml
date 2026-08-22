@@ -156,7 +156,10 @@ floci-az:
       consumer-groups: "$Default,my-consumer-group"
     sql:
       enabled: true
-      mocked: false         # false = back servers with a real SQL Server container (needs accept-eula=Y). true = no Docker; servers are pure ARM state (no EULA)
+      # data-plane.provider defaults to none. Set to managed for a real SQL Server container.
+      # data-plane:
+      #   provider: managed
+      # mocked: false       # Deprecated alias: true = none, false = managed
       # accept-eula: "Y"     # Must be set to "Y" to accept the Microsoft SQL Server EULA
       image: "mcr.microsoft.com/mssql/server:2025-latest"
       sa-password: "FlociAz_Strong123!"

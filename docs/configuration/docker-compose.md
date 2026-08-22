@@ -54,8 +54,8 @@ services:
 
 ### With Azure SQL Database
 
-SQL Server containers are started on-demand when a server is created via the management API.
-The Docker socket mount is required:
+SQL defaults to control-plane-only mode and needs no Docker socket. To opt into managed SQL Server
+containers, set the provider to `managed`, accept the EULA, and mount the Docker socket:
 
 ```yaml
 services:
@@ -66,6 +66,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER: managed
       FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA: "Y"   # accept the Microsoft SQL Server EULA
       # FLOCI_AZ_SERVICES_SQL_IMAGE: "mcr.microsoft.com/mssql/server:2025-latest"
 ```
@@ -236,7 +237,9 @@ All variables are optional; the default applies when unset.
 
 | Variable | Default | Description |
 |---|---|---|
-| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | _(empty)_ | Set to `Y` to accept the Microsoft SQL Server EULA (required) |
+| `FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER` | `none` | `none` for ARM state only; `managed` for a real SQL Server container; `external` is reserved |
+| `FLOCI_AZ_SERVICES_SQL_MOCKED` | _(unset)_ | Deprecated provider alias: `true` = `none`, `false` = `managed` |
+| `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` | `N` | Set to `Y` to accept the Microsoft SQL Server EULA (managed mode only) |
 | `FLOCI_AZ_SERVICES_SQL_IMAGE` | `mcr.microsoft.com/mssql/server:2025-latest` | Docker image for SQL Server containers |
 | `FLOCI_AZ_SERVICES_SQL_STARTUP_TIMEOUT_SECONDS` | `60` | Seconds to wait for SQL Server to become ready |
 

@@ -206,6 +206,7 @@ $(foreach e,$(COSMOS_ENGINES),$(eval $(call COSMOS_RULES,$(e))))
 
 run-sql:
 	$(MVN) quarkus:dev -Dno-color \
+		"-Dfloci-az.services.sql.data-plane.provider=managed" \
 		"-Dfloci-az.services.sql.accept-eula=Y" > emulator.log 2>&1 & echo $$! > $(PID_FILE)
 	@until curl -s http://localhost:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "Emulator is up! (SQL service — EULA accepted)"

@@ -267,13 +267,13 @@ public class SqlState {
                 id, port, reachableHost, tags, databases, firewallRules, createdAt);
         }
 
-        /**
-         * The host an application uses to reach the data plane. Azure would expose
-         * {@code {name}.database.windows.net}; floci-az returns the actually-reachable host —
-         * {@code localhost} for host networking, or the container name when floci-az runs
-         * inside Docker on a shared network.
-         */
+        /** Azure-shaped public hostname returned by ARM resource responses. */
         public String fullyQualifiedDomainName() {
+            return serverName + ".database.windows.net";
+        }
+
+        /** Reachable host returned by the emulator-specific connection discovery endpoint. */
+        public String dataPlaneHost() {
             return host != null && !host.isBlank() ? host : "localhost";
         }
     }

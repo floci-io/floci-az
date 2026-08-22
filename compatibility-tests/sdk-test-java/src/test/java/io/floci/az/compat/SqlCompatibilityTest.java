@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <ul>
  *   <li>floci-az emulator running (default: http://localhost:4577)</li>
  *   <li>Docker available so floci-az can start SQL Server containers</li>
+ *   <li>Managed provider: {@code FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER=managed}</li>
  *   <li>EULA accepted: {@code FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y} set in the emulator</li>
  * </ul>
  *
@@ -94,6 +95,9 @@ class SqlCompatibilityTest {
         // Fetch connection info for the master database
         HttpResponse<String> connectResp = send("GET",
             BASE + "/devstoreaccount1-sql/servers/" + SERVER + "/connect", null);
+        assumeTrue(connectResp.statusCode() != 409,
+            "SQL data plane is disabled — set FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER=managed "
+                + "and restart emulator");
         assertEquals(200, connectResp.statusCode(),
             "/connect failed: " + connectResp.body());
 
