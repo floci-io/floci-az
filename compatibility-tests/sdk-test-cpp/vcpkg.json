@@ -1,0 +1,10 @@
+{
+  "name": "floci-sdk-test-cpp",
+  "version-string": "0.1.0",
+  "description": "Azure SDK for C++ compatibility tests for Floci AZ",
+  "dependencies": [
+    "azure-storage-blobs-cpp",
+    "azure-storage-queues-cpp",
+    "gtest"
+  ]
+}
