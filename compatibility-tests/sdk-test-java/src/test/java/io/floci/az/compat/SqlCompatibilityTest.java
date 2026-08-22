@@ -95,7 +95,9 @@ class SqlCompatibilityTest {
         // Fetch connection info for the master database
         HttpResponse<String> connectResp = send("GET",
             BASE + "/devstoreaccount1-sql/servers/" + SERVER + "/connect", null);
-        assumeTrue(connectResp.statusCode() != 409,
+        boolean dataPlaneDisabled = connectResp.statusCode() == 409
+            && connectResp.body().contains("\"code\":\"DataPlaneNotEnabled\"");
+        assumeTrue(!dataPlaneDisabled,
             "SQL data plane is disabled — set FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER=managed "
                 + "and restart emulator");
         assertEquals(200, connectResp.statusCode(),
