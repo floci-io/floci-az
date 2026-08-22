@@ -884,40 +884,46 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response authorizeRead(AzureRequest request, String containerName, String blobName) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeRead(
-                        request.accountName(), containerName, blobName, token))
+                        request, containerName, blobName, token))
                 .orElse(null);
     }
 
     private Response authorizeList(AzureRequest request, String containerName) {
         return storageSas(request)
-                .flatMap(token -> sasAuthorization.authorizeList(request.accountName(), containerName, token))
+                .flatMap(token -> sasAuthorization.authorizeList(request, containerName, token))
                 .orElse(null);
     }
 
     private Response authorizeList(AzureRequest request, String containerName, String path) {
         return storageSas(request)
-                .flatMap(token -> sasAuthorization.authorizeList(request.accountName(), containerName, path, token))
+                .flatMap(token -> sasAuthorization.authorizeList(request, containerName, path, token))
                 .orElse(null);
     }
 
     private Response authorizeCreate(AzureRequest request, String containerName, String blobName) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeCreate(
-                        request.accountName(), containerName, blobName, token))
+                        request, containerName, blobName, token))
                 .orElse(null);
     }
 
     private Response authorizeWrite(AzureRequest request, String containerName, String blobName) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeWrite(
-                        request.accountName(), containerName, blobName, token))
+                        request, containerName, blobName, token))
                 .orElse(null);
     }
 
     private Response authorizeDelete(AzureRequest request, String containerName, String blobName) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeDelete(
-                        request.accountName(), containerName, blobName, token))
+                        request, containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeAppend(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeAppend(request, containerName, blobName, token))
                 .orElse(null);
     }
 
