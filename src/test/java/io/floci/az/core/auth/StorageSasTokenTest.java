@@ -26,7 +26,12 @@ class StorageSasTokenTest {
                 Map.entry("sks", "b"),
                 Map.entry("skv", "2024-11-04"),
                 Map.entry("sdd", "2"),
-                Map.entry("ses", "scope")
+                Map.entry("ses", "scope"),
+                Map.entry("snapshot", "2026-07-15T10:30:00Z"),
+                Map.entry("skdutid", "delegated-tenant"),
+                Map.entry("sduoid", "delegated-user"),
+                Map.entry("srh", "x-ms-client-request-id"),
+                Map.entry("srq", "operation")
         )).orElseThrow();
 
         assertThat(token.version(), equalTo("2024-11-04"));
@@ -36,6 +41,11 @@ class StorageSasTokenTest {
         assertThat(token.signedObjectId(), equalTo(UserDelegationKeyMaterial.SIGNED_OBJECT_ID));
         assertThat(token.directoryDepth(), equalTo("2"));
         assertThat(token.encryptionScope(), equalTo("scope"));
+        assertThat(token.snapshotTime(), equalTo("2026-07-15T10:30:00Z"));
+        assertThat(token.delegatedUserTenantId(), equalTo("delegated-tenant"));
+        assertThat(token.delegatedUserObjectId(), equalTo("delegated-user"));
+        assertThat(token.signedRequestHeaders(), equalTo("x-ms-client-request-id"));
+        assertThat(token.signedRequestQueryParameters(), equalTo("operation"));
         assertTrue(token.parsedStartTime().isPresent());
         assertTrue(token.parsedExpiryTime().isPresent());
         assertTrue(token.parsedSignedKeyStart().isPresent());
