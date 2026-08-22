@@ -675,6 +675,46 @@ public class BlobServiceTest {
     }
 
     @Test
+    void dataLakeDirectoryListingPreservesBoundarySpaces() {
+        String directory = " path with spaces ";
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/{directory}?resource=directory", CONTAINER, directory)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .queryParam("recursive", true)
+            .queryParam("directory", directory)
+            .when().get("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeDirectoryListingRejectsFilePath() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/file?resource=file", CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=file", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+    }
+
+    @Test
     void dataLakeEmptyFilesystemListingReturnsEmptyPaths() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
