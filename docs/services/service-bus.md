@@ -150,8 +150,8 @@ services:
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` | `5673` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_TLS_PORT` | `5674` | Host port for AMQPS |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ARTEMIS_IMAGE` | `apache/activemq-artemis:2.44.0` | Artemis image; must match bundled protocol patches |
-| `FLOCI_AZ_SERVICES_SERVICE_BUS_MAX_DELIVERY_COUNT` | `10` | Max delivery attempts before dead-lettering |
-| `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS` | `60` | Peek-lock duration |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_MAX_DELIVERY_COUNT` | `10` | Default max delivery attempts before dead-lettering, for entities that do not set `MaxDeliveryCount` |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS` | `60` | Default peek-lock duration, for entities that do not set `LockDuration` |
 
 ### application.yml
 
@@ -164,13 +164,24 @@ floci-az:
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"
-      max-delivery-count: 10
-      lock-duration-seconds: 60
+      max-delivery-count: 10      # default when the entity omits MaxDeliveryCount
+      lock-duration-seconds: 60   # default when the entity omits LockDuration
 ```
+
+### Per-entity delivery settings
+
+Queues and subscriptions honor `MaxDeliveryCount` (1–2000) and `LockDuration`
+(up to `PT5M`) from the entity-create payload, matching Azure. A message is
+dead-lettered once its delivery count exceeds the entity's `MaxDeliveryCount`.
+`LockDuration` is enforced for session-enabled entities (session locks expire
+and can be reacquired after the configured duration); non-session peek-lock
+expiry is not enforced by the broker. Entities that omit either property fall
+back to the configured defaults above.
 
 ## Out of scope (future work)
 
 - Session state and explicit session-lock renewal
+- Non-session peek-lock expiry enforcement
 - Deferred messages and auto-forwarding
-- Duplicate detection and message transactions
+- Message transactions
 - Geo-disaster recovery and partitioned entities

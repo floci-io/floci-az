@@ -307,6 +307,70 @@ public sealed class ServiceBusCompatibilityTests
         await deadLetterReceiver.CompleteMessageAsync(expired, cancellationToken);
     }
 
+    [Test]
+    [NotInParallel("servicebus-broker")]
+    [Timeout(90_000)]
+    public async Task MaxDeliveryCountDeadLettersWhenExceeded(CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string queue = $"dotnet-mdc-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureQueue(serviceBusNamespace, queue, maxDeliveryCount: 2, cancellationToken);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        await using var client = new ServiceBusClient(connectionString, new ServiceBusClientOptions
+        {
+            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(30) }
+        });
+
+        await using ServiceBusSender sender = client.CreateSender(queue);
+        await sender.SendMessageAsync(new ServiceBusMessage("poison"), cancellationToken);
+
+        // Exhaust the entity's two delivery attempts by abandoning both. Only the relative
+        // delivery count is asserted: the emulator's AMQP delivery-count header is 1-based
+        // where Azure's is 0-based, and this SDK adds one on receive.
+        await using ServiceBusReceiver receiver = client.CreateReceiver(queue);
+        ServiceBusReceivedMessage first = await Receive(receiver, cancellationToken);
+        await receiver.AbandonMessageAsync(first, cancellationToken: cancellationToken);
+        ServiceBusReceivedMessage second = await Receive(receiver, cancellationToken);
+        await Assert.That(second.DeliveryCount).IsEqualTo(first.DeliveryCount + 1);
+        await receiver.AbandonMessageAsync(second, cancellationToken: cancellationToken);
+
+        await Assert.That(await receiver.ReceiveMessageAsync(
+            TimeSpan.FromSeconds(1), cancellationToken)).IsNull();
+
+        await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
+            queue, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+        ServiceBusReceivedMessage deadLettered = await Receive(deadLetterReceiver, cancellationToken);
+        await Assert.That(deadLettered.Body.ToString()).IsEqualTo("poison");
+        await deadLetterReceiver.CompleteMessageAsync(deadLettered, cancellationToken);
+    }
+
+    private static async Task EnsureQueue(
+        string serviceBusNamespace,
+        string queue,
+        int maxDeliveryCount,
+        CancellationToken cancellationToken)
+    {
+        string body = $"""
+            <entry xmlns="http://www.w3.org/2005/Atom">
+              <content type="application/xml">
+                <QueueDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
+                  <MaxDeliveryCount>{maxDeliveryCount}</MaxDeliveryCount>
+                </QueueDescription>
+              </content>
+            </entry>
+            """;
+        await PutEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/queues/{queue}",
+            body,
+            "Queue",
+            cancellationToken);
+    }
+
     private static async Task AssertExpiresIntoDeadLetterQueue(
         ServiceBusClient client,
         string queue,

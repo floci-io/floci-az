@@ -246,10 +246,10 @@ public class ServiceBusNamespaceManager {
             String queueName,
             boolean requiresSession,
             long lockDurationSeconds,
+            int maxDeliveryAttempts,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
-        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
                 + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
@@ -390,12 +390,12 @@ public class ServiceBusNamespaceManager {
             String filter,
             boolean requiresSession,
             long lockDurationSeconds,
+            int maxDeliveryAttempts,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
-        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
                 + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
