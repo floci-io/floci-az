@@ -89,6 +89,7 @@ nav:
     - Virtual Machines: services/vm.md
     - Azure Cache for Redis: services/redis.md
     - Azure Container Registry: services/acr.md
+    - Azure Container Instances: services/aci.md
     - Event Grid: services/event-grid.md
     - Azure Monitor / Log Analytics: services/monitor.md
     - Communication Services Email: services/email.md
