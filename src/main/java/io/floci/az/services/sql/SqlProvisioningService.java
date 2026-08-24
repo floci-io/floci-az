@@ -117,12 +117,23 @@ public class SqlProvisioningService {
                 }
             }
             if (superseded) {
-                serverManager.stopServer(ready);
+                stopSupersededServer(operationId, ready);
             }
         } catch (Exception e) {
             fail(operationId, desired, "ContainerStartFailed", e.getMessage(), e);
         } finally {
             futures.remove(operationId);
+        }
+    }
+
+    private void stopSupersededServer(
+            String operationId, SqlState.SqlServerEntry server) {
+        try {
+            serverManager.stopServer(server);
+        } catch (Exception e) {
+            LOG.errorf(e,
+                "Failed to clean up superseded SQL Server container: server=%s operation=%s",
+                server.serverName(), operationId);
         }
     }
 

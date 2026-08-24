@@ -366,7 +366,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
             .orElse(notFound("Server '" + serverName + "' not found"));
     }
 
-    private Response deleteServer(String serverName) {
+    private synchronized Response deleteServer(String serverName) {
         if (!state.serverExists(serverName)) {
             return notFound("Server '" + serverName + "' not found");
         }
@@ -728,7 +728,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
      * Stops all running SQL Server containers and wipes state.
      * Used by {@code POST /_admin/reset} for test isolation.
      */
-    public void clear() {
+    public synchronized void clear() {
         provisioningService.clear();
         state.listServers().forEach(entry -> {
             try { serverManager.stopServer(entry); } catch (Exception e) {
