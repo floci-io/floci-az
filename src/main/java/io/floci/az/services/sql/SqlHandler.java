@@ -616,6 +616,9 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         if (config.services().sql().dataPlaneProvider() == NONE) {
             return dataPlaneNotEnabled();
         }
+        if (config.services().sql().dataPlaneProvider() == EXTERNAL) {
+            return dataPlaneProviderUnavailable();
+        }
         if (server.hostPort() <= 0) {
             return ArmErrors.error(409, "DataPlaneNotReady",
                 "SQL data plane for server '" + server.serverName() + "' is not ready.");
