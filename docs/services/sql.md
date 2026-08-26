@@ -34,6 +34,10 @@ the Azure-shaped `{server}.database.windows.net` hostname and never include emul
 The deprecated `mocked` setting remains a compatibility alias when `data-plane.provider` is absent:
 `true` maps to `none`; `false` maps to `managed`.
 
+For upgrade compatibility, `accept-eula: "Y"` also selects `managed` when neither
+`data-plane.provider` nor `mocked` is configured. An explicit provider or legacy `mocked` value
+always takes precedence.
+
 Managed server creation does not wait for image pull or engine startup on the request thread. A new
 server is persisted with `state=Creating` and returns `202 Accepted`, `Location`, and `Retry-After`.
 Poll `Location` until it returns `200` with `status=Succeeded` or `status=Failed`. Server GET exposes

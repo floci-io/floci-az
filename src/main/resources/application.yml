@@ -156,7 +156,7 @@ floci-az:
       consumer-groups: "$Default,my-consumer-group"
     sql:
       enabled: true
-      # data-plane.provider defaults to none. Set to managed for a real SQL Server container.
+      # data-plane.provider defaults to none, unless accept-eula=Y preserves legacy managed mode.
       # data-plane:
       #   provider: managed
       # mocked: false       # Deprecated alias: true = none, false = managed
