@@ -429,7 +429,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("Last-Modified", RFC1123_DATE_TIME.format(so.lastModified()))
                 .header("ETag", so.etag())
                 .header("x-ms-blob-type", so.metadata().getOrDefault("BlobType", "BlockBlob"))
-                .header(HttpHeaders.CONTENT_TYPE, so.metadata().getOrDefault("Content-Type", "application/octet-stream"))
+                .header(HttpHeaders.CONTENT_TYPE, usableContentType(so.metadata().get("Content-Type")))
                 .header(HttpHeaders.CONTENT_LENGTH, contentLength)
                 .header("x-ms-blob-content-length", totalSize)
                 .header("Accept-Ranges", "bytes")
@@ -571,7 +571,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     RFC1123_DATE_TIME.format(so.lastModified()),
                     so.etag(),
                     (long) so.data().length,
-                    so.metadata().getOrDefault("Content-Type", "application/octet-stream"),
+                    usableContentType(so.metadata().get("Content-Type")),
                     so.metadata().getOrDefault("BlobType", "BlockBlob")
             ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null));
         });
@@ -787,13 +787,30 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (contentType == null) {
             contentType = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
         }
-        metadata.put("Content-Type", contentType != null ? contentType : "application/octet-stream");
+        metadata.put("Content-Type", usableContentType(contentType));
         BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, responseHeader) -> {
             String value = request.headers().getHeaderString(requestHeader);
             if (value != null) {
                 metadata.put(responseHeader, value);
             }
         });
+    }
+
+    /**
+     * Returns a content type safe to send back, substituting {@code application/octet-stream} - the
+     * default {@code Get Blob Properties} documents for a blob with no content type specified - for one
+     * that is missing, empty, or not a valid media type.
+     */
+    private static String usableContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            MediaType.valueOf(contentType);
+        } catch (IllegalArgumentException e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        return contentType;
     }
 
     /**
