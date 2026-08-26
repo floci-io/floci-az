@@ -542,13 +542,24 @@ public interface EmulatorConfig {
         SqlDataPlaneConfig dataPlane();
 
         /**
-         * Resolves the explicit provider, then the legacy {@code mocked} alias, then the
-         * control-plane-only default.
+         * Resolves the explicit provider, then the legacy {@code mocked} alias. When neither is
+         * configured, an accepted EULA preserves the legacy managed data plane; otherwise the
+         * service defaults to control-plane-only behavior.
          */
         default SqlDataPlaneProvider dataPlaneProvider() {
-            return dataPlane().provider().orElseGet(() -> mocked()
-                .map(value -> value ? SqlDataPlaneProvider.NONE : SqlDataPlaneProvider.MANAGED)
-                .orElse(SqlDataPlaneProvider.NONE));
+            Optional<SqlDataPlaneProvider> provider = dataPlane().provider();
+            if (provider.isPresent()) {
+                return provider.get();
+            }
+
+            Optional<Boolean> legacyMocked = mocked();
+            if (legacyMocked.isPresent()) {
+                return legacyMocked.get() ? SqlDataPlaneProvider.NONE : SqlDataPlaneProvider.MANAGED;
+            }
+
+            return "Y".equalsIgnoreCase(acceptEula())
+                ? SqlDataPlaneProvider.MANAGED
+                : SqlDataPlaneProvider.NONE;
         }
 
         /**
