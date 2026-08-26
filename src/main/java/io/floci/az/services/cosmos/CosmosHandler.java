@@ -762,7 +762,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     /**
      * Execute a transactional batch request.
      *
-     * <p>The request body is a JSON array of operation objects, each with at minimum
+     * <p>The request body is a JSON array or the RecordIO/HybridRow payload used by the
+     * .NET SDK. Each operation has at minimum
      * {@code "operationType"} and, depending on the type, {@code "id"} and/or
      * {@code "resourceBody"}.</p>
      *
@@ -782,9 +783,13 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Object defaultTtl = containerDefaultTtl(collFound);
 
         List<Map<String, Object>> operations;
+        boolean hybridRow;
         try {
             byte[] raw = req.bodyStream().readAllBytes();
-            operations = MAPPER.readValue(raw, new TypeReference<>() {});
+            hybridRow = CosmosHybridRowBatchCodec.isHybridRow(raw);
+            operations = hybridRow
+                    ? CosmosHybridRowBatchCodec.decodeOperations(raw)
+                    : MAPPER.readValue(raw, new TypeReference<>() {});
         } catch (IOException e) {
             return errorResponse(400, "BadRequest", "Invalid batch request body.");
         }
@@ -845,13 +850,18 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
 
         try {
-            return Response.ok(MAPPER.writeValueAsString(results), "application/json")
+            Object responseBody = hybridRow
+                    ? CosmosHybridRowBatchCodec.encodeResults(results)
+                    : MAPPER.writeValueAsString(results);
+            String contentType = hybridRow ? "application/octet-stream" : "application/json";
+            int status = hybridRow && failed ? 207 : 200;
+            return Response.status(status).entity(responseBody).type(contentType)
                     .header("x-ms-request-charge",  String.valueOf(results.size()))
                     .header("x-ms-session-token",   "0:0#1")
                     .header("x-ms-activity-id",     UUID.randomUUID().toString())
                     .header("x-ms-version",         "2018-12-31")
                     .build();
-        } catch (JsonProcessingException e) {
+        } catch (IOException e) {
             return Response.serverError().build();
         }
     }
@@ -951,6 +961,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             operations.add((Map<String, Object>) operation);
         }
         Map<String, Object> document = parseData(found.get());
+        String filterPredicate = body.get("condition") instanceof String value ? value : null;
+        if (filterPredicate != null && !filterPredicate.isBlank()
+                && queryEngine.execute("SELECT * " + filterPredicate, List.of(), List.of(document)).count() == 0) {
+            return batchResultError(412);
+        }
         applyPatchOperations(document, operations);
 
         Instant now = Instant.now();
