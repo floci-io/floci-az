@@ -134,6 +134,7 @@ class ServiceBusConfigGeneratorTest {
     void packagesArtemisPatchesForAzureSdkSemantics() throws Exception {
         Set<String> expectedClasses = Set.of(
                 "org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.class",
+                "org/apache/activemq/artemis/protocol/amqp/broker/ServiceBusBatchSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/AmqpTransferTagGenerator.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.class",
