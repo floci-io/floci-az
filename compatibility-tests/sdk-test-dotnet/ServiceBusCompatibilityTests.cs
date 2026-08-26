@@ -23,7 +23,7 @@ public sealed class ServiceBusCompatibilityTests
     public async Task AdministrationClientSupportsTopicSubscriptionAndRuleCrud(
         CancellationToken cancellationToken)
     {
-        string topic = $"dotnet-admin-{Guid.NewGuid():N}";
+        string topic = $"dotnet-admin-{Guid.NewGuid():N}-queue";
         string subscription = $"dotnet-admin-sub-{Guid.NewGuid():N}";
         string rule = $"dotnet-admin-rule-{Guid.NewGuid():N}";
         var endpoint = new Uri(EmulatorEndpoint);
@@ -70,6 +70,117 @@ public sealed class ServiceBusCompatibilityTests
         await administrationClient.DeleteSubscriptionAsync(
             topic, subscription, cancellationToken);
         await administrationClient.DeleteTopicAsync(topic, cancellationToken);
+    }
+
+    [Test]
+    [NotInParallel("servicebus-broker")]
+    [Timeout(90_000)]
+    public async Task AdministrationClientReportsQueueRuntimeMessageCounts(
+        CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string queue = $"dotnet-counts-{Guid.NewGuid():N}";
+        string secondQueue = $"dotnet-counts-secondary-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureQueue(serviceBusNamespace, queue, cancellationToken);
+        await EnsureQueue(serviceBusNamespace, secondQueue, cancellationToken);
+
+        await using var client = new ServiceBusClient(DataPlaneConnectionString());
+        await using ServiceBusSender sender = client.CreateSender(queue);
+        await sender.SendMessageAsync(new ServiceBusMessage("one"), cancellationToken);
+        await sender.SendMessageAsync(new ServiceBusMessage("two"), cancellationToken);
+        await sender.SendMessageAsync(new ServiceBusMessage("three"), cancellationToken);
+        await using ServiceBusSender secondSender = client.CreateSender(secondQueue);
+        await secondSender.SendMessageAsync(new ServiceBusMessage("secondary"), cancellationToken);
+
+        var administrationClient = new ServiceBusAdministrationClient(
+            AdministrationConnectionString());
+        QueueRuntimeProperties enqueued = await WaitForQueueRuntimeProperties(
+            administrationClient,
+            queue,
+            properties => properties.ActiveMessageCount == 3,
+            cancellationToken);
+        await Assert.That(enqueued.ActiveMessageCount).IsEqualTo(3);
+        await Assert.That(enqueued.DeadLetterMessageCount).IsEqualTo(0);
+        await Assert.That(enqueued.TotalMessageCount).IsEqualTo(3);
+
+        await using ServiceBusReceiver receiver = client.CreateReceiver(queue);
+        ServiceBusReceivedMessage deadLettered = await Receive(receiver, cancellationToken);
+        await receiver.DeadLetterMessageAsync(deadLettered, cancellationToken: cancellationToken);
+
+        QueueRuntimeProperties afterDeadLetter = await WaitForQueueRuntimeProperties(
+            administrationClient,
+            queue,
+            properties => properties.ActiveMessageCount == 2 &&
+                properties.DeadLetterMessageCount == 1,
+            cancellationToken);
+        await Assert.That(afterDeadLetter.ActiveMessageCount).IsEqualTo(2);
+        await Assert.That(afterDeadLetter.DeadLetterMessageCount).IsEqualTo(1);
+        await Assert.That(afterDeadLetter.TotalMessageCount).IsEqualTo(3);
+
+        var listed = new Dictionary<string, QueueRuntimeProperties>();
+        await foreach (QueueRuntimeProperties properties in
+            administrationClient.GetQueuesRuntimePropertiesAsync(cancellationToken))
+        {
+            if (properties.Name == queue || properties.Name == secondQueue)
+            {
+                listed[properties.Name] = properties;
+            }
+        }
+        await Assert.That(listed).Count().IsEqualTo(2);
+        await Assert.That(listed[queue].ActiveMessageCount).IsEqualTo(2);
+        await Assert.That(listed[queue].DeadLetterMessageCount).IsEqualTo(1);
+        await Assert.That(listed[secondQueue].ActiveMessageCount).IsEqualTo(1);
+        await Assert.That(listed[secondQueue].DeadLetterMessageCount).IsEqualTo(0);
+    }
+
+    [Test]
+    [NotInParallel("servicebus-broker")]
+    [Timeout(90_000)]
+    public async Task ManagementPlaneReportsSubscriptionRuntimeMessageCounts(
+        CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string topic = $"dotnet-count-topic-{Guid.NewGuid():N}";
+        string subscription = $"dotnet-count-sub-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureTopic(serviceBusNamespace, topic, cancellationToken);
+        await EnsureSubscription(
+            serviceBusNamespace, topic, subscription, cancellationToken);
+
+        await using var client = new ServiceBusClient(DataPlaneConnectionString());
+        await using ServiceBusSender sender = client.CreateSender(topic);
+        await sender.SendMessageAsync(new ServiceBusMessage("one"), cancellationToken);
+        await sender.SendMessageAsync(new ServiceBusMessage("two"), cancellationToken);
+
+        var administrationClient = new ServiceBusAdministrationClient(
+            AdministrationConnectionString());
+        SubscriptionRuntimeProperties enqueued =
+            await WaitForSubscriptionRuntimeProperties(
+            administrationClient,
+            topic,
+            subscription,
+            properties => properties.ActiveMessageCount == 2,
+            cancellationToken);
+        await Assert.That(enqueued.ActiveMessageCount).IsEqualTo(2);
+        await Assert.That(enqueued.DeadLetterMessageCount).IsEqualTo(0);
+        await Assert.That(enqueued.TotalMessageCount).IsEqualTo(2);
+
+        await using ServiceBusReceiver receiver = client.CreateReceiver(topic, subscription);
+        ServiceBusReceivedMessage deadLettered = await Receive(receiver, cancellationToken);
+        await receiver.DeadLetterMessageAsync(deadLettered, cancellationToken: cancellationToken);
+
+        SubscriptionRuntimeProperties afterDeadLetter =
+            await WaitForSubscriptionRuntimeProperties(
+            administrationClient,
+            topic,
+            subscription,
+            properties => properties.ActiveMessageCount == 1 &&
+                properties.DeadLetterMessageCount == 1,
+            cancellationToken);
+        await Assert.That(afterDeadLetter.ActiveMessageCount).IsEqualTo(1);
+        await Assert.That(afterDeadLetter.DeadLetterMessageCount).IsEqualTo(1);
+        await Assert.That(afterDeadLetter.TotalMessageCount).IsEqualTo(2);
     }
 
     [Test]
@@ -556,6 +667,68 @@ public sealed class ServiceBusCompatibilityTests
             await receiver.ReceiveMessageAsync(ReceiveTimeout, cancellationToken);
         await Assert.That(message).IsNotNull();
         return message!;
+    }
+
+    private static string DataPlaneConnectionString() =>
+        $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+        "SharedAccessKeyName=RootManageSharedAccessKey;" +
+        "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+
+    private static string AdministrationConnectionString()
+    {
+        var endpoint = new Uri(EmulatorEndpoint);
+        return $"Endpoint=sb://{endpoint.Authority};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+    }
+
+    private static async Task<QueueRuntimeProperties> WaitForQueueRuntimeProperties(
+        ServiceBusAdministrationClient administrationClient,
+        string queue,
+        Func<QueueRuntimeProperties, bool> condition,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+        QueueRuntimeProperties? properties = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            properties = (await administrationClient.GetQueueRuntimePropertiesAsync(
+                queue, cancellationToken)).Value;
+            if (condition(properties))
+            {
+                return properties;
+            }
+            await Task.Delay(250, cancellationToken);
+        }
+        throw new TimeoutException(
+            $"Queue runtime counts did not converge: active={properties?.ActiveMessageCount}, " +
+            $"deadLetter={properties?.DeadLetterMessageCount}, total={properties?.TotalMessageCount}");
+    }
+
+    private static async Task<SubscriptionRuntimeProperties> WaitForSubscriptionRuntimeProperties(
+        ServiceBusAdministrationClient administrationClient,
+        string topic,
+        string subscription,
+        Func<SubscriptionRuntimeProperties, bool> condition,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+        SubscriptionRuntimeProperties? properties = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            properties = (await administrationClient.GetSubscriptionRuntimePropertiesAsync(
+                topic, subscription, cancellationToken)).Value;
+            if (condition(properties))
+            {
+                return properties;
+            }
+            await Task.Delay(250, cancellationToken);
+        }
+        throw new TimeoutException(
+            $"Subscription runtime counts did not converge: " +
+            $"active={properties?.ActiveMessageCount}, " +
+            $"deadLetter={properties?.DeadLetterMessageCount}, " +
+            $"total={properties?.TotalMessageCount}");
     }
 
     private static async Task EnsureNamespace(

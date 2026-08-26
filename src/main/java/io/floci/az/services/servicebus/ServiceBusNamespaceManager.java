@@ -1,5 +1,7 @@
 package io.floci.az.services.servicebus;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
@@ -12,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import javax.management.ObjectName;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
@@ -38,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServiceBusNamespaceManager {
 
     private static final Logger LOG = Logger.getLogger(ServiceBusNamespaceManager.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
     static final String PROTON_PATCH_RESOURCE = "/artemis/proton-j-0.34.1-floci-az-proton-patch.jar";
@@ -74,6 +78,7 @@ public class ServiceBusNamespaceManager {
     private static final int AMQP_PORT = 5672;
     private static final int AMQPS_PORT = 5671;
     private static final int JOLOKIA_PORT = 8161;
+    private static final Duration MESSAGE_COUNT_TIMEOUT = Duration.ofSeconds(3);
     private static final String MANAGEMENT_SUFFIX = "/$management";
     private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$DeadLetterQueue";
     private static final String SUBSCRIPTION_DIVERT_SUFFIX = "/$Divert";
@@ -101,6 +106,14 @@ public class ServiceBusNamespaceManager {
             String jolokiaHost,
             int jolokiaPort,
             boolean mocked) {}
+
+    public record MessageCounts(long active, long deadLetter) {
+        static final MessageCounts ZERO = new MessageCounts(0, 0);
+
+        long total() {
+            return Math.addExact(active, deadLetter);
+        }
+    }
 
     private final ConcurrentHashMap<String, NamespaceState> namespaces = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ServiceBusCbsResponder> cbsResponders = new ConcurrentHashMap<>();
@@ -259,6 +272,41 @@ public class ServiceBusNamespaceManager {
 
     public Map<String, NamespaceState> listNamespaces() {
         return Map.copyOf(namespaces);
+    }
+
+    /** Reads live queue and dead-letter queue depths from Artemis. */
+    public MessageCounts getMessageCounts(String namespaceName, String queueName) {
+        return getMessageCounts(namespaceName, List.of(queueName))
+                .getOrDefault(queueName, MessageCounts.ZERO);
+    }
+
+    /** Reads live queue and dead-letter queue depths from Artemis in one bounded Jolokia request. */
+    public Map<String, MessageCounts> getMessageCounts(
+            String namespaceName, List<String> queueNames) {
+        if (queueNames.isEmpty()) {
+            return Map.of();
+        }
+        NamespaceState state = namespaces.get(namespaceName);
+        if (state == null || state.mocked()) {
+            return zeroMessageCounts(queueNames);
+        }
+
+        String baseUrl = "http://" + state.jolokiaHost() + ":" + state.jolokiaPort()
+                + "/console/jolokia";
+        String auth = Base64.getEncoder().encodeToString(
+                "artemis:artemis".getBytes(StandardCharsets.UTF_8));
+        HttpClient http = HttpClient.newHttpClient();
+        try {
+            return jolokiaReadMessageCounts(
+                    http, baseUrl, auth, namespaceName, queueNames);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.warnf(e, "Failed to read message counts for %d queues in namespace '%s'",
+                    queueNames.size(), namespaceName);
+            return zeroMessageCounts(queueNames);
+        }
     }
 
     public void shutdownAll() {
@@ -672,6 +720,96 @@ public class ServiceBusNamespaceManager {
         } catch (Exception e) {
             LOG.debugv("Jolokia call failed ({0}): {1}", operation.split("\\(")[0], e.getMessage());
         }
+    }
+
+    private static Map<String, MessageCounts> jolokiaReadMessageCounts(
+            HttpClient http, String baseUrl, String auth, String namespaceName,
+            List<String> queueNames) throws IOException, InterruptedException {
+        String body = jolokiaMessageCountRequest(namespaceName, queueNames);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl))
+                .timeout(MESSAGE_COUNT_TIMEOUT)
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Basic " + auth)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new IOException("Jolokia HTTP status " + response.statusCode());
+        }
+        return parseJolokiaMessageCounts(queueNames, response.body());
+    }
+
+    static String jolokiaMessageCountRequest(
+            String namespaceName, List<String> queueNames) throws IOException {
+        var requests = MAPPER.createArrayNode();
+        for (String queueName : queueNames) {
+            for (String suffix : List.of("", DEAD_LETTER_QUEUE_SUFFIX)) {
+                var request = requests.addObject();
+                request.put("type", "read");
+                request.put("mbean", queueMBean(namespaceName, queueName + suffix));
+                request.put("attribute", "MessageCount");
+            }
+        }
+        return MAPPER.writeValueAsString(requests);
+    }
+
+    static Map<String, MessageCounts> parseJolokiaMessageCounts(
+            List<String> queueNames, String responseBody) throws IOException {
+        JsonNode responses = MAPPER.readTree(responseBody);
+        int expectedResponses = queueNames.size() * 2;
+        if (!responses.isArray() || responses.size() != expectedResponses) {
+            throw new IOException("Expected " + expectedResponses
+                    + " Jolokia responses, received " + responses.size());
+        }
+        Map<String, MessageCounts> counts = new LinkedHashMap<>();
+        for (int i = 0; i < queueNames.size(); i++) {
+            long active = parseJolokiaMessageCount(responses.get(i * 2));
+            long deadLetter = parseJolokiaMessageCount(responses.get(i * 2 + 1));
+            counts.put(queueNames.get(i), new MessageCounts(active, deadLetter));
+        }
+        return Map.copyOf(counts);
+    }
+
+    static long parseJolokiaMessageCount(String responseBody) throws IOException {
+        return parseJolokiaMessageCount(MAPPER.readTree(responseBody));
+    }
+
+    private static long parseJolokiaMessageCount(JsonNode response) throws IOException {
+        if (response.path("status").asInt() != 200) {
+            throw new IOException("Jolokia response status " + response.path("status").asInt());
+        }
+        JsonNode value = response.path("value");
+        long count;
+        if (value.isIntegralNumber()) {
+            count = value.longValue();
+        } else if (value.isTextual()) {
+            try {
+                count = Long.parseLong(value.textValue());
+            } catch (NumberFormatException e) {
+                throw new IOException("Invalid Jolokia MessageCount value: " + value, e);
+            }
+        } else {
+            throw new IOException("Missing Jolokia MessageCount value");
+        }
+        if (count < 0) {
+            throw new IOException("Negative Jolokia MessageCount value: " + count);
+        }
+        return count;
+    }
+
+    private static Map<String, MessageCounts> zeroMessageCounts(List<String> queueNames) {
+        Map<String, MessageCounts> counts = new LinkedHashMap<>();
+        queueNames.forEach(queueName -> counts.put(queueName, MessageCounts.ZERO));
+        return Map.copyOf(counts);
+    }
+
+    static String queueMBean(String namespaceName, String queueName) {
+        return "org.apache.activemq.artemis:broker="
+                + ObjectName.quote("floci-az-servicebus-" + namespaceName)
+                + ",component=addresses,address=" + ObjectName.quote(queueName)
+                + ",subcomponent=queues,routing-type=" + ObjectName.quote("anycast")
+                + ",queue=" + ObjectName.quote(queueName);
     }
 
     private static String jsonString(String value) {

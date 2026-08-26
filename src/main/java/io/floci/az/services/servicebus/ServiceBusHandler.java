@@ -70,7 +70,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private static final String DEFAULT_NAMESPACE = "default";
     /** Main Service Bus namespace for entity descriptions. */
     private static final String SB_NS = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
-    /** Separate namespace used by MessageCountDetails child elements (per spec). */
+    /** Separate namespace used by CountDetails child elements (per spec). */
     private static final String SB_COUNT_NS = "http://schemas.microsoft.com/netservices/2011/06/servicebus";
     private static final DateTimeFormatter ISO8601 = ServiceBusModels.ISO8601;
 
@@ -882,6 +882,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     /** Entry XML carries no {@code <?xml?>} prolog so it can be embedded in feeds; responses prepend it. */
     private String queueEntryXml(String namespace, ServiceBusModels.QueueEntity q) {
+        ServiceBusNamespaceManager.MessageCounts counts =
+                namespaceManager.getMessageCounts(namespace, q.name());
+        return queueEntryXml(namespace, q, counts);
+    }
+
+    private String queueEntryXml(
+            String namespace,
+            ServiceBusModels.QueueEntity q,
+            ServiceBusNamespaceManager.MessageCounts counts) {
         String created = ISO8601.format(q.createdAt());
         String updated = ISO8601.format(q.updatedAt());
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
@@ -890,12 +899,13 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<published>" + created + "</published>"
                 + "<updated>" + updated + "</updated>"
                 + "<content type=\"application/xml\">"
-                + queueDescriptionXml(q)
+                + queueDescriptionXml(q, counts)
                 + "</content>"
                 + "</entry>";
     }
 
-    private String queueDescriptionXml(ServiceBusModels.QueueEntity q) {
+    private String queueDescriptionXml(ServiceBusModels.QueueEntity q,
+                                       ServiceBusNamespaceManager.MessageCounts counts) {
         String lockDuration = isoDuration(q.lockDurationSeconds());
         return "<QueueDescription xmlns=\"" + SB_NS + "\">"
                 + "<MaxSizeInMegabytes>" + q.maxSizeInMegabytes() + "</MaxSizeInMegabytes>"
@@ -915,12 +925,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
-                + messageCountDetailsXml()
+                + "<MessageCount>" + counts.total() + "</MessageCount>"
+                + countDetailsXml(counts)
                 + "</QueueDescription>";
     }
 
     private String queueFeedXml(String namespace, List<ServiceBusModels.QueueEntity> queues) {
         String now = ISO8601.format(Instant.now());
+        Map<String, ServiceBusNamespaceManager.MessageCounts> counts =
+                namespaceManager.getMessageCounts(
+                        namespace, queues.stream().map(ServiceBusModels.QueueEntity::name).toList());
         StringBuilder sb = new StringBuilder();
         sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
@@ -928,7 +942,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
           .append("<id>https://localhost/").append(xmlEsc(namespace)).append("/$Resources/queues</id>")
           .append("<updated>").append(now).append("</updated>");
         for (ServiceBusModels.QueueEntity q : queues) {
-            sb.append(queueEntryXml(namespace, q));
+            sb.append(queueEntryXml(
+                    namespace, q, counts.getOrDefault(q.name(), ServiceBusNamespaceManager.MessageCounts.ZERO)));
         }
         sb.append("</feed>");
         return sb.toString();
@@ -962,7 +977,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
-                + messageCountDetailsXml()
+                + countDetailsXml(ServiceBusNamespaceManager.MessageCounts.ZERO)
                 + "</TopicDescription>";
     }
 
@@ -982,6 +997,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     private String subscriptionEntryXml(String namespace, ServiceBusModels.SubscriptionEntity s) {
+        String queueName = s.topicName() + "/Subscriptions/" + s.name();
+        ServiceBusNamespaceManager.MessageCounts counts =
+                namespaceManager.getMessageCounts(namespace, queueName);
+        return subscriptionEntryXml(namespace, s, counts);
+    }
+
+    private String subscriptionEntryXml(
+            String namespace,
+            ServiceBusModels.SubscriptionEntity s,
+            ServiceBusNamespaceManager.MessageCounts counts) {
         String created = ISO8601.format(s.createdAt());
         String updated = ISO8601.format(s.updatedAt());
         String lockDuration = isoDuration(s.lockDurationSeconds());
@@ -992,12 +1017,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<published>" + created + "</published>"
                 + "<updated>" + updated + "</updated>"
                 + "<content type=\"application/xml\">"
-                + subscriptionDescriptionXml(s, lockDuration)
+                + subscriptionDescriptionXml(s, lockDuration, counts)
                 + "</content>"
                 + "</entry>";
     }
 
-    private String subscriptionDescriptionXml(ServiceBusModels.SubscriptionEntity s, String lockDuration) {
+    private String subscriptionDescriptionXml(
+            ServiceBusModels.SubscriptionEntity s,
+            String lockDuration,
+            ServiceBusNamespaceManager.MessageCounts counts) {
         return "<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
                 + "<LockDuration>" + lockDuration + "</LockDuration>"
                 + "<MaxDeliveryCount>" + s.maxDeliveryCount() + "</MaxDeliveryCount>"
@@ -1011,13 +1039,18 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
-                + messageCountDetailsXml()
+                + "<MessageCount>" + counts.total() + "</MessageCount>"
+                + countDetailsXml(counts)
                 + "</SubscriptionDescription>";
     }
 
     private String subscriptionFeedXml(String namespace, String topicName,
                                         List<ServiceBusModels.SubscriptionEntity> subs) {
         String now = ISO8601.format(Instant.now());
+        Map<String, ServiceBusNamespaceManager.MessageCounts> counts =
+                namespaceManager.getMessageCounts(namespace, subs.stream()
+                        .map(sub -> sub.topicName() + "/Subscriptions/" + sub.name())
+                        .toList());
         StringBuilder sb = new StringBuilder();
         sb.append(XML_PROLOG)
           .append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
@@ -1026,7 +1059,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
           .append(xmlEsc(topicName)).append("/subscriptions</id>")
           .append("<updated>").append(now).append("</updated>");
         for (ServiceBusModels.SubscriptionEntity s : subs) {
-            sb.append(subscriptionEntryXml(namespace, s));
+            String queueName = s.topicName() + "/Subscriptions/" + s.name();
+            sb.append(subscriptionEntryXml(
+                    namespace, s,
+                    counts.getOrDefault(queueName, ServiceBusNamespaceManager.MessageCounts.ZERO)));
         }
         sb.append("</feed>");
         return sb.toString();
@@ -1066,17 +1102,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
-     * Returns a {@code <MessageCountDetails>} element using the spec-mandated 2011/06 namespace.
-     * All counts are zero because message state lives entirely in Artemis.
+     * Returns a {@code <CountDetails>} element using the spec-mandated 2011/06 namespace.
      */
-    private String messageCountDetailsXml() {
-        return "<MessageCountDetails xmlns=\"" + SB_COUNT_NS + "\">"
-                + "<ActiveMessageCount>0</ActiveMessageCount>"
-                + "<DeadLetterMessageCount>0</DeadLetterMessageCount>"
+    private String countDetailsXml(ServiceBusNamespaceManager.MessageCounts counts) {
+        return "<CountDetails xmlns=\"" + SB_COUNT_NS + "\">"
+                + "<ActiveMessageCount>" + counts.active() + "</ActiveMessageCount>"
+                + "<DeadLetterMessageCount>" + counts.deadLetter() + "</DeadLetterMessageCount>"
                 + "<ScheduledMessageCount>0</ScheduledMessageCount>"
                 + "<TransferDeadLetterMessageCount>0</TransferDeadLetterMessageCount>"
                 + "<TransferMessageCount>0</TransferMessageCount>"
-                + "</MessageCountDetails>";
+                + "</CountDetails>";
     }
 
     // ── Storage key helpers ───────────────────────────────────────────────────

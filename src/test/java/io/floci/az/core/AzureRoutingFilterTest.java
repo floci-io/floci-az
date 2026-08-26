@@ -137,6 +137,17 @@ class AzureRoutingFilterTest {
                 .body(containsString("EnumerationResults"));
     }
 
+    @Test
+    void serviceBusSdkSignalOverridesEntityNameAccountSuffix() {
+        given().header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+                .queryParam("api-version", "2021-05")
+                .when().get("/orders-queue")
+                .then()
+                .statusCode(404)
+                .contentType("application/atom+xml")
+                .body(containsString("<Code>404</Code>"));
+    }
+
     /**
      * The six {@code -cosmos-*} engine suffixes (disabled by default) each echo their exact
      * serviceType in the terminal 503 — pinning the suffix map and the mandatory longest-first
