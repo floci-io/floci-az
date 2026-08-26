@@ -497,14 +497,19 @@ public class AzureRoutingFilter {
 
     /** Service Bus root-level spec paths (e.g. {@code $namespaceinfo}, {@code $Resources/...}) or AtomPub XML. */
     private Outcome routeServiceBusAtomPub(RoutingContext ctx) {
-        if (ctx.firstSegment().endsWith("-servicebus")) {
+        if (matchSuffix(accountSuffixRoutes, ctx.firstSegment()) != null) {
             return Fallthrough.TO_NEXT_STAGE; // account-suffix routing owns it
         }
         ContainerRequestContext rc = ctx.requestContext();
         String contentType = rc.getHeaderString(HttpHeaders.CONTENT_TYPE);
         String accept = rc.getHeaderString(HttpHeaders.ACCEPT);
+        String userAgent = rc.getHeaderString(HttpHeaders.USER_AGENT);
+        boolean isDotNetAdministrationClient = userAgent != null
+            && userAgent.contains("azsdk-net-Messaging.ServiceBus/")
+            && rc.getUriInfo().getQueryParameters().containsKey("api-version");
         boolean isServiceBusRequest = (contentType != null && contentType.contains("application/atom+xml"))
             || (accept != null && accept.contains("application/atom+xml"))
+            || isDotNetAdministrationClient
             || ctx.path().startsWith("$namespaceinfo")
             || ctx.path().startsWith("$Resources");
         if (!isServiceBusRequest) {

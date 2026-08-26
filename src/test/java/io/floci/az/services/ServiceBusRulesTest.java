@@ -381,6 +381,66 @@ public class ServiceBusRulesTest {
     }
 
     @Test
+    void dotnetPascalCaseSegmentsSupportSubscriptionAndRuleCrud() {
+        String topic = "dotnet-routing-topic";
+        String subscription = "dotnet-routing-sub";
+        String subscriptionPath = BASE + "/" + topic + "/Subscriptions/" + subscription;
+        String rulePath = subscriptionPath + "/Rules/dotnet-rule";
+
+        given().body(TOPIC_BODY).when().put(BASE + "/" + topic).then().statusCode(201);
+        given().body(entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(subscriptionPath)
+                .then().statusCode(201)
+                .body(containsString("<title type=\"text\">" + subscription + "</title>"));
+
+        given().body(correlationRuleBody("dotnet-rule", "dotnet"))
+                .when().put(rulePath)
+                .then().statusCode(201)
+                .body(containsString("<Name>dotnet-rule</Name>"));
+        given().when().get(subscriptionPath + "/rUlEs")
+                .then().statusCode(200)
+                .body(containsString("<Name>dotnet-rule</Name>"));
+        given().when().get(rulePath)
+                .then().statusCode(200)
+                .body(containsString("<Label>dotnet</Label>"));
+
+        given().when().delete(rulePath).then().statusCode(200);
+        given().when().delete(subscriptionPath).then().statusCode(200);
+        given().when().delete(BASE + "/" + topic).then().statusCode(200);
+    }
+
+    @Test
+    void rootLevelPascalCasePathsReturnServiceBusAtomErrors() {
+        String topic = "dotnet-root-routing-topic";
+        String subscription = "dotnet-root-routing-sub";
+        String subscriptionPath = "/" + topic + "/Subscriptions/" + subscription;
+
+        given().accept("application/atom+xml").contentType("application/atom+xml")
+                .body(TOPIC_BODY)
+                .when().put("/" + topic)
+                .then().statusCode(201);
+        given().accept("application/atom+xml").contentType("application/atom+xml")
+                .body(entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(subscriptionPath)
+                .then().statusCode(201);
+
+        given().header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+                .when().get(subscriptionPath + "/unsupported?api-version=2021-05")
+                .then()
+                .statusCode(404)
+                .contentType("application/atom+xml")
+                .body(containsString("<Code>404</Code>"))
+                .body(not(containsString("BlobNotFound")));
+
+        given().header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+                .when().delete(subscriptionPath + "?api-version=2021-05")
+                .then().statusCode(200);
+        given().header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+                .when().delete("/" + topic + "?api-version=2021-05")
+                .then().statusCode(200);
+    }
+
+    @Test
     void feedsContainExactlyOneXmlProlog() {
         createTopicAndSubscription("rules-topic-prolog", "sub1");
         given().body(correlationRuleBody("r1", "red"))

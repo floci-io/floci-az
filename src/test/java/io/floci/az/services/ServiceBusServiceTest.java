@@ -58,6 +58,15 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void apiVersionDoesNotOverrideAnotherServicesAccountSuffix() {
+        given()
+            .when().get("/routing-appconfig-appconfig/kv?api-version=2024-09-01")
+            .then()
+            .statusCode(200)
+            .body(containsString("\"items\""));
+    }
+
+    @Test
     void queuePersistsDuplicateDetectionSettings() {
         String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
                 + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection>"

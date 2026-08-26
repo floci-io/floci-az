@@ -98,6 +98,39 @@ class AzureRoutingFilterTest {
     }
 
     @Test
+    void serviceBusSignalsDoNotOverridePathStyleBlobRouting() {
+        given().queryParam("restype", "container").queryParam("api-version", "2021-05")
+                .when().put("/routingstorage/subscriptions")
+                .then().statusCode(201);
+        given().header("x-ms-blob-type", "BlockBlob").body("storage payload")
+                .queryParam("api-version", "2021-05")
+                .when().put("/routingstorage/subscriptions/blob")
+                .then().statusCode(201);
+
+        given().queryParam("api-version", "2021-05")
+                .when().get("/routingstorage/subscriptions/blob")
+                .then()
+                .statusCode(200)
+                .body(containsString("storage payload"));
+    }
+
+    @Test
+    void serviceBusSignalsDoNotOverridePathStyleQueueRouting() {
+        given().queryParam("restype", "queue").queryParam("api-version", "2021-05")
+                .when().put("/routingqueue/subscriptions")
+                .then().statusCode(201);
+
+        given().contentType("application/xml")
+                .body("<QueueMessage><MessageText>storage payload</MessageText></QueueMessage>")
+                .when().post("/routingqueue/subscriptions/messages")
+                .then().statusCode(201);
+        given().when().get("/routingqueue/subscriptions/messages")
+                .then()
+                .statusCode(200)
+                .body(containsString("storage payload"));
+    }
+
+    @Test
     void queueSuffixRoutesToQueue() {
         given().when().get("/devstoreaccount1-queue/?comp=list")
                 .then().statusCode(200)

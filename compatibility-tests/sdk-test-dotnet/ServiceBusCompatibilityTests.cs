@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using Azure.Messaging.ServiceBus;
+using Azure.Messaging.ServiceBus.Administration;
 
 namespace FlociAz.Compatibility;
 
@@ -15,6 +16,61 @@ public sealed class ServiceBusCompatibilityTests
         Environment.GetEnvironmentVariable("SERVICEBUS_HOST") ?? "localhost";
     private static readonly int ServiceBusPort =
         int.Parse(Environment.GetEnvironmentVariable("SERVICEBUS_AMQP_PORT") ?? "5673");
+
+    [Test]
+    [NotInParallel("servicebus-broker")]
+    [Timeout(90_000)]
+    public async Task AdministrationClientSupportsTopicSubscriptionAndRuleCrud(
+        CancellationToken cancellationToken)
+    {
+        string topic = $"dotnet-admin-{Guid.NewGuid():N}";
+        string subscription = $"dotnet-admin-sub-{Guid.NewGuid():N}";
+        string rule = $"dotnet-admin-rule-{Guid.NewGuid():N}";
+        var endpoint = new Uri(EmulatorEndpoint);
+        string connectionString =
+            $"Endpoint=sb://{endpoint.Authority};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        var administrationClient = new ServiceBusAdministrationClient(connectionString);
+
+        await administrationClient.CreateTopicAsync(topic, cancellationToken);
+        TopicProperties topicProperties =
+            (await administrationClient.GetTopicAsync(topic, cancellationToken)).Value;
+        await Assert.That(topicProperties.Name).IsEqualTo(topic);
+
+        await administrationClient.CreateSubscriptionAsync(
+            topic, subscription, cancellationToken);
+        await administrationClient.CreateRuleAsync(
+            topic,
+            subscription,
+            new CreateRuleOptions(rule, new CorrelationRuleFilter { Subject = "dotnet" }),
+            cancellationToken);
+        await administrationClient.DeleteRuleAsync(
+            topic, subscription, "$Default", cancellationToken);
+
+        SubscriptionProperties subscriptionProperties =
+            (await administrationClient.GetSubscriptionAsync(
+                topic, subscription, cancellationToken)).Value;
+        await Assert.That(subscriptionProperties.SubscriptionName).IsEqualTo(subscription);
+
+        SubscriptionRuntimeProperties runtimeProperties =
+            (await administrationClient.GetSubscriptionRuntimePropertiesAsync(
+                topic, subscription, cancellationToken)).Value;
+        await Assert.That(runtimeProperties.SubscriptionName).IsEqualTo(subscription);
+
+        var rules = new List<RuleProperties>();
+        await foreach (RuleProperties ruleProperties in administrationClient.GetRulesAsync(
+            topic, subscription, cancellationToken))
+        {
+            rules.Add(ruleProperties);
+        }
+        await Assert.That(rules).HasSingleItem();
+        await Assert.That(rules[0].Name).IsEqualTo(rule);
+
+        await administrationClient.DeleteSubscriptionAsync(
+            topic, subscription, cancellationToken);
+        await administrationClient.DeleteTopicAsync(topic, cancellationToken);
+    }
 
     [Test]
     [NotInParallel("servicebus-broker")]

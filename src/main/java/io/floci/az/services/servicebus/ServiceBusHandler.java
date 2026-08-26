@@ -167,7 +167,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             String entityPath = secondSlash < 0 ? "topics" : "topics/" + rest.substring(secondSlash + 1);
             return routeEntityRequest(req, account, first, entityPath);
         }
-        if ("subscriptions".equals(second)) {
+        if ("subscriptions".equalsIgnoreCase(second)) {
             // Spec: {topicName}/subscriptions[/{subName}]
             String subRest = secondSlash < 0 ? "" : rest.substring(secondSlash + 1);
             return handleSpecSubscriptionPath(req, account, first, subRest);
@@ -325,12 +325,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
         String subName = subRest.substring(0, slash);
         String tail = subRest.substring(slash + 1);
-        if ("rules".equals(tail)) {
+        if ("rules".equalsIgnoreCase(tail)) {
             return "GET".equals(req.method())
                     ? handleListRules(account, namespace, topicName, subName)
                     : Response.status(405).build();
         }
-        if (tail.startsWith("rules/")) {
+        if (tail.regionMatches(true, 0, "rules/", 0, "rules/".length())) {
             return handleRuleCrud(req, account, namespace, topicName, subName,
                     tail.substring("rules/".length()));
         }
@@ -448,10 +448,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             }
             String topicName = rest.substring(0, slash);
             String sub = rest.substring(slash + 1);
-            if ("subscriptions".equals(sub)) {
+            if ("subscriptions".equalsIgnoreCase(sub)) {
                 return handleListSubscriptions(account, namespace, topicName);
             }
-            if (sub.startsWith("subscriptions/")) {
+            if (sub.regionMatches(true, 0, "subscriptions/", 0, "subscriptions/".length())) {
                 String subRest = sub.substring("subscriptions/".length());
                 Response response = handleSubscriptionSubPath(req, account, namespace, topicName, subRest);
                 if (response != null) {
