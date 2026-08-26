@@ -178,6 +178,59 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
+    [Timeout(90_000)]
+    public async Task SessionSubscriptionDeadLetterQueueSupportsPeekAndNonSessionReceive(
+        CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string topic = $"session-dlq-topic-{Guid.NewGuid():N}";
+        string subscription = $"session-dlq-sub-{Guid.NewGuid():N}";
+        string sessionId = $"session-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureTopic(serviceBusNamespace, topic, cancellationToken);
+        await EnsureSessionSubscription(
+            serviceBusNamespace, topic, subscription, cancellationToken);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+
+        await using var client = new ServiceBusClient(connectionString, new ServiceBusClientOptions
+        {
+            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(10) }
+        });
+        await using ServiceBusSender sender = client.CreateSender(topic);
+        var outgoing = new ServiceBusMessage("session dead letter")
+        {
+            MessageId = Guid.NewGuid().ToString("N"),
+            SessionId = sessionId,
+            Subject = "important"
+        };
+        outgoing.ApplicationProperties["tenant"] = "contoso";
+        await sender.SendMessageAsync(outgoing, cancellationToken);
+
+        await using (ServiceBusSessionReceiver sessionReceiver = await client.AcceptSessionAsync(
+            topic, subscription, sessionId, new ServiceBusSessionReceiverOptions(), cancellationToken))
+        {
+            ServiceBusReceivedMessage message = await Receive(sessionReceiver, cancellationToken);
+            await sessionReceiver.DeadLetterMessageAsync(
+                message, "validation-failed", "invalid payload", cancellationToken);
+        }
+
+        await using ServiceBusReceiver deadLetterReceiver = client.CreateReceiver(
+            topic, subscription, new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+        ServiceBusReceivedMessage? peeked = await deadLetterReceiver.PeekMessageAsync(
+            cancellationToken: cancellationToken);
+        await Assert.That(peeked).IsNotNull();
+        await AssertDeadLetterProperties(peeked!, outgoing.MessageId, sessionId);
+
+        ServiceBusReceivedMessage received = await Receive(deadLetterReceiver, cancellationToken);
+        await AssertDeadLetterProperties(received, outgoing.MessageId, sessionId);
+        await deadLetterReceiver.CompleteMessageAsync(received, cancellationToken);
+    }
+
+    [Test]
     [Timeout(120_000)]
     public async Task DotnetSdkSuppressesDuplicateMessageIdsForQueuesAndTopics(
         CancellationToken cancellationToken)
@@ -474,6 +527,41 @@ public sealed class ServiceBusCompatibilityTests
             "",
             "Subscription",
             cancellationToken);
+
+    private static Task EnsureSessionSubscription(
+        string serviceBusNamespace,
+        string topic,
+        string subscription,
+        CancellationToken cancellationToken)
+    {
+        const string description = """
+            <entry xmlns="http://www.w3.org/2005/Atom">
+              <content type="application/xml">
+                <SubscriptionDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
+                  <RequiresSession>true</RequiresSession>
+                </SubscriptionDescription>
+              </content>
+            </entry>
+            """;
+        return PutEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/topics/{topic}" +
+            $"/subscriptions/{subscription}",
+            description,
+            "Subscription",
+            cancellationToken);
+    }
+
+    private static async Task AssertDeadLetterProperties(
+        ServiceBusReceivedMessage message, string expectedMessageId, string expectedSessionId)
+    {
+        await Assert.That(message.Body.ToString()).IsEqualTo("session dead letter");
+        await Assert.That(message.MessageId).IsEqualTo(expectedMessageId);
+        await Assert.That(message.SessionId).IsEqualTo(expectedSessionId);
+        await Assert.That(message.Subject).IsEqualTo("important");
+        await Assert.That(message.ApplicationProperties["tenant"]).IsEqualTo("contoso");
+        await Assert.That(message.DeadLetterReason).IsEqualTo("validation-failed");
+        await Assert.That(message.DeadLetterErrorDescription).IsEqualTo("invalid payload");
+    }
 
     private static async Task EnsureQueue(
         string serviceBusNamespace,

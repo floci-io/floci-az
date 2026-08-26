@@ -306,13 +306,23 @@
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="import org.apache.qpid.proton.amqp.messaging.Modified;"
+                                    value="import org.apache.qpid.proton.amqp.messaging.Modified;&#10;import org.apache.qpid.proton.amqp.messaging.Rejected;"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="if (settleImmediate) {"
-                                    value="if (settleImmediate) { delivery.disposition(remoteState);"
+                                    value="if (settleImmediate) { delivery.disposition(remoteState instanceof Rejected ? new Rejected() : remoteState);"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="if (Boolean.TRUE.equals(modification.getDeliveryFailed())) {"
                                     value="if (!Boolean.TRUE.equals(modification.getUndeliverableHere())) {"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="sessionSPI.reject(brokerConsumer, message);"
+                                    value="ServiceBusDeadLetterSupport.apply(message, (Rejected) remoteState); sessionSPI.reject(brokerConsumer, message);"
                                     failOnNoReplacements="true" />
                             </target>
                         </configuration>

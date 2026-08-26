@@ -271,8 +271,6 @@ public class ServiceBusNamespaceManager {
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             applySessionMetadata(http, baseUrl, auth, mbean, queueName,
                     requiresSession, lockDurationSeconds);
-            applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
-                    requiresSession, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
@@ -420,8 +418,6 @@ public class ServiceBusNamespaceManager {
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             applySessionMetadata(http, baseUrl, auth, mbean, queueName,
-                    requiresSession, lockDurationSeconds);
-            applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
                     requiresSession, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
