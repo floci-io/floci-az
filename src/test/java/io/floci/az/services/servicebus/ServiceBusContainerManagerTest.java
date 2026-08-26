@@ -1,0 +1,54 @@
+package io.floci.az.services.servicebus;
+
+import io.floci.az.config.EmulatorConfig;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class ServiceBusContainerManagerTest {
+
+    private final EmulatorConfig config = mock(EmulatorConfig.class);
+    private final EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+    private final EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+    private final ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+
+    @BeforeEach
+    void setUp() {
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(serviceBus.enabled()).thenReturn(true);
+    }
+
+    @Test
+    void reapsOrphanedContainersWhenBrokerModeStarts() {
+        when(serviceBus.mocked()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+
+        verify(namespaceManager).reapOrphanedContainers();
+    }
+
+    @Test
+    void skipsCleanupInMockedMode() {
+        when(serviceBus.mocked()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+
+        verify(namespaceManager, never()).reapOrphanedContainers();
+    }
+
+    @Test
+    void cleanupFailureDoesNotFailApplicationStartup() {
+        when(serviceBus.mocked()).thenReturn(false);
+        when(namespaceManager.reapOrphanedContainers())
+                .thenThrow(new IllegalStateException("Docker unavailable"));
+
+        assertDoesNotThrow(
+                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+    }
+}

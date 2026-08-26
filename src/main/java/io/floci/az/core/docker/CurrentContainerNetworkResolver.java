@@ -45,6 +45,27 @@ public class CurrentContainerNetworkResolver {
         return resolve().map(CurrentContainerNetwork::ipAddress);
     }
 
+    /** Returns the current emulator's Docker container id when running in Docker. */
+    public Optional<String> resolveContainerId() {
+        if (!containerDetector.isRunningInContainer()) {
+            return Optional.empty();
+        }
+        String candidate = currentContainerId();
+        if (candidate.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(candidate).exec();
+            String containerId = inspect.getId();
+            return Optional.of(
+                    containerId == null || containerId.isBlank() ? candidate : containerId);
+        } catch (Exception e) {
+            LOG.debugv("Could not resolve current Docker container {0}: {1}",
+                    candidate, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     Optional<CurrentContainerNetwork> resolve() {
         Optional<CurrentContainerNetwork> cached = cachedNetwork;
         if (cached != null) {

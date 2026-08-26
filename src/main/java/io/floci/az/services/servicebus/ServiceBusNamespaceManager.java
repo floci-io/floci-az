@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,6 +22,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -78,6 +80,8 @@ public class ServiceBusNamespaceManager {
     private static final String TOPIC_ADDRESS_SUFFIX = "/$Topic";
     private static final String TOPIC_DIVERT_SUFFIX = "/$TopicDivert";
     private static final String SESSION_METADATA_PREFIX = "floci-az:servicebus-session:";
+    private static final String SERVICE_LABEL = "servicebus";
+    private static final String OWNER_CONTAINER_LABEL = "floci_owner_container";
     private static final String DUPLICATE_DETECTION_MBEAN =
             "io.floci.az.artemis:type=ServiceBusDuplicateDetection";
     private static final String EXPIRY_MBEAN = "io.floci.az.artemis:type=ServiceBusExpiry";
@@ -104,6 +108,7 @@ public class ServiceBusNamespaceManager {
     private final EmulatorConfig config;
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
+    private final CurrentContainerNetworkResolver currentContainerResolver;
     private final ServiceBusConfigGenerator configGenerator;
     private final ArtemisTlsGenerator tlsGenerator;
 
@@ -111,11 +116,13 @@ public class ServiceBusNamespaceManager {
     public ServiceBusNamespaceManager(EmulatorConfig config,
                                        ContainerBuilder containerBuilder,
                                        ContainerLifecycleManager lifecycleManager,
+                                       CurrentContainerNetworkResolver currentContainerResolver,
                                        ServiceBusConfigGenerator configGenerator,
                                        ArtemisTlsGenerator tlsGenerator) {
         this.config = config;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
+        this.currentContainerResolver = currentContainerResolver;
         this.configGenerator = configGenerator;
         this.tlsGenerator = tlsGenerator;
     }
@@ -148,6 +155,7 @@ public class ServiceBusNamespaceManager {
         ContainerSpec spec = containerBuilder.newContainer(config.services().serviceBus().artemisImage())
                 .withName(containerName)
                 .withEnv("ANONYMOUS_LOGIN", "true")
+                .withLabels(serviceContainerLabels())
                 .withPortBinding(AMQP_PORT, amqpHostPort)
                 .withPortBinding(AMQPS_PORT, amqpsHostPort)
                 .withDynamicPort(JOLOKIA_PORT)
@@ -195,6 +203,20 @@ public class ServiceBusNamespaceManager {
         LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
                 namespaceName, amqpEndpoint, amqpsEndpoint);
         return state;
+    }
+
+    int reapOrphanedContainers() {
+        return lifecycleManager.removeOrphanedContainers(
+                containerName(""), ContainerStorageHelper.defaultLabels(config),
+                OWNER_CONTAINER_LABEL);
+    }
+
+    Map<String, String> serviceContainerLabels() {
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put("floci_service", SERVICE_LABEL);
+        currentContainerResolver.resolveContainerId()
+                .ifPresent(ownerId -> labels.put(OWNER_CONTAINER_LABEL, ownerId));
+        return labels;
     }
 
     /** Registers a mocked namespace with no backing broker — management API only. */

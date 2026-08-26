@@ -41,6 +41,14 @@ public class ServiceBusContainerManager {
         if (sb.mocked()) {
             LOG.info("Service Bus service mocked — skipping container startup");
         } else {
+            try {
+                int reaped = namespaceManager.reapOrphanedContainers();
+                if (reaped > 0) {
+                    LOG.infov("Removed {0} orphaned Service Bus container(s)", reaped);
+                }
+            } catch (Exception e) {
+                LOG.errorf(e, "Could not reap orphaned Service Bus containers");
+            }
             LOG.info("Service Bus service enabled — namespace starts on first entity management call");
         }
     }

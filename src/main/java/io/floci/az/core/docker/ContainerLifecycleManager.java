@@ -416,12 +416,81 @@ public class ContainerLifecycleManager {
      * @param name the container name to remove
      */
     public void removeIfExists(String name) {
+        tryRemoveIfExists(name);
+    }
+
+    private boolean tryRemoveIfExists(String name) {
         try {
             dockerClient.removeContainerCmd(name).withForce(true).exec();
             LOG.infov("Removed stale container {0}", name);
+            return true;
         } catch (NotFoundException ignored) {
+            return false;
         } catch (Exception e) {
             LOG.debugv("Could not remove container {0}: {1}", name, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Removes containers whose owning emulator container no longer exists or is stopped. Name and
+     * emulator-label checks constrain the candidates; an explicit owner label proves whether each
+     * matching sidecar is orphaned. Ownerless legacy containers and containers whose owner cannot
+     * be inspected are left untouched because they cannot be removed safely.
+     *
+     * @return the number of orphaned containers successfully removed
+     */
+    public int removeOrphanedContainers(
+            String namePrefix, Map<String, String> requiredLabels, String ownerLabel) {
+        List<Container> containers = dockerClient.listContainersCmd().withShowAll(true).exec();
+        int removed = 0;
+        for (Container container : containers) {
+            if (hasNamePrefix(container, namePrefix)
+                    && hasRequiredLabels(container, requiredLabels)
+                    && ownerIsStoppedOrMissing(container, ownerLabel)
+                    && tryRemoveIfExists(container.getId())) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private static boolean hasNamePrefix(Container container, String namePrefix) {
+        String[] names = container.getNames();
+        if (names == null) {
+            return false;
+        }
+        for (String name : names) {
+            String normalized = name.startsWith("/") ? name.substring(1) : name;
+            if (normalized.startsWith(namePrefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasRequiredLabels(
+            Container container, Map<String, String> requiredLabels) {
+        Map<String, String> labels = container.getLabels();
+        return labels != null && requiredLabels.entrySet().stream()
+                .allMatch(entry -> entry.getValue().equals(labels.get(entry.getKey())));
+    }
+
+    private boolean ownerIsStoppedOrMissing(Container container, String ownerLabel) {
+        Map<String, String> labels = container.getLabels();
+        String ownerId = labels == null ? null : labels.get(ownerLabel);
+        if (ownerId == null || ownerId.isBlank()) {
+            return false;
+        }
+        try {
+            InspectContainerResponse owner = dockerClient.inspectContainerCmd(ownerId).exec();
+            return owner.getState() != null && !Boolean.TRUE.equals(owner.getState().getRunning());
+        } catch (NotFoundException e) {
+            return true;
+        } catch (Exception e) {
+            LOG.warnv("Could not inspect owner container {0}; skipping orphan cleanup: {1}",
+                    ownerId, e.getMessage());
+            return false;
         }
     }
 
