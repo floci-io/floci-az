@@ -21,7 +21,9 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
   <a href="https://github.com/floci-io/floci-az/releases/latest"><img src="https://img.shields.io/github/v/release/floci-io/floci-az?label=latest%20release&color=blue" alt="Latest Release"></a>
   <a href="https://github.com/floci-io/floci-az/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/floci-io/floci-az/release.yml?label=build" alt="Build Status"></a>
   <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/pulls/floci/floci-az?label=docker%20pulls" alt="Docker Pulls"></a>
+  <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/image-size/floci/floci-az/latest?label=image%20size" alt="Docker Image Size"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <a href="https://github.com/floci-io/floci-az/stargazers"><img src="https://img.shields.io/github/stars/floci-io/floci-az?style=flat" alt="GitHub Stars"></a>
 </p>
 
 <p align="center">
@@ -632,9 +634,12 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis                                                            |   124 |
 | `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, API Management, SQL, PostgreSQL (Flexible Server) | 252 |
 | `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
+| `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces                                                    |    10 |
 | `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
 | `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database)                                            |    14 |
 | `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login                                                                 |    13 |
+
+† Built from source via vcpkg, so the image takes ~6 min cold (seconds if warm).
 
 ‡ Ships with the Entra ID feature ([#23](https://github.com/floci-io/floci-az/issues/23)).
 
@@ -644,6 +649,7 @@ Run the suites against a running container:
 make test-python-compat
 make test-java-compat
 make test-node-compat
+make test-cpp-compat
 make test-cosmos-all    # Cosmos engine tests: MongoDB · PostgreSQL · Cassandra · Gremlin · Table · NoSQL (requires Docker)
 make test-iac-compat    # Terraform + OpenTofu
 make compat-docker      # full matrix

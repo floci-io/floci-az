@@ -240,6 +240,7 @@ compatibility-tests/
                           managed identity
   sdk-test-node/        — Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
                           keyvault, eventhub, servicebus, managed identity
+  sdk-test-cpp/         — Azure SDK for C++ (GoogleTest via vcpkg): blob, queue. Built from source, so ~6 min cold
   compat-terraform/     — hashicorp/azurerm Terraform provider (BATS)
   compat-opentofu/      — OpenTofu with the azurerm provider (BATS)
   compat-azcli/         — real `az` CLI against a custom registered cloud (BATS)
@@ -275,6 +276,7 @@ Current per-suite env vars that must stay in sync:
 | `sdk-test-node` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
+| `sdk-test-cpp` | none — only the shared `FLOCI_AZ_ENDPOINT` | ✓ (no `extra_env`) |
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.
 

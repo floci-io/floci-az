@@ -73,12 +73,13 @@ public class DataLakePathOperations {
 
     public boolean pathExists(String account, String filesystem, String path) {
         String normalizedPath = normalizeDirectory(path);
-        if (normalizedPath == null || normalizedPath.isBlank()) {
+        if (normalizedPath == null || normalizedPath.isEmpty()) {
             return true;
         }
         String exactKey = account + "/" + filesystem + "/" + normalizedPath;
-        if (store.get(exactKey).isPresent()) {
-            return true;
+        var exactPath = store.get(exactKey);
+        if (exactPath.isPresent()) {
+            return "directory".equals(exactPath.get().metadata().get(RESOURCE_TYPE));
         }
         String descendantPrefix = exactKey + "/";
         return store.keys().stream().anyMatch(key -> key.startsWith(descendantPrefix) && !isInternalKey(key));
@@ -115,7 +116,7 @@ public class DataLakePathOperations {
 
     private static String objectPrefix(String account, String filesystem, String directory) {
         String prefix = account + "/" + filesystem + "/";
-        if (directory == null || directory.isBlank()) {
+        if (directory == null || directory.isEmpty()) {
             return prefix;
         }
         return prefix + directory + "/";
@@ -126,18 +127,18 @@ public class DataLakePathOperations {
     }
 
     private static boolean isUnderDirectory(String name, String directory) {
-        return directory == null || directory.isBlank() || name.startsWith(directory + "/");
+        return directory == null || directory.isEmpty() || name.startsWith(directory + "/");
     }
 
     private static String relativeName(String name, String directory) {
-        if (directory == null || directory.isBlank()) {
+        if (directory == null || directory.isEmpty()) {
             return name;
         }
         return name.substring(directory.length() + 1);
     }
 
     private static String joinPath(String left, String right) {
-        if (left == null || left.isBlank()) {
+        if (left == null || left.isEmpty()) {
             return right;
         }
         return left + "/" + right;
@@ -147,14 +148,14 @@ public class DataLakePathOperations {
         if (directory == null) {
             return null;
         }
-        String normalized = directory.trim();
+        String normalized = directory;
         while (normalized.startsWith("/")) {
             normalized = normalized.substring(1);
         }
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
-        return normalized.isBlank() ? null : normalized;
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private static String quoteEtag(String etag) {

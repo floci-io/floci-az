@@ -68,7 +68,9 @@ jobs:
     name: native / ${{ matrix.test }}
     needs: build-native
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    # sdk-test-cpp compiles OpenSSL, libxml2, libcurl and the SDK from source via vcpkg,
+    # so it needs more headroom than the suites that install prebuilt packages.
+    timeout-minutes: ${{ matrix.timeout_minutes || 20 }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,6 +101,8 @@ jobs:
               -e SERVICEBUS_AMQP_PORT=5672
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
+          - test: sdk-test-cpp
+            timeout_minutes: 45
           - test: compat-terraform
           - test: compat-opentofu
           - test: compat-azcli
