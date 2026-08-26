@@ -113,4 +113,33 @@ class CosmosQueryEngineOrderByTest {
         assertEquals(List.of("b", "a"),
                 r.items().stream().map(d -> ((Map<?, ?>) d).get("id")).toList());
     }
+
+    @Test
+    void dotnetRewrittenOrderByQueryReturnsPlannerEnvelope() {
+        List<Map<String, Object>> docs = List.of(
+                Map.of("id", "high", "rank", 2),
+                Map.of("id", "low", "rank", 1));
+
+        CosmosQueryEngine.QueryResult result = engine.execute("""
+                SELECT items._rid, [{"item": items.rank}] AS orderByItems, items AS payload
+                FROM items
+                WHERE (true)
+                ORDER BY items.rank
+                """, List.of(), docs);
+
+        assertEquals(2, result.count());
+        Map<?, ?> first = (Map<?, ?>) result.items().get(0);
+        assertEquals(List.of(Map.of("item", 1)), first.get("orderByItems"));
+        assertEquals("low", ((Map<?, ?>) first.get("payload")).get("id"));
+    }
+
+    @Test
+    void dotnetRewrittenCountQueryReturnsAggregateProjection() {
+        CosmosQueryEngine.QueryResult result = engine.execute("""
+                SELECT VALUE [{"item": COUNT(1)}]
+                FROM c
+                """, List.of(), List.of(Map.of("id", "one"), Map.of("id", "two")));
+
+        assertEquals(List.of(List.of(Map.of("item", 2L))), result.items());
+    }
 }

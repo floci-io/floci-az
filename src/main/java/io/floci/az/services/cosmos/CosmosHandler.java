@@ -45,6 +45,32 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private static final String K_COLL = "|coll|";
     private static final String K_DOC  = "|doc|";
 
+    /**
+     * Configuration advertised by the Cosmos DB gateway for the SDK's client-side query planner.
+     * The .NET SDK rejects an empty object before sending any query request.
+     */
+    private static final Map<String, Object> QUERY_ENGINE_CONFIGURATION = Map.ofEntries(
+            Map.entry("maxSqlQueryInputLength", 262144),
+            Map.entry("maxJoinsPerSqlQuery", 5),
+            Map.entry("maxLogicalAndPerSqlQuery", 500),
+            Map.entry("maxLogicalOrPerSqlQuery", 500),
+            Map.entry("maxUdfRefPerSqlQuery", 10),
+            Map.entry("maxInExpressionItemsCount", 16000),
+            Map.entry("queryMaxInMemorySortDocumentCount", 500),
+            Map.entry("maxQueryRequestTimeoutFraction", 0.9),
+            Map.entry("sqlAllowNonFiniteNumbers", false),
+            Map.entry("sqlAllowAggregateFunctions", true),
+            Map.entry("sqlAllowSubQuery", true),
+            Map.entry("sqlAllowScalarSubQuery", true),
+            Map.entry("allowNewKeywords", true),
+            Map.entry("sqlAllowLike", true),
+            Map.entry("sqlAllowGroupByClause", true),
+            Map.entry("maxSpatialQueryCells", 12),
+            Map.entry("spatialMaxGeometryPointCount", 256),
+            Map.entry("sqlDisableOptimizationFlags", 0),
+            Map.entry("sqlAllowTop", true),
+            Map.entry("enableSpatialIndexing", true));
+
     private final StorageBackend<String, StoredObject> store;
     private final CosmosQueryEngine queryEngine = new CosmosQueryEngine();
 
@@ -211,9 +237,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("userReplicationPolicy",        Map.of("asyncReplication", false, "minReplicaSetSize", 1, "maxReplicasetSize", 4));
         body.put("systemReplicationPolicy",      Map.of("minReplicaSetSize", 1, "maxReplicasetSize", 4));
         body.put("readPolicy",                   Map.of("primaryReadCoefficient", 1, "secondaryReadCoefficient", 1));
-        body.put("queryEngineConfiguration",     "{}");
 
         try {
+            body.put("queryEngineConfiguration", MAPPER.writeValueAsString(QUERY_ENGINE_CONFIGURATION));
             return Response.ok(MAPPER.writeValueAsString(body))
                     .type("application/json")
                     .header("x-ms-request-charge", "1")
@@ -310,7 +336,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
 
         Instant now  = Instant.now();
-        String  rid  = newRid(8);
+        String  rid  = newRid(8, dbRid(req.accountName(), dbId));
         String  etag = newEtag();
 
         @SuppressWarnings("unchecked")
@@ -404,18 +430,27 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * return one range covering the full hash space ("" … "FF").</p>
      */
     private Response listPartitionKeyRanges(AzureRequest req, String dbId, String collId) {
-        Optional<StoredObject> coll = store.get(collKey(req.accountName(), dbId, collId));
+        Optional<StoredObject> coll = findContainer(req.accountName(), dbId, collId);
         if (coll.isEmpty()) return notFound(collId);
 
         String collRid = (String) parseData(coll.get()).getOrDefault("_rid", newRid(8));
         String etag    = coll.get().etag();
         long   ts      = coll.get().lastModified().getEpochSecond();
+        String quotedEtag = quoted(etag);
+
+        if (quotedEtag.equals(req.headers().getHeaderString("If-None-Match"))) {
+            return Response.notModified()
+                    .header("etag", quotedEtag)
+                    .header("x-ms-activity-id", UUID.randomUUID().toString())
+                    .header("x-ms-version", "2018-12-31")
+                    .build();
+        }
 
         Map<String, Object> range = new LinkedHashMap<>();
         range.put("id",           "0");
         range.put("_rid",         newRid(12));
         range.put("_self",        "dbs/" + dbId + "/colls/" + collId + "/pkranges/0");
-        range.put("_etag",        quoted(etag));
+        range.put("_etag",        quotedEtag);
         range.put("_ts",          ts);
         range.put("minInclusive", "");
         range.put("maxExclusive", "FF");
@@ -430,6 +465,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         try {
             return Response.ok(MAPPER.writeValueAsString(body), "application/json")
+                    .header("etag",                quotedEtag)
                     .header("x-ms-request-charge", "1")
                     .header("x-ms-item-count",     "1")
                     .header("x-ms-activity-id",    UUID.randomUUID().toString())
@@ -438,6 +474,38 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         } catch (JsonProcessingException e) {
             return Response.serverError().build();
         }
+    }
+
+    private Optional<StoredObject> findContainer(String account, String dbId, String collId) {
+        Optional<StoredObject> byName = store.get(collKey(account, dbId, collId));
+        if (byName.isPresent()) {
+            return byName;
+        }
+
+        // The .NET SDK reads partition ranges through the resource-ID link returned by the gateway.
+        Optional<String> databaseName = findDatabaseName(account, dbId);
+        if (databaseName.isEmpty()) {
+            return Optional.empty();
+        }
+
+        String collectionPrefix = account + K_COLL + databaseName.get() + "|";
+        return store.scan(key -> key.startsWith(collectionPrefix))
+                .stream()
+                .filter(stored -> collId.equals(parseData(stored).get("_rid")))
+                .findFirst();
+    }
+
+    private Optional<String> findDatabaseName(String account, String dbId) {
+        if (store.get(dbKey(account, dbId)).isPresent()) {
+            return Optional.of(dbId);
+        }
+
+        return store.scan(key -> key.startsWith(account + K_DB))
+                .stream()
+                .map(this::parseData)
+                .filter(database -> dbId.equals(database.get("_rid")))
+                .map(database -> String.valueOf(database.get("id")))
+                .findFirst();
     }
 
     /**
@@ -1409,8 +1477,17 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * @param byteLen 4 (database), 8 (collection), or 16 (document)
      */
     private String newRid(int byteLen) {
+        return newRid(byteLen, null);
+    }
+
+    private String newRid(int byteLen, String parentRid) {
         byte[] b = new byte[byteLen];
         new Random().nextBytes(b);
+
+        if (parentRid != null && !parentRid.isBlank()) {
+            byte[] parentBytes = Base64.getDecoder().decode(parentRid.replace('-', '/'));
+            System.arraycopy(parentBytes, 0, b, 0, Math.min(parentBytes.length, b.length));
+        }
 
         if (byteLen == 8) {
             // bit 7 of byte[4] must be 1 for the SDK to recognise this as a collection RID

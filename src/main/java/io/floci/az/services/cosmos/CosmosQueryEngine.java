@@ -57,7 +57,9 @@ public class CosmosQueryEngine {
             String aggregateType,        // "SUM","AVG","MIN","MAX" — scalar aggregate without GROUP BY
             String aggregateField,       // field path for the aggregate (already alias-stripped)
             boolean distinct,            // SELECT DISTINCT
-            List<String> groupBy         // GROUP BY field expressions (empty = no GROUP BY)
+            List<String> groupBy,        // GROUP BY field expressions (empty = no GROUP BY)
+            boolean wrappedCountProjection,
+            String rootAlias
     ) {}
 
     public record QueryResult(List<Object> items, int count) {}
@@ -86,7 +88,11 @@ public class CosmosQueryEngine {
 
         // COUNT(1) / COUNT(*) — scalar
         if (q.countQuery()) {
-            return new QueryResult(List.of((long) filtered.size()), 1);
+            Object count = (long) filtered.size();
+            if (q.wrappedCountProjection()) {
+                count = List.of(Map.of("item", count));
+            }
+            return new QueryResult(List.of(count), 1);
         }
 
         // SUM / AVG / MIN / MAX without GROUP BY — scalar aggregate
@@ -118,12 +124,14 @@ public class CosmosQueryEngine {
         List<Object> results;
         if (q.selectValue() && q.selectFields() != null && q.selectFields().size() == 1) {
             String path = q.selectFields().get(0);
-            results = filtered.stream().map(doc -> resolve(doc, path)).collect(Collectors.toCollection(ArrayList::new));
+            results = filtered.stream()
+                    .map(doc -> path.equals(q.rootAlias()) ? doc : resolve(doc, path))
+                    .collect(Collectors.toCollection(ArrayList::new));
         } else if (q.selectFields() == null) {
             results = new ArrayList<>(filtered);
         } else {
             results = filtered.stream()
-                    .map(doc -> (Object) projectDoc(doc, q.selectFields()))
+                    .map(doc -> (Object) projectDoc(doc, q.selectFields(), q.rootAlias()))
                     .collect(Collectors.toCollection(ArrayList::new));
         }
 
@@ -147,6 +155,10 @@ public class CosmosQueryEngine {
             "(?is)EXISTS\\s*\\(\\s*SELECT\\s+VALUE\\s+(\\w+)\\s+"
                     + "FROM\\s+\\1\\s+IN\\s+([\\w.]+)"
                     + "(?:\\s+WHERE\\s+(.+))?\\s*\\)");
+    private static final Pattern DOTNET_WRAPPED_COUNT_PATTERN = Pattern.compile(
+            "(?i)^SELECT\\s+VALUE\\s+\\[\\{\\s*\"item\"\\s*:\\s*COUNT\\s*\\((?:1|\\*)\\)\\s*}]\\s+FROM\\b");
+    private static final Pattern DOTNET_ORDER_BY_ITEM_PATTERN = Pattern.compile(
+            "\\[\\{\\s*\"item\"\\s*:\\s*(.+)\\s*}]", Pattern.CASE_INSENSITIVE);
 
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
@@ -170,6 +182,19 @@ public class CosmosQueryEngine {
         int groupByIdx = fromIdx >= 0 ? indexOfKeyword(upper, "GROUP BY", fromIdx) : -1;
         int orderIdx   = indexOfKeyword(upper, "ORDER BY", Math.max(fromIdx, 0));
         int offsetIdx  = indexOfKeyword(upper, "OFFSET",   Math.max(Math.max(orderIdx, groupByIdx), 0));
+        String rootAlias = "c";
+        if (fromIdx >= 0) {
+            int fromEnd = minPositive(whereIdx, groupByIdx, orderIdx, offsetIdx, sql.length());
+            String[] fromTokens = sql.substring(fromIdx + 4, fromEnd).trim().split("\\s+");
+            if (fromTokens.length > 0 && !fromTokens[0].isBlank()) {
+                rootAlias = fromTokens[0];
+                if (fromTokens.length > 2 && "AS".equalsIgnoreCase(fromTokens[1])) {
+                    rootAlias = fromTokens[2];
+                } else if (fromTokens.length == 2) {
+                    rootAlias = fromTokens[1];
+                }
+            }
+        }
 
         // WHERE clause text — ends at the first of: GROUP BY, ORDER BY, OFFSET, or end
         String where = null;
@@ -206,6 +231,7 @@ public class CosmosQueryEngine {
         // COUNT query: only true when there is no GROUP BY
         boolean countQuery = groupBy.isEmpty()
                 && (upper.contains("COUNT(1)") || upper.contains("COUNT(*)"));
+        boolean wrappedCountProjection = countQuery && DOTNET_WRAPPED_COUNT_PATTERN.matcher(sql).find();
 
         // SELECT clause
         boolean selectValue   = false;
@@ -250,7 +276,7 @@ public class CosmosQueryEngine {
         }
 
         return new ParsedQuery(countQuery, selectValue, selectFields, where, orderBy, top, offset, limit,
-                aggregateType, aggregateField, distinct, groupBy);
+                aggregateType, aggregateField, distinct, groupBy, wrappedCountProjection, rootAlias);
     }
 
     // -----------------------------------------------------------------------
@@ -260,6 +286,8 @@ public class CosmosQueryEngine {
     boolean evalExpr(Map<String, Object> doc, String expr) {
         expr = expr.trim();
         if (expr.isEmpty()) return true;
+        if ("true".equalsIgnoreCase(expr)) return true;
+        if ("false".equalsIgnoreCase(expr)) return false;
 
         // Strip balanced outer parens
         if (expr.startsWith("(") && matchingCloseParen(expr, 0) == expr.length() - 1) {
@@ -530,7 +558,7 @@ public class CosmosQueryEngine {
     // Projection
     // -----------------------------------------------------------------------
 
-    private Map<String, Object> projectDoc(Map<String, Object> doc, List<String> fields) {
+    private Map<String, Object> projectDoc(Map<String, Object> doc, List<String> fields, String rootAlias) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (String field : fields) {
             int asIdx = findTopLevelKeyword(field, "AS");
@@ -547,7 +575,7 @@ public class CosmosQueryEngine {
                     alias = expr.contains(".") ? expr.substring(expr.indexOf('.') + 1) : expr;
                 }
             }
-            Object val = resolveExpr(doc, expr);
+            Object val = expr.equals(rootAlias) ? doc : resolveExpr(doc, expr);
             setNested(result, alias, val);
         }
         return result;
@@ -795,6 +823,13 @@ public class CosmosQueryEngine {
         if ("null".equalsIgnoreCase(expr))  return null;
         if ("true".equalsIgnoreCase(expr))  return Boolean.TRUE;
         if ("false".equalsIgnoreCase(expr)) return Boolean.FALSE;
+
+        Matcher orderByItem = DOTNET_ORDER_BY_ITEM_PATTERN.matcher(expr);
+        if (orderByItem.matches()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("item", resolveExpr(doc, orderByItem.group(1).trim()));
+            return List.of(item);
+        }
 
         // Numeric literal
         if (expr.matches("-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?")) {
