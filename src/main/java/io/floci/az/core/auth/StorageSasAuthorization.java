@@ -149,11 +149,13 @@ public class StorageSasAuthorization {
                 value(token.signedKeyStart()),
                 value(token.signedKeyExpiry()),
                 value(token.signedKeyService()),
-                value(token.signedKeyVersion()),
-                value(token.preauthorizedAgentObjectId()),
-                value(token.agentObjectId()),
-                value(token.correlationId())
+                value(token.signedKeyVersion())
         ));
+        if (layout.includesAgentFields()) {
+            fields.add(value(token.preauthorizedAgentObjectId()));
+            fields.add(value(token.agentObjectId()));
+            fields.add(value(token.correlationId()));
+        }
         if (layout.includesDelegatedUser()) {
             fields.add(value(token.delegatedUserTenantId()));
             fields.add(value(token.delegatedUserObjectId()));
@@ -362,22 +364,25 @@ public class StorageSasAuthorization {
     }
 
     private enum SasLayout {
-        LEGACY(false, false, false),
-        SNAPSHOT(false, true, false),
-        ENCRYPTION_SCOPE(false, true, true),
-        DELEGATED_USER(true, true, true),
-        REQUEST_CONSTRAINTS(true, true, true);
+        LEGACY(false, false, true, false),
+        SNAPSHOT(true, false, true, false),
+        ENCRYPTION_SCOPE(true, false, true, true),
+        DELEGATED_USER(true, true, true, true),
+        REQUEST_CONSTRAINTS(true, true, true, true);
 
+        private final boolean agentFields;
         private final boolean delegatedUser;
         private final boolean snapshot;
         private final boolean encryptionScope;
 
-        SasLayout(boolean delegatedUser, boolean snapshot, boolean encryptionScope) {
+        SasLayout(boolean agentFields, boolean delegatedUser, boolean snapshot, boolean encryptionScope) {
+            this.agentFields = agentFields;
             this.delegatedUser = delegatedUser;
             this.snapshot = snapshot;
             this.encryptionScope = encryptionScope;
         }
 
+        boolean includesAgentFields() { return agentFields; }
         boolean includesDelegatedUser() { return delegatedUser; }
         boolean includesSnapshot() { return snapshot; }
         boolean includesEncryptionScope() { return encryptionScope; }
