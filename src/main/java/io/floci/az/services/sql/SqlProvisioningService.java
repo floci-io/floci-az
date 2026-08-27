@@ -6,6 +6,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -27,6 +28,7 @@ public class SqlProvisioningService {
     private static final Logger LOG = Logger.getLogger(SqlProvisioningService.class);
     private static final int WORKER_COUNT = 2;
     private static final int QUEUE_CAPACITY = 64;
+    private static final int MAX_TERMINAL_OPERATIONS = 256;
 
     private final SqlState state;
     private final SqlServerManager serverManager;
@@ -94,6 +96,7 @@ public class SqlProvisioningService {
         operations.computeIfPresent(operationId,
             (id, operation) -> operation.complete("Canceled", "OperationCanceled",
                 "SQL server provisioning was canceled."));
+        pruneTerminalOperations();
     }
 
     public synchronized void clear() {
@@ -157,6 +160,18 @@ public class SqlProvisioningService {
             (id, operation) -> operation.complete(status, code, message));
         if (completed != null) {
             activeOperations.remove(key(completed.serverName()), operationId);
+            pruneTerminalOperations();
+        }
+    }
+
+    private void pruneTerminalOperations() {
+        List<SqlProvisioningOperation> terminal = operations.values().stream()
+            .filter(operation -> !operation.inProgress())
+            .sorted(Comparator.comparing(SqlProvisioningOperation::endTime))
+            .toList();
+        for (int index = 0; index < terminal.size() - MAX_TERMINAL_OPERATIONS; index++) {
+            SqlProvisioningOperation operation = terminal.get(index);
+            operations.remove(operation.id(), operation);
         }
     }
 

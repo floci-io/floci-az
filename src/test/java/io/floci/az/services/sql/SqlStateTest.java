@@ -263,6 +263,8 @@ class SqlStateTest {
         assertEquals("sub-001", entry.get().subscriptionId(), "subscriptionId restored");
         assertEquals("rg-test",  entry.get().resourceGroupName(), "resourceGroup restored");
         assertEquals("sa",       entry.get().administratorLogin(), "login restored");
+        assertEquals("Creating", entry.get().provisioningState(),
+            "a restored server without a runtime must require reprovisioning");
 
         // ── Runtime fields are cleared (containers don't survive restarts) ─────
         assertNull(entry.get().containerId(),
