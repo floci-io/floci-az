@@ -230,14 +230,14 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
 
             serverManager.requireEulaAccepted();
             if (current.isPresent() && "Creating".equals(current.get().provisioningState())) {
-                if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
-                    return ArmErrors.error(409, "ConflictingServerOperation",
-                        "A conflicting create or update operation is in progress for SQL server '"
-                            + serverName + "'.");
-                }
                 Optional<SqlProvisioningService.SqlProvisioningOperation> active =
                     provisioningService.activeOperation(serverName);
                 if (active.isPresent()) {
+                    if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
+                        return ArmErrors.error(409, "ConflictingServerOperation",
+                            "A conflicting create or update operation is in progress for SQL server '"
+                                + serverName + "'.");
+                    }
                     return accepted(request, active.get(), current.get());
                 }
                 current = state.getServer(serverName);

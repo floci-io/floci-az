@@ -6,10 +6,14 @@ import io.floci.az.core.storage.InMemoryStorage;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SqlHandlerConcurrencyTest {
@@ -67,6 +72,33 @@ class SqlHandlerConcurrencyTest {
             releaseBegin.countDown();
             requests.shutdownNow();
         }
+    }
+
+    @Test
+    void changedPutReprovisionsRestoredCreatingServerWithoutActiveOperation() {
+        EmulatorConfig config = managedConfig();
+        SqlState state = new SqlState(new InMemoryStorage<>());
+        state.putServer(new SqlState.SqlServerEntry(
+            "concurrentserver", "test-sub", "test-rg", "eastus", "sa", "OldPass1!",
+            null, 0, "localhost", "Creating", null, null, Map.of(),
+            new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
+        SqlServerManager serverManager = mock(SqlServerManager.class);
+        SqlProvisioningService provisioningService = mock(SqlProvisioningService.class);
+        when(provisioningService.activeOperation("concurrentserver")).thenReturn(Optional.empty());
+        when(provisioningService.begin(any())).thenAnswer(invocation -> {
+            SqlState.SqlServerEntry desired = invocation.getArgument(0);
+            return SqlProvisioningService.SqlProvisioningOperation.inProgress(
+                "operation-id", desired.serverName(), desired.location(), desired.armId());
+        });
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService);
+
+        Response response = handler.handle(request("PUT", BODY));
+
+        assertEquals(202, response.getStatus());
+        ArgumentCaptor<SqlState.SqlServerEntry> desired =
+            ArgumentCaptor.forClass(SqlState.SqlServerEntry.class);
+        verify(provisioningService).begin(desired.capture());
+        assertEquals("StrongPass1!", desired.getValue().administratorLoginPassword());
     }
 
     private static EmulatorConfig managedConfig() {
