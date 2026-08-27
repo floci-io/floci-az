@@ -6,6 +6,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,7 @@ class ContainerAppRuntimeManagerTest {
     private ContainerBuilder containerBuilder;
     private ContainerBuilder.Builder builder;
     private ContainerLifecycleManager lifecycleManager;
+    private CurrentContainerNetworkResolver currentContainerNetworkResolver;
     private ContainerAppRuntimeManager runtimeManager;
 
     @BeforeEach
@@ -44,8 +46,10 @@ class ContainerAppRuntimeManagerTest {
         containerBuilder = mock(ContainerBuilder.class);
         builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
         lifecycleManager = mock(ContainerLifecycleManager.class);
+        currentContainerNetworkResolver = mock(CurrentContainerNetworkResolver.class);
         when(containerBuilder.newContainer(any())).thenReturn(builder);
-        runtimeManager = new ContainerAppRuntimeManager(containerBuilder, lifecycleManager, config);
+        runtimeManager = new ContainerAppRuntimeManager(
+                containerBuilder, lifecycleManager, currentContainerNetworkResolver, config);
     }
 
     @Test
@@ -70,9 +74,18 @@ class ContainerAppRuntimeManagerTest {
 
         verify(builder).withDockerNetwork(Optional.of("test-network"));
         verify(builder).withNetworkMode("container:leader-id");
-        assertEquals(List.of("172.18.0.0/16"), revision.getNetworkSubnets());
         assertTrue(runtimeManager.isInternalCaller("172.18.0.9"));
         assertFalse(runtimeManager.isInternalCaller("192.168.1.9"));
+    }
+
+    @Test
+    void refreshesCurrentNetworkSubnetsBeforeRuntimeStarts() {
+        when(lifecycleManager.networkSubnetsForNetwork("test-network"))
+                .thenReturn(List.of("172.18.0.0/16"), List.of("172.19.0.0/16"));
+
+        assertTrue(runtimeManager.isInternalCaller("172.18.0.4"));
+        assertTrue(runtimeManager.isInternalCaller("172.19.0.4"));
+        assertFalse(runtimeManager.isInternalCaller("172.18.0.4"));
     }
 
     @Test

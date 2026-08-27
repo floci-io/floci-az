@@ -548,7 +548,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
             return ArmErrors.error(503, "ContainerAppMocked",
                     "Container App is configured in mocked mode; ingress data plane is unavailable.");
         }
-        if (!isIngressCallerAllowed(ingress, request, revision)) {
+        if (!isIngressCallerAllowed(ingress, request)) {
             return ArmErrors.notFound("Container App ingress host was not found.");
         }
 
@@ -571,12 +571,9 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
                         "Active revision has no running ingress replica."));
     }
 
-    private boolean isIngressCallerAllowed(
-            JsonNode ingress, AzureRequest request, RevisionState revision) {
+    private boolean isIngressCallerAllowed(JsonNode ingress, AzureRequest request) {
         return ingress.path("external").asBoolean(false)
-                || runtimeManager.isInternalCaller(request.remoteAddress())
-                || ContainerLifecycleManager.isAddressInSubnets(
-                        request.remoteAddress(), revision.getNetworkSubnets());
+                || runtimeManager.isInternalCaller(request.remoteAddress());
     }
 
     Optional<RevisionState> routeRevision(ContainerAppState app, JsonNode ingress) {
