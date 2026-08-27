@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Azure Container Instances (Microsoft.ContainerInstance), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), Managed Identity (Microsoft.ManagedIdentity + IMDS token endpoint), Microsoft Entra ID (OpenID Connect / OAuth2 token issuance, including interactive auth-code+PKCE sign-in), and a narrow Microsoft Graph slice (service principal discovery, group membership).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), Azure Container Apps (Microsoft.App), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Azure Container Instances (Microsoft.ContainerInstance), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), Managed Identity (Microsoft.ManagedIdentity + IMDS token endpoint), Microsoft Entra ID (OpenID Connect / OAuth2 token issuance, including interactive auth-code+PKCE sign-in), and a narrow Microsoft Graph slice (service principal discovery, group membership).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -167,6 +167,7 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 | Azure SQL Database  | ✅                         | ❌                                           | ❌                                                                           |
 | Azure DB for PostgreSQL | ✅                     | ❌                                           | ❌                                                                           |
 | AKS (Kubernetes)    | ✅                         | ❌                                           | ❌                                                                           |
+| Container Apps      | ✅                         | ❌                                           | ❌                                                                           |
 | API Management      | ✅                         | ❌                                           | ❌                                                                           |
 | Virtual Machines    | ✅                         | ❌                                           | ❌                                                                           |
 | Azure Cache for Redis | ✅                       | ❌                                           | ❌                                                                           |
@@ -316,6 +317,7 @@ flowchart LR
 | **Azure SQL Database**  | ARM path + `/{account}-sql/` | Servers, databases, firewall rules; ARM-only by default, optional managed SQL Server 2025 containers                                                                                                                 |
 | **Azure Database for PostgreSQL** | ARM path (`Microsoft.DBforPostgreSQL`) + `/{account}-postgres/` | Flexible servers, databases, firewall rules, configurations; Docker-backed `postgres:17-alpine` containers (no EULA), dynamic port allocation, or mocked |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
+| **Azure Container Apps** | ARM path (`Microsoft.App`) + environment-specific app FQDN | Managed environment/app CRUD, Single/Multiple revisions, secrets, min/max replicas, Docker-backed HTTP ingress or mocked |
 | **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
 | **Virtual Network**     | ARM path (`Microsoft.Network`) | VNet, subnet, NIC, public IP, NSG, private DNS zone (+ virtual network links, record sets), private endpoint (+ private DNS zone groups), and private link service ARM resources; subnet listing is scoped to the parent VNet; NIC private IPs are synthesized for VM/Terraform compatibility |
 | **Virtual Machines**    | ARM path (`Microsoft.Compute`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state; mocked: no Docker (container backing planned)  |
@@ -396,6 +398,7 @@ Floci AZ uses real Docker containers when in-process emulation would reduce fide
 | Azure SQL Database | `mcr.microsoft.com/mssql/server:2025-latest` | Optional managed SQL Server engine (per server) |
 | Azure Database for PostgreSQL | `postgres:17-alpine` | PostgreSQL engine (per flexible server) |
 | AKS | `rancher/k3s:latest` | Kubernetes API server via k3s |
+| Azure Container Apps | User-provided images | Revision replicas with HTTP ingress through floci-az |
 | Azure Cache for Redis | `valkey/valkey:8-alpine` | Redis / Valkey protocol (per cache) |
 | Azure Container Registry | `registry:2` | OCI-compatible registry for docker push and docker pull (shared) |
 
@@ -642,7 +645,7 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | Module              | Language / Tool | Coverage                                                                                                                       | Tests |
 |---------------------|-----------------|--------------------------------------------------------------------------------------------------------------------------------|------:|
 | `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis                                                            |   124 |
-| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, API Management, SQL, PostgreSQL (Flexible Server) | 252 |
+| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, Container Apps, API Management, SQL, PostgreSQL (Flexible Server) | 253 |
 | `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
 | `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces                                                    |    10 |
 | `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
