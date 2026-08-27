@@ -111,6 +111,12 @@ public class BannerLogger {
                     : "mocked  (container-backed mode not yet available)";
             sb.append(serviceStatusDocker("aci", true, aciInfo));
         }
+        if (config.services().containerApps().enabled()) {
+            String containerAppsInfo = config.services().containerApps().mocked()
+                    ? "mocked  (no docker)"
+                    : "revisions  dns:" + config.services().containerApps().dnsSuffix();
+            sb.append(serviceStatusDocker("containerapps", true, containerAppsInfo));
+        }
         if (config.services().vm().enabled()) {
             String vmInfo = config.services().vm().mocked()
                     ? "mocked  (no docker)"
@@ -174,6 +180,7 @@ public class BannerLogger {
             case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
             case "servicebus" -> config.storage().services().serviceBus().mode().orElse(config.storage().mode());
             case "sql"       -> config.storage().services().sql().mode().orElse(config.storage().mode());
+            case "containerapps" -> config.storage().services().containerApps().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

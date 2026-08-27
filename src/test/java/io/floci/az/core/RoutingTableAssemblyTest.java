@@ -26,20 +26,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tried before the broader providers.</p>
  */
 @QuarkusTest
-@DisplayName("AzureRoutingFilter — tables assembled from handlers match A4's static tables")
+@DisplayName("AzureRoutingFilter — tables assembled from handlers match expected routes")
 class RoutingTableAssemblyTest {
 
     @Inject
     AzureRoutingFilter filter;
 
-    /** A4's HOST_ROUTES, verbatim. */
+    /** A4's HOST_ROUTES plus routes introduced by later services. */
     private static final Set<Map.Entry<String, String>> GOLDEN_HOST_ROUTES = Set.of(
         Map.entry(".vault.azure.net", "keyvault"),
         Map.entry(".communication.azure.com", "email"),
         Map.entry(".blob.core.windows.net", "blob"),
         Map.entry(".dfs.core.windows.net", "blob"),
         Map.entry(".queue.core.windows.net", "queue"),
-        Map.entry(".servicebus.windows.net", "servicebus")
+        Map.entry(".servicebus.windows.net", "servicebus"),
+        Map.entry(".azurecontainerapps.io", "containerapps")
     );
 
     /** A4's ACCOUNT_SUFFIX_ROUTES, verbatim (pre-sort). */
@@ -68,7 +69,7 @@ class RoutingTableAssemblyTest {
     );
 
     /**
-     * A4's PROVIDER_ROUTES minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
+     * A4's PROVIDER_ROUTES plus later services, minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
      * of the filter's provider lane into the ArmHandler lane (it implements {@code ArmProviderService}),
      * so it is no longer a filter provider route. Every other entry is unchanged from A4.
      */
@@ -83,7 +84,8 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.DBforMariaDB/", "mariadb"),
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
-        Map.entry("/providers/Microsoft.Communication/", "email")
+        Map.entry("/providers/Microsoft.Communication/", "email"),
+        Map.entry("/providers/Microsoft.App/", "containerapps")
     );
 
     private static Set<Map.Entry<String, String>> asEntries(List<SuffixRoute> routes) {
@@ -95,7 +97,7 @@ class RoutingTableAssemblyTest {
     @Test
     void hostRoutesMatchA4() {
         assertEquals(GOLDEN_HOST_ROUTES, asEntries(filter.hostRoutes()));
-        assertEquals(6, filter.hostRoutes().size(), "no duplicate host suffixes");
+        assertEquals(7, filter.hostRoutes().size(), "no duplicate host suffixes");
     }
 
     @Test
