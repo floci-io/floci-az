@@ -757,15 +757,13 @@ public class ServiceBusNamespaceManager {
     static Map<String, MessageCounts> parseJolokiaMessageCounts(
             List<String> queueNames, String responseBody) throws IOException {
         JsonNode responses = MAPPER.readTree(responseBody);
-        int expectedResponses = queueNames.size() * 2;
-        if (!responses.isArray() || responses.size() != expectedResponses) {
-            throw new IOException("Expected " + expectedResponses
-                    + " Jolokia responses, received " + responses.size());
+        if (!responses.isArray()) {
+            throw new IOException("Expected a Jolokia response array");
         }
         Map<String, MessageCounts> counts = new LinkedHashMap<>();
         for (int i = 0; i < queueNames.size(); i++) {
-            long active = parseJolokiaMessageCountOrZero(responses.get(i * 2));
-            long deadLetter = parseJolokiaMessageCountOrZero(responses.get(i * 2 + 1));
+            long active = parseJolokiaMessageCountOrZero(responses.path(i * 2));
+            long deadLetter = parseJolokiaMessageCountOrZero(responses.path(i * 2 + 1));
             counts.put(queueNames.get(i), new MessageCounts(active, deadLetter));
         }
         return Map.copyOf(counts);

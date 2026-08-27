@@ -72,10 +72,14 @@ class ServiceBusNamespaceManagerTest {
     }
 
     @Test
-    void rejectsIncompleteBatchedCountResponses() {
-        assertThrows(IOException.class, () ->
-                ServiceBusNamespaceManager.parseJolokiaMessageCounts(
-                        List.of("orders"), "[{\"status\":200,\"value\":3}]"));
+    void preservesAvailableCountsWhenBatchedResponsesAreIncomplete() throws IOException {
+        var counts = ServiceBusNamespaceManager.parseJolokiaMessageCounts(
+                List.of("orders", "processor"),
+                "[{\"status\":200,\"value\":3},{\"status\":200,\"value\":1},"
+                        + "{\"status\":200,\"value\":5}]");
+
+        assertEquals(new ServiceBusNamespaceManager.MessageCounts(3, 1), counts.get("orders"));
+        assertEquals(new ServiceBusNamespaceManager.MessageCounts(5, 0), counts.get("processor"));
     }
 
     @Test
