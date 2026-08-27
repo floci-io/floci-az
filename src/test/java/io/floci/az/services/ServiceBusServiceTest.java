@@ -67,6 +67,19 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void dotNetAdministrationClientCanUseEntityNameEndingInAccountSuffix() {
+        given()
+            .header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+            .queryParam("api-version", "2021-05")
+            .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+            .when().put("/orders-queue")
+            .then()
+            .statusCode(201)
+            .contentType("application/atom+xml")
+            .body(containsString("<QueueDescription"));
+    }
+
+    @Test
     void queuePersistsDuplicateDetectionSettings() {
         String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
                 + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection>"
