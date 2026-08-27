@@ -209,7 +209,9 @@ public class SqlState {
                         e.serverName(), e.subscriptionId(), e.resourceGroupName(),
                         e.location(), e.administratorLogin(), e.administratorLoginPassword(),
                         null, 0, "localhost",   // containerId / hostPort / host are always reset on load
-                        e.provisioningState() != null ? e.provisioningState() : "Creating",
+                        "Ready".equals(e.provisioningState())
+                            ? "Creating"
+                            : e.provisioningState() != null ? e.provisioningState() : "Creating",
                         e.failureCode(), e.failureMessage(),
                         new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
                         new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),

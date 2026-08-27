@@ -40,9 +40,10 @@ always takes precedence.
 
 Managed server creation does not wait for image pull or engine startup on the request thread. A new
 server is persisted with `state=Creating` and returns `202 Accepted`, `Location`, and `Retry-After`.
-Poll `Location` until it returns `200` with `status=Succeeded` or `status=Failed`. Server GET exposes
-the corresponding `Creating`, `Ready`, or `Failed` resource state. Equivalent PUT retries reuse the
-same operation; conflicting updates during provisioning return `409 ConflictingServerOperation`.
+Poll `Location` until it returns `200` with `status=Succeeded`; failed provisioning returns a non-2xx
+ARM error envelope containing the provisioning error code and message. Server GET exposes the
+corresponding `Creating`, `Ready`, or `Failed` resource state. Equivalent PUT retries reuse the same
+operation; conflicting updates during provisioning return `409 ConflictingServerOperation`.
 
 ---
 

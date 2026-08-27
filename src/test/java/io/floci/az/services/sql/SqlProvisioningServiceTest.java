@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -113,6 +114,36 @@ class SqlProvisioningServiceTest {
 
         release.release();
         verify(manager, timeout(2_000)).stopServer(any());
+    }
+
+    @Test
+    void boundsRetainedTerminalOperations() {
+        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlServerManager manager = mock(SqlServerManager.class);
+        when(manager.startServer(any())).thenAnswer(invocation ->
+            ((SqlState.SqlServerEntry) invocation.getArgument(0))
+                .withContainer("container-id", 14330, "localhost"));
+        var executor = mock(java.util.concurrent.ExecutorService.class);
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(executor).execute(any());
+        service = new SqlProvisioningService(state, manager, executor);
+
+        String firstOperationId = null;
+        String lastOperationId = null;
+        for (int index = 0; index < 257; index++) {
+            SqlState.SqlServerEntry desired = server("server-" + index);
+            state.putServer(desired);
+            String operationId = service.begin(desired).id();
+            if (firstOperationId == null) {
+                firstOperationId = operationId;
+            }
+            lastOperationId = operationId;
+        }
+
+        assertTrue(service.get(firstOperationId).isEmpty());
+        assertTrue(service.get(lastOperationId).isPresent());
     }
 
     private SqlProvisioningService.SqlProvisioningOperation awaitTerminal(
