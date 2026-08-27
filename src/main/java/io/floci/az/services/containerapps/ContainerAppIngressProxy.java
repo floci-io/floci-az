@@ -40,7 +40,7 @@ public class ContainerAppIngressProxy {
     public Response proxy(AzureRequest request, ContainerLifecycleManager.EndpointInfo endpoint) {
         try {
             URI target = URI.create("http://" + endpoint.host() + ":" + endpoint.port()
-                    + "/" + trimLeadingSlash(request.resourcePath()) + queryString(request.queryParamsMulti()));
+                    + "/" + trimLeadingSlash(request.rawPath()) + queryString(request.queryParamsMulti()));
             byte[] body = request.bodyStream() == null ? new byte[0] : request.bodyStream().readAllBytes();
             HttpRequest.Builder outgoing = HttpRequest.newBuilder(target)
                     .timeout(timeout)

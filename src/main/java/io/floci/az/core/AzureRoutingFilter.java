@@ -94,6 +94,7 @@ public class AzureRoutingFilter {
     private record RoutingContext(
         ContainerRequestContext requestContext,
         String path,
+        String rawPath,
         HttpHeaders headers,
         String host,
         boolean secure,
@@ -325,6 +326,7 @@ public class AzureRoutingFilter {
                                 @Context HttpServerRequest serverRequest) {
         // Capture context before switching threads
         String path0 = requestContext.getUriInfo().getPath();
+        String rawPath0 = serverRequest.path();
         HttpHeaders headers = httpHeaders;
         // Capture the request authority/host now (JAX-RS request scope may not propagate to the
         // blocking thread). Under HTTP/2 the wire protocol uses :authority instead of a Host
@@ -342,14 +344,16 @@ public class AzureRoutingFilter {
                 ? null : serverRequest.remoteAddress().hostAddress();
 
         return Uni.createFrom().completionStage(
-            vertx.executeBlocking(() -> doFilter(requestContext, path0, headers, capturedHost, remoteAddress))
+            vertx.executeBlocking(() -> doFilter(
+                    requestContext, path0, rawPath0, headers, capturedHost, remoteAddress))
                  .toCompletionStage()
         );
     }
 
-    private Response doFilter(ContainerRequestContext requestContext, String rawPath, HttpHeaders headers,
-                              String capturedHost, String remoteAddress) {
-        String path = rawPath.startsWith("/") ? rawPath.substring(1) : rawPath;
+    private Response doFilter(ContainerRequestContext requestContext, String decodedPath, String rawPath,
+                              HttpHeaders headers, String capturedHost, String remoteAddress) {
+        String path = trimLeadingSlash(decodedPath);
+        String encodedPath = trimLeadingSlash(rawPath);
 
         if (isEmulatorAdminPath(path)) {
             return null;
@@ -357,8 +361,8 @@ public class AzureRoutingFilter {
 
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
-        RoutingContext ctx = new RoutingContext(requestContext, path, headers, hostWithoutPort(capturedHost),
-            requestContext.getSecurityContext().isSecure(), remoteAddress);
+        RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, headers,
+            hostWithoutPort(capturedHost), requestContext.getSecurityContext().isSecure(), remoteAddress);
 
         for (Function<RoutingContext, Outcome> stage : stages) {
             Outcome outcome = stage.apply(ctx);
@@ -377,6 +381,10 @@ public class AzureRoutingFilter {
     private static boolean isEmulatorAdminPath(String path) {
         return path.equals("health") || path.equals("ready")
             || path.startsWith("_floci/") || path.startsWith("_admin");
+    }
+
+    private static String trimLeadingSlash(String path) {
+        return path.startsWith("/") ? path.substring(1) : path;
     }
 
     /**
@@ -735,7 +743,7 @@ public class AzureRoutingFilter {
         }
         AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
             ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
-            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress());
+            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath());
         LOGGER.infof("Dispatching %s request to %s: %s %s", label,
             handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
         return new Handled(handler.get().handle(request));
@@ -751,7 +759,7 @@ public class AzureRoutingFilter {
         });
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
-            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(), ctx.host(), ctx.remoteAddress());
+            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath());
         return request.withAuthContext(authPipeline.resolve(request));
     }
 
