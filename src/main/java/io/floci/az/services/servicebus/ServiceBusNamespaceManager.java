@@ -72,6 +72,7 @@ public class ServiceBusNamespaceManager {
     private static final int AMQP_PORT = 5672;
     private static final int AMQPS_PORT = 5671;
     private static final int JOLOKIA_PORT = 8161;
+    private static final String MANAGEMENT_SUFFIX = "/$management";
     private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$DeadLetterQueue";
     private static final String SUBSCRIPTION_DIVERT_SUFFIX = "/$Divert";
     private static final String TOPIC_ADDRESS_SUFFIX = "/$Topic";
@@ -246,10 +247,10 @@ public class ServiceBusNamespaceManager {
             String queueName,
             boolean requiresSession,
             long lockDurationSeconds,
+            int maxDeliveryAttempts,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
-        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
                 + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
@@ -266,6 +267,8 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            createManagementAddress(http, baseUrl, auth, mbean, queueName);
+            createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             applySessionMetadata(http, baseUrl, auth, mbean, queueName,
                     requiresSession, lockDurationSeconds);
             applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
@@ -285,6 +288,8 @@ public class ServiceBusNamespaceManager {
     public void jolokiaDeleteQueue(String namespaceName, String queueName) {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            deleteManagementAddress(http, baseUrl, auth, mbean, queueName);
+            deleteManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(queueName, true, true));
@@ -390,12 +395,12 @@ public class ServiceBusNamespaceManager {
             String filter,
             boolean requiresSession,
             long lockDurationSeconds,
+            int maxDeliveryAttempts,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
-        int maxDeliveryAttempts = config.services().serviceBus().maxDeliveryCount();
         String addressSettings = "{\"deadLetterAddress\":" + jsonString(deadLetterQueue)
                 + ",\"maxDeliveryAttempts\":" + maxDeliveryAttempts
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
@@ -412,6 +417,8 @@ public class ServiceBusNamespaceManager {
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+            createManagementAddress(http, baseUrl, auth, mbean, queueName);
+            createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             applySessionMetadata(http, baseUrl, auth, mbean, queueName,
                     requiresSession, lockDurationSeconds);
             applySessionMetadata(http, baseUrl, auth, mbean, deadLetterQueue,
@@ -453,6 +460,8 @@ public class ServiceBusNamespaceManager {
         String deadLetterQueue = queueName + DEAD_LETTER_QUEUE_SUFFIX;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
+            deleteManagementAddress(http, baseUrl, auth, mbean, queueName);
+            deleteManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyDivert(java.lang.String)",
                     jsonArr(divertName));
@@ -482,6 +491,22 @@ public class ServiceBusNamespaceManager {
         jolokiaExec(http, baseUrl, auth, EXPIRY_MBEAN,
                 "configure(java.lang.String,long,java.lang.String)",
                 jsonArr(queueName, ttlMillis, deadLetterAddress));
+    }
+
+    private void createManagementAddress(
+            HttpClient http, String baseUrl, String auth, String mbean, String entityPath) {
+        String managementAddress = entityPath + MANAGEMENT_SUFFIX;
+        jolokiaExec(http, baseUrl, auth, mbean,
+                "createAddress(java.lang.String,java.lang.String)",
+                jsonArr(managementAddress, "MULTICAST"));
+    }
+
+    private void deleteManagementAddress(
+            HttpClient http, String baseUrl, String auth, String mbean, String entityPath) {
+        String managementAddress = entityPath + MANAGEMENT_SUFFIX;
+        jolokiaExec(http, baseUrl, auth, mbean,
+                "deleteAddress(java.lang.String,boolean)",
+                jsonArr(managementAddress, true));
     }
 
     private void removeExpiry(

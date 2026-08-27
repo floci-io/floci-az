@@ -127,6 +127,51 @@ class ServiceBusCompatibilityTest {
     }
 
     @Test
+    @DisplayName("entity MaxDeliveryCount dead-letters after the configured attempts")
+    void maxDeliveryCountDeadLettersAfterEntityLimit() throws Exception {
+        String queue = uniqueName("mdc");
+        EmulatorConfig.ensureServiceBusQueue(queue, "<MaxDeliveryCount>2</MaxDeliveryCount>");
+        String payload = "mdc-" + UUID.randomUUID();
+
+        send(queue, payload);
+
+        // Exhaust the entity's two delivery attempts by abandoning both. Only the relative
+        // delivery count is asserted: the emulator's AMQP delivery-count header is 1-based
+        // where Azure's is 0-based, and this SDK reads the header verbatim.
+        long previousCount = -1;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+                ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                        .stream().findFirst().orElse(null);
+                assertNotNull(msg, "Expected delivery attempt " + attempt);
+                assertTrue(msg.getDeliveryCount() > previousCount,
+                        "Delivery count should increase on each attempt");
+                previousCount = msg.getDeliveryCount();
+                receiver.abandon(msg);
+            }
+        }
+
+        // The third attempt must yield nothing: the broker dead-lettered the message.
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            long count = receiver.receiveMessages(1, Duration.ofSeconds(2)).stream().count();
+            assertEquals(0, count, "Message should be gone after MaxDeliveryCount attempts");
+        }
+
+        try (ServiceBusReceiverClient dlqReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .receiver()
+                .queueName(queue)
+                .subQueue(com.azure.messaging.servicebus.models.SubQueue.DEAD_LETTER_QUEUE)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient()) {
+            ServiceBusReceivedMessage dlqMsg = dlqReceiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(dlqMsg, "Message should be dead-lettered after exceeding MaxDeliveryCount");
+            assertEquals(payload, dlqMsg.getBody().toString());
+            dlqReceiver.complete(dlqMsg);
+        }
+    }
+
+    @Test
     @DisplayName("message properties round-trip correctly")
     void messageProperties() throws Exception {
         String queue = uniqueQueue();

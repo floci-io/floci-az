@@ -324,6 +324,39 @@ public class BlobServiceTest {
     }
 
     @Test
+    void legacySasCanReadBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    legacySas(CONTAINER, BLOB))
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void sasWithSignedRepeatedQueryValuesCanReadBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .queryParam("operation", "read", "metadata")
+            .when().get("/{account}/{container}/{blob}?{sas}",
+                    ACCOUNT, CONTAINER, BLOB, sasWithSignedRepeatedQueryValues(CONTAINER, BLOB))
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
     void arbitraryNonExpiredSasReturnsAuthenticationFailed() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -672,6 +705,46 @@ public class BlobServiceTest {
             .then()
             .statusCode(200)
             .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeDirectoryListingPreservesBoundarySpaces() {
+        String directory = " path with spaces ";
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/{directory}?resource=directory", CONTAINER, directory)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .queryParam("recursive", true)
+            .queryParam("directory", directory)
+            .when().get("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeDirectoryListingRejectsFilePath() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/file?resource=file", CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=file", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
     }
 
     @Test
@@ -1381,6 +1454,101 @@ public class BlobServiceTest {
         } catch (Exception e) {
             throw new IllegalStateException("Unable to derive legacy test key", e);
         }
+    }
+
+    private String legacySas(String container, String blobName) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String st = start.toString();
+        String se = expiry.toString();
+        String version = "2019-12-12";
+        String stringToSign = String.join("\n",
+                "r",
+                st,
+                se,
+                canonicalName(container, blobName),
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID,
+                UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                st,
+                se,
+                "b",
+                version,
+                "",
+                "",
+                version,
+                "b",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+        );
+        String signature = hmac(keyMaterial.signingKeyForAccount(ACCOUNT), stringToSign);
+        return "sv=" + version
+                + "&st=" + st
+                + "&se=" + se
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + st
+                + "&ske=" + se
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=b"
+                + "&sp=r"
+                + "&sig=" + signature;
+    }
+
+    private String sasWithSignedRepeatedQueryValues(String container, String blobName) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String st = start.toString();
+        String se = expiry.toString();
+        String version = "2026-04-06";
+        String stringToSign = String.join("\n",
+                "r",
+                st,
+                se,
+                canonicalName(container, blobName),
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID,
+                UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                st,
+                se,
+                "b",
+                version,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                version,
+                "b",
+                "",
+                "",
+                "",
+                "\noperation=read,metadata",
+                "",
+                "",
+                "",
+                "",
+                ""
+        );
+        String signature = hmac(keyMaterial.signingKeyForAccount(ACCOUNT), stringToSign);
+        return "sv=" + version
+                + "&st=" + st
+                + "&se=" + se
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + st
+                + "&ske=" + se
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=b"
+                + "&sp=r"
+                + "&srq=operation"
+                + "&sig=" + signature;
     }
 
     private static String canonicalName(String container, String blobName) {

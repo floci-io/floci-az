@@ -15,6 +15,7 @@ import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -69,11 +70,15 @@ public class ArmHandler implements AzureServiceHandler {
     private final Instance<ArmProviderService> providerServices;
     private final Map<String, ArmProviderService> providerLane = new HashMap<>();
 
+    /** Services contributing their resources to the resource-group /resources index. */
+    private final Instance<ResourceIndexContributor> resourceIndexContributors;
+
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
-                      Instance<ArmProviderService> providerServices) {
+                      Instance<ArmProviderService> providerServices,
+                      Instance<ResourceIndexContributor> resourceIndexContributors) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -82,6 +87,7 @@ public class ArmHandler implements AzureServiceHandler {
         this.networkHandler       = networkHandler;
         this.managedIdentityHandler = managedIdentityHandler;
         this.providerServices     = providerServices;
+        this.resourceIndexContributors = resourceIndexContributors;
     }
 
     /**
@@ -269,6 +275,11 @@ public class ArmHandler implements AzureServiceHandler {
             resources.addAll(apiManagementHandler.listServices(sub, rg));
             if (config.services().managedIdentity().enabled()) {
                 resources.addAll(managedIdentityHandler.listResources(sub, rg));
+            }
+            for (ResourceIndexContributor contributor : resourceIndexContributors) {
+                if (contributor.indexEnabled()) {
+                    resources.addAll(contributor.listRgResources(sub, rg));
+                }
             }
             return Response.ok(Map.of("value", resources)).build();
         }

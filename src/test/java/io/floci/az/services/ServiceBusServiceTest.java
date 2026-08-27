@@ -167,6 +167,72 @@ public class ServiceBusServiceTest {
                 .body(containsString("DefaultMessageTimeToLive must be positive"));
     }
 
+    @Test
+    void queuePersistsMaxDeliveryCountAndLockDuration() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<LockDuration>PT30S</LockDuration>"
+                + "<MaxDeliveryCount>5</MaxDeliveryCount>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/delivery-queue")
+                .then().statusCode(201)
+                .body(containsString("<LockDuration>PT30S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>5</MaxDeliveryCount>"));
+
+        given().when().get(BASE + "/delivery-queue")
+                .then().statusCode(200)
+                .body(containsString("<LockDuration>PT30S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>5</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void subscriptionPersistsMaxDeliveryCountAndLockDuration() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/delivery-topic")
+                .then().statusCode(201);
+
+        String subscriptionBody = entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
+                + "<LockDuration>PT45S</LockDuration>"
+                + "<MaxDeliveryCount>3</MaxDeliveryCount>"
+                + "</SubscriptionDescription>");
+        given().body(subscriptionBody)
+                .when().put(BASE + "/delivery-topic/subscriptions/delivery-subscription")
+                .then().statusCode(201)
+                .body(containsString("<LockDuration>PT45S</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>3</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void deliverySettingsDefaultToConfiguredValues() {
+        given().body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/delivery-default-queue")
+                .then().statusCode(201)
+                .body(containsString("<LockDuration>PT1M</LockDuration>"))
+                .body(containsString("<MaxDeliveryCount>10</MaxDeliveryCount>"));
+    }
+
+    @Test
+    void rejectsMaxDeliveryCountOutsideAzureLimits() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<MaxDeliveryCount>0</MaxDeliveryCount>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/delivery-invalid-count")
+                .then().statusCode(400)
+                .body(containsString("MaxDeliveryCount must be between 1 and 2000"));
+    }
+
+    @Test
+    void rejectsLockDurationAboveFiveMinutes() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<LockDuration>PT6M</LockDuration>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/delivery-invalid-lock")
+                .then().statusCode(400)
+                .body(containsString("LockDuration must be between PT1S and PT5M"));
+    }
+
     private static String entry(String description) {
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
                 + description + "</content></entry>";

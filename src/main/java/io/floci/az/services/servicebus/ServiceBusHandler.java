@@ -267,9 +267,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         boolean requiresSession = body.contains("<RequiresSession>true</RequiresSession>");
         ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection;
         ServiceBusEntityXml.MessageLifetimeSettings lifetime;
+        ServiceBusEntityXml.DeliverySettings delivery;
         try {
             duplicateDetection = ServiceBusEntityXml.duplicateDetection(body);
             lifetime = ServiceBusEntityXml.parseMessageLifetime(body);
+            delivery = ServiceBusEntityXml.parseDelivery(body);
         } catch (IllegalArgumentException e) {
             return badRequestAtom(e.getMessage());
         }
@@ -279,7 +281,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
         return handleCreateQueue(
-                account, ns, entityName, requiresSession, duplicateDetection, lifetime);
+                account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery);
     }
 
     private Response handleSpecEntityDelete(String account, String ns, String entityName) {
@@ -481,7 +483,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 try {
                     yield handleCreateQueue(account, namespace, queueName, requiresSession,
                             ServiceBusEntityXml.duplicateDetection(body),
-                            ServiceBusEntityXml.parseMessageLifetime(body));
+                            ServiceBusEntityXml.parseMessageLifetime(body),
+                            ServiceBusEntityXml.parseDelivery(body));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -504,7 +507,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private Response handleCreateQueue(String account, String namespace, String queueName,
                                         boolean requiresSession,
                                         ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
-                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                        ServiceBusEntityXml.DeliverySettings delivery) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.QueueEntity existing =
@@ -517,13 +521,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         ServiceBusModels.QueueEntity queue = ServiceBusModels.QueueEntity.defaults(
-                queueName, sb.maxDeliveryCount(), sb.lockDurationSeconds(), requiresSession,
-                duplicateDetection, lifetime);
+                queueName,
+                delivery.maxDeliveryCount() != null ? delivery.maxDeliveryCount() : sb.maxDeliveryCount(),
+                delivery.lockDurationSeconds() != null ? delivery.lockDurationSeconds() : sb.lockDurationSeconds(),
+                requiresSession, duplicateDetection, lifetime);
         store.put(key, toStoredObject(key, queue));
 
         try {
             namespaceManager.jolokiaCreateQueue(namespace, queueName,
-                    queue.requiresSession(), queue.lockDurationSeconds(), duplicateDetection, lifetime);
+                    queue.requiresSession(), queue.lockDurationSeconds(),
+                    queue.maxDeliveryCount(), duplicateDetection, lifetime);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision queue '%s' in Artemis for namespace '%s'", queueName, namespace);
         }
@@ -662,7 +669,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 try {
                     yield handleCreateSubscription(account, namespace, topicName, subName,
                             requiresSession, body,
-                            ServiceBusEntityXml.parseMessageLifetime(body));
+                            ServiceBusEntityXml.parseMessageLifetime(body),
+                            ServiceBusEntityXml.parseDelivery(body));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -687,7 +695,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private Response handleCreateSubscription(String account, String namespace,
                                                 String topicName, String subName,
                                                 boolean requiresSession, String body,
-                                                ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+                                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                                ServiceBusEntityXml.DeliverySettings delivery) {
         Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
         if (storedTopic.isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -716,7 +725,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         ServiceBusModels.SubscriptionEntity sub = ServiceBusModels.SubscriptionEntity.defaults(
-                topicName, subName, sb.maxDeliveryCount(), sb.lockDurationSeconds(),
+                topicName, subName,
+                delivery.maxDeliveryCount() != null ? delivery.maxDeliveryCount() : sb.maxDeliveryCount(),
+                delivery.lockDurationSeconds() != null ? delivery.lockDurationSeconds() : sb.lockDurationSeconds(),
                 requiresSession, lifetime);
         store.put(key, toStoredObject(key, sub));
         String ruleStoreKey = ruleKey(account, namespace, topicName, subName, initialRule.name());
@@ -731,6 +742,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             namespaceManager.jolokiaCreateSubscription(
                     namespace, topicName, subName, selector,
                     sub.requiresSession(), sub.lockDurationSeconds(),
+                    sub.maxDeliveryCount(),
                     new ServiceBusEntityXml.DuplicateDetectionSettings(
                             topic.requiresDuplicateDetection(),
                             topic.duplicateDetectionHistorySeconds()),

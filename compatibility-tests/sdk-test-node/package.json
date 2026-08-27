@@ -13,6 +13,7 @@
     "@azure/identity": "^4.5.0",
     "@azure/keyvault-secrets": "^4.8.0",
     "@azure/msal-node": "^5.4.2",
+    "@azure/service-bus": "7.9.5",
     "@azure/storage-blob": "^12.23.0",
     "@azure/storage-queue": "^12.22.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",

@@ -25,6 +25,7 @@ src/main/java/io/floci/az/
     └── functions/   # FunctionsServiceHandler, ContainerLauncher, WarmPool, FunctionCodeStore
 
 compatibility-tests/
+├── sdk-test-cpp/    # Azure C++ SDK tests (GoogleTest, vcpkg)
 ├── sdk-test-java/   # Azure Java SDK tests (JUnit 5)
 ├── sdk-test-node/   # Azure Node.js SDK tests (Jest)
 └── sdk-test-python/ # Azure Python SDK tests (pytest)
@@ -50,6 +51,7 @@ Then run via Make:
 make test-python-compat # Python SDK (virtualenv)
 make test-java-compat   # Java SDK (Maven)
 make test-node-compat   # Node.js SDK (npm)
+make test-cpp-compat    # C++ SDK (Docker only: the toolchain lives in the image)
 ```
 
 ### Compatibility tests — Docker (matches CI)

@@ -189,6 +189,11 @@ floci-az:
       api-server-base-port: 6443
       api-server-max-port: 7443
       keep-running-on-shutdown: false
+    aci:
+      enabled: true
+      mocked: true          # true = no Docker; container groups are pure ARM state (Succeeded/Running). false = back groups with real containers (PR 2)
+      base-port: 7500       # host-port range for published group ports (clear of acr 5000-5099, redis 6379-6399, aks 6443-7443)
+      max-port: 7599
     vm:
       enabled: true
       mocked: true          # true = no Docker; VMs are pure ARM state. false = back VMs with containers (phase 2)

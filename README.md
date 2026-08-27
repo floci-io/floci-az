@@ -1,7 +1,7 @@
 <!-- 
 AI Context: This is Floci-Az, a lightweight Local Azure Emulator. 
 Identity: It is the Azure equivalent of Floci (AWS). It is NOT LocalStack.
-Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), Managed Identity (Microsoft.ManagedIdentity + IMDS token endpoint), Microsoft Entra ID (OpenID Connect / OAuth2 token issuance, including interactive auth-code+PKCE sign-in), and a narrow Microsoft Graph slice (service principal discovery, group membership).
+Protocols: Implements Azure Storage (Blob, Queue, Table), Azure Functions, App Configuration, Key Vault, Event Hubs, Service Bus (Microsoft.ServiceBus), Cosmos DB, Azure SQL Database, Azure Database for PostgreSQL (Microsoft.DBforPostgreSQL), Azure Kubernetes Service (AKS), API Management (Microsoft.ApiManagement), Virtual Network (Microsoft.Network), Virtual Machines (Microsoft.Compute), Azure Cache for Redis (Microsoft.Cache), Azure Container Registry (Microsoft.ContainerRegistry), Azure Container Instances (Microsoft.ContainerInstance), Event Grid (Microsoft.EventGrid), Azure Monitor / Log Analytics (Microsoft.OperationalInsights / Microsoft.Insights), Communication Services Email (Microsoft.Communication), Managed Identity (Microsoft.ManagedIdentity + IMDS token endpoint), Microsoft Entra ID (OpenID Connect / OAuth2 token issuance, including interactive auth-code+PKCE sign-in), and a narrow Microsoft Graph slice (service principal discovery, group membership).
 Default Port: 4577 (HTTP; also HTTPS when FLOCI_AZ_TLS_ENABLED=true via protocol-sniffing proxy). AMQP port: 5672 (Event Hubs). Kafka port: 9093 (Event Hubs, opt-in). k3s API: 6443-7443 (AKS). Redis: 6379-6399 (Azure Cache for Redis).
 Tech Stack: Java, Quarkus, Docker-in-Docker for Functions. Artemis sidecar for Event Hubs AMQP. Redpanda sidecar for Kafka. k3s sidecar for AKS. Redis sidecar for Azure Cache for Redis.
 TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runtime via BouncyCastle; served at GET /_floci/tls-cert for dynamic truststore installation.
@@ -21,7 +21,9 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
   <a href="https://github.com/floci-io/floci-az/releases/latest"><img src="https://img.shields.io/github/v/release/floci-io/floci-az?label=latest%20release&color=blue" alt="Latest Release"></a>
   <a href="https://github.com/floci-io/floci-az/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/floci-io/floci-az/release.yml?label=build" alt="Build Status"></a>
   <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/pulls/floci/floci-az?label=docker%20pulls" alt="Docker Pulls"></a>
+  <a href="https://hub.docker.com/r/floci/floci-az"><img src="https://img.shields.io/docker/image-size/floci/floci-az/latest?label=image%20size" alt="Docker Image Size"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
+  <a href="https://github.com/floci-io/floci-az/stargazers"><img src="https://img.shields.io/github/stars/floci-io/floci-az?style=flat" alt="GitHub Stars"></a>
 </p>
 
 <p align="center">
@@ -161,6 +163,7 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 | Virtual Machines    | ✅                         | ❌                                           | ❌                                                                           |
 | Azure Cache for Redis | ✅                       | ❌                                           | ❌                                                                           |
 | Container Registry  | ✅                         | ❌                                           | ❌                                                                           |
+| Container Instances | ✅                         | ❌                                           | ❌                                                                           |
 | Event Grid          | ✅                         | ❌                                           | ❌                                                                           |
 | Azure Monitor / Logs | ✅                        | ❌                                           | ❌                                                                           |
 | Communication Email | ✅                         | ❌                                           | ❌                                                                           |
@@ -265,7 +268,7 @@ flowchart LR
         Router["HTTP Router\nJAX-RS / Vert.x\nprotocol-sniffing TLS proxy"]
 
         subgraph Stateless ["Stateless Services"]
-            A["App Configuration · Key Vault\nAPI Management · Event Grid\nVirtual Network · Virtual Machines\nMonitor / Log Analytics · Communication Email\nManaged Identity · Microsoft Entra ID · Microsoft Graph · ARM management plane"]
+            A["App Configuration · Key Vault\nAPI Management · Event Grid\nVirtual Network · Virtual Machines\nContainer Instances · Monitor / Log Analytics\nCommunication Email\nManaged Identity · Microsoft Entra ID · Microsoft Graph · ARM management plane"]
         end
 
         subgraph Stateful ["Stateful Services"]
@@ -310,6 +313,7 @@ flowchart LR
 | **Virtual Machines**    | ARM path (`Microsoft.Compute`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state; mocked — no Docker (container backing planned) |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, `listKeys`/`regenerateKey`; real `valkey/valkey:8-alpine` containers (data plane, primary key as password) or mocked; non-SSL port |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, `listCredentials`/`regenerateCredential`, `checkNameAvailability`; one shared `registry:2` (Docker Registry V2 push/pull, path-style `loginServer`, anonymous) or mocked |
+| **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | Container group lifecycle (create/update/delete/list by rg + subscription), `start`/`stop`/`restart` with spec-exact LRO shapes, container logs, instanceView, azurerm-safe read-backs (ports/resources always present, canonical enum casing, secrets never echoed); mocked — no Docker (container backing planned) |
 | **Event Grid**          | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | Custom Topics, `listKeys`/`regenerateKey`, webhook `eventSubscriptions` with subject/eventType filters; publish in Event Grid + CloudEvents 1.0 schemas; async webhook delivery with retry; `SubscriptionValidationEvent` handshake; HTTP-only (no sidecar) |
 | **Azure Monitor / Log Analytics** | ARM path (`Microsoft.OperationalInsights` / `Microsoft.Insights`) + `/dataCollectionRules/{id}/streams/{stream}` + `/v1/workspaces/{id}/query` | Workspaces, Data Collection Endpoints/Rules; Logs Ingestion API; Log Analytics query with a KQL subset (`where`/`project`/`take`/`limit` + timespan); HTTP-only (no sidecar) |
 | **Communication Services Email** | `/emails:send` + `/emails/operations/{id}` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style `GET /emailMessages`); communication/email services + domains via ARM; captures messages locally — no real delivery; HTTP-only (no sidecar) |
@@ -632,9 +636,12 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis                                                            |   124 |
 | `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, API Management, SQL, PostgreSQL (Flexible Server) | 252 |
 | `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
+| `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces                                                    |    10 |
 | `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
 | `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database)                                            |    14 |
 | `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login                                                                 |    13 |
+
+† Built from source via vcpkg, so the image takes ~6 min cold (seconds if warm).
 
 ‡ Ships with the Entra ID feature ([#23](https://github.com/floci-io/floci-az/issues/23)).
 
@@ -644,6 +651,7 @@ Run the suites against a running container:
 make test-python-compat
 make test-java-compat
 make test-node-compat
+make test-cpp-compat
 make test-cosmos-all    # Cosmos engine tests: MongoDB · PostgreSQL · Cassandra · Gremlin · Table · NoSQL (requires Docker)
 make test-iac-compat    # Terraform + OpenTofu
 make compat-docker      # full matrix

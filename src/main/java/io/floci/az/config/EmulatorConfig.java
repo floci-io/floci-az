@@ -126,6 +126,7 @@ public interface EmulatorConfig {
         MariaDbServiceConfig   mariaDb();
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
+        AciConfig              aci();
         VmConfig               vm();
         ApimConfig             apim();
         RedisConfig            redis();
@@ -269,6 +270,32 @@ public interface EmulatorConfig {
 
         /** End of the host port range for registry instances. */
         @WithDefault("5099")
+        int maxPort();
+    }
+
+    /** Microsoft.ContainerInstance — container groups (ACI). */
+    interface AciConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Docker container is started; container groups transition
+         * immediately to {@code Succeeded} with a synthetic IP and a {@code Running} instance
+         * view. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /**
+         * Start of the host port range for published container-group ports (non-mocked mode).
+         * 7500-7599 is chosen clear of the other sidecar ranges: acr 5000-5099, amqp 5671-5674,
+         * redis 6379-6399, aks 6443-7443, kafka 9093.
+         */
+        @WithDefault("7500")
+        int basePort();
+
+        /** End of the host port range for published container-group ports. */
+        @WithDefault("7599")
         int maxPort();
     }
 

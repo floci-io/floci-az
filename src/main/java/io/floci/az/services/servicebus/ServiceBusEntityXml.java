@@ -14,6 +14,8 @@ final class ServiceBusEntityXml {
             Duration.ofSeconds(DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS);
     private static final long MIN_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofSeconds(20).toSeconds();
     private static final long MAX_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofDays(7).toSeconds();
+    private static final int MAX_DELIVERY_COUNT_LIMIT = 2000;
+    private static final long MAX_LOCK_DURATION_SECONDS = Duration.ofMinutes(5).toSeconds();
 
     private ServiceBusEntityXml() {}
 
@@ -63,4 +65,43 @@ final class ServiceBusEntityXml {
     }
 
     record MessageLifetimeSettings(long ttlMillis, boolean deadLetterOnExpiration) {}
+
+    /**
+     * Parses the per-entity delivery settings from a queue or subscription description.
+     * Null components mean the element was absent from the payload; the handler falls
+     * back to the configured emulator-wide defaults in that case.
+     */
+    static DeliverySettings parseDelivery(String xml) {
+        Integer maxDeliveryCount = null;
+        String rawCount = XmlParser.extractFirst(xml, "MaxDeliveryCount", null);
+        if (rawCount != null) {
+            try {
+                maxDeliveryCount = Integer.valueOf(rawCount.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("MaxDeliveryCount must be an integer", e);
+            }
+            if (maxDeliveryCount < 1 || maxDeliveryCount > MAX_DELIVERY_COUNT_LIMIT) {
+                throw new IllegalArgumentException(
+                        "MaxDeliveryCount must be between 1 and " + MAX_DELIVERY_COUNT_LIMIT);
+            }
+        }
+        Long lockDurationSeconds = null;
+        String rawLock = XmlParser.extractFirst(xml, "LockDuration", null);
+        if (rawLock != null) {
+            final Duration lock;
+            try {
+                lock = Duration.parse(rawLock.trim());
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("LockDuration must be an ISO-8601 duration", e);
+            }
+            if (lock.isNegative() || lock.isZero() || lock.getNano() != 0
+                    || lock.getSeconds() > MAX_LOCK_DURATION_SECONDS) {
+                throw new IllegalArgumentException("LockDuration must be between PT1S and PT5M");
+            }
+            lockDurationSeconds = lock.getSeconds();
+        }
+        return new DeliverySettings(maxDeliveryCount, lockDurationSeconds);
+    }
+
+    record DeliverySettings(Integer maxDeliveryCount, Long lockDurationSeconds) {}
 }

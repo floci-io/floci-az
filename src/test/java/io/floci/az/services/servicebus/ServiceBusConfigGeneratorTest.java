@@ -38,6 +38,9 @@ class ServiceBusConfigGeneratorTest {
                 "class-name=\"io.floci.az.artemis.ServiceBusDuplicateDetectionPlugin\""));
         assertTrue(brokerXml.contains(
                 "class-name=\"io.floci.az.artemis.ServiceBusExpiryPlugin\""));
+        assertTrue(brokerXml.contains(
+                "class-name=\"io.floci.az.artemis.ServiceBusPeekPlugin\""));
+        assertTrue(brokerXml.contains("<enable-ingress-timestamp>true</enable-ingress-timestamp>"));
     }
 
     @Test
@@ -55,6 +58,7 @@ class ServiceBusConfigGeneratorTest {
         assertTrue(brokerXml.contains("<forwarding-address>$cbs-intercept</forwarding-address>"));
         assertTrue(brokerXml.contains("<filter string=\"operation = &apos;put-token&apos;\"/>"));
         assertTrue(brokerXml.contains("<exclusive>true</exclusive>"));
+        assertTrue(brokerXml.contains("<address name=\"$cbs\"><multicast/></address>"));
         assertTrue(brokerXml.contains("<queue name=\"$cbs-intercept\"/>"));
     }
 
@@ -83,14 +87,15 @@ class ServiceBusConfigGeneratorTest {
     }
 
     @Test
-    void packagesMessageExpiryPluginForTheArtemisSidecar() throws Exception {
+    void packagesServiceBusPluginsForTheArtemisSidecar() throws Exception {
         try (InputStream stream = getClass().getResourceAsStream(
                 ServiceBusNamespaceManager.ARTEMIS_EXTENSION_RESOURCE)) {
             assertNotNull(stream, "Artemis extension JAR must be embedded in the application");
             try (JarInputStream jar = new JarInputStream(stream)) {
                 Set<String> expectedClasses = Set.of(
                         "io/floci/az/artemis/ServiceBusExpiryPlugin.class",
-                        "io/floci/az/artemis/ServiceBusExpiryPluginMBean.class");
+                        "io/floci/az/artemis/ServiceBusExpiryPluginMBean.class",
+                        "io/floci/az/artemis/ServiceBusPeekPlugin.class");
                 Set<String> packagedClasses = new HashSet<>();
                 for (var entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
                     if (expectedClasses.contains(entry.getName())) {
@@ -129,6 +134,7 @@ class ServiceBusConfigGeneratorTest {
     void packagesArtemisPatchesForAzureSdkSemantics() throws Exception {
         Set<String> expectedClasses = Set.of(
                 "org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.class",
+                "org/apache/activemq/artemis/protocol/amqp/broker/ServiceBusBatchSupport.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/AmqpTransferTagGenerator.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.class",
                 "org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.class",

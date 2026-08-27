@@ -438,12 +438,22 @@ public final class EmulatorConfig {
 
     /** Creates a queue via the floci-az management API (ATOM XML). */
     static void ensureServiceBusQueue(String queueName, boolean requiresSession) throws Exception {
+        ensureServiceBusQueue(queueName,
+                requiresSession ? "<RequiresSession>true</RequiresSession>" : null);
+    }
+
+    /**
+     * Creates a queue via the floci-az management API with the given inner
+     * {@code QueueDescription} elements (e.g. {@code <MaxDeliveryCount>2</MaxDeliveryCount>}),
+     * or an empty body when {@code descriptionElements} is null.
+     */
+    static void ensureServiceBusQueue(String queueName, String descriptionElements) throws Exception {
         String url = BASE + "/" + ACCOUNT + "-servicebus/" + SERVICEBUS_NAMESPACE
                 + "/queues/" + queueName;
-        String body = requiresSession
+        String body = descriptionElements != null
                 ? "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
                   + "<QueueDescription xmlns=\"http://schemas.microsoft.com/netservices/2010/10/servicebus/connect\">"
-                  + "<RequiresSession>true</RequiresSession></QueueDescription></content></entry>"
+                  + descriptionElements + "</QueueDescription></content></entry>"
                 : "";
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
         HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
