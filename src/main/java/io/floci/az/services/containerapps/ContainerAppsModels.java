@@ -103,6 +103,7 @@ final class ContainerAppsModels {
         private String fqdn;
         private Instant createdTime;
         private Instant lastActiveTime;
+        private List<String> networkSubnets = List.of();
 
         public RevisionState() {
         }
@@ -139,5 +140,9 @@ final class ContainerAppsModels {
         public void setCreatedTime(Instant createdTime) { this.createdTime = createdTime; }
         public Instant getLastActiveTime() { return lastActiveTime; }
         public void setLastActiveTime(Instant lastActiveTime) { this.lastActiveTime = lastActiveTime; }
+        public List<String> getNetworkSubnets() { return networkSubnets; }
+        public void setNetworkSubnets(List<String> networkSubnets) {
+            this.networkSubnets = networkSubnets == null ? List.of() : List.copyOf(networkSubnets);
+        }
     }
 }

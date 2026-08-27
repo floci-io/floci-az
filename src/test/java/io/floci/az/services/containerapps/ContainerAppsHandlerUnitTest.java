@@ -125,8 +125,10 @@ class ContainerAppsHandlerUnitTest {
     @Test
     void restoredInternalIngressStartsRuntimeBeforeAuthorizingCaller() {
         AtomicBoolean runtimeStarted = new AtomicBoolean();
-        doAnswer(ignored -> {
+        doAnswer(invocation -> {
             runtimeStarted.set(true);
+            RevisionState revision = invocation.getArgument(1);
+            revision.setNetworkSubnets(List.of("172.18.0.0/16"));
             return null;
         }).when(runtimeManager).startRevision(any(), any(), any(), anyInt(), anyInt());
         when(runtimeManager.isInternalCaller("172.18.0.4"))

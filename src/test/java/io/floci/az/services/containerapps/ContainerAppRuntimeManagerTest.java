@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.ServerSocket;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -69,6 +70,7 @@ class ContainerAppRuntimeManagerTest {
 
         verify(builder).withDockerNetwork(Optional.of("test-network"));
         verify(builder).withNetworkMode("container:leader-id");
+        assertEquals(List.of("172.18.0.0/16"), revision.getNetworkSubnets());
         assertTrue(runtimeManager.isInternalCaller("172.18.0.9"));
         assertFalse(runtimeManager.isInternalCaller("192.168.1.9"));
     }
