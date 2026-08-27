@@ -100,7 +100,7 @@ class CosmosItemConditionTest {
                           "resourceBody": {"id":"one","pk":"p","value":2}
                         }]""")
                 .post(DOCS)
-                .then().statusCode(200).body("[0].statusCode", is(412));
+                .then().statusCode(207).body("[0].statusCode", is(412));
 
         readDocument().then().statusCode(200).body("value", is(1));
     }
@@ -128,7 +128,7 @@ class CosmosItemConditionTest {
                           }
                         ]""".formatted(etag.replace("\"", "\\\"")))
                 .post(DOCS)
-                .then().statusCode(200)
+                .then().statusCode(207)
                 .body("statusCode", contains(424, 412));
 
         readDocument().then().statusCode(200).body("value", is(1));
