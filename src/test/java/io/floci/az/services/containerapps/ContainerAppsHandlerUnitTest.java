@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -123,16 +124,13 @@ class ContainerAppsHandlerUnitTest {
     }
 
     @Test
-    void restoredInternalIngressStartsRuntimeBeforeAuthorizingCaller() {
+    void restoredInternalIngressAuthorizesCallerBeforeStartingRuntime() {
         AtomicBoolean runtimeStarted = new AtomicBoolean();
-        doAnswer(invocation -> {
+        doAnswer(ignored -> {
             runtimeStarted.set(true);
-            RevisionState revision = invocation.getArgument(1);
-            revision.setNetworkSubnets(List.of("172.18.0.0/16"));
             return null;
         }).when(runtimeManager).startRevision(any(), any(), any(), anyInt(), anyInt());
-        when(runtimeManager.isInternalCaller("172.18.0.4"))
-                .thenAnswer(ignored -> runtimeStarted.get());
+        when(runtimeManager.isInternalCaller("172.18.0.4")).thenReturn(true);
         var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
         when(runtimeManager.endpoint(any(), any()))
                 .thenAnswer(ignored -> runtimeStarted.get() ? Optional.of(endpoint) : Optional.empty());
@@ -143,14 +141,29 @@ class ContainerAppsHandlerUnitTest {
         assertEquals(201, handler.handle(request("PUT", PROVIDER + "containerApps/internal-app", internalBody))
                 .getStatus());
         runtimeStarted.set(false);
-        String fqdn = "internal-app." + environment.path("properties").path("defaultDomain").asText();
-        String accountName = fqdn.substring(0, fqdn.length() - ".azurecontainerapps.io".length());
 
-        Response response = handler.handle(new AzureRequest("GET", accountName, "containerapps", "hello",
+        Response response = handler.handle(new AzureRequest("GET", ingressAccountName(environment, "internal-app"),
+                "containerapps", "hello",
                 null, null, Map.of(), null, false, "172.18.0.4"));
 
         assertEquals(204, response.getStatus());
         assertTrue(runtimeStarted.get());
+    }
+
+    @Test
+    void restoredInternalIngressRejectsCallerWithoutStartingRuntime() {
+        ObjectNode environment = (ObjectNode) createEnvironment("sub", "rg", "env").getEntity();
+        String internalBody = appBody("v1").replace("\"external\":true", "\"external\":false");
+        assertEquals(201, handler.handle(request("PUT", PROVIDER + "containerApps/internal-app", internalBody))
+                .getStatus());
+        clearInvocations(runtimeManager);
+
+        Response response = handler.handle(new AzureRequest("GET", ingressAccountName(environment, "internal-app"),
+                "containerapps", "hello",
+                null, null, Map.of(), null, false, "203.0.113.4"));
+
+        assertEquals(404, response.getStatus());
+        verify(runtimeManager, never()).startRevision(any(), any(), any(), anyInt(), anyInt());
     }
 
     @Test
@@ -171,6 +184,11 @@ class ContainerAppsHandlerUnitTest {
         return handler.handle(request("PUT", "subscriptions/" + subscription + "/resourceGroups/"
                 + resourceGroup + "/providers/Microsoft.App/managedEnvironments/" + name,
                 "{\"location\":\"eastus\",\"properties\":{}}"));
+    }
+
+    private static String ingressAccountName(ObjectNode environment, String appName) {
+        String fqdn = appName + "." + environment.path("properties").path("defaultDomain").asText();
+        return fqdn.substring(0, fqdn.length() - ".azurecontainerapps.io".length());
     }
 
     private static RevisionState revision(String name, Instant createdTime) throws Exception {

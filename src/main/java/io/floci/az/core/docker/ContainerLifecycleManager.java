@@ -177,24 +177,7 @@ public class ContainerLifecycleManager {
             }
             List<String> subnets = new ArrayList<>();
             for (String networkName : networks.keySet()) {
-                try {
-                    Network network = dockerClient.inspectNetworkCmd()
-                            .withNetworkId(networkName)
-                            .exec();
-                    if (network.getIpam() == null || network.getIpam().getConfig() == null) {
-                        continue;
-                    }
-                    network.getIpam().getConfig().stream()
-                            .map(Network.Ipam.Config::getSubnet)
-                            .filter(subnet -> subnet != null && !subnet.isBlank())
-                            .forEach(subnets::add);
-                } catch (NotFoundException e) {
-                    LOG.debugv("Docker network {0} disappeared while inspecting container {1}",
-                            networkName, containerId);
-                } catch (DockerException e) {
-                    LOG.warnv("Could not inspect Docker network {0} for container {1}: {2}",
-                            networkName, containerId, e.getMessage());
-                }
+                subnets.addAll(networkSubnetsForNetwork(networkName));
             }
             return List.copyOf(subnets);
         } catch (NotFoundException e) {
@@ -203,6 +186,31 @@ public class ContainerLifecycleManager {
         } catch (DockerException e) {
             LOG.warnv("Could not inspect Docker networks for container {0}: {1}",
                     containerId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Returns the current Docker IPAM subnets for a named network. */
+    public List<String> networkSubnetsForNetwork(String networkName) {
+        if (networkName == null || networkName.isBlank()) {
+            return List.of();
+        }
+        try {
+            Network network = dockerClient.inspectNetworkCmd()
+                    .withNetworkId(networkName)
+                    .exec();
+            if (network.getIpam() == null || network.getIpam().getConfig() == null) {
+                return List.of();
+            }
+            return network.getIpam().getConfig().stream()
+                    .map(Network.Ipam.Config::getSubnet)
+                    .filter(subnet -> subnet != null && !subnet.isBlank())
+                    .toList();
+        } catch (NotFoundException e) {
+            LOG.debugv("Docker network {0} was not found", networkName);
+            return List.of();
+        } catch (DockerException e) {
+            LOG.warnv("Could not inspect Docker network {0}: {1}", networkName, e.getMessage());
             return List.of();
         }
     }
