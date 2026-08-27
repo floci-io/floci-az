@@ -80,6 +80,19 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void atomPubClientCanUseEntityNameEndingInAccountSuffix() {
+        given()
+            .contentType("application/atom+xml")
+            .accept("application/atom+xml")
+            .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+            .when().put("/atom-orders-queue")
+            .then()
+            .statusCode(201)
+            .contentType("application/atom+xml")
+            .body(containsString("<QueueDescription"));
+    }
+
+    @Test
     void queuePersistsDuplicateDetectionSettings() {
         String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
                 + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection>"
