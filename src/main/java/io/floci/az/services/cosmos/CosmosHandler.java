@@ -629,8 +629,12 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         // The Cosmos DB PATCH body can arrive in two forms:
         //   1. {"operations": [...]}  — Java / Python SDKs
         //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
-        List<Map<String, Object>> operations = parsePatchBody(req);
-        applyPatchOperations(doc, operations);
+        PatchRequest patch = parsePatchBody(req);
+        if (patch.condition() != null && !patch.condition().isBlank()
+                && queryEngine.execute("SELECT * " + patch.condition(), List.of(), List.of(doc)).count() == 0) {
+            return errorResponse(412, "PreconditionFailed", "The patch filter predicate was not satisfied.");
+        }
+        applyPatchOperations(doc, patch.operations());
 
         Instant now  = Instant.now();
         String  etag = newEtag();
@@ -1383,23 +1387,28 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * </ul>
      */
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> parsePatchBody(AzureRequest req) {
+    private PatchRequest parsePatchBody(AzureRequest req) {
         try {
             byte[] raw = req.bodyStream().readAllBytes();
             String trimmed = new String(raw, StandardCharsets.UTF_8).trim();
             if (trimmed.startsWith("[")) {
                 // Node SDK: raw operations array
-                return MAPPER.readValue(trimmed, new TypeReference<>() {});
+                return new PatchRequest(MAPPER.readValue(trimmed, new TypeReference<>() {}), null);
             } else {
                 // Java/Python SDK: {"operations": [...]}
                 Map<String, Object> body = MAPPER.readValue(trimmed, new TypeReference<>() {});
-                return body.get("operations") instanceof List<?> l
+                List<Map<String, Object>> operations = body.get("operations") instanceof List<?> l
                         ? (List<Map<String, Object>>) l : List.of();
+                String condition = body.get("condition") instanceof String value ? value : null;
+                return new PatchRequest(operations, condition);
             }
         } catch (IOException e) {
             LOG.warnf("Failed to parse PATCH body: %s", e.getMessage());
-            return List.of();
+            return new PatchRequest(List.of(), null);
         }
+    }
+
+    private record PatchRequest(List<Map<String, Object>> operations, String condition) {
     }
 
     private byte[] toBytes(Object obj) {

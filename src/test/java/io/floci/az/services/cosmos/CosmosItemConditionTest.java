@@ -58,6 +58,24 @@ class CosmosItemConditionTest {
     }
 
     @Test
+    void patchFilterPredicateRejectsWithoutChangingDocument() {
+        createDocument(1);
+
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
+                .body("""
+                        {
+                          "condition": "FROM c WHERE c.value = 2",
+                          "operations": [{"op":"set","path":"/value","value":3}]
+                        }""")
+                .patch(DOCS + "/one")
+                .then().statusCode(412)
+                .body("code", is("PreconditionFailed"));
+
+        readDocument().then().statusCode(200).body("value", is(1));
+    }
+
+    @Test
     void upsertHonorsIfMatchAndIfNoneMatch() {
         String etag = createDocument(1);
 
