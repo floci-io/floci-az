@@ -541,11 +541,15 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
             return ArmErrors.error(503, "ContainerAppUnavailable", "No active revision is available.");
         }
         if (config.services().containerApps().mocked()) {
-            if (!isIngressCallerAllowed(ingress, request)) {
+            if (!ingress.path("external").asBoolean(false)
+                    && !runtimeManager.isInternalCaller(request.remoteAddress())) {
                 return ArmErrors.notFound("Container App ingress host was not found.");
             }
             return ArmErrors.error(503, "ContainerAppMocked",
                     "Container App is configured in mocked mode; ingress data plane is unavailable.");
+        }
+        if (!isIngressCallerAllowed(ingress, request, revision)) {
+            return ArmErrors.notFound("Container App ingress host was not found.");
         }
 
         Optional<ContainerLifecycleManager.EndpointInfo> endpoint =
@@ -562,17 +566,17 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
                 LOG.errorf(e, "Failed to scale Container App revision %s from zero", revision.getName());
             }
         }
-        if (!isIngressCallerAllowed(ingress, request)) {
-            return ArmErrors.notFound("Container App ingress host was not found.");
-        }
         return endpoint.map(value -> ingressProxy.proxy(request, value))
                 .orElseGet(() -> ArmErrors.error(503, "ContainerAppUnavailable",
                         "Active revision has no running ingress replica."));
     }
 
-    private boolean isIngressCallerAllowed(JsonNode ingress, AzureRequest request) {
+    private boolean isIngressCallerAllowed(
+            JsonNode ingress, AzureRequest request, RevisionState revision) {
         return ingress.path("external").asBoolean(false)
-                || runtimeManager.isInternalCaller(request.remoteAddress());
+                || runtimeManager.isInternalCaller(request.remoteAddress())
+                || ContainerLifecycleManager.isAddressInSubnets(
+                        request.remoteAddress(), revision.getNetworkSubnets());
     }
 
     Optional<RevisionState> routeRevision(ContainerAppState app, JsonNode ingress) {

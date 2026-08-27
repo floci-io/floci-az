@@ -55,6 +55,10 @@ public class ContainerAppRuntimeManager {
                 replicas.add(startReplica(app, revision, configuration, replica, targetPort));
             }
             runtimes.put(runtimeKey(app, revision.getName()), new RevisionRuntime(replicas));
+            revision.setNetworkSubnets(replicas.stream()
+                    .flatMap(replica -> replica.networkSubnets().stream())
+                    .distinct()
+                    .toList());
             LOG.infov("Started Container App revision {0} with {1} replicas",
                     revision.getName(), replicaCount);
         } catch (RuntimeException e) {
