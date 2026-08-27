@@ -309,7 +309,10 @@ public class ServiceBusServiceTest {
                 .body(containsString("<MessageCount>0</MessageCount>"))
                 .body(containsString("<CountDetails xmlns:sb=\"" + SB_COUNT_NS + "\">"))
                 .body(containsString("<sb:ActiveMessageCount>0</sb:ActiveMessageCount>"))
-                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"));
+                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"))
+                .body(containsString("<SizeInBytes>0</SizeInBytes>"))
+                .body(containsString("<CreatedAt>"))
+                .body(containsString("<UpdatedAt>"));
 
         given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
                 .when().put(BASE + "/runtime-count-topic")
@@ -321,7 +324,10 @@ public class ServiceBusServiceTest {
                 .body(containsString("<MessageCount>0</MessageCount>"))
                 .body(containsString("<CountDetails xmlns:sb=\"" + SB_COUNT_NS + "\">"))
                 .body(containsString("<sb:ActiveMessageCount>0</sb:ActiveMessageCount>"))
-                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"));
+                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"))
+                .body(containsString("<SizeInBytes>0</SizeInBytes>"))
+                .body(containsString("<CreatedAt>"))
+                .body(containsString("<UpdatedAt>"));
     }
 
     @Test
