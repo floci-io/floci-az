@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 
@@ -29,9 +30,15 @@ public sealed class CosmosCompatibilityTests
 
         try
         {
+            var properties = new ContainerProperties("items", "/pk");
+            properties.IndexingPolicy.CompositeIndexes.Add(
+                new Collection<CompositePath>
+                {
+                    new() { Path = "/rank", Order = CompositePathSortOrder.Ascending },
+                    new() { Path = "/id", Order = CompositePathSortOrder.Ascending }
+                });
             Container container = await database.CreateContainerAsync(
-                new ContainerProperties("items", "/pk"),
-                cancellationToken: cancellationToken);
+                properties, cancellationToken: cancellationToken);
             await container.CreateItemAsync(
                 new QueryItem("one", "a", 3),
                 new PartitionKey("a"),
@@ -57,6 +64,15 @@ public sealed class CosmosCompatibilityTests
             await Assert.That(ordered[0].Rank).IsEqualTo(1);
             await Assert.That(ordered[1].Rank).IsEqualTo(2);
             await Assert.That(ordered[2].Rank).IsEqualTo(3);
+
+            List<QueryItem> multiOrdered = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>(
+                    "SELECT * FROM c ORDER BY c.rank, c.id"),
+                cancellationToken);
+            await Assert.That(multiOrdered.Count).IsEqualTo(3);
+            await Assert.That(multiOrdered[0].Id).IsEqualTo("two");
+            await Assert.That(multiOrdered[1].Id).IsEqualTo("three");
+            await Assert.That(multiOrdered[2].Id).IsEqualTo("one");
 
             List<int> counts = await ReadAll(
                 container.GetItemQueryIterator<int>("SELECT VALUE COUNT(1) FROM c"),

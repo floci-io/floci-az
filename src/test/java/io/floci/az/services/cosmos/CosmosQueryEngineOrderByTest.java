@@ -134,6 +134,25 @@ class CosmosQueryEngineOrderByTest {
     }
 
     @Test
+    void dotnetRewrittenMultiOrderByQueryReturnsEveryPlannerItem() {
+        List<Map<String, Object>> docs = List.of(
+                Map.of("id", "z", "rank", 1),
+                Map.of("id", "a", "rank", 1));
+
+        CosmosQueryEngine.QueryResult result = engine.execute("""
+                SELECT items._rid,
+                       [{"item": items.rank}, {"item": items.id}] AS orderByItems,
+                       items AS payload
+                FROM items
+                ORDER BY items.rank, items.id
+                """, List.of(), docs);
+
+        Map<?, ?> first = (Map<?, ?>) result.items().getFirst();
+        assertEquals(List.of(Map.of("item", 1), Map.of("item", "a")), first.get("orderByItems"));
+        assertEquals("a", ((Map<?, ?>) first.get("payload")).get("id"));
+    }
+
+    @Test
     void dotnetRewrittenCountQueryReturnsAggregateProjection() {
         CosmosQueryEngine.QueryResult result = engine.execute("""
                 SELECT VALUE [{"item": COUNT(1)}]

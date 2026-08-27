@@ -158,7 +158,7 @@ public class CosmosQueryEngine {
     private static final Pattern DOTNET_WRAPPED_COUNT_PATTERN = Pattern.compile(
             "(?i)^SELECT\\s+VALUE\\s+\\[\\{\\s*\"item\"\\s*:\\s*COUNT\\s*\\((?:1|\\*)\\)\\s*}]\\s+FROM\\b");
     private static final Pattern DOTNET_ORDER_BY_ITEM_PATTERN = Pattern.compile(
-            "\\[\\{\\s*\"item\"\\s*:\\s*(.+)\\s*}]", Pattern.CASE_INSENSITIVE);
+            "\\{\\s*\"item\"\\s*:\\s*(.+)\\s*}", Pattern.CASE_INSENSITIVE);
 
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
@@ -779,7 +779,9 @@ public class CosmosQueryEngine {
 
     List<String> splitTopLevel(String s, char delim) {
         List<String> result = new ArrayList<>();
-        int depth = 0;
+        int parenthesisDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
         boolean inStr = false;
         char strCh = 0;
         int start = 0;
@@ -790,9 +792,13 @@ public class CosmosQueryEngine {
                 if (c == strCh) inStr = false;
             } else if (c == '\'' || c == '"') {
                 inStr = true; strCh = c;
-            } else if (c == '(') { depth++;
-            } else if (c == ')') { depth--;
-            } else if (c == delim && depth == 0) {
+            } else if (c == '(') { parenthesisDepth++;
+            } else if (c == ')') { parenthesisDepth--;
+            } else if (c == '[') { bracketDepth++;
+            } else if (c == ']') { bracketDepth--;
+            } else if (c == '{') { braceDepth++;
+            } else if (c == '}') { braceDepth--;
+            } else if (c == delim && parenthesisDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
                 result.add(s.substring(start, i));
                 start = i + 1;
             }
@@ -824,11 +830,21 @@ public class CosmosQueryEngine {
         if ("true".equalsIgnoreCase(expr))  return Boolean.TRUE;
         if ("false".equalsIgnoreCase(expr)) return Boolean.FALSE;
 
-        Matcher orderByItem = DOTNET_ORDER_BY_ITEM_PATTERN.matcher(expr);
-        if (orderByItem.matches()) {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("item", resolveExpr(doc, orderByItem.group(1).trim()));
-            return List.of(item);
+        if (expr.startsWith("[") && expr.endsWith("]")) {
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (String rawItem : splitTopLevel(expr.substring(1, expr.length() - 1), ',')) {
+                Matcher orderByItem = DOTNET_ORDER_BY_ITEM_PATTERN.matcher(rawItem.trim());
+                if (!orderByItem.matches()) {
+                    items.clear();
+                    break;
+                }
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("item", resolveExpr(doc, orderByItem.group(1).trim()));
+                items.add(item);
+            }
+            if (!items.isEmpty()) {
+                return items;
+            }
         }
 
         // Numeric literal
