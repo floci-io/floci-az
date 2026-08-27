@@ -19,6 +19,18 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 - **System properties** — `_rid`, `_self`, `_etag`, `_ts`, `_attachments` auto-generated on every write
 - **Partition keys** — resolved from `x-ms-documentdb-partitionkey` header or extracted from document body using the container's configured path
 
+### .NET query planner configuration
+
+The account response advertises query-engine capabilities consumed by the .NET SDK before it
+sends SQL. Two values intentionally differ from Azure:
+
+- `sqlAllowLike` is `true` because Floci-AZ implements `LIKE` and must allow the SDK planner to
+  submit those queries. Azure currently advertises `false`.
+- `sqlDisableOptimizationFlags` is the fixed value `0`. Floci-AZ does not source Azure's internal
+  deployment-specific optimization flags; its in-process query engine does not consume them.
+
+These are client-planning compatibility values, not user configuration.
+
 ## Endpoint
 
 ```
