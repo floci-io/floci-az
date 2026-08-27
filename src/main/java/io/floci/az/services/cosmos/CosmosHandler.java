@@ -854,7 +854,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                     ? CosmosHybridRowBatchCodec.encodeResults(results)
                     : MAPPER.writeValueAsString(results);
             String contentType = hybridRow ? "application/octet-stream" : "application/json";
-            int status = hybridRow && failed ? 207 : 200;
+            int status = failed ? 207 : 200;
             return Response.status(status).entity(responseBody).type(contentType)
                     .header("x-ms-request-charge",  String.valueOf(results.size()))
                     .header("x-ms-session-token",   "0:0#1")

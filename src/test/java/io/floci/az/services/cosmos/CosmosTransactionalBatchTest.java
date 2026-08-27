@@ -44,7 +44,7 @@ class CosmosTransactionalBatchTest {
                           {"operationType":"Delete","id":"missing"}
                         ]""")
                 .post(DOCS)
-                .then().statusCode(200)
+                .then().statusCode(207)
                 .body("statusCode", contains(424, 404));
 
         read("one").then().statusCode(200).body("value", is(1));
@@ -93,7 +93,7 @@ class CosmosTransactionalBatchTest {
                           {"operationType":"Read","id":"one"}
                         ]""")
                 .post(DOCS)
-                .then().statusCode(200)
+                .then().statusCode(207)
                 .body("statusCode", contains(400, 424));
 
         read("one").then().statusCode(200)
