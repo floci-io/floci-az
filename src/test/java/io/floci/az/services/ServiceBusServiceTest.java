@@ -2,6 +2,8 @@ package io.floci.az.services;
 
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -73,6 +75,20 @@ public class ServiceBusServiceTest {
             .queryParam("api-version", "2021-05")
             .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
             .when().put("/orders-queue")
+            .then()
+            .statusCode(201)
+            .contentType("application/atom+xml")
+            .body(containsString("<QueueDescription"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orders-table", "orders-appconfig", "orders-keyvault", "orders-functions"})
+    void dotNetAdministrationClientOverridesEveryConflictingAccountSuffix(String entityName) {
+        given()
+            .header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+            .queryParam("api-version", "2021-05")
+            .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+            .when().put("/" + entityName)
             .then()
             .statusCode(201)
             .contentType("application/atom+xml")
