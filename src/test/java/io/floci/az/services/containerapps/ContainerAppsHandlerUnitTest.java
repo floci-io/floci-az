@@ -20,6 +20,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -43,6 +46,7 @@ class ContainerAppsHandlerUnitTest {
             + "Microsoft.App/managedEnvironments/env";
 
     private ContainerAppRuntimeManager runtimeManager;
+    private ContainerAppIngressProxy ingressProxy;
     private ContainerAppsHandler handler;
 
     @BeforeEach
@@ -52,11 +56,11 @@ class ContainerAppsHandlerUnitTest {
         when(config.services().containerApps().mocked()).thenReturn(false);
 
         runtimeManager = mock(ContainerAppRuntimeManager.class);
+        ingressProxy = mock(ContainerAppIngressProxy.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         StorageBackend<String, StoredObject> storage = new InMemoryStorage<>();
         when(storageFactory.create("containerapps")).thenReturn(storage);
-        handler = new ContainerAppsHandler(config, runtimeManager,
-                mock(ContainerAppIngressProxy.class), storageFactory);
+        handler = new ContainerAppsHandler(config, runtimeManager, ingressProxy, storageFactory);
     }
 
     @Test
@@ -116,6 +120,35 @@ class ContainerAppsHandlerUnitTest {
         assertFalse(ContainerLifecycleManager.isAddressInSubnets("8.8.8.8", subnets));
         assertTrue(ContainerLifecycleManager.isAddressInSubnets("172.18.0.4", subnets));
         assertTrue(ContainerLifecycleManager.isAddressInSubnets("fd00::4", subnets));
+    }
+
+    @Test
+    void restoredInternalIngressStartsRuntimeBeforeAuthorizingCaller() {
+        AtomicBoolean runtimeStarted = new AtomicBoolean();
+        doAnswer(ignored -> {
+            runtimeStarted.set(true);
+            return null;
+        }).when(runtimeManager).startRevision(any(), any(), any(), anyInt(), anyInt());
+        when(runtimeManager.isInternalCaller("172.18.0.4"))
+                .thenAnswer(ignored -> runtimeStarted.get());
+        var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
+        when(runtimeManager.endpoint(any(), any()))
+                .thenAnswer(ignored -> runtimeStarted.get() ? Optional.of(endpoint) : Optional.empty());
+        when(ingressProxy.proxy(any(), any())).thenReturn(Response.noContent().build());
+
+        ObjectNode environment = (ObjectNode) createEnvironment("sub", "rg", "env").getEntity();
+        String internalBody = appBody("v1").replace("\"external\":true", "\"external\":false");
+        assertEquals(201, handler.handle(request("PUT", PROVIDER + "containerApps/internal-app", internalBody))
+                .getStatus());
+        runtimeStarted.set(false);
+        String fqdn = "internal-app." + environment.path("properties").path("defaultDomain").asText();
+        String accountName = fqdn.substring(0, fqdn.length() - ".azurecontainerapps.io".length());
+
+        Response response = handler.handle(new AzureRequest("GET", accountName, "containerapps", "hello",
+                null, null, Map.of(), null, false, "172.18.0.4"));
+
+        assertEquals(204, response.getStatus());
+        assertTrue(runtimeStarted.get());
     }
 
     @Test

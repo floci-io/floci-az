@@ -536,15 +536,14 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
         if (ingress.isMissingNode() || ingress.isNull()) {
             return ArmErrors.notFound("Container App has no ingress configured.");
         }
-        if (!ingress.path("external").asBoolean(false)
-                && !runtimeManager.isInternalCaller(request.remoteAddress())) {
-            return ArmErrors.notFound("Container App ingress host was not found.");
-        }
         RevisionState revision = routeRevision(app, ingress).orElse(null);
         if (revision == null) {
             return ArmErrors.error(503, "ContainerAppUnavailable", "No active revision is available.");
         }
         if (config.services().containerApps().mocked()) {
+            if (!isIngressCallerAllowed(ingress, request)) {
+                return ArmErrors.notFound("Container App ingress host was not found.");
+            }
             return ArmErrors.error(503, "ContainerAppMocked",
                     "Container App is configured in mocked mode; ingress data plane is unavailable.");
         }
@@ -563,9 +562,17 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
                 LOG.errorf(e, "Failed to scale Container App revision %s from zero", revision.getName());
             }
         }
+        if (!isIngressCallerAllowed(ingress, request)) {
+            return ArmErrors.notFound("Container App ingress host was not found.");
+        }
         return endpoint.map(value -> ingressProxy.proxy(request, value))
                 .orElseGet(() -> ArmErrors.error(503, "ContainerAppUnavailable",
                         "Active revision has no running ingress replica."));
+    }
+
+    private boolean isIngressCallerAllowed(JsonNode ingress, AzureRequest request) {
+        return ingress.path("external").asBoolean(false)
+                || runtimeManager.isInternalCaller(request.remoteAddress());
     }
 
     Optional<RevisionState> routeRevision(ContainerAppState app, JsonNode ingress) {
