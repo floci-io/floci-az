@@ -28,6 +28,11 @@ class CosmosHybridRowBatchCodecTest {
                     + "fxMEAAAAAgAAAAdtaXNzaW5n";
     private static final String IF_MATCH_DELETE_CAPTURE =
             "gfDY/38BCgAAAIHx2P9/GgAAADpfNJeBcFThfxMEAAAAAgAAAANvbmUUCQVzdGFsZQ==";
+    private static final String CREATE_READ_UPSERT_CAPTURE =
+            "gfDY/38BCgAAAIHx2P9/MgAAAIy0GfCBcFThf0MAAAAAAgAAACN7ImlkIjoiY3JlYXRlZCIs"
+                    + "InBrIjoicCIsInZhbHVlIjoxfYHx2P9/FgAAAI7kXlCBcFThfxMCAAAAAgAAAAdjcmVhdGVk"
+                    + "gfHY/38yAAAAJIqEvIFwVOF/QxQAAAACAAAAI3siaWQiOiJjcmVhdGVkIiwicGsiOiJwIiwidm"
+                    + "FsdWUiOjJ9";
 
     @Test
     void decodesPatchBodyCapturedFromDotnetSdk() throws IOException {
@@ -60,6 +65,18 @@ class CosmosHybridRowBatchCodecTest {
         Map<String, Object> conditionalDelete =
                 CosmosHybridRowBatchCodec.decodeOperations(decode(IF_MATCH_DELETE_CAPTURE)).getFirst();
         assertEquals("stale", conditionalDelete.get("ifMatch"));
+    }
+
+    @Test
+    void decodesCreateReadAndUpsertOpcodes() throws IOException {
+        List<Map<String, Object>> operations =
+                CosmosHybridRowBatchCodec.decodeOperations(decode(CREATE_READ_UPSERT_CAPTURE));
+
+        assertEquals(List.of("Create", "Read", "Upsert"),
+                operations.stream().map(operation -> operation.get("operationType")).toList());
+        assertEquals(1, ((Map<?, ?>) operations.get(0).get("resourceBody")).get("value"));
+        assertEquals("created", operations.get(1).get("id"));
+        assertEquals(2, ((Map<?, ?>) operations.get(2).get("resourceBody")).get("value"));
     }
 
     @Test
