@@ -764,11 +764,19 @@ public class ServiceBusNamespaceManager {
         }
         Map<String, MessageCounts> counts = new LinkedHashMap<>();
         for (int i = 0; i < queueNames.size(); i++) {
-            long active = parseJolokiaMessageCount(responses.get(i * 2));
-            long deadLetter = parseJolokiaMessageCount(responses.get(i * 2 + 1));
+            long active = parseJolokiaMessageCountOrZero(responses.get(i * 2));
+            long deadLetter = parseJolokiaMessageCountOrZero(responses.get(i * 2 + 1));
             counts.put(queueNames.get(i), new MessageCounts(active, deadLetter));
         }
         return Map.copyOf(counts);
+    }
+
+    private static long parseJolokiaMessageCountOrZero(JsonNode response) {
+        try {
+            return parseJolokiaMessageCount(response);
+        } catch (IOException e) {
+            return 0;
+        }
     }
 
     static long parseJolokiaMessageCount(String responseBody) throws IOException {
