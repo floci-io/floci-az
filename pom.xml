@@ -300,6 +300,16 @@
                                     value="address = SimpleString.of(targetAddress.startsWith(&quot;/&quot;) ? targetAddress.substring(1) : targetAddress);"
                                     failOnNoReplacements="true" />
                                 <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
+                                    token="import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;"
+                                    value="import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;&#10;import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;&#10;import org.apache.activemq.artemis.protocol.amqp.broker.ServiceBusBatchSupport;"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
+                                    token="sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(message), routingContext, message);"
+                                    value="if (message instanceof AMQPMessage amqpMessage &amp;&amp; ServiceBusBatchSupport.isBatch(amqpMessage)) {&#10;            for (Message batchMessage : ServiceBusBatchSupport.decode(amqpMessage, sessionSPI.getCoreMessageObjectPools())) {&#10;               sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(batchMessage), routingContext, batchMessage);&#10;            }&#10;         } else {&#10;            sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(message), routingContext, message);&#10;         }"
+                                    failOnNoReplacements="true" />
+                                <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="doAck(message);"
                                     value="doAck(message); delivery.disposition(Accepted.getInstance());"

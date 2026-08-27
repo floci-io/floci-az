@@ -156,7 +156,10 @@ floci-az:
       consumer-groups: "$Default,my-consumer-group"
     sql:
       enabled: true
-      mocked: false         # false = back servers with a real SQL Server container (needs accept-eula=Y). true = no Docker; servers are pure ARM state (no EULA)
+      # data-plane.provider defaults to none, unless accept-eula=Y preserves legacy managed mode.
+      # data-plane:
+      #   provider: managed
+      # mocked: false       # Deprecated alias: true = none, false = managed
       # accept-eula: "Y"     # Must be set to "Y" to accept the Microsoft SQL Server EULA
       image: "mcr.microsoft.com/mssql/server:2025-latest"
       sa-password: "FlociAz_Strong123!"
@@ -186,6 +189,11 @@ floci-az:
       api-server-base-port: 6443
       api-server-max-port: 7443
       keep-running-on-shutdown: false
+    aci:
+      enabled: true
+      mocked: true          # true = no Docker; container groups are pure ARM state (Succeeded/Running). false = back groups with real containers (PR 2)
+      base-port: 7500       # host-port range for published group ports (clear of acr 5000-5099, redis 6379-6399, aks 6443-7443)
+      max-port: 7599
     vm:
       enabled: true
       mocked: true          # true = no Docker; VMs are pure ARM state. false = back VMs with containers (phase 2)

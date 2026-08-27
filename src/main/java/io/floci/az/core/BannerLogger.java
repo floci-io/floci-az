@@ -9,16 +9,21 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
+
 @ApplicationScoped
 public class BannerLogger {
 
     private static final Logger LOGGER = Logger.getLogger(BannerLogger.class);
 
-    @Inject
-    EmulatorConfig config;
+    private final EmulatorConfig config;
+    private final CosmosEngineRegistry cosmosEngineRegistry;
 
     @Inject
-    CosmosEngineRegistry cosmosEngineRegistry;
+    public BannerLogger(EmulatorConfig config, CosmosEngineRegistry cosmosEngineRegistry) {
+        this.config = config;
+        this.cosmosEngineRegistry = cosmosEngineRegistry;
+    }
 
     void onStart(@Observes StartupEvent ev) {
         LOGGER.info("=== FLOCI - AZ Starting ===");
@@ -73,6 +78,12 @@ public class BannerLogger {
         if (config.services().keyVault().enabled()) {
             sb.append(serviceStatus("keyvault", true, getStorageMode("keyvault")));
         }
+        if (config.services().sql().enabled()) {
+            String provider = config.services().sql().dataPlaneProvider().name()
+                .toLowerCase(Locale.ROOT);
+            sb.append(String.format("   %-9s [%s]  data-plane: %-8s storage: %s\n",
+                "sql", "enabled ", provider, getStorageMode("sql")));
+        }
         if (config.services().eventHub().enabled()) {
             String amqpInfo = "amqp:" + config.services().eventHub().amqpPort()
                     + "  ns:" + config.services().eventHub().defaultNamespace();
@@ -93,6 +104,12 @@ public class BannerLogger {
                             + "  ports:" + config.services().aks().apiServerBasePort()
                             + "-" + config.services().aks().apiServerMaxPort();
             sb.append(serviceStatusDocker("aks", true, aksInfo));
+        }
+        if (config.services().aci().enabled()) {
+            String aciInfo = config.services().aci().mocked()
+                    ? "mocked  (no docker)"
+                    : "mocked  (container-backed mode not yet available)";
+            sb.append(serviceStatusDocker("aci", true, aciInfo));
         }
         if (config.services().vm().enabled()) {
             String vmInfo = config.services().vm().mocked()
@@ -156,6 +173,7 @@ public class BannerLogger {
             case "cosmos"    -> config.storage().services().cosmos().mode().orElse(config.storage().mode());
             case "keyvault"  -> config.storage().services().keyVault().mode().orElse(config.storage().mode());
             case "servicebus" -> config.storage().services().serviceBus().mode().orElse(config.storage().mode());
+            case "sql"       -> config.storage().services().sql().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

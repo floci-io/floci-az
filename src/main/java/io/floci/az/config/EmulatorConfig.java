@@ -126,6 +126,7 @@ public interface EmulatorConfig {
         MariaDbServiceConfig   mariaDb();
         ServiceBusConfig       serviceBus();
         AksConfig              aks();
+        AciConfig              aci();
         VmConfig               vm();
         ApimConfig             apim();
         RedisConfig            redis();
@@ -269,6 +270,32 @@ public interface EmulatorConfig {
 
         /** End of the host port range for registry instances. */
         @WithDefault("5099")
+        int maxPort();
+    }
+
+    /** Microsoft.ContainerInstance — container groups (ACI). */
+    interface AciConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Docker container is started; container groups transition
+         * immediately to {@code Succeeded} with a synthetic IP and a {@code Running} instance
+         * view. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
+
+        /**
+         * Start of the host port range for published container-group ports (non-mocked mode).
+         * 7500-7599 is chosen clear of the other sidecar ranges: acr 5000-5099, amqp 5671-5674,
+         * redis 6379-6399, aks 6443-7443, kafka 9093.
+         */
+        @WithDefault("7500")
+        int basePort();
+
+        /** End of the host port range for published container-group ports. */
+        @WithDefault("7599")
         int maxPort();
     }
 
@@ -532,12 +559,35 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /**
-         * When {@code true}, no SQL Server container is started; servers are created in state and
-         * transition immediately to {@code state=Ready} (no EULA required). The data plane is
-         * unavailable (no live JDBC endpoint). Useful for tests without Docker.
+         * Legacy data-plane switch. Prefer {@code data-plane.provider}. When the provider is not
+         * explicitly configured, {@code true} maps to {@link SqlDataPlaneProvider#NONE} and
+         * {@code false} maps to {@link SqlDataPlaneProvider#MANAGED}.
          */
-        @WithDefault("false")
-        boolean mocked();
+        @Deprecated
+        Optional<Boolean> mocked();
+
+        SqlDataPlaneConfig dataPlane();
+
+        /**
+         * Resolves the explicit provider, then the legacy {@code mocked} alias. When neither is
+         * configured, an accepted EULA preserves the legacy managed data plane; otherwise the
+         * service defaults to control-plane-only behavior.
+         */
+        default SqlDataPlaneProvider dataPlaneProvider() {
+            Optional<SqlDataPlaneProvider> provider = dataPlane().provider();
+            if (provider.isPresent()) {
+                return provider.get();
+            }
+
+            Optional<Boolean> legacyMocked = mocked();
+            if (legacyMocked.isPresent()) {
+                return legacyMocked.get() ? SqlDataPlaneProvider.NONE : SqlDataPlaneProvider.MANAGED;
+            }
+
+            return "Y".equalsIgnoreCase(acceptEula())
+                ? SqlDataPlaneProvider.MANAGED
+                : SqlDataPlaneProvider.NONE;
+        }
 
         /**
          * Must be set to "Y" to accept the Microsoft SQL Server EULA.
@@ -568,6 +618,17 @@ public interface EmulatorConfig {
         /** Default host port. 0 lets the OS pick a free port (recommended when running multiple servers). */
         @WithDefault("0")
         int defaultPort();
+    }
+
+    interface SqlDataPlaneConfig {
+        /** Azure SQL data-plane provider: none, managed, or external. */
+        Optional<SqlDataPlaneProvider> provider();
+    }
+
+    enum SqlDataPlaneProvider {
+        NONE,
+        MANAGED,
+        EXTERNAL
     }
 
     /**

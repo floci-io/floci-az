@@ -2,7 +2,6 @@ package io.floci.az.services.sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
@@ -21,8 +20,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
+import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
 
 /**
  * HTTP handler for Azure SQL Database management-plane requests.
@@ -50,14 +51,21 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(SqlHandler.class);
 
-    @Inject EmulatorConfig config;
-    @Inject SqlState       state;
-    @Inject SqlServerManager serverManager;
-
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final EmulatorConfig config;
+    private final SqlState state;
+    private final SqlServerManager serverManager;
+    private final ObjectMapper mapper;
 
     /** Guards concurrent server-start operations (per server name). */
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
+
+    @Inject
+    public SqlHandler(EmulatorConfig config, SqlState state, SqlServerManager serverManager) {
+        this.config = config;
+        this.state = state;
+        this.serverManager = serverManager;
+        this.mapper = new ObjectMapper();
+    }
 
     @Override public String getServiceType()           { return "sql"; }
 
@@ -176,7 +184,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response createOrUpdateServer(AzureRequest request, String serverName) {
-        if (!config.services().sql().enabled()) return serviceDisabled();
+        if (!config.services().sql().enabled()) {
+            return serviceDisabled();
+        }
+        if (config.services().sql().dataPlaneProvider() == EXTERNAL) {
+            return dataPlaneProviderUnavailable();
+        }
 
         try {
             JsonNode body = readBody(request.bodyStream());
@@ -203,9 +216,8 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
                     null, 0, "localhost", tags, databases, firewallRules, Instant.now());
                 state.putServer(entry);
 
-                if (config.services().sql().mocked()) {
-                    // Mocked mode: no SQL Server container (no Docker, no EULA). The server is
-                    // pure ARM state and reports state=Ready; the data plane is unavailable.
+                if (config.services().sql().dataPlaneProvider() == NONE) {
+                    // Control-plane-only mode: no Docker access or EULA requirement.
                     state.putDatabase(serverName, SqlState.SqlDatabaseEntry.master(serverName));
                     return Response.status(201).entity(serverResponse(entry)).build();
                 }
@@ -227,15 +239,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
                     }
                 } catch (SqlServerManager.EulaNotAcceptedException e) {
                     state.removeServer(serverName);
-                    return Response.status(503)
-                        .entity(Map.of("error", "EulaNotAccepted", "message", e.getMessage()))
-                        .build();
+                    return ArmErrors.error(503, "EulaNotAccepted", e.getMessage());
                 } catch (Exception e) {
                     state.removeServer(serverName);
                     LOG.errorf(e, "Failed to start SQL Server container for server=%s", serverName);
-                    return Response.status(500)
-                        .entity(Map.of("error", "ContainerStartFailed", "message", e.getMessage()))
-                        .build();
+                    return ArmErrors.error(500, "ContainerStartFailed", e.getMessage());
                 }
             } else {
                 entry = state.getServer(serverName).get();
@@ -422,27 +430,24 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
     // ── Convenience /connect ──────────────────────────────────────────────────
 
     private Response handleServerConnect(String serverName) {
-        return state.getServer(serverName)
-            .map(s -> {
-                SqlConnectionInfo info = SqlConnectionInfo.of(
-                    s.fullyQualifiedDomainName(), s.hostPort(),
-                    s.administratorLogin(), "***", null);
-                return Response.ok(connectResponse(s, info, null)).build();
-            })
-            .orElse(notFound("Server '" + serverName + "' not found"));
+        Optional<SqlState.SqlServerEntry> server = state.getServer(serverName);
+        if (server.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        return connectResponse(server.get(), null);
     }
 
     private Response handleDatabaseConnect(String serverName, String dbName) {
         Optional<SqlState.SqlServerEntry> serverOpt = state.getServer(serverName);
-        if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
+        if (serverOpt.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
         Optional<SqlState.SqlDatabaseEntry> dbOpt = state.getDatabase(serverName, dbName);
-        if (dbOpt.isEmpty()) return notFound("Database '" + dbName + "' not found");
+        if (dbOpt.isEmpty()) {
+            return notFound("Database '" + dbName + "' not found");
+        }
 
-        SqlState.SqlServerEntry server = serverOpt.get();
-        SqlConnectionInfo info = SqlConnectionInfo.of(
-            server.fullyQualifiedDomainName(), server.hostPort(),
-            server.administratorLogin(), "***", dbName);
-        return Response.ok(connectResponse(server, info, dbName)).build();
+        return connectResponse(serverOpt.get(), dbName);
     }
 
     // ── Response builders ─────────────────────────────────────────────────────
@@ -451,14 +456,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("administratorLogin", s.administratorLogin());
         props.put("version", "12.0");
-        props.put("state", (config.services().sql().mocked() || s.containerId() != null) ? "Ready" : "Creating");
+        props.put("state", (config.services().sql().dataPlaneProvider() == NONE
+            || s.containerId() != null) ? "Ready" : "Creating");
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("minimalTlsVersion", "None");
         props.put("publicNetworkAccess", "Enabled");
-        // floci-az convenience — not in the real spec. This is the reachable port (the published
-        // host port for host networking, or the in-network container port when floci-az runs in a
-        // container). Prefer the /connect endpoint, which returns the matching reachable host.
-        if (s.hostPort() > 0) props.put("localPort", s.hostPort());
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("id", s.armId());
@@ -510,10 +512,19 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         return resp;
     }
 
-    private Map<String, Object> connectResponse(SqlState.SqlServerEntry server,
-                                                 SqlConnectionInfo info, String database) {
+    private Response connectResponse(SqlState.SqlServerEntry server, String database) {
+        if (config.services().sql().dataPlaneProvider() == NONE) {
+            return dataPlaneNotEnabled();
+        }
+        if (config.services().sql().dataPlaneProvider() == EXTERNAL) {
+            return dataPlaneProviderUnavailable();
+        }
+        if (server.hostPort() <= 0) {
+            return ArmErrors.error(409, "DataPlaneNotReady",
+                "SQL data plane for server '" + server.serverName() + "' is not ready.");
+        }
         SqlConnectionInfo real = SqlConnectionInfo.of(
-            server.fullyQualifiedDomainName(), server.hostPort(),
+            server.dataPlaneHost(), server.hostPort(),
             server.administratorLogin(), server.administratorLoginPassword(),
             database);
         Map<String, Object> resp = new LinkedHashMap<>();
@@ -525,7 +536,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         resp.put("connectionString", real.adoNet());
         resp.put("pyodbc",        real.pyodbc());
         resp.put("entityFramework", real.efCore());
-        return resp;
+        return Response.ok(resp).build();
     }
 
     // ── Parsing helpers ───────────────────────────────────────────────────────
@@ -600,6 +611,17 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         return Response.status(503).entity(Map.of(
             "error", Map.of("code", "ServiceDisabled",
                 "message", "Azure SQL Database service is disabled on this emulator."))).build();
+    }
+
+    private static Response dataPlaneNotEnabled() {
+        return ArmErrors.error(409, "DataPlaneNotEnabled",
+            "Azure SQL data plane is disabled. Set floci-az.services.sql.data-plane.provider "
+                + "to managed to enable connection discovery.");
+    }
+
+    private static Response dataPlaneProviderUnavailable() {
+        return ArmErrors.error(503, "DataPlaneProviderUnavailable",
+            "Azure SQL external data-plane provider is not configured in this version.");
     }
 
     /**

@@ -86,6 +86,54 @@ public sealed class ServiceBusCompatibilityTests
     }
 
     [Test]
+    [Timeout(90_000)]
+    public async Task DotnetSdkUnpacksBatchedMessagesBeforeSubscriptionRouting(
+        CancellationToken cancellationToken)
+    {
+        const string serviceBusNamespace = "default";
+        string topic = $"batch-topic-{Guid.NewGuid():N}";
+        string subscription = $"batch-sub-{Guid.NewGuid():N}";
+        await EnsureNamespace(serviceBusNamespace, cancellationToken);
+        await EnsureTopic(serviceBusNamespace, topic, cancellationToken);
+        await EnsureFilteredSubscription(
+            serviceBusNamespace, topic, subscription, "accepted", cancellationToken);
+
+        string connectionString =
+            $"Endpoint=sb://{ServiceBusHost}:{ServiceBusPort};" +
+            "SharedAccessKeyName=RootManageSharedAccessKey;" +
+            "SharedAccessKey=devkey;UseDevelopmentEmulator=true;";
+        await using var client = new ServiceBusClient(connectionString, new ServiceBusClientOptions
+        {
+            RetryOptions = { TryTimeout = TimeSpan.FromSeconds(10) }
+        });
+        await using ServiceBusSender sender = client.CreateSender(topic);
+        using ServiceBusMessageBatch batch = await sender.CreateMessageBatchAsync(cancellationToken);
+        for (var index = 0; index < 3; index++)
+        {
+            var message = new ServiceBusMessage($"message-{index}")
+            {
+                MessageId = Guid.NewGuid().ToString("N"),
+                Subject = "accepted"
+            };
+            message.ApplicationProperties["index"] = index;
+            await Assert.That(batch.TryAddMessage(message)).IsTrue();
+        }
+        await sender.SendMessagesAsync(batch, cancellationToken);
+
+        await using ServiceBusReceiver receiver = client.CreateReceiver(topic, subscription);
+        IReadOnlyList<ServiceBusReceivedMessage> received = await receiver.ReceiveMessagesAsync(
+            3, ReceiveTimeout, cancellationToken);
+        await Assert.That(received.Count).IsEqualTo(3);
+        for (var index = 0; index < received.Count; index++)
+        {
+            await Assert.That(received[index].Body.ToString()).IsEqualTo($"message-{index}");
+            await Assert.That(received[index].Subject).IsEqualTo("accepted");
+            await Assert.That(received[index].ApplicationProperties["index"]).IsEqualTo(index);
+            await receiver.CompleteMessageAsync(received[index], cancellationToken);
+        }
+    }
+
+    [Test]
     [Timeout(60_000)]
     public async Task DotnetSdkSupportsSessionReceivers(CancellationToken cancellationToken)
     {
@@ -539,6 +587,33 @@ public sealed class ServiceBusCompatibilityTests
               <content type="application/xml">
                 <SubscriptionDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
                   <RequiresSession>true</RequiresSession>
+                </SubscriptionDescription>
+              </content>
+            </entry>
+            """;
+        return PutEntity(
+            $"{EmulatorEndpoint}/devstoreaccount1-servicebus/{serviceBusNamespace}/topics/{topic}" +
+            $"/subscriptions/{subscription}",
+            description,
+            "Subscription",
+            cancellationToken);
+    }
+
+    private static Task EnsureFilteredSubscription(
+        string serviceBusNamespace,
+        string topic,
+        string subscription,
+        string subject,
+        CancellationToken cancellationToken)
+    {
+        string description = $"""
+            <entry xmlns="http://www.w3.org/2005/Atom">
+              <content type="application/xml">
+                <SubscriptionDescription xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">
+                  <DefaultRuleDescription>
+                    <Filter i:type="CorrelationFilter"><Label>{subject}</Label></Filter>
+                    <Name>subject-filter</Name>
+                  </DefaultRuleDescription>
                 </SubscriptionDescription>
               </content>
             </entry>
