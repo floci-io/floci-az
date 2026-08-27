@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -146,6 +147,22 @@ class SqlHandlerAsyncManagedTest {
             .body("port", equalTo(14330));
     }
 
+    @Test
+    void failedProvisioningPollReturnsArmErrorStatus() throws Exception {
+        doThrow(new IllegalStateException("container failed"))
+            .when(serverManager).startServer(any());
+
+        Response create = given()
+            .contentType("application/json")
+            .body(BODY)
+            .when().put(SERVER_URL);
+
+        Response failed = awaitFailed(create.header("Location"), Duration.ofSeconds(5));
+        assertEquals(500, failed.statusCode());
+        assertEquals("ContainerStartFailed", failed.jsonPath().getString("error.code"));
+        assertEquals("container failed", failed.jsonPath().getString("error.message"));
+    }
+
     private static void awaitSucceeded(String operationLocation, Duration timeout)
             throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
@@ -158,6 +175,19 @@ class SqlHandlerAsyncManagedTest {
             Thread.sleep(10);
         }
         throw new AssertionError("Provisioning operation did not succeed within " + timeout);
+    }
+
+    private static Response awaitFailed(String operationLocation, Duration timeout)
+            throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            Response response = given().when().get(operationLocation);
+            if (response.statusCode() != 202) {
+                return response;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Provisioning operation did not fail within " + timeout);
     }
 
     public static class AsyncManagedProfile implements QuarkusTestProfile {

@@ -276,17 +276,15 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
 
     private Response operationResponse(AzureRequest request,
                                        SqlProvisioningService.SqlProvisioningOperation operation) {
+        if (operation.errorCode() != null) {
+            return ArmErrors.error(500, operation.errorCode(), operation.errorMessage());
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", operation.id());
         body.put("status", operation.status());
         body.put("startTime", operation.startTime());
         if (operation.endTime() != null) {
             body.put("endTime", operation.endTime());
-        }
-        if (operation.errorCode() != null) {
-            body.put("error", Map.of(
-                "code", operation.errorCode(),
-                "message", operation.errorMessage()));
         }
         Response.ResponseBuilder response = Response.status(operation.inProgress() ? 202 : 200)
             .entity(body);
