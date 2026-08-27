@@ -291,9 +291,9 @@ public class ServiceBusServiceTest {
                 .then()
                 .statusCode(201)
                 .body(containsString("<MessageCount>0</MessageCount>"))
-                .body(containsString("<CountDetails xmlns=\"" + SB_COUNT_NS + "\">"))
-                .body(containsString("<ActiveMessageCount>0</ActiveMessageCount>"))
-                .body(containsString("<DeadLetterMessageCount>0</DeadLetterMessageCount>"));
+                .body(containsString("<CountDetails xmlns:sb=\"" + SB_COUNT_NS + "\">"))
+                .body(containsString("<sb:ActiveMessageCount>0</sb:ActiveMessageCount>"))
+                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"));
 
         given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
                 .when().put(BASE + "/runtime-count-topic")
@@ -303,9 +303,9 @@ public class ServiceBusServiceTest {
                 .then()
                 .statusCode(201)
                 .body(containsString("<MessageCount>0</MessageCount>"))
-                .body(containsString("<CountDetails xmlns=\"" + SB_COUNT_NS + "\">"))
-                .body(containsString("<ActiveMessageCount>0</ActiveMessageCount>"))
-                .body(containsString("<DeadLetterMessageCount>0</DeadLetterMessageCount>"));
+                .body(containsString("<CountDetails xmlns:sb=\"" + SB_COUNT_NS + "\">"))
+                .body(containsString("<sb:ActiveMessageCount>0</sb:ActiveMessageCount>"))
+                .body(containsString("<sb:DeadLetterMessageCount>0</sb:DeadLetterMessageCount>"));
     }
 
     @Test

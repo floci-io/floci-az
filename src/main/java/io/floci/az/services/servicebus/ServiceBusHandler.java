@@ -1101,16 +1101,14 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return sb.toString();
     }
 
-    /**
-     * Returns a {@code <CountDetails>} element using the spec-mandated 2011/06 namespace.
-     */
+    /** Returns CountDetails in the entity namespace with count children in the 2011/06 namespace. */
     private String countDetailsXml(ServiceBusNamespaceManager.MessageCounts counts) {
-        return "<CountDetails xmlns=\"" + SB_COUNT_NS + "\">"
-                + "<ActiveMessageCount>" + counts.active() + "</ActiveMessageCount>"
-                + "<DeadLetterMessageCount>" + counts.deadLetter() + "</DeadLetterMessageCount>"
-                + "<ScheduledMessageCount>0</ScheduledMessageCount>"
-                + "<TransferDeadLetterMessageCount>0</TransferDeadLetterMessageCount>"
-                + "<TransferMessageCount>0</TransferMessageCount>"
+        return "<CountDetails xmlns:sb=\"" + SB_COUNT_NS + "\">"
+                + "<sb:ActiveMessageCount>" + counts.active() + "</sb:ActiveMessageCount>"
+                + "<sb:DeadLetterMessageCount>" + counts.deadLetter() + "</sb:DeadLetterMessageCount>"
+                + "<sb:ScheduledMessageCount>0</sb:ScheduledMessageCount>"
+                + "<sb:TransferDeadLetterMessageCount>0</sb:TransferDeadLetterMessageCount>"
+                + "<sb:TransferMessageCount>0</sb:TransferMessageCount>"
                 + "</CountDetails>";
     }
 
