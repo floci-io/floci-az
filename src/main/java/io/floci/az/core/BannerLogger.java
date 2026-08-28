@@ -115,6 +115,7 @@ public class BannerLogger {
             String containerAppsInfo = config.services().containerApps().mocked()
                     ? "mocked  (no docker)"
                     : "revisions  dns:" + config.services().containerApps().dnsSuffix();
+            containerAppsInfo += "  storage:" + getStorageMode("containerapps");
             sb.append(serviceStatusDocker("containerapps", true, containerAppsInfo));
         }
         if (config.services().vm().enabled()) {
