@@ -69,4 +69,16 @@ class ServiceBusOrphanCleanupTest {
                 "floci_service", "servicebus",
                 "floci_owner_container", "owner-id"), manager.serviceContainerLabels());
     }
+
+    @Test
+    void existingFiveArgumentConstructionRemainsSupported() {
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                mock(EmulatorConfig.class),
+                mock(ContainerBuilder.class),
+                mock(ContainerLifecycleManager.class),
+                mock(ServiceBusConfigGenerator.class),
+                mock(ArtemisTlsGenerator.class));
+
+        assertEquals(Map.of("floci_service", "servicebus"), manager.serviceContainerLabels());
+    }
 }

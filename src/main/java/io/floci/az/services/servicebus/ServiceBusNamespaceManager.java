@@ -127,6 +127,14 @@ public class ServiceBusNamespaceManager {
         this.tlsGenerator = tlsGenerator;
     }
 
+    ServiceBusNamespaceManager(EmulatorConfig config,
+                               ContainerBuilder containerBuilder,
+                               ContainerLifecycleManager lifecycleManager,
+                               ServiceBusConfigGenerator configGenerator,
+                               ArtemisTlsGenerator tlsGenerator) {
+        this(config, containerBuilder, lifecycleManager, null, configGenerator, tlsGenerator);
+    }
+
     public synchronized NamespaceState startNamespace(
             String namespaceName, int amqpHostPort, int amqpsHostPort) {
         NamespaceState existing = namespaces.get(namespaceName);
@@ -214,8 +222,10 @@ public class ServiceBusNamespaceManager {
     Map<String, String> serviceContainerLabels() {
         Map<String, String> labels = new LinkedHashMap<>();
         labels.put("floci_service", SERVICE_LABEL);
-        currentContainerResolver.resolveContainerId()
-                .ifPresent(ownerId -> labels.put(OWNER_CONTAINER_LABEL, ownerId));
+        if (currentContainerResolver != null) {
+            currentContainerResolver.resolveContainerId()
+                    .ifPresent(ownerId -> labels.put(OWNER_CONTAINER_LABEL, ownerId));
+        }
         return labels;
     }
 
