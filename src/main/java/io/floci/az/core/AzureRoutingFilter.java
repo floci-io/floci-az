@@ -507,8 +507,11 @@ public class AzureRoutingFilter {
             && userAgent.contains("azsdk-net-Messaging.ServiceBus/")
             && rc.getUriInfo().getQueryParameters().containsKey("api-version");
         SuffixRoute accountSuffix = matchSuffix(accountSuffixRoutes, ctx.firstSegment());
+        boolean hasExplicitServiceBusAccountPrefix = accountSuffix != null
+            && "servicebus".equals(accountSuffix.serviceType())
+            && !ctx.resourcePath().isEmpty();
         if (accountSuffix != null
-                && ("servicebus".equals(accountSuffix.serviceType())
+                && (hasExplicitServiceBusAccountPrefix
                     || (!isAtomPub && !isDotNetAdministrationClient))) {
             return Fallthrough.TO_NEXT_STAGE; // account-suffix routing owns it
         }

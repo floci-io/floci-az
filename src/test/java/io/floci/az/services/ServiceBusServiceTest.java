@@ -80,6 +80,19 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void dotNetAdministrationClientCanUseEntityNameEndingInServiceBusSuffix() {
+        given()
+            .header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
+            .queryParam("api-version", "2021-05")
+            .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+            .when().put("/orders-servicebus")
+            .then()
+            .statusCode(201)
+            .contentType("application/atom+xml")
+            .body(containsString("<QueueDescription"));
+    }
+
+    @Test
     void atomPubClientCanUseEntityNameEndingInAccountSuffix() {
         given()
             .contentType("application/atom+xml")
