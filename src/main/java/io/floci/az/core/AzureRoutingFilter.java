@@ -506,8 +506,10 @@ public class AzureRoutingFilter {
         boolean isDotNetAdministrationClient = userAgent != null
             && userAgent.contains("azsdk-net-Messaging.ServiceBus/")
             && rc.getUriInfo().getQueryParameters().containsKey("api-version");
-        if (!isAtomPub && !isDotNetAdministrationClient
-                && matchSuffix(accountSuffixRoutes, ctx.firstSegment()) != null) {
+        SuffixRoute accountSuffix = matchSuffix(accountSuffixRoutes, ctx.firstSegment());
+        if (accountSuffix != null
+                && ("servicebus".equals(accountSuffix.serviceType())
+                    || (!isAtomPub && !isDotNetAdministrationClient))) {
             return Fallthrough.TO_NEXT_STAGE; // account-suffix routing owns it
         }
         boolean isServiceBusRequest = isAtomPub || isDotNetAdministrationClient

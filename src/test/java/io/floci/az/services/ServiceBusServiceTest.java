@@ -93,6 +93,16 @@ public class ServiceBusServiceTest {
     }
 
     @Test
+    void explicitServiceBusAccountSuffixStillStripsPrefixForAtomPub() {
+        given()
+            .contentType("application/atom+xml")
+            .body("")
+            .when().put("/devstoreaccount1-servicebus/default/queues/atom-explicit")
+            .then()
+            .statusCode(201);
+    }
+
+    @Test
     void queuePersistsDuplicateDetectionSettings() {
         String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
                 + "<RequiresDuplicateDetection>true</RequiresDuplicateDetection>"
