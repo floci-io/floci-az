@@ -183,7 +183,7 @@ public class ContainerLifecycleManager {
         } catch (NotFoundException e) {
             LOG.debugv("Container {0} disappeared before its network could be inspected", containerId);
             return List.of();
-        } catch (DockerException e) {
+        } catch (RuntimeException e) {
             LOG.warnv("Could not inspect Docker networks for container {0}: {1}",
                     containerId, e.getMessage());
             return List.of();
@@ -209,7 +209,7 @@ public class ContainerLifecycleManager {
         } catch (NotFoundException e) {
             LOG.debugv("Docker network {0} was not found", networkName);
             return List.of();
-        } catch (DockerException e) {
+        } catch (RuntimeException e) {
             LOG.warnv("Could not inspect Docker network {0}: {1}", networkName, e.getMessage());
             return List.of();
         }
