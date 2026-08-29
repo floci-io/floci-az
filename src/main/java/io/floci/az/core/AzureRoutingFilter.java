@@ -509,7 +509,6 @@ public class AzureRoutingFilter {
         SuffixRoute accountSuffix = matchSuffix(accountSuffixRoutes, ctx.firstSegment());
         boolean hasExplicitServiceBusAccountPrefix = accountSuffix != null
             && "servicebus".equals(accountSuffix.serviceType())
-            && !isDotNetAdministrationClient
             && !ctx.resourcePath().isEmpty();
         if (accountSuffix != null
                 && (hasExplicitServiceBusAccountPrefix

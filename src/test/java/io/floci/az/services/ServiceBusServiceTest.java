@@ -93,24 +93,16 @@ public class ServiceBusServiceTest {
     }
 
     @Test
-    void dotNetAdministrationClientCanUseChildOfEntityEndingInServiceBusSuffix() {
+    void dotNetAdministrationClientCanUseExplicitServiceBusAccountPrefix() {
         given()
             .header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
             .queryParam("api-version", "2021-05")
-            .body(entry("<TopicDescription xmlns=\"" + SB_NS + "\"/>"))
-            .when().put("/orders-servicebus")
-            .then()
-            .statusCode(201);
-
-        given()
-            .header("User-Agent", "azsdk-net-Messaging.ServiceBus/7.20.1")
-            .queryParam("api-version", "2021-05")
-            .body(entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\"/>"))
-            .when().put("/orders-servicebus/Subscriptions/processor")
+            .body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+            .when().put(BASE + "/explicit-dotnet")
             .then()
             .statusCode(201)
             .contentType("application/atom+xml")
-            .body(containsString("<SubscriptionDescription"));
+            .body(containsString("<QueueDescription"));
     }
 
     @Test
