@@ -48,6 +48,26 @@ public sealed class CosmosTransactionalBatchCompatibilityTests
             await Assert.That(patched.Resource.Value<string>("kind")).IsEqualTo("z");
             await Assert.That(patched.Resource.Value<int>("count")).IsEqualTo(11);
 
+            using TransactionalBatchResponse opcodeBatch = await container
+                .CreateTransactionalBatch(new PartitionKey("u1"))
+                .CreateItem(new { id = "created", tenant = "u1", kind = "create" })
+                .ReadItem("one")
+                .UpsertItem(new { id = "upserted", tenant = "u1", kind = "upsert" })
+                .ExecuteAsync(cancellationToken);
+
+            await Assert.That(opcodeBatch.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            await Assert.That(opcodeBatch.Count).IsEqualTo(3);
+            await Assert.That(opcodeBatch[0].StatusCode).IsEqualTo(HttpStatusCode.Created);
+            await Assert.That(opcodeBatch[1].StatusCode).IsEqualTo(HttpStatusCode.OK);
+            await Assert.That(opcodeBatch[2].StatusCode).IsEqualTo(HttpStatusCode.Created);
+
+            ItemResponse<JObject> created = await container.ReadItemAsync<JObject>(
+                "created", new PartitionKey("u1"), cancellationToken: cancellationToken);
+            ItemResponse<JObject> upserted = await container.ReadItemAsync<JObject>(
+                "upserted", new PartitionKey("u1"), cancellationToken: cancellationToken);
+            await Assert.That(created.Resource.Value<string>("kind")).IsEqualTo("create");
+            await Assert.That(upserted.Resource.Value<string>("kind")).IsEqualTo("upsert");
+
             using TransactionalBatchResponse filteredPatch = await container
                 .CreateTransactionalBatch(new PartitionKey("u1"))
                 .PatchItem("one", [PatchOperation.Set("/kind", "ignored")],
