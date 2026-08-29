@@ -78,6 +78,10 @@ within that session. Attach responses include Azure's `com.microsoft:locked-unti
 Session ownership lasts for the receiver link. Session state and explicit session-lock renewal are
 not currently emulated.
 
+Read a session-enabled entity's dead-letter subqueue with an ordinary receiver. Azure SDKs do not
+expose session receivers for dead-letter subqueues, and receiving from that subqueue does not
+require a session lock.
+
 ## Message peeking
 
 Queue and subscription receivers support Azure SDK `peekMessages()` calls through each entity's
