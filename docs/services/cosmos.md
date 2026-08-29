@@ -21,13 +21,13 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 
 ### .NET query planner configuration
 
-The account response advertises query-engine capabilities consumed by the .NET SDK before it
-sends SQL. Two values intentionally differ from Azure:
+The account response advertises query-engine capabilities. Floci-AZ emits 20 keys, while the
+observed Azure gateway payloads contain 19. Two details intentionally differ:
 
-- `sqlAllowLike` is `true` because Floci-AZ implements `LIKE` and must allow the SDK planner to
-  submit those queries. Azure currently advertises `false`.
-- `sqlDisableOptimizationFlags` is the fixed value `0`. Floci-AZ does not source Azure's internal
-  deployment-specific optimization flags; its in-process query engine does not consume them.
+- `sqlAllowLike` is `true` so the advertised capability set matches what Floci-AZ's query engine
+  can execute. Azure currently advertises `false`.
+- `sqlDisableOptimizationFlags` does not appear in the observed Azure payloads. Floci-AZ emits the
+  extra key with value `0` so its advertised set remains a superset; no current code reads it.
 
 These are client-planning compatibility values, not user configuration.
 
