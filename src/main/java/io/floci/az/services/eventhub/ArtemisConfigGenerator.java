@@ -25,6 +25,8 @@ import java.util.Map;
 public class ArtemisConfigGenerator {
 
     private static final String DEFAULT_CONSUMER_GROUP = "$Default";
+    private static final String CBS_ADDRESS = "$cbs";
+    private static final String CBS_INTERCEPT_ADDRESS = "$cbs-intercept";
 
     private final EmulatorConfig config;
 
@@ -89,7 +91,8 @@ public class ArtemisConfigGenerator {
                 .elem("name", "floci-az-eventhubs")
                 .start("acceptors")
                   .startAttr("acceptor", "name", "amqp")
-                    .raw("tcp://0.0.0.0:5672?protocols=AMQP")
+                    .raw("tcp://0.0.0.0:5672?protocols=AMQP"
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN;maxMessageSize=1048576")
                   .end("acceptor")
                   .startAttr("acceptor", "name", "amqps")
                     .raw("tcp://0.0.0.0:5671?protocols=AMQP"
@@ -97,7 +100,9 @@ public class ArtemisConfigGenerator {
                         + ";keyStorePath=/var/lib/artemis-instance/etc-override/artemis.p12"
                         + ";keyStorePassword=" + ArtemisTlsGenerator.KEYSTORE_PASSWORD
                         + ";keyStoreType=PKCS12"
-                        + ";needClientAuth=false")
+                        + ";needClientAuth=false"
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN"
+                        + ";maxMessageSize=1048576")
                   .end("acceptor")
                 .end("acceptors")
                 .elem("security-enabled", false)
@@ -111,12 +116,29 @@ public class ArtemisConfigGenerator {
                 .end("address-settings")
                 .start("addresses")
                   .raw(addresses.build())
+                  .startAttr("address", "name", CBS_ADDRESS)
+                    .selfClose("multicast")
+                  .end("address")
+                  .startAttr("address", "name", CBS_INTERCEPT_ADDRESS)
+                    .start("anycast")
+                      .selfClose("queue", "name", CBS_INTERCEPT_ADDRESS)
+                    .end("anycast")
+                  .end("address")
                 .end("addresses");
 
-        String divertsXml = diverts.build();
-        if (!divertsXml.isEmpty()) {
-            xml.start("diverts").raw(divertsXml).end("diverts");
-        }
+        // The CBS divert is unconditional: every Azure SDK puts a token on $cbs before
+        // opening entity links, and it is the CbsResponder — attached to the intercept
+        // queue — that answers. Without it the put-token reply carries no status-code
+        // and the SDK cannot authorize.
+        xml.start("diverts")
+             .raw(diverts.build())
+             .startAttr("divert", "name", "cbs-request-intercept")
+               .elem("address", CBS_ADDRESS)
+               .elem("forwarding-address", CBS_INTERCEPT_ADDRESS)
+               .selfClose("filter", "string", "operation = 'put-token'")
+               .elem("exclusive", true)
+             .end("divert")
+           .end("diverts");
 
         xml.end("core").end("configuration");
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" + xml.build();

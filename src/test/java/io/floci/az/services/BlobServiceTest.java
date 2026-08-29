@@ -1322,6 +1322,104 @@ public class BlobServiceTest {
             .header("Content-Type", not(emptyOrNullString()));
     }
 
+    @Test
+    void putBlobWithEmptyContentTypeServesOctetStream() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-blob-content-type", "")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/octet-stream"));
+    }
+
+    @Test
+    void putBlobWithUnparseableContentTypeServesOctetStream() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-blob-content-type", "not-a-media-type")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/octet-stream"));
+    }
+
+    @Test
+    void getBlobWithEmptyContentTypeStillReturnsContent() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-blob-content-type", "")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/octet-stream"))
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void listBlobsWithEmptyContentTypeReportsOctetStream() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-blob-content-type", "")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(containsString("<Content-Type>application/octet-stream</Content-Type>"));
+    }
+
+    @Test
+    void committedBlockBlobWithEmptyContentTypeServesOctetStream() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+
+        given()
+            .body("chunk")
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, BLOB, blockId)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-blob-content-type", "")
+            .contentType("application/xml")
+            .body("<BlockList><Latest>" + blockId + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("application/octet-stream"));
+    }
+
     private static void putTestBlob(String content) {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

@@ -21,11 +21,17 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Daemon thread that handles AMQP CBS (Claims Based Security) for a Service Bus namespace.
+ * Daemon thread that handles AMQP CBS (Claims Based Security) for a namespace.
  *
- * The Azure Service Bus SDK always sends a PUT TOKEN request to the {@code $cbs} address
- * before opening any entity links. This responder receives those requests and replies with
- * status-code 200 on the {@code $cbs} response link, unblocking the SDK.
+ * The Azure SDKs always send a PUT TOKEN request to the {@code $cbs} address before opening
+ * any entity links. This responder receives those requests — routed to the intercept queue by
+ * the broker.xml divert — and replies on the {@code $cbs} response link, unblocking the SDK.
+ *
+ * Used by both Service Bus and Event Hubs namespaces.
+ *
+ * The reply carries status-code 202 (Accepted), as the AMQP CBS specification requires for
+ * put-token. Some SDK stacks accept 200; others reject anything but 202 (the Rust
+ * {@code fe2o3-amqp-cbs} hard-codes it), so the specified code is the interoperable one.
  *
  * Uses proton-j directly since it is the same low-level AMQP library the SDK uses internally.
  */
@@ -164,8 +170,8 @@ public class ServiceBusCbsResponder {
             Message response = Message.Factory.create();
             response.setCorrelationId(correlationId);
             Map<String, Object> props = new HashMap<>();
-            props.put("status-code", 200);
-            props.put("status-description", "OK");
+            props.put("status-code", 202);
+            props.put("status-description", "Accepted");
             response.setApplicationProperties(new ApplicationProperties(props));
 
             byte[] encoded = new byte[512];

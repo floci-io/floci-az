@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.services.servicebus.ServiceBusCbsResponder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -50,7 +51,17 @@ public class EventHubNamespaceManager {
      */
     public record NamespaceState(String containerId, int amqpHostPort, int amqpsHostPort, String tlsCertPem, boolean mocked) {}
 
+    // Artemis library patches, shared with the Service Bus broker — see where they are
+    // copied in below for why each is needed.
+    static final String PROTON_PATCH_RESOURCE = "/artemis/proton-j-0.34.1-floci-az-proton-patch.jar";
+    static final String ARTEMIS_AMQP_PATCH_RESOURCE =
+            "/artemis/artemis-amqp-protocol-2.44.0-floci-az-artemis-amqp-patch.jar";
+    private static final String PROTON_J_PATH = "/opt/activemq-artemis/lib/proton-j-0.34.1.jar";
+    private static final String ARTEMIS_AMQP_PATH =
+            "/opt/activemq-artemis/lib/artemis-amqp-protocol-2.44.0.jar";
+
     private final ConcurrentHashMap<String, NamespaceState> namespaces = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ServiceBusCbsResponder> cbsResponders = new ConcurrentHashMap<>();
 
     private final EmulatorConfig config;
     private final ContainerBuilder containerBuilder;
@@ -75,9 +86,18 @@ public class EventHubNamespaceManager {
      * Starts an Artemis container for the given namespace and registers it.
      * Host ports of {@code 0} mean "allocate dynamically".
      */
-    public NamespaceState startNamespace(String namespaceName,
+    public synchronized NamespaceState startNamespace(String namespaceName,
                                           Map<String, List<String>> entities,
                                           int amqpHostPort, int amqpsHostPort) {
+        // Synchronized, and re-checking inside the lock, as the Service Bus manager does:
+        // the handler's own existence check is not atomic with this call, so two
+        // overlapping creates would otherwise each start a broker and a responder, and
+        // the second registration would orphan the first — leaking a daemon thread and
+        // its Proton reactor's file descriptors.
+        NamespaceState existing = namespaces.get(namespaceName);
+        if (existing != null) {
+            return existing;
+        }
         String containerName = containerName(namespaceName);
         List<String> amqpHostnames = List.of("localhost", containerName);
 
@@ -112,6 +132,15 @@ public class EventHubNamespaceManager {
                 "/var/lib/artemis-instance/etc-override/broker.xml");
         lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
                 "/var/lib/artemis-instance/etc-override/artemis.p12");
+        // The same two library patches the Service Bus broker gets. Artemis never
+        // advertises max-message-size on ATTACH (spec-legal: unset means "no limit"),
+        // but the Azure SDKs read the absent field as a zero-byte limit and reject
+        // every send — so the patched proton-j sets it. The patched amqp-protocol
+        // carries the MSSBCBS SASL mechanism the acceptors offer.
+        lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
+                PROTON_J_PATH);
+        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
+                ARTEMIS_AMQP_PATH);
 
         ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
 
@@ -119,6 +148,13 @@ public class EventHubNamespaceManager {
         waitForPort(amqpEndpoint, "AMQP");
         EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
         waitForPort(amqpsEndpoint, "AMQPS");
+
+        // Answers the CBS put-token every Azure SDK sends before opening entity links;
+        // the broker.xml divert routes those requests to the intercept queue this
+        // attaches to. Same responder the Service Bus namespaces use.
+        ServiceBusCbsResponder cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
+        cbs.start();
+        cbsResponders.put(namespaceName, cbs);
 
         // Topology is pre-configured in broker.xml; Jolokia setup runs in background
         // to handle any dynamic additions (e.g. consumer groups created after startup).
@@ -150,10 +186,17 @@ public class EventHubNamespaceManager {
      *
      * @return {@code true} if the namespace existed and was stopped; {@code false} if unknown
      */
-    public boolean stopNamespace(String namespaceName) {
+    public synchronized boolean stopNamespace(String namespaceName) {
+        // Shares startNamespace's lock: a delete arriving mid-start would otherwise see
+        // no namespace, clean nothing up, and let the start it raced publish a namespace
+        // the caller had already deleted — leaving its container and responder running.
         NamespaceState state = namespaces.remove(namespaceName);
         if (state == null) {
             return false;
+        }
+        ServiceBusCbsResponder cbs = cbsResponders.remove(namespaceName);
+        if (cbs != null) {
+            cbs.stop();
         }
         if (!state.mocked() && state.containerId() != null) {
             lifecycleManager.stopAndRemove(state.containerId(), null);
@@ -317,5 +360,17 @@ public class EventHubNamespaceManager {
         }
         throw new RuntimeException(
                 "Artemis did not open " + label + " port " + endpoint + " within 60s");
+    }
+
+    private static byte[] loadResource(String resource) {
+        try (java.io.InputStream stream =
+                EventHubNamespaceManager.class.getResourceAsStream(resource)) {
+            if (stream == null) {
+                throw new IllegalStateException("Embedded Artemis resource not found: " + resource);
+            }
+            return stream.readAllBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read embedded Artemis resource: " + resource, e);
+        }
     }
 }

@@ -58,6 +58,24 @@ class CosmosItemConditionTest {
     }
 
     @Test
+    void patchFilterPredicateRejectsWithoutChangingDocument() {
+        createDocument(1);
+
+        given().contentType("application/json")
+                .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
+                .body("""
+                        {
+                          "condition": "FROM c WHERE c.value = 2",
+                          "operations": [{"op":"set","path":"/value","value":3}]
+                        }""")
+                .patch(DOCS + "/one")
+                .then().statusCode(412)
+                .body("code", is("PreconditionFailed"));
+
+        readDocument().then().statusCode(200).body("value", is(1));
+    }
+
+    @Test
     void upsertHonorsIfMatchAndIfNoneMatch() {
         String etag = createDocument(1);
 
@@ -100,7 +118,7 @@ class CosmosItemConditionTest {
                           "resourceBody": {"id":"one","pk":"p","value":2}
                         }]""")
                 .post(DOCS)
-                .then().statusCode(200).body("[0].statusCode", is(412));
+                .then().statusCode(207).body("[0].statusCode", is(412));
 
         readDocument().then().statusCode(200).body("value", is(1));
     }
@@ -128,7 +146,7 @@ class CosmosItemConditionTest {
                           }
                         ]""".formatted(etag.replace("\"", "\\\"")))
                 .post(DOCS)
-                .then().statusCode(200)
+                .then().statusCode(207)
                 .body("statusCode", contains(424, 412));
 
         readDocument().then().statusCode(200).body("value", is(1));

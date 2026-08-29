@@ -4,7 +4,7 @@ WORKDIR /app
 COPY SdkTestDotnet.csproj .
 RUN dotnet restore
 
-COPY ServiceBusCompatibilityTests.cs .
+COPY *.cs .
 RUN dotnet build --no-restore
 
 RUN mkdir -p /results

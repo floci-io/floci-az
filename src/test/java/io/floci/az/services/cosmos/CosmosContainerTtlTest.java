@@ -205,7 +205,7 @@ public class CosmosContainerTtlTest {
                 .header("x-ms-documentdb-partitionkey", "[\"x\"]")
                 .body("[{\"operationType\":\"Read\",\"id\":\"a\"},{\"operationType\":\"Read\",\"id\":\"b\"}]")
                 .when().post(BASE + "/dbs/" + DB + "/colls/events/docs")
-                .then().statusCode(200)
+                .then().statusCode(207)
                 .body("statusCode", contains(404, 424));
 
         // conditional point and batch mutations also treat the expired doc as absent
@@ -227,7 +227,7 @@ public class CosmosContainerTtlTest {
                           "resourceBody": {"id":"a","category":"x"}
                         }]""".formatted(expiredEtag.replace("\"", "\\\"")))
                 .when().post(BASE + "/dbs/" + DB + "/colls/events/docs")
-                .then().statusCode(200).body("[0].statusCode", is(404));
+                .then().statusCode(207).body("[0].statusCode", is(404));
 
         // an expired doc no longer blocks re-creating the same id
         insertDoc("events", "{\"id\":\"a\",\"category\":\"x\"}");

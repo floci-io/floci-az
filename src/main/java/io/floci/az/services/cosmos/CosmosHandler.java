@@ -629,8 +629,12 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         // The Cosmos DB PATCH body can arrive in two forms:
         //   1. {"operations": [...]}  — Java / Python SDKs
         //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
-        List<Map<String, Object>> operations = parsePatchBody(req);
-        applyPatchOperations(doc, operations);
+        PatchRequest patch = parsePatchBody(req);
+        if (patch.condition() != null && !patch.condition().isBlank()
+                && queryEngine.execute("SELECT * " + patch.condition(), List.of(), List.of(doc)).count() == 0) {
+            return errorResponse(412, "PreconditionFailed", "The patch filter predicate was not satisfied.");
+        }
+        applyPatchOperations(doc, patch.operations());
 
         Instant now  = Instant.now();
         String  etag = newEtag();
@@ -762,7 +766,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     /**
      * Execute a transactional batch request.
      *
-     * <p>The request body is a JSON array of operation objects, each with at minimum
+     * <p>The request body is a JSON array or the RecordIO/HybridRow payload used by the
+     * .NET SDK. Each operation has at minimum
      * {@code "operationType"} and, depending on the type, {@code "id"} and/or
      * {@code "resourceBody"}.</p>
      *
@@ -782,9 +787,13 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         Object defaultTtl = containerDefaultTtl(collFound);
 
         List<Map<String, Object>> operations;
+        boolean hybridRow;
         try {
             byte[] raw = req.bodyStream().readAllBytes();
-            operations = MAPPER.readValue(raw, new TypeReference<>() {});
+            hybridRow = CosmosHybridRowBatchCodec.isHybridRow(raw);
+            operations = hybridRow
+                    ? CosmosHybridRowBatchCodec.decodeOperations(raw)
+                    : MAPPER.readValue(raw, new TypeReference<>() {});
         } catch (IOException e) {
             return errorResponse(400, "BadRequest", "Invalid batch request body.");
         }
@@ -845,13 +854,18 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
 
         try {
-            return Response.ok(MAPPER.writeValueAsString(results), "application/json")
+            Object responseBody = hybridRow
+                    ? CosmosHybridRowBatchCodec.encodeResults(results)
+                    : MAPPER.writeValueAsString(results);
+            String contentType = hybridRow ? "application/octet-stream" : "application/json";
+            int status = failed ? 207 : 200;
+            return Response.status(status).entity(responseBody).type(contentType)
                     .header("x-ms-request-charge",  String.valueOf(results.size()))
                     .header("x-ms-session-token",   "0:0#1")
                     .header("x-ms-activity-id",     UUID.randomUUID().toString())
                     .header("x-ms-version",         "2018-12-31")
                     .build();
-        } catch (JsonProcessingException e) {
+        } catch (IOException e) {
             return Response.serverError().build();
         }
     }
@@ -951,6 +965,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             operations.add((Map<String, Object>) operation);
         }
         Map<String, Object> document = parseData(found.get());
+        String filterPredicate = body.get("condition") instanceof String value ? value : null;
+        if (filterPredicate != null && !filterPredicate.isBlank()
+                && queryEngine.execute("SELECT * " + filterPredicate, List.of(), List.of(document)).count() == 0) {
+            return batchResultError(412);
+        }
         applyPatchOperations(document, operations);
 
         Instant now = Instant.now();
@@ -1368,23 +1387,28 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
      * </ul>
      */
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> parsePatchBody(AzureRequest req) {
+    private PatchRequest parsePatchBody(AzureRequest req) {
         try {
             byte[] raw = req.bodyStream().readAllBytes();
             String trimmed = new String(raw, StandardCharsets.UTF_8).trim();
             if (trimmed.startsWith("[")) {
                 // Node SDK: raw operations array
-                return MAPPER.readValue(trimmed, new TypeReference<>() {});
+                return new PatchRequest(MAPPER.readValue(trimmed, new TypeReference<>() {}), null);
             } else {
                 // Java/Python SDK: {"operations": [...]}
                 Map<String, Object> body = MAPPER.readValue(trimmed, new TypeReference<>() {});
-                return body.get("operations") instanceof List<?> l
+                List<Map<String, Object>> operations = body.get("operations") instanceof List<?> l
                         ? (List<Map<String, Object>>) l : List.of();
+                String condition = body.get("condition") instanceof String value ? value : null;
+                return new PatchRequest(operations, condition);
             }
         } catch (IOException e) {
             LOG.warnf("Failed to parse PATCH body: %s", e.getMessage());
-            return List.of();
+            return new PatchRequest(List.of(), null);
         }
+    }
+
+    private record PatchRequest(List<Map<String, Object>> operations, String condition) {
     }
 
     private byte[] toBytes(Object obj) {
