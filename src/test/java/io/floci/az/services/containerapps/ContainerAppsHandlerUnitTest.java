@@ -113,14 +113,13 @@ class ContainerAppsHandlerUnitTest {
     }
 
     @Test
-    void internalIngressUsesExactDockerNetworkSubnets() {
-        List<String> subnets = List.of("172.18.0.0/16", "fd00::/64");
-        assertFalse(ContainerLifecycleManager.isAddressInSubnets(null, subnets));
-        assertFalse(ContainerLifecycleManager.isAddressInSubnets("127.0.0.1", subnets));
-        assertFalse(ContainerLifecycleManager.isAddressInSubnets("172.19.0.4", subnets));
-        assertFalse(ContainerLifecycleManager.isAddressInSubnets("8.8.8.8", subnets));
-        assertTrue(ContainerLifecycleManager.isAddressInSubnets("172.18.0.4", subnets));
-        assertTrue(ContainerLifecycleManager.isAddressInSubnets("fd00::4", subnets));
+    void internalIngressUsesExactManagedContainerAddresses() {
+        List<String> addresses = List.of("172.18.0.4", "fd00::4");
+        assertFalse(ContainerLifecycleManager.matchesAnyAddress(null, addresses));
+        assertFalse(ContainerLifecycleManager.matchesAnyAddress("172.18.0.5", addresses));
+        assertFalse(ContainerLifecycleManager.matchesAnyAddress("fd00::5", addresses));
+        assertTrue(ContainerLifecycleManager.matchesAnyAddress("172.18.0.4", addresses));
+        assertTrue(ContainerLifecycleManager.matchesAnyAddress("fd00:0:0:0:0:0:0:4", addresses));
     }
 
     @Test
