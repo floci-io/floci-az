@@ -16,7 +16,6 @@ import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Mount;
 import com.github.dockerjava.api.model.MountType;
-import com.github.dockerjava.api.model.Network;
 import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -33,6 +32,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -164,8 +164,8 @@ public class ContainerLifecycleManager {
         return new ContainerInfo(containerId, endpoints);
     }
 
-    /** Returns Docker IPAM subnets attached to a container. */
-    public List<String> networkSubnets(String containerId) {
+    /** Returns IP addresses assigned to a container's Docker network namespace. */
+    public List<String> containerAddresses(String containerId) {
         try {
             InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
             if (inspect.getNetworkSettings() == null) {
@@ -175,85 +175,42 @@ public class ContainerLifecycleManager {
             if (networks == null || networks.isEmpty()) {
                 return List.of();
             }
-            List<String> subnets = new ArrayList<>();
-            for (String networkName : networks.keySet()) {
-                subnets.addAll(networkSubnetsForNetwork(networkName));
+            List<String> addresses = new ArrayList<>();
+            for (ContainerNetwork network : networks.values()) {
+                if (network.getIpAddress() != null && !network.getIpAddress().isBlank()) {
+                    addresses.add(network.getIpAddress());
+                }
+                if (network.getGlobalIPv6Address() != null && !network.getGlobalIPv6Address().isBlank()) {
+                    addresses.add(network.getGlobalIPv6Address());
+                }
             }
-            return List.copyOf(subnets);
+            return List.copyOf(addresses);
         } catch (NotFoundException e) {
-            LOG.debugv("Container {0} disappeared before its network could be inspected", containerId);
+            LOG.debugv("Container {0} disappeared before its addresses could be inspected", containerId);
             return List.of();
         } catch (RuntimeException e) {
-            LOG.warnv("Could not inspect Docker networks for container {0}: {1}",
+            LOG.warnv("Could not inspect Docker addresses for container {0}: {1}",
                     containerId, e.getMessage());
             return List.of();
         }
     }
 
-    /** Returns the current Docker IPAM subnets for a named network. */
-    public List<String> networkSubnetsForNetwork(String networkName) {
-        if (networkName == null || networkName.isBlank()) {
-            return List.of();
-        }
-        try {
-            Network network = dockerClient.inspectNetworkCmd()
-                    .withNetworkId(networkName)
-                    .exec();
-            if (network.getIpam() == null || network.getIpam().getConfig() == null) {
-                return List.of();
-            }
-            return network.getIpam().getConfig().stream()
-                    .map(Network.Ipam.Config::getSubnet)
-                    .filter(subnet -> subnet != null && !subnet.isBlank())
-                    .toList();
-        } catch (NotFoundException e) {
-            LOG.debugv("Docker network {0} was not found", networkName);
-            return List.of();
-        } catch (RuntimeException e) {
-            LOG.warnv("Could not inspect Docker network {0}: {1}", networkName, e.getMessage());
-            return List.of();
-        }
-    }
-
-    /** Tests an IP literal against Docker IPAM CIDR subnets without trusting forwarded headers. */
-    public static boolean isAddressInSubnets(String address, Collection<String> subnets) {
+    /** Tests whether an IP literal exactly matches one of the supplied IP literals. */
+    public static boolean matchesAnyAddress(String address, Collection<String> addresses) {
         if (address == null || address.isBlank()) {
             return false;
         }
         try {
             byte[] candidate = InetAddress.getByName(address).getAddress();
-            for (String subnet : subnets) {
-                String[] parts = subnet.split("/", 2);
-                if (parts.length != 2) {
-                    continue;
-                }
-                byte[] network = InetAddress.getByName(parts[0]).getAddress();
-                int prefixLength = Integer.parseInt(parts[1]);
-                if (network.length == candidate.length
-                        && prefixLength >= 0 && prefixLength <= network.length * Byte.SIZE
-                        && matchesPrefix(candidate, network, prefixLength)) {
+            for (String expected : addresses) {
+                if (Arrays.equals(candidate, InetAddress.getByName(expected).getAddress())) {
                     return true;
                 }
             }
-        } catch (UnknownHostException | NumberFormatException e) {
+        } catch (UnknownHostException e) {
             return false;
         }
         return false;
-    }
-
-    private static boolean matchesPrefix(byte[] address, byte[] network, int prefixLength) {
-        int wholeBytes = prefixLength / Byte.SIZE;
-        int remainingBits = prefixLength % Byte.SIZE;
-        for (int index = 0; index < wholeBytes; index++) {
-            if (address[index] != network[index]) {
-                return false;
-            }
-        }
-        if (remainingBits == 0) {
-            return true;
-        }
-        int mask = 0xff & (0xff << (Byte.SIZE - remainingBits));
-        return (address[wholeBytes] & mask) == (network[wholeBytes] & mask);
     }
 
     /**

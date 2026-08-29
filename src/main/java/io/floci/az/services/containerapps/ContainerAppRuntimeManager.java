@@ -6,7 +6,6 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
-import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -34,18 +33,15 @@ public class ContainerAppRuntimeManager {
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
-    private final CurrentContainerNetworkResolver currentContainerNetworkResolver;
     private final EmulatorConfig config;
     private final Map<String, RevisionRuntime> runtimes = new ConcurrentHashMap<>();
 
     @Inject
     public ContainerAppRuntimeManager(ContainerBuilder containerBuilder,
                                       ContainerLifecycleManager lifecycleManager,
-                                      CurrentContainerNetworkResolver currentContainerNetworkResolver,
                                       EmulatorConfig config) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
-        this.currentContainerNetworkResolver = currentContainerNetworkResolver;
         this.config = config;
     }
 
@@ -101,19 +97,10 @@ public class ContainerAppRuntimeManager {
     }
 
     public boolean isInternalCaller(String remoteAddress) {
-        boolean matchesRunningRevision = runtimes.values().stream()
+        return runtimes.values().stream()
                 .flatMap(runtime -> runtime.replicas().stream())
-                .anyMatch(replica -> ContainerLifecycleManager.isAddressInSubnets(
-                        remoteAddress, replica.networkSubnets()));
-        if (matchesRunningRevision) {
-            return true;
-        }
-        String networkName = config.services().dockerNetwork()
-                .filter(name -> !name.isBlank())
-                .or(currentContainerNetworkResolver::resolveNetworkName)
-                .orElse("bridge");
-        return ContainerLifecycleManager.isAddressInSubnets(
-                remoteAddress, lifecycleManager.networkSubnetsForNetwork(networkName));
+                .anyMatch(replica -> ContainerLifecycleManager.matchesAnyAddress(
+                        remoteAddress, replica.networkAddresses()));
     }
 
     private ReplicaRuntime startReplica(ContainerAppState app, RevisionState revision,
@@ -127,7 +114,7 @@ public class ContainerAppRuntimeManager {
         List<String> containerIds = new ArrayList<>();
         ContainerLifecycleManager.EndpointInfo ingressEndpoint = null;
         String networkNamespace = null;
-        List<String> networkSubnets = List.of();
+        List<String> networkAddresses = List.of();
 
         try {
             for (int containerIndex = 0; containerIndex < containers.size(); containerIndex++) {
@@ -163,7 +150,7 @@ public class ContainerAppRuntimeManager {
                 containerIds.add(info.containerId());
                 if (networkNamespace == null) {
                     networkNamespace = info.containerId();
-                    networkSubnets = lifecycleManager.networkSubnets(networkNamespace);
+                    networkAddresses = lifecycleManager.containerAddresses(networkNamespace);
                 }
                 if (containerIndex == 0 && targetPort > 0) {
                     ingressEndpoint = info.getEndpoint(targetPort);
@@ -172,9 +159,9 @@ public class ContainerAppRuntimeManager {
             if (ingressEndpoint != null) {
                 waitUntilReady(ingressEndpoint, revision.getName(), replicaIndex);
             }
-            return new ReplicaRuntime(List.copyOf(containerIds), ingressEndpoint, networkSubnets);
+            return new ReplicaRuntime(List.copyOf(containerIds), ingressEndpoint, networkAddresses);
         } catch (RuntimeException e) {
-            stopReplica(new ReplicaRuntime(List.copyOf(containerIds), ingressEndpoint, networkSubnets));
+            stopReplica(new ReplicaRuntime(List.copyOf(containerIds), ingressEndpoint, networkAddresses));
             throw e;
         }
     }
@@ -283,6 +270,6 @@ public class ContainerAppRuntimeManager {
 
     private record ReplicaRuntime(List<String> containerIds,
                                   ContainerLifecycleManager.EndpointInfo ingressEndpoint,
-                                  List<String> networkSubnets) {
+                                  List<String> networkAddresses) {
     }
 }
