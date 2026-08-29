@@ -195,6 +195,20 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /** Returns IP addresses for running containers carrying every required label. */
+    public List<String> runningContainerAddresses(Map<String, String> requiredLabels) {
+        try {
+            return dockerClient.listContainersCmd().withShowAll(false).exec().stream()
+                    .filter(container -> hasRequiredLabels(container, requiredLabels))
+                    .flatMap(container -> containerAddresses(container.getId()).stream())
+                    .distinct()
+                    .toList();
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not inspect running Docker containers by label: {0}", e.getMessage());
+            return List.of();
+        }
+    }
+
     /** Tests whether an IP literal exactly matches one of the supplied IP literals. */
     public static boolean matchesAnyAddress(String address, Collection<String> addresses) {
         if (address == null || address.isBlank()) {

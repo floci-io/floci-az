@@ -30,6 +30,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ContainerAppRuntimeManager {
 
     private static final Logger LOG = Logger.getLogger(ContainerAppRuntimeManager.class);
+    private static final String SERVICE_LABEL = "floci_service";
+    private static final String SERVICE_LABEL_VALUE = "containerapps";
+    private static final String ENVIRONMENT_LABEL = "floci_containerapps_environment";
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
@@ -54,7 +57,8 @@ public class ContainerAppRuntimeManager {
             for (int replica = 0; replica < replicaCount; replica++) {
                 replicas.add(startReplica(app, revision, configuration, replica, targetPort));
             }
-            runtimes.put(runtimeKey(app, revision.getName()), new RevisionRuntime(replicas));
+            runtimes.put(runtimeKey(app, revision.getName()),
+                    new RevisionRuntime(normalizedEnvironmentId(app), replicas));
             LOG.infov("Started Container App revision {0} with {1} replicas",
                     revision.getName(), replicaCount);
         } catch (RuntimeException e) {
@@ -96,11 +100,21 @@ public class ContainerAppRuntimeManager {
         return Optional.empty();
     }
 
-    public boolean isInternalCaller(String remoteAddress) {
-        return runtimes.values().stream()
+    public boolean isInternalCaller(String remoteAddress, String environmentId) {
+        String normalizedEnvironment = normalizeEnvironmentId(environmentId);
+        if (normalizedEnvironment.isBlank()) {
+            return false;
+        }
+        boolean matchesCurrentRuntime = runtimes.values().stream()
+                .filter(runtime -> normalizedEnvironment.equals(runtime.environmentId()))
                 .flatMap(runtime -> runtime.replicas().stream())
                 .anyMatch(replica -> ContainerLifecycleManager.matchesAnyAddress(
                         remoteAddress, replica.networkAddresses()));
+        if (matchesCurrentRuntime) {
+            return true;
+        }
+        return ContainerLifecycleManager.matchesAnyAddress(remoteAddress,
+                lifecycleManager.runningContainerAddresses(environmentLabels(normalizedEnvironment)));
     }
 
     private ReplicaRuntime startReplica(ContainerAppState app, RevisionState revision,
@@ -115,6 +129,7 @@ public class ContainerAppRuntimeManager {
         ContainerLifecycleManager.EndpointInfo ingressEndpoint = null;
         String networkNamespace = null;
         List<String> networkAddresses = List.of();
+        Map<String, String> labels = environmentLabels(normalizedEnvironmentId(app));
 
         try {
             for (int containerIndex = 0; containerIndex < containers.size(); containerIndex++) {
@@ -126,6 +141,7 @@ public class ContainerAppRuntimeManager {
                 ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                         .withName(containerName)
                         .withEnv(environment(container.path("env"), secrets))
+                        .withLabels(labels)
                         .withLogRotation();
                 if (networkNamespace == null) {
                     builder.withDockerNetwork(config.services().dockerNetwork());
@@ -246,6 +262,21 @@ public class ContainerAppRuntimeManager {
         return app.storageKey() + "/" + revisionName.toLowerCase(Locale.ROOT);
     }
 
+    private static String normalizedEnvironmentId(ContainerAppState app) {
+        return normalizeEnvironmentId(
+                app.getDocument().path("properties").path("environmentId").asText());
+    }
+
+    private static String normalizeEnvironmentId(String environmentId) {
+        return environmentId == null ? "" : environmentId.toLowerCase(Locale.ROOT);
+    }
+
+    private static Map<String, String> environmentLabels(String environmentId) {
+        return Map.of(
+                SERVICE_LABEL, SERVICE_LABEL_VALUE,
+                ENVIRONMENT_LABEL, environmentId);
+    }
+
     private static String requiredText(JsonNode node, String field) {
         String value = node.path(field).asText();
         if (value.isBlank()) {
@@ -262,9 +293,10 @@ public class ContainerAppRuntimeManager {
         return values;
     }
 
-    private record RevisionRuntime(List<ReplicaRuntime> replicas, AtomicInteger nextReplica) {
-        private RevisionRuntime(List<ReplicaRuntime> replicas) {
-            this(List.copyOf(replicas), new AtomicInteger());
+    private record RevisionRuntime(String environmentId, List<ReplicaRuntime> replicas,
+                                   AtomicInteger nextReplica) {
+        private RevisionRuntime(String environmentId, List<ReplicaRuntime> replicas) {
+            this(environmentId, List.copyOf(replicas), new AtomicInteger());
         }
     }
 
