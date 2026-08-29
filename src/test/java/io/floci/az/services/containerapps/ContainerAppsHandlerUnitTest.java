@@ -129,7 +129,7 @@ class ContainerAppsHandlerUnitTest {
             runtimeStarted.set(true);
             return null;
         }).when(runtimeManager).startRevision(any(), any(), any(), anyInt(), anyInt());
-        when(runtimeManager.isInternalCaller("172.18.0.4")).thenReturn(true);
+        when(runtimeManager.isInternalCaller("172.18.0.4", ENVIRONMENT_ID)).thenReturn(true);
         var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
         when(runtimeManager.endpoint(any(), any()))
                 .thenAnswer(ignored -> runtimeStarted.get() ? Optional.of(endpoint) : Optional.empty());

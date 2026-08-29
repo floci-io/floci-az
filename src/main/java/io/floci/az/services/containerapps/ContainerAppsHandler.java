@@ -566,13 +566,13 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         }
         if (config.services().containerApps().mocked()) {
             if (!ingress.path("external").asBoolean(false)
-                    && !runtimeManager.isInternalCaller(request.remoteAddress())) {
+                    && !runtimeManager.isInternalCaller(request.remoteAddress(), environmentId(app))) {
                 return ArmErrors.notFound("Container App ingress host was not found.");
             }
             return ArmErrors.error(503, "ContainerAppMocked",
                     "Container App is configured in mocked mode; ingress data plane is unavailable.");
         }
-        if (!isIngressCallerAllowed(ingress, request)) {
+        if (!isIngressCallerAllowed(app, ingress, request)) {
             return ArmErrors.notFound("Container App ingress host was not found.");
         }
 
@@ -595,9 +595,9 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                         "Active revision has no running ingress replica."));
     }
 
-    private boolean isIngressCallerAllowed(JsonNode ingress, AzureRequest request) {
+    private boolean isIngressCallerAllowed(ContainerAppState app, JsonNode ingress, AzureRequest request) {
         return ingress.path("external").asBoolean(false)
-                || runtimeManager.isInternalCaller(request.remoteAddress());
+                || runtimeManager.isInternalCaller(request.remoteAddress(), environmentId(app));
     }
 
     Optional<RevisionState> routeRevision(ContainerAppState app, JsonNode ingress) {

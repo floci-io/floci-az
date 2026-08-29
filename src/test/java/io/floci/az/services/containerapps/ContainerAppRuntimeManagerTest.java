@@ -24,12 +24,18 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ContainerAppRuntimeManagerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String ENVIRONMENT_ID = "/subscriptions/sub/resourcegroups/rg/providers/"
+            + "microsoft.app/managedenvironments/env";
+    private static final Map<String, String> ENVIRONMENT_LABELS = Map.of(
+            "floci_service", "containerapps",
+            "floci_containerapps_environment", ENVIRONMENT_ID);
 
     private ContainerBuilder containerBuilder;
     private ContainerBuilder.Builder builder;
@@ -70,14 +76,25 @@ class ContainerAppRuntimeManagerTest {
 
         verify(builder).withDockerNetwork(Optional.of("test-network"));
         verify(builder).withNetworkMode("container:leader-id");
-        assertTrue(runtimeManager.isInternalCaller("172.18.0.9"));
-        assertFalse(runtimeManager.isInternalCaller("172.18.0.10"));
-        assertFalse(runtimeManager.isInternalCaller("192.168.1.9"));
+        verify(builder, times(2)).withLabels(ENVIRONMENT_LABELS);
+        assertTrue(runtimeManager.isInternalCaller("172.18.0.9", ENVIRONMENT_ID));
+        assertFalse(runtimeManager.isInternalCaller("172.18.0.9", ENVIRONMENT_ID + "-other"));
+        assertFalse(runtimeManager.isInternalCaller("172.18.0.10", ENVIRONMENT_ID));
+        assertFalse(runtimeManager.isInternalCaller("192.168.1.9", ENVIRONMENT_ID));
     }
 
     @Test
     void rejectsCallerBeforeAnyManagedRuntimeStarts() {
-        assertFalse(runtimeManager.isInternalCaller("172.18.0.4"));
+        assertFalse(runtimeManager.isInternalCaller("172.18.0.4", ENVIRONMENT_ID));
+    }
+
+    @Test
+    void authorizesLabeledEnvironmentCallerAfterManagerRestart() {
+        when(lifecycleManager.runningContainerAddresses(ENVIRONMENT_LABELS))
+                .thenReturn(List.of("172.18.0.4"));
+
+        assertTrue(runtimeManager.isInternalCaller("172.18.0.4", ENVIRONMENT_ID));
+        assertFalse(runtimeManager.isInternalCaller("172.18.0.5", ENVIRONMENT_ID));
     }
 
     @Test
@@ -107,7 +124,8 @@ class ContainerAppRuntimeManagerTest {
     }
 
     private static ContainerAppState app() throws Exception {
-        JsonNode document = MAPPER.readTree("{\"properties\":{}}");
+        JsonNode document = MAPPER.readTree("{\"properties\":{\"environmentId\":\""
+                + ENVIRONMENT_ID + "\"}}");
         return new ContainerAppState("sub", "rg", "app", document, Instant.now());
     }
 
