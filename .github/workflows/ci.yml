@@ -39,7 +39,34 @@ jobs:
         with:
           java-version: '25'
           distribution: 'temurin'
-          cache: maven
+          # no `cache: maven` - broken in this action release line: it restores nothing
+          # ("maven cache is not found") and then fails to save ("Path Validation Error:
+          # Path(s) specified in the action for caching do(es) not exist"), so every run
+          # resolved dependencies cold. Explicit cache steps below do the same job.
+
+      # Restore on every run, save from main only. Actions caches are ref-scoped: a
+      # pull_request run's write lands in refs/pull/N/merge, which no other PR can read,
+      # so a PR save is a private duplicate of what main already publishes under this
+      # key. PRs restore main's copy instead. This job is the repo's single cache writer;
+      # compatibility.yml and nightly.yml restore the same key read-only.
+      #
+      # `hashFiles('pom.xml')`, not '**/pom.xml': the glob would also hash
+      # compatibility-tests/sdk-test-java/pom.xml, a project this workflow never builds,
+      # and an unrelated change there would bust the key.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
 
       - name: Run tests
         run: ./mvnw test -B
+
+      # `on.push.branches` is [main] only in this workflow, so `push` means main.
+      # `always()` so a failed test run still saves the dependencies it resolved.
+      - uses: actions/cache/save@v6.1.0
+        if: always() && github.event_name == 'push'
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}

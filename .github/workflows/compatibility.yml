@@ -30,8 +30,22 @@ jobs:
         with:
           java-version: '25'
           distribution: 'mandrel'
-          cache: maven
+          # no `cache: maven` - it keys on setup-graalvm-Linux-maven-<hash>, a key only
+          # this pull_request-only workflow ever writes. Actions caches are ref-scoped, so
+          # those writes land in refs/pull/N/merge and no run can read another's: it misses
+          # every time while still saving hundreds of MB nothing will read.
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Restore-only, keyed identically to ci.yml so this reads the ~/.m2 that ci.yml saves
+      # on push to main. ci.yml stays the single writer; a second writer would race it.
+      # Partial-hit caveat: ci.yml runs x64 and this runs arm64, but `runner.os` is Linux
+      # for both and Maven artifacts are arch-neutral, so only classifier-based natives
+      # re-download. `-Dnative` also pulls native-image plugins `mvn test` never fetches.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-
 
       - name: Build native executable (quick build)
         run: ./mvnw clean package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-Ob"
@@ -51,8 +65,11 @@ jobs:
           file: docker/Dockerfile.native-package
           tags: floci-az:test-native
           outputs: type=docker,dest=/tmp/floci-az-native-image.tar
-          cache-from: type=gha,scope=floci-az-native
-          cache-to: type=gha,scope=floci-az-native,mode=max
+          # No layer cache here, deliberately. The COPY below brings in a natively
+          # compiled binary that changes every commit, and Docker layer reuse is
+          # sequential, so nothing after it can ever be reused: the cache was write-only.
+          # `mode=max` still stored the whole image, including that volatile
+          # multi-hundred-MB binary layer, once per PR ref.
 
       - name: Compress native image
         run: gzip /tmp/floci-az-native-image.tar
@@ -147,8 +164,11 @@ jobs:
           context: compatibility-tests/${{ matrix.test }}
           load: true
           tags: compat-${{ matrix.test }}
+          # Read-only on purpose. Actions caches are ref-scoped, so a pull_request run's
+          # writes land in refs/pull/N/merge, private to that PR: eight images per open PR
+          # overran the repo's cache budget and evicted entries between a PR's own runs.
+          # warm-compat-caches.yml populates these scopes on main; PRs read that one copy.
           cache-from: type=gha,scope=${{ runner.os }}-${{ runner.arch }}-${{ matrix.test }}
-          cache-to: type=gha,scope=${{ runner.os }}-${{ runner.arch }}-${{ matrix.test }},mode=max
 
       - name: Run tests
         id: tests

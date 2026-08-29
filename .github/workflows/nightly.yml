@@ -51,8 +51,21 @@ jobs:
         with:
           java-version: '25'
           distribution: 'mandrel'
-          cache: maven
+          # no `cache: maven` - it could never hit here. Its restore hashes the pristine
+          # pom.xml, but its post-job save runs *after* `versions:set` below has rewritten
+          # that pom, so the two keys never match. The nightly version embeds the date, so
+          # the save key changed every night: it wrote hundreds of MB per job per night
+          # under a key nothing would ever read.
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Restore-only, keyed identically to ci.yml. This job checks out `ref: main`, so the
+      # pristine pom hashed here matches the one ci.yml hashed. Restoring BEFORE
+      # `versions:set` is load-bearing: after it, the pom hash no longer matches.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-
 
       - name: Set nightly version
         run: ./mvnw versions:set -DnewVersion="nightly-${{ needs.prepare.outputs.version }}" -DgenerateBackupPoms=false -q
@@ -86,8 +99,21 @@ jobs:
         with:
           java-version: '25'
           distribution: 'mandrel'
-          cache: maven
+          # no `cache: maven` - it could never hit here. Its restore hashes the pristine
+          # pom.xml, but its post-job save runs *after* `versions:set` below has rewritten
+          # that pom, so the two keys never match. The nightly version embeds the date, so
+          # the save key changed every night: it wrote hundreds of MB per job per night
+          # under a key nothing would ever read.
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Restore-only, keyed identically to ci.yml. This job checks out `ref: main`, so the
+      # pristine pom hashed here matches the one ci.yml hashed. Restoring BEFORE
+      # `versions:set` is load-bearing: after it, the pom hash no longer matches.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-
 
       - name: Set nightly version
         run: ./mvnw versions:set -DnewVersion="nightly-${{ needs.prepare.outputs.version }}" -DgenerateBackupPoms=false -q
