@@ -1042,7 +1042,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + "<MessageCount>" + counts.total() + "</MessageCount>"
-                + runtimeMetadataXml(s.createdAt(), s.updatedAt())
+                + runtimeTimestampsXml(s.createdAt(), s.updatedAt())
                 + countDetailsXml(counts)
                 + "</SubscriptionDescription>";
     }
@@ -1116,8 +1116,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     private String runtimeMetadataXml(Instant createdAt, Instant updatedAt) {
-        return "<SizeInBytes>0</SizeInBytes>"
-                + "<CreatedAt>" + ISO8601.format(createdAt) + "</CreatedAt>"
+        return "<SizeInBytes>0</SizeInBytes>" + runtimeTimestampsXml(createdAt, updatedAt);
+    }
+
+    private String runtimeTimestampsXml(Instant createdAt, Instant updatedAt) {
+        return "<CreatedAt>" + ISO8601.format(createdAt) + "</CreatedAt>"
                 + "<UpdatedAt>" + ISO8601.format(updatedAt) + "</UpdatedAt>";
     }
 
