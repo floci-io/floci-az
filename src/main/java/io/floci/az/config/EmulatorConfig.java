@@ -379,7 +379,7 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** When true, preserve ARM state and revisions without starting application containers. */
-        @WithDefault("false")
+        @WithDefault("true")
         boolean mocked();
 
         /** DNS suffix used for emulated environment, app, and revision FQDNs. */

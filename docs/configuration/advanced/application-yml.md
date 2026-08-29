@@ -80,7 +80,7 @@ floci-az:
       enabled: true
     container-apps:
       enabled: true
-      mocked: false
+      mocked: true
       dns-suffix: azurecontainerapps.io
       ingress-timeout-seconds: 60
 ```
@@ -101,6 +101,6 @@ floci-az:
 | `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | Fresh container per invocation |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CONTAINER_IDLE_TIMEOUT_SECONDS` | `300` | Evict warm containers idle longer than this (seconds); `0` disables eviction |
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable/disable App Configuration |
-| `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `false` | Keep Container Apps ARM state without Docker runtimes |
+| `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `true` | Keep Container Apps ARM state without Docker runtimes |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |

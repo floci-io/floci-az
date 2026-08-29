@@ -12,6 +12,7 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.endsWith;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -63,6 +64,77 @@ public class ContainerAppsHandlerTest {
         given().delete(ENVIRONMENT_URL).then().statusCode(204);
         given().get(ENVIRONMENT_URL).then().statusCode(404)
                 .body("error.code", equalTo("ResourceNotFound"));
+    }
+
+    @Test
+    void managedEnvironmentResponsesHideWriteOnlySecrets() {
+        String body = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "daprAIConnectionString": "InstrumentationKey=secret",
+                    "daprAIInstrumentationKey": "secret-key",
+                    "appLogsConfiguration": {
+                      "logAnalyticsConfiguration": {
+                        "customerId": "customer",
+                        "sharedKey": "shared-secret"
+                      }
+                    }
+                  }
+                }
+                """;
+
+        given().contentType("application/json").body(body).put(ENVIRONMENT_URL).then()
+                .statusCode(201)
+                .body("properties.daprAIConnectionString", nullValue())
+                .body("properties.daprAIInstrumentationKey", nullValue())
+                .body("properties.appLogsConfiguration.logAnalyticsConfiguration.sharedKey", nullValue())
+                .body("properties.appLogsConfiguration.logAnalyticsConfiguration.customerId",
+                        equalTo("customer"));
+
+        given().get(ENVIRONMENT_URL).then()
+                .statusCode(200)
+                .body("properties.daprAIConnectionString", nullValue())
+                .body("properties.daprAIInstrumentationKey", nullValue())
+                .body("properties.appLogsConfiguration.logAnalyticsConfiguration.sharedKey", nullValue());
+    }
+
+    @Test
+    void nameAvailabilityUsesManagedEnvironmentScope() {
+        createEnvironment();
+        String body = "{\"name\":\"available-app\",\"type\":\"Microsoft.App/containerApps\"}";
+        String endpoint = ENVIRONMENT_ID + "/checkNameAvailability?api-version=2025-07-01";
+
+        given().contentType("application/json").body(body).post(endpoint).then()
+                .statusCode(200)
+                .body("nameAvailable", equalTo(true))
+                .body("reason", equalTo("None"))
+                .body("message", equalTo(""));
+
+        createApp("available-app", "Single", "v1", 1);
+        given().contentType("application/json").body(body).post(endpoint).then()
+                .statusCode(200)
+                .body("nameAvailable", equalTo(false))
+                .body("reason", equalTo("AlreadyExists"));
+
+        given().contentType("application/json").body(body)
+                .post("/subscriptions/" + SUB
+                        + "/providers/Microsoft.App/locations/eastus/checkNameAvailability"
+                        + "?api-version=2025-07-01")
+                .then().statusCode(404);
+    }
+
+    @Test
+    void resourcesAppearInResourceGroupIndex() {
+        createEnvironment();
+        createApp("indexed-app", "Single", "v1", 1);
+
+        given().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.name", hasItems(ENVIRONMENT, "indexed-app"))
+                .body("value.type", hasItems(
+                        "Microsoft.App/managedEnvironments", "Microsoft.App/containerApps"));
     }
 
     @Test

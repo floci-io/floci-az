@@ -14,6 +14,7 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -42,7 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Azure Container Apps management plane and HTTP ingress. */
 @ApplicationScoped
-public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
+public class ContainerAppsHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(ContainerAppsHandler.class);
     private static final String PROVIDER = "/providers/Microsoft.App/";
@@ -116,8 +117,8 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
 
         LOG.debugv("Container Apps ARM request: {0} {1}", method, path);
 
-        if (tail.matches("locations/[^/]+/checkNameAvailability") && "POST".equals(method)) {
-            return Response.ok(Map.of("nameAvailable", true)).build();
+        if (tail.matches("managedEnvironments/[^/]+/checkNameAvailability")) {
+            return checkNameAvailability(method, subscription, resourceGroup, segment(tail, 1), request);
         }
         if ("managedEnvironments".equalsIgnoreCase(tail)) {
             return handleEnvironmentCollection(method, subscription, resourceGroup,
@@ -165,6 +166,29 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
                 .map(this::environmentResponse)
                 .toList();
         return Response.ok(Map.of("value", environments)).build();
+    }
+
+    private Response checkNameAvailability(String method, String subscription, String resourceGroup,
+                                           String environmentName, AzureRequest request) throws IOException {
+        if (!"POST".equals(method)) {
+            return methodNotAllowed();
+        }
+        if (read(environmentKey(subscription, resourceGroup, environmentName),
+                ManagedEnvironmentState.class).isEmpty()) {
+            return ArmErrors.notFound("Managed Environment '" + environmentName + "' was not found.");
+        }
+        ObjectNode body = readObject(request);
+        String name = body.path("name").asText();
+        String type = body.path("type").asText();
+        boolean available = !"Microsoft.App/containerApps".equalsIgnoreCase(type)
+                || apps().stream().noneMatch(app -> app.getName().equalsIgnoreCase(name)
+                        && environmentId(app).equalsIgnoreCase(
+                                environmentId(subscription, resourceGroup, environmentName)));
+        return Response.ok(Map.of(
+                "nameAvailable", available,
+                "reason", available ? "None" : "AlreadyExists",
+                "message", available ? "" : "Container App '" + name + "' already exists."))
+                .build();
     }
 
     private Response handleEnvironment(String method, String subscription, String resourceGroup,
@@ -613,6 +637,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
         response.put("name", environment.getName());
         response.put("type", "Microsoft.App/managedEnvironments");
         ObjectNode properties = response.withObject("/properties");
+        hideEnvironmentSecretValues(properties);
         properties.put("provisioningState", "Succeeded");
         properties.put("defaultDomain", defaultDomain(environment));
         properties.put("staticIp", "127.0.0.1");
@@ -620,6 +645,14 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
             properties.put("zoneRedundant", false);
         }
         return response;
+    }
+
+    private static void hideEnvironmentSecretValues(ObjectNode properties) {
+        properties.remove(List.of("daprAIConnectionString", "daprAIInstrumentationKey"));
+        JsonNode logAnalytics = properties.path("appLogsConfiguration").path("logAnalyticsConfiguration");
+        if (logAnalytics instanceof ObjectNode configuration) {
+            configuration.remove("sharedKey");
+        }
     }
 
     private ObjectNode appResponse(ContainerAppState app) {
@@ -797,6 +830,42 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable {
 
     private List<ContainerAppState> apps() {
         return scan(APP_PREFIX, ContainerAppState.class);
+    }
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().containerApps().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String subscription, String resourceGroup) {
+        List<Map<String, Object>> resources = new ArrayList<>();
+        environments().stream()
+                .filter(environment -> subscription.equalsIgnoreCase(environment.getSubscriptionId()))
+                .filter(environment -> resourceGroup.equalsIgnoreCase(environment.getResourceGroup()))
+                .map(environment -> indexEntry(
+                        environmentId(subscription, resourceGroup, environment.getName()),
+                        environment.getName(), "Microsoft.App/managedEnvironments", environment.getDocument()))
+                .forEach(resources::add);
+        apps().stream()
+                .filter(app -> subscription.equalsIgnoreCase(app.getSubscriptionId()))
+                .filter(app -> resourceGroup.equalsIgnoreCase(app.getResourceGroup()))
+                .map(app -> indexEntry(appId(app), app.getName(), "Microsoft.App/containerApps", app.getDocument()))
+                .forEach(resources::add);
+        return resources;
+    }
+
+    private static Map<String, Object> indexEntry(String id, String name, String type, JsonNode document) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", id);
+        entry.put("name", name);
+        entry.put("type", type);
+        entry.put("location", document.path("location").asText());
+        JsonNode tags = document.get("tags");
+        if (tags != null && tags.isObject()) {
+            entry.put("tags", MAPPER.convertValue(tags, Map.class));
+        }
+        return entry;
     }
 
     private <T> List<T> scan(String prefix, Class<T> type) {

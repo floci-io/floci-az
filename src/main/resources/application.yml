@@ -198,7 +198,7 @@ floci-az:
       max-port: 7599
     container-apps:
       enabled: true
-      mocked: false         # false = run revision replicas in Docker. true = ARM state only
+      mocked: true          # true = ARM state only. false = run revision replicas in Docker
       dns-suffix: azurecontainerapps.io
       ingress-timeout-seconds: 60
     vm:

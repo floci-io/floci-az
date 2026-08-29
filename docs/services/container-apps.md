@@ -29,6 +29,7 @@ PATCH  /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/managedE
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/managedEnvironments/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/managedEnvironments
 GET    /subscriptions/{sub}/providers/Microsoft.App/managedEnvironments
+POST   .../managedEnvironments/{name}/checkNameAvailability
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/containerApps/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/containerApps/{name}
@@ -93,7 +94,7 @@ floci-az:
   services:
     container-apps:
       enabled: true
-      mocked: false
+      mocked: true
       dns-suffix: azurecontainerapps.io
       ingress-timeout-seconds: 60
 ```
@@ -101,8 +102,12 @@ floci-az:
 | Environment variable | Default | Description |
 |---|---:|---|
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_ENABLED` | `true` | Enables `Microsoft.App` routing |
-| `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `false` | Keeps ARM state without Docker containers |
+| `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `true` | Keeps ARM state without Docker containers |
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_DNS_SUFFIX` | `azurecontainerapps.io` | Suffix returned in environment and app FQDNs |
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_INGRESS_TIMEOUT_SECONDS` | `60` | Backend connect/request timeout |
 
-Real mode requires access to Docker daemon. Template containers in one replica share the leader container's network namespace, so sidecars can communicate over `localhost`. The leader receives the dynamic host-port binding for the shared ingress target port. A replica becomes healthy only after that port accepts TCP connections. Requests still enter floci-az on port 4577.
+Set `mocked: false` to enable real mode, which requires access to the Docker daemon. Template
+containers in one replica share the leader container's network namespace, so sidecars can
+communicate over `localhost`. The leader receives the dynamic host-port binding for the shared
+ingress target port. A replica becomes healthy only after that port accepts TCP connections.
+Requests still enter floci-az on port 4577.
