@@ -101,7 +101,7 @@ class ServiceBusTopologyLoaderUnitTest {
     }
 
     @Test
-    void rejectedReplacementPreservesExistingRule() throws Exception {
+    void rejectedRenamePreservesExistingRule() throws Exception {
         Path topologyFile = tempDir.resolve("replacement.json");
         Files.writeString(topologyFile, """
                 {
@@ -113,7 +113,7 @@ class ServiceBusTopologyLoaderUnitTest {
                         "Subscriptions": [{
                           "Name": "subscription",
                           "Rules": [{
-                            "Name": "existing",
+                            "Name": "replacement",
                             "Properties": {
                               "FilterType": "Sql",
                               "SqlFilter": { "SqlExpression": "priority % 2 = 0" }

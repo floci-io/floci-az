@@ -233,6 +233,7 @@ public class ServiceBusTopologyLoader {
         }
         Set<String> retainedRuleNames = new HashSet<>();
         int applied = 0;
+        boolean ruleRejected = false;
 
         if (declaredRules.isEmpty()) {
             ServiceBusModels.RuleEntity defaultRule = ServiceBusModels.RuleEntity.trueFilter(
@@ -246,17 +247,23 @@ public class ServiceBusTopologyLoader {
         } else {
             for (ServiceBusTopologyFile.Rule rule : declaredRules) {
                 if (!hasName("rule", rule == null ? null : rule.name())) {
+                    ruleRejected = true;
                     continue;
                 }
                 if (applyRule(namespace, topicName, subscription.name(), rule)) {
                     retainedRuleNames.add(rule.name());
                     applied++;
-                } else if (existingRuleNames.contains(rule.name())) {
-                    LOG.warnf("Keeping existing topology rule '%s/%s/%s' because its replacement "
-                                    + "was rejected",
-                            topicName, subscription.name(), rule.name());
-                    retainedRuleNames.add(rule.name());
+                } else {
+                    ruleRejected = true;
                 }
+            }
+            if (ruleRejected) {
+                existingRuleNames.stream()
+                        .filter(name -> !DEFAULT_RULE.equals(name))
+                        .forEach(retainedRuleNames::add);
+                LOG.warnf("Keeping existing topology rules for '%s/%s' because at least one "
+                                + "declared rule was rejected",
+                        topicName, subscription.name());
             }
         }
 
