@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,6 +48,54 @@ class ServiceBusContainerManagerTest {
     void cleanupFailureDoesNotFailApplicationStartup() {
         when(serviceBus.mocked()).thenReturn(false);
         when(namespaceManager.reapOrphanedContainers())
+                .thenThrow(new IllegalStateException("Docker unavailable"));
+
+        assertDoesNotThrow(
+                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+    }
+
+    @Test
+    void namespaceStartStaysLazyByDefault() {
+        when(serviceBus.mocked()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+
+        verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
+        verify(namespaceManager, never()).startMockedNamespace(anyString());
+    }
+
+    @Test
+    void startsDefaultNamespaceOnBootWhenConfigured() {
+        when(serviceBus.mocked()).thenReturn(false);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(serviceBus.amqpPort()).thenReturn(5673);
+        when(serviceBus.amqpTlsPort()).thenReturn(5674);
+
+        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+
+        verify(namespaceManager).startNamespace(
+                ServiceBusNamespaceManager.DEFAULT_NAMESPACE, 5673, 5674);
+    }
+
+    @Test
+    void registersMockedNamespaceOnBootWhenConfigured() {
+        when(serviceBus.mocked()).thenReturn(true);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+
+        verify(namespaceManager).startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
+        verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void bootStartFailureDoesNotFailApplicationStartup() {
+        when(serviceBus.mocked()).thenReturn(false);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(serviceBus.amqpPort()).thenReturn(5673);
+        when(serviceBus.amqpTlsPort()).thenReturn(5674);
+        when(namespaceManager.startNamespace(
+                ServiceBusNamespaceManager.DEFAULT_NAMESPACE, 5673, 5674))
                 .thenThrow(new IllegalStateException("Docker unavailable"));
 
         assertDoesNotThrow(

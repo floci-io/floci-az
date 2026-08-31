@@ -40,15 +40,27 @@ public class ServiceBusContainerManager {
         }
         if (sb.mocked()) {
             LOG.info("Service Bus service mocked — skipping container startup");
-        } else {
-            try {
-                int reaped = namespaceManager.reapOrphanedContainers();
-                if (reaped > 0) {
-                    LOG.infov("Removed {0} orphaned Service Bus container(s)", reaped);
-                }
-            } catch (Exception e) {
-                LOG.errorf(e, "Could not reap orphaned Service Bus containers");
+            if (sb.startOnBoot()) {
+                namespaceManager.startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
             }
+            return;
+        }
+        try {
+            int reaped = namespaceManager.reapOrphanedContainers();
+            if (reaped > 0) {
+                LOG.infov("Removed {0} orphaned Service Bus container(s)", reaped);
+            }
+        } catch (Exception e) {
+            LOG.errorf(e, "Could not reap orphaned Service Bus containers");
+        }
+        if (sb.startOnBoot()) {
+            try {
+                namespaceManager.startNamespace(
+                        ServiceBusNamespaceManager.DEFAULT_NAMESPACE, sb.amqpPort(), sb.amqpTlsPort());
+            } catch (Exception e) {
+                LOG.errorf(e, "Could not start the default Service Bus namespace on boot");
+            }
+        } else {
             LOG.info("Service Bus service enabled — namespace starts on first entity management call");
         }
     }

@@ -383,6 +383,17 @@ public interface EmulatorConfig {
         @WithDefault("false")
         boolean mocked();
 
+        /**
+         * When {@code true}, the {@code default} namespace starts with the emulator instead of
+         * on the first entity-management call, so the configured AMQP port is listening as soon
+         * as floci-az is up. Lets orchestrators (Docker Compose health checks, .NET Aspire
+         * hosting integrations) treat the Service Bus endpoint as deterministic without issuing
+         * a management call first. In {@code mocked} mode the namespace is registered without a
+         * broker.
+         */
+        @WithDefault("false")
+        boolean startOnBoot();
+
         @WithDefault("5673")
         int amqpPort();
 

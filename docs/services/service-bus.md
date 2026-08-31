@@ -95,6 +95,23 @@ Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;Share
 `UseDevelopmentEmulator=true` tells the SDK to use plain AMQP (no TLS). The `SharedAccessKey` value is
 ignored — Artemis runs without authentication in dev mode.
 
+## Deterministic endpoint for orchestrators
+
+The AMQP data plane always binds the configured host ports (`amqp-port`, default `5673`;
+`amqp-tls-port`, default `5674`), so an orchestrator that starts floci-az knows the Service Bus
+endpoint up front — there is no dynamic port to discover. Two more pieces complete the story:
+
+- **`start-on-boot: true`** starts the `default` namespace (and its Artemis sidecar) together with
+  the emulator, instead of on the first entity-management call. Without it, nothing listens on the
+  AMQP port until a queue, topic, or namespace is created, which breaks health checks and clients
+  that connect at startup.
+- **`GET /{account}-servicebus/namespaces`** reports each running namespace's actual
+  `amqpPort`/`amqpsPort`, for tooling that wants to verify or discover the endpoint at runtime.
+
+This is what hosting integrations (e.g. .NET Aspire) should rely on: pass
+`FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` (with `..._MOCKED=false` and `..._START_ON_BOOT=true`),
+then hand clients `Endpoint=sb://<host>:<that port>;...;UseDevelopmentEmulator=true;`.
+
 ## Python SDK
 
 ```python
@@ -145,6 +162,7 @@ services:
     environment:
       FLOCI_AZ_SERVICES_SERVICE_BUS_ENABLED: "true"
       FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED: "false"
+      FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
@@ -155,6 +173,7 @@ services:
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ENABLED` | `true` | Enable/disable the service |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED` | `true` | Mocked mode (management plane only, no Artemis) |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT` | `false` | Start the `default` namespace (and its Artemis sidecar) with the emulator instead of on the first management call |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` | `5673` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_TLS_PORT` | `5674` | Host port for AMQPS |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ARTEMIS_IMAGE` | `apache/activemq-artemis:2.44.0` | Artemis image; must match bundled protocol patches |
@@ -169,6 +188,7 @@ floci-az:
     service-bus:
       enabled: true
       mocked: true              # true = management plane only, no Docker. false = real Artemis sidecar
+      start-on-boot: false      # true = default namespace starts with the emulator (see "Deterministic endpoint")
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"

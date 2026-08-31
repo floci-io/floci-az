@@ -67,7 +67,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private static final String ATOM_XML_CONTENT_TYPE = "application/atom+xml;charset=utf-8";
     private static final String XML_PROLOG = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
-    private static final String DEFAULT_NAMESPACE = "default";
+    private static final String DEFAULT_NAMESPACE = ServiceBusNamespaceManager.DEFAULT_NAMESPACE;
     /** Main Service Bus namespace for entity descriptions. */
     private static final String SB_NS = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
     /** Separate namespace used by MessageCountDetails child elements (per spec). */

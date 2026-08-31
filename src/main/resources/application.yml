@@ -175,6 +175,8 @@ floci-az:
       enabled: true
       # Keep the broker opt-in because each namespace owns an Artemis sidecar.
       mocked: true
+      # true = the default namespace starts with the emulator (deterministic AMQP endpoint at boot).
+      start-on-boot: false
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"

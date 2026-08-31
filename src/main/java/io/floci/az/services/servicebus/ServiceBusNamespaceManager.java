@@ -37,6 +37,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class ServiceBusNamespaceManager {
 
+    /** Namespace used by SDK spec paths and lazy/boot-time starts when none is named explicitly. */
+    public static final String DEFAULT_NAMESPACE = "default";
+
     private static final Logger LOG = Logger.getLogger(ServiceBusNamespaceManager.class);
 
     static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
