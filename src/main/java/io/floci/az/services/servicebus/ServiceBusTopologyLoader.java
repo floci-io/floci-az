@@ -23,9 +23,9 @@ import java.util.Set;
  * the same {@link ServiceBusHandler} paths the management API uses, so validation, storage,
  * and Artemis provisioning behave exactly as if an SDK had created them.
  *
- * <p>Rule semantics match the official emulator: a subscription with declared rules gets
- * exactly those rules (the implicit {@code $Default} TrueFilter is removed); one without
- * rules keeps {@code $Default}.
+ * <p>Rule semantics match the official emulator: valid declarations reconcile exactly and
+ * remove the implicit {@code $Default} TrueFilter; a rejected replacement preserves the last
+ * valid same-named rule, while a subscription without declarations keeps {@code $Default}.
  *
  * <p>Loading is best-effort and never fails startup: an unreadable file is skipped with an
  * {@code ERROR}, an invalid entity is skipped with an {@code ERROR} while the rest of the
@@ -218,6 +218,11 @@ public class ServiceBusTopologyLoader {
     private int reconcileRules(String namespace, String topicName,
                                ServiceBusTopologyFile.Subscription subscription) {
         List<ServiceBusTopologyFile.Rule> declaredRules = orEmpty(subscription.rules());
+        Set<String> existingRuleNames = new HashSet<>();
+        for (ServiceBusModels.RuleEntity existing :
+                handler.loadRules(ACCOUNT, namespace, topicName, subscription.name())) {
+            existingRuleNames.add(existing.name());
+        }
         Set<String> retainedRuleNames = new HashSet<>();
         int applied = 0;
 
@@ -227,13 +232,22 @@ public class ServiceBusTopologyLoader {
             if (succeeded("rule", topicName + "/" + subscription.name() + "/" + DEFAULT_RULE,
                     handler.putRule(ACCOUNT, namespace, defaultRule))) {
                 retainedRuleNames.add(DEFAULT_RULE);
+            } else if (existingRuleNames.contains(DEFAULT_RULE)) {
+                retainedRuleNames.add(DEFAULT_RULE);
             }
         } else {
             for (ServiceBusTopologyFile.Rule rule : declaredRules) {
-                if (hasName("rule", rule == null ? null : rule.name())
-                        && applyRule(namespace, topicName, subscription.name(), rule)) {
+                if (!hasName("rule", rule == null ? null : rule.name())) {
+                    continue;
+                }
+                if (applyRule(namespace, topicName, subscription.name(), rule)) {
                     retainedRuleNames.add(rule.name());
                     applied++;
+                } else if (existingRuleNames.contains(rule.name())) {
+                    LOG.warnf("Keeping existing topology rule '%s/%s/%s' because its replacement "
+                                    + "was rejected",
+                            topicName, subscription.name(), rule.name());
+                    retainedRuleNames.add(rule.name());
                 }
             }
         }

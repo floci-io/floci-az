@@ -1,14 +1,18 @@
 package io.floci.az.services.servicebus;
 
 import io.floci.az.config.EmulatorConfig;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,5 +59,61 @@ class ServiceBusTopologyLoaderUnitTest {
         verify(namespaceManager).startNamespace("working", 0, 0);
         verify(namespaceManager, never()).startNamespace("working", 5672, 5671);
         verifyNoInteractions(handler);
+    }
+
+    @Test
+    void rejectedReplacementPreservesExistingRule() throws Exception {
+        Path topologyFile = tempDir.resolve("replacement.json");
+        Files.writeString(topologyFile, """
+                {
+                  "UserConfig": {
+                    "Namespaces": [{
+                      "Name": "namespace",
+                      "Topics": [{
+                        "Name": "topic",
+                        "Subscriptions": [{
+                          "Name": "subscription",
+                          "Rules": [{
+                            "Name": "existing",
+                            "Properties": {
+                              "FilterType": "Sql",
+                              "SqlFilter": { "SqlExpression": "priority % 2 = 0" }
+                            }
+                          }]
+                        }]
+                      }]
+                    }]
+                  }
+                }
+                """);
+
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ServiceBusHandler handler = mock(ServiceBusHandler.class);
+        ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+        ServiceBusModels.RuleEntity existing = ServiceBusModels.RuleEntity.trueFilter(
+                "topic", "subscription", "existing");
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(serviceBus.topologyFile()).thenReturn(Optional.of(topologyFile.toString()));
+        when(serviceBus.mocked()).thenReturn(true);
+        when(namespaceManager.getNamespace(anyString())).thenReturn(Optional.empty());
+        when(handler.handleCreateTopic(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), any(), any()))
+                .thenReturn(Response.status(201).build());
+        when(handler.handleCreateSubscription(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                eq(false), anyString(), any(), any()))
+                .thenReturn(Response.status(201).build());
+        when(handler.putRule(eq("devstoreaccount1"), eq("namespace"), any()))
+                .thenReturn(Response.status(400).build());
+        when(handler.loadRules("devstoreaccount1", "namespace", "topic", "subscription"))
+                .thenReturn(List.of(existing));
+
+        new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
+
+        verify(handler, never()).handleDeleteRule(
+                "devstoreaccount1", "namespace", "topic", "subscription", "existing");
     }
 }
