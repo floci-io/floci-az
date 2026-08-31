@@ -261,9 +261,9 @@ public class ServiceBusTopologyLoader {
                 }
             }
             if (ruleRejected && applied == 0) {
-                existingRuleNames.stream()
-                        .filter(name -> !DEFAULT_RULE.equals(name))
-                        .forEach(retainedRuleNames::add);
+                // The official emulator drops invalid declarations before seeding, leaving the
+                // subscription's implicit $Default rule (or its previous valid rule set) intact.
+                retainedRuleNames.addAll(existingRuleNames);
                 LOG.warnf("Keeping existing topology rules for '%s/%s' because at least one "
                                 + "declared rule was rejected",
                         topicName, subscription.name());
