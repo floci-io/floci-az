@@ -356,6 +356,10 @@ When adding a sidecar-based service, additionally:
 
 ---
 
+## Documentation Style
+
+- No em-dashes anywhere, in any content. Use colons, commas, or periods.
+
 ## Logging
 
 - Use JBoss Logging (`Logger.getLogger(MyClass.class)`)

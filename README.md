@@ -13,7 +13,8 @@ TLS: Optional. Set FLOCI_AZ_TLS_ENABLED=true. Self-signed cert generated at runt
 </p>
 
 <p align="center">
-  <strong>Light, fluffy, and always free</strong><br />
+  <strong>Any Cloud. Locally.</strong><br />
+  Light, fluffy, and always free<br />
   No account. No auth token. No feature gates. Just <code>docker compose up</code>.
 </p>
 
@@ -46,7 +47,14 @@ Floci AZ is a free, open-source local Azure emulator for development, testing, a
 
 It gives you Azure-compatible services on your machine without requiring a cloud account, an auth token, or paid feature gates. Point your Azure SDK, CLI, or Terraform at `http://localhost:4577` and keep your existing workflows.
 
-Floci AZ is the Azure counterpart to [Floci](https://github.com/floci-io/floci), the AWS emulator.
+Floci AZ is the Azure member of the [Floci](https://github.com/floci-io) emulator family.
+
+| Emulator | Cloud | Port |
+|---|---|:---:|
+| [floci](https://github.com/floci-io/floci) | AWS | 4566 |
+| **[floci-az](https://github.com/floci-io/floci-az)** | **Azure** | **4577** |
+| [floci-gcp](https://github.com/floci-io/floci-gcp) | GCP | 4588 |
+| [floci-oci](https://github.com/floci-io/floci-oci) | OCI | 4599 |
 
 ## Quick Start
 
@@ -74,7 +82,7 @@ docker run -d --name floci-az \
   floci/floci-az:latest
 ```
 
-All services are available at `http://localhost:4577`. Use any account name and key — in `dev` auth mode credentials are not validated.
+All services are available at `http://localhost:4577`. Use any account name and key: in `dev` auth mode credentials are not validated.
 
 > **Azure Functions** requires access to the Docker socket so Floci AZ can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
 
@@ -98,9 +106,9 @@ services:
       FLOCI_AZ_HOSTNAME: floci-az   # add Docker service name to cert SANs
 ```
 
-The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore — no static cert to bundle or import manually.
+The self-signed certificate is generated at startup and cached under `data/tls/`. Fetch it at runtime from `GET http://localhost:4577/_floci/tls-cert` to install it into your truststore: no static cert to bundle or import manually.
 
-> **Terraform / OpenTofu (azurerm) also requires TLS** — the provider discovers the cloud over HTTPS (`GET https://<host>/metadata/endpoints`), so it fails against plain HTTP. See the [Terraform / OpenTofu guide](https://floci.io/floci-az/terraform/).
+> **Terraform / OpenTofu (azurerm) also requires TLS.** The provider discovers the cloud over HTTPS (`GET https://<host>/metadata/endpoints`), so it fails against plain HTTP. See the [Terraform / OpenTofu guide](https://floci.io/floci-az/terraform/).
 
 </details>
 
@@ -184,26 +192,26 @@ Floci AZ gives you more services than the official local tools, consolidated on 
 The [Azure Cosmos DB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator) is Microsoft's official local
 emulator for Cosmos DB. It ships as a Windows installer or a **Windows-container** Docker image, exposes a built-in Data
 Explorer UI, and supports multiple Cosmos DB APIs (SQL, MongoDB, Cassandra, Gremlin, Table). It is a faithful replica of
-the cloud service — but it carries the full weight of that fidelity.
+the cloud service, but it carries the full weight of that fidelity.
 
 ### Head-to-head
 
 | Feature                          | Azure Cosmos DB Emulator                                 | Floci AZ                                                                                 |
 |----------------------------------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
-| **Platform**                     | Windows-first (Windows containers historically required) | Linux-native containers — runs on Mac, Linux, and Windows                                |
+| **Platform**                     | Windows-first (Windows containers historically required) | Linux-native containers: runs on Mac, Linux, and Windows                                 |
 | **Docker image size**            | Heavy (~GBs depending on version/base image)             | Lightweight modular engines (~50 MB to a few hundred MB depending on selected APIs)      |
-| **Startup time**                 | Slow startup (tens of seconds)                           | On-demand startup — only starts the required Cosmos API engine                           |
-| **RAM required**                 | High memory usage (commonly ≥ 2 GB)                      | Minimal footprint — only active engines consume resources                                |
+| **Startup time**                 | Slow startup (tens of seconds)                           | On-demand startup: only starts the required Cosmos API engine                            |
+| **RAM required**                 | High memory usage (commonly ≥ 2 GB)                      | Minimal footprint: only active engines consume resources                                 |
 | **Cosmos DB APIs**               | SQL (NoSQL), MongoDB, Cassandra, Gremlin, Table          | SQL (NoSQL), MongoDB, PostgreSQL, Cassandra, Gremlin, Table                              |
 | **Cosmos API implementation**    | Microsoft proprietary emulator                           | API-specific compatibility engines                                                       |
-| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | 🟢 Embedded in-process engine — full SQL dialect, no Docker, instant startup            |
-| **MongoDB API provider**         | Native Cosmos Emulator                                   | 🟢 MongoDB Community Server — identical wire protocol (BSON + OP_MSG)                   |
-| **PostgreSQL API provider**      | Native Cosmos Emulator                                   | 🟢 Citus (the exact engine Azure runs) — standard JDBC driver, zero code changes        |
-| **Cassandra API provider**       | Native Cosmos Emulator                                   | 🟢 ScyllaDB — CQL-compatible, same DataStax driver                                      |
-| **Gremlin API provider**         | Native Cosmos Emulator                                   | 🟡 Apache TinkerPop — standard traversals work; Cosmos extensions not emulated          |
-| **Table API provider**           | Native Cosmos Emulator                                   | 🟢 In-memory (embedded) — same `azure-data-tables` SDK, no Docker                       |
+| **NoSQL / SQL API provider**     | Native Cosmos Emulator                                   | 🟢 Embedded in-process engine: full SQL dialect, no Docker, instant startup             |
+| **MongoDB API provider**         | Native Cosmos Emulator                                   | 🟢 MongoDB Community Server: identical wire protocol (BSON + OP_MSG)                    |
+| **PostgreSQL API provider**      | Native Cosmos Emulator                                   | 🟢 Citus (the exact engine Azure runs): standard JDBC driver, zero code changes         |
+| **Cassandra API provider**       | Native Cosmos Emulator                                   | 🟢 ScyllaDB: CQL-compatible, same DataStax driver                                       |
+| **Gremlin API provider**         | Native Cosmos Emulator                                   | 🟡 Apache TinkerPop: standard traversals work; Cosmos extensions not emulated           |
+| **Table API provider**           | Native Cosmos Emulator                                   | 🟢 In-memory (embedded): same `azure-data-tables` SDK, no Docker                        |
 | **Other Azure services**         | Cosmos DB only                                           | Blob · Queue · Table · Functions · App Config · Cosmos DB in a unified local Azure stack |
-| **HTTPS / certificates**         | Self-signed certificates required — must be imported into the OS/JVM trust store or validation disabled | Plain HTTP on `4577` by default. Optional TLS: set `FLOCI_AZ_TLS_ENABLED=true` — HTTP and HTTPS served on the same port `4577` via protocol-sniffing proxy; self-signed cert generated at runtime, no static cert bundled, cert available at `GET /_floci/tls-cert` |
+| **HTTPS / certificates**         | Self-signed certificates required: must be imported into the OS/JVM trust store or validation disabled | Plain HTTP on `4577` by default. Optional TLS: set `FLOCI_AZ_TLS_ENABLED=true`, and HTTP and HTTPS are served on the same port `4577` via protocol-sniffing proxy; self-signed cert generated at runtime, no static cert bundled, cert available at `GET /_floci/tls-cert` |
 | **Web UI / Data Explorer**       | ✅ Built-in                                               | ❌ API-focused local development environment                                              |
 | **Open source**                  | ❌ Proprietary                                            | ✅ MIT                                                                                    |
 | **CI/CD friendliness**           | ⚠️ Heavy images and slower pipelines                     | ✅ Fast startup and Linux-friendly containers                                             |
@@ -251,7 +259,7 @@ the cloud service — but it carries the full weight of that fidelity.
 
 - A lightweight, cross-platform dev/test environment that starts in milliseconds.
 - CI/CD pipelines on Linux runners (GitHub Actions, GitLab CI, CircleCI, etc.).
-- Multiple Azure services in a single container — no juggling separate emulators.
+- Multiple Azure services in a single container: no juggling separate emulators.
 - No TLS certificate headaches.
 - Cosmos DB SQL API coverage is sufficient (CRUD, SQL queries, PATCH, transactional batch, pagination, aggregates,
   string functions).
@@ -300,7 +308,7 @@ flowchart LR
 | **Table Storage**       | `/{account}-table/`          | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
 | **Azure Functions**     | `/{account}-functions/`      | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool                                                                                                                            |
 | **App Configuration**   | `/{account}-appconfig/`      | Key-values, labels, feature flags, snapshots (async provisioning), revisions, locks, ETags; pagination (`@nextLink`), `$select`, `tags` filtering, `Accept-Datetime` time-travel, `Sync-Token`                        |
-| **Cosmos DB (NoSQL)** | `/{account}-cosmos/`         | Databases, containers, documents CRUD + full SQL queries — always-on, no Docker. PATCH; transactional batch. |
+| **Cosmos DB (NoSQL)** | `/{account}-cosmos/`         | Databases, containers, documents CRUD + full SQL queries: always-on, no Docker. PATCH; transactional batch.  |
 | **Cosmos DB NoSQL (embedded)** | `/{account}-cosmos-nosql/` | Same embedded SQL engine as above, exposed as a named engine endpoint. Opt-in with `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED=true`; no Docker required. |
 | **Key Vault**           | `/{account}-keyvault/`       | Secrets CRUD, versioning, soft-delete, properties update                                                                                                                                                              |
 | **Event Hubs**          | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in)                                                                                                                                                       |
@@ -310,13 +318,13 @@ flowchart LR
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | CreateOrUpdate, Get, Delete, List, agent pools, kubeconfig (`listClusterAdminCredential`); real k3s containers or mocked |
 | **API Management**      | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/{service}/` | In-process APIM emulator for ARM resources, gateway routing, products/subscriptions, named values, backends, OpenAPI import, and a focused policy subset |
 | **Virtual Network**     | ARM path (`Microsoft.Network`) | VNet, subnet, NIC, public IP, NSG, private DNS zone (+ virtual network links, record sets), private endpoint (+ private DNS zone groups), and private link service ARM resources; subnet listing is scoped to the parent VNet; NIC private IPs are synthesized for VM/Terraform compatibility |
-| **Virtual Machines**    | ARM path (`Microsoft.Compute`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state; mocked — no Docker (container backing planned) |
+| **Virtual Machines**    | ARM path (`Microsoft.Compute`) | VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView power state; mocked: no Docker (container backing planned)  |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, `listKeys`/`regenerateKey`; real `valkey/valkey:8-alpine` containers (data plane, primary key as password) or mocked; non-SSL port |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, `listCredentials`/`regenerateCredential`, `checkNameAvailability`; one shared `registry:2` (Docker Registry V2 push/pull, path-style `loginServer`, anonymous) or mocked |
-| **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | Container group lifecycle (create/update/delete/list by rg + subscription), `start`/`stop`/`restart` with spec-exact LRO shapes, container logs, instanceView, azurerm-safe read-backs (ports/resources always present, canonical enum casing, secrets never echoed); mocked — no Docker (container backing planned) |
+| **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | Container group lifecycle (create/update/delete/list by rg + subscription), `start`/`stop`/`restart` with spec-exact LRO shapes, container logs, instanceView, azurerm-safe read-backs (ports/resources always present, canonical enum casing, secrets never echoed); mocked: no Docker (container backing planned)  |
 | **Event Grid**          | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | Custom Topics, `listKeys`/`regenerateKey`, webhook `eventSubscriptions` with subject/eventType filters; publish in Event Grid + CloudEvents 1.0 schemas; async webhook delivery with retry; `SubscriptionValidationEvent` handshake; HTTP-only (no sidecar) |
 | **Azure Monitor / Log Analytics** | ARM path (`Microsoft.OperationalInsights` / `Microsoft.Insights`) + `/dataCollectionRules/{id}/streams/{stream}` + `/v1/workspaces/{id}/query` | Workspaces, Data Collection Endpoints/Rules; Logs Ingestion API; Log Analytics query with a KQL subset (`where`/`project`/`take`/`limit` + timespan); HTTP-only (no sidecar) |
-| **Communication Services Email** | `/emails:send` + `/emails/operations/{id}` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style `GET /emailMessages`); communication/email services + domains via ARM; captures messages locally — no real delivery; HTTP-only (no sidecar) |
+| **Communication Services Email** | `/emails:send` + `/emails/operations/{id}` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style `GET /emailMessages`); communication/email services + domains via ARM; captures messages locally, no real delivery; HTTP-only (no sidecar)  |
 | **Managed Identity**    | ARM path (`Microsoft.ManagedIdentity`) + `/metadata/identity/oauth2/token` | User-assigned identities (server-generated `principalId`/`clientId`), federated identity credentials, system-assigned `identities/default`; IMDS token endpoint for `ManagedIdentityCredential` (point the SDK at the emulator with `AZURE_POD_IDENTITY_AUTHORITY_HOST`); v1.0 JWTs signed with the Entra key, verifiable via JWKS; HTTP-only (no sidecar) |
 
 <details>
@@ -382,9 +390,9 @@ Floci AZ uses real Docker containers when in-process emulation would reduce fide
 | Event Hubs AMQP | `apache/activemq-artemis` | Full AMQP 1.0 broker |
 | Event Hubs Kafka | `redpandadata/redpanda` | Kafka-compatible broker (opt-in) |
 | Cosmos DB MongoDB | `mongo:7` | MongoDB Community Server, full wire protocol |
-| Cosmos DB PostgreSQL | `citusdata/citus` | Citus — the exact engine Azure runs |
+| Cosmos DB PostgreSQL | `citusdata/citus` | Citus: the exact engine Azure runs |
 | Cosmos DB Cassandra | `scylladb/scylla:6.2` | CQL-compatible drop-in |
-| Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop — standard Gremlin traversals |
+| Cosmos DB Gremlin | `tinkerpop/gremlin-server` | Apache TinkerPop: standard Gremlin traversals |
 | Azure SQL Database | `mcr.microsoft.com/mssql/server:2025-latest` | Optional managed SQL Server engine (per server) |
 | Azure Database for PostgreSQL | `postgres:17-alpine` | PostgreSQL engine (per flexible server) |
 | AKS | `rancher/k3s:latest` | Kubernetes API server via k3s |
@@ -400,7 +408,7 @@ docker run -d --name floci-az \
   floci/floci-az:latest
 ```
 
-The Cosmos DB multi-API engines (MongoDB, PostgreSQL, Cassandra, Gremlin, plus the embedded NoSQL and Table engines) are disabled by default and configured separately — see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
+The Cosmos DB multi-API engines (MongoDB, PostgreSQL, Cassandra, Gremlin, plus the embedded NoSQL and Table engines) are disabled by default and configured separately: see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
 
 ## Persistence and Storage Modes
 
@@ -429,9 +437,9 @@ Floci AZ uses path-style routing:
 | Queue             | `http://localhost:4577/{accountName}-queue`           | |
 | Table             | `http://localhost:4577/{accountName}-table`           | |
 | Functions         | `http://localhost:4577/{accountName}-functions`       | |
-| App Configuration | `http://localhost:4577/{accountName}-appconfig`       | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
-| Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and use `https://localhost:4577` — the SDK enforces TLS; cert auto-generated at runtime, fetch from `GET /_floci/tls-cert` |
-| Key Vault         | `http://localhost:4577/{accountName}-keyvault`        | Some SDKs require an `https://` URL — use a `ForceHttp` transport policy to rewrite to HTTP |
+| App Configuration | `http://localhost:4577/{accountName}-appconfig`       | Some SDKs require an `https://` URL: use a `ForceHttp` transport policy to rewrite to HTTP |
+| Cosmos DB         | `http://localhost:4577/{accountName}-cosmos`          | Python / Node SDKs. **Java SDK:** enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and use `https://localhost:4577`: the SDK enforces TLS; cert auto-generated at runtime, fetch from `GET /_floci/tls-cert` |
+| Key Vault         | `http://localhost:4577/{accountName}-keyvault`        | Some SDKs require an `https://` URL: use a `ForceHttp` transport policy to rewrite to HTTP |
 | Event Hubs        | AMQP `amqp://localhost:5672` · Kafka `localhost:9093` | |
 
 The standard development storage connection string works out of the box:
@@ -629,7 +637,7 @@ networks:
 
 ## Compatibility Testing
 
-The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ across SDKs and tooling workflows. Each directory is one suite — App Configuration, Key Vault, Event Hubs, and Service Bus are exercised inside the SDK suites rather than as standalone modules.
+The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ across SDKs and tooling workflows. Each directory is one suite. App Configuration, Key Vault, Event Hubs, and Service Bus are exercised inside the SDK suites rather than as standalone modules.
 
 | Module              | Language / Tool | Coverage                                                                                                                       | Tests |
 |---------------------|-----------------|--------------------------------------------------------------------------------------------------------------------------------|------:|
@@ -665,11 +673,11 @@ Azurite users can point their existing connection strings at Floci AZ with a sin
 # Before (Azurite default)
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02...;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;
 
-# After (Floci AZ — single port)
+# After (Floci AZ, single port)
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02...;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
 ```
 
-The account name and key are the same. Floci AZ consolidates all services onto port `4577` — no more separate ports per service.
+The account name and key are the same. Floci AZ consolidates all services onto port `4577`: no more separate ports per service.
 
 ## Image Tags
 
@@ -689,6 +697,12 @@ image: floci/floci-az:latest      # recommended
 image: floci/floci-az:0.9.0       # pinned release
 image: floci/floci-az:nightly     # track main
 ```
+
+### Release train
+
+Stable releases ship on the **1st and 3rd Tuesday of each month**. Between trains, `floci/floci-az:nightly` tracks `main`. Every merged fix is available the next day, with immutable `nightly-mmddyyyy` tags for reproducible builds.
+
+Versions are derived from Conventional Commits by [semantic-release](https://github.com/semantic-release/semantic-release); `CHANGELOG.md` is generated, never hand-edited. Releases are cut from `main` only: there are no maintenance branches.
 
 ## Configuration
 
@@ -751,7 +765,7 @@ networks:
   app-net:
 ```
 
-For the **Cosmos DB multi-API engines** (MongoDB, PostgreSQL, Cassandra, Gremlin, and the embedded NoSQL and Table engines) — enable flags, image/port overrides, the `/connect` endpoint, and SDK examples — see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
+For the **Cosmos DB multi-API engines** (MongoDB, PostgreSQL, Cassandra, Gremlin, and the embedded NoSQL and Table engines), including enable flags, image/port overrides, the `/connect` endpoint, and SDK examples, see the [Cosmos DB engine configuration](https://floci.io/floci-az/services/cosmos/#multi-api-engines) docs.
 
 <details>
 <summary><strong>Cosmos DB API parity rationale</strong></summary>
@@ -761,13 +775,13 @@ what Azure Cosmos DB actually runs in production.
 
 ---
 
-**🟢 PostgreSQL API — very high parity**
+**🟢 PostgreSQL API: very high parity**
 
-Azure Cosmos DB for PostgreSQL *is* Citus — a distributed PostgreSQL extension developed by
+Azure Cosmos DB for PostgreSQL *is* Citus, a distributed PostgreSQL extension developed by
 the same team that runs inside Azure. The wire protocol, query language, and drivers are
 identical to vanilla PostgreSQL.
 
-- **Client SDK**: standard PostgreSQL JDBC driver (`org.postgresql:postgresql`) — the same
+- **Client SDK**: standard PostgreSQL JDBC driver (`org.postgresql:postgresql`), the same
   driver you use in production, unchanged. [Official quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/postgresql/quickstart-app-stacks-java).
 - **Engine**: `citusdata/citus` Docker image (the exact same project).
 - **Known gaps**: Azure-specific HA/scaling, multi-region replication, and Azure RBAC
@@ -777,32 +791,32 @@ identical to vanilla PostgreSQL.
 
 ---
 
-**🟢 MongoDB API — very high parity**
+**🟢 MongoDB API: very high parity**
 
 Azure Cosmos DB for MongoDB exposes the full MongoDB wire protocol (BSON + OP_MSG).
 Connecting with any MongoDB driver targets the same binary framing and command set
 regardless of whether the server is a real `mongod` or the Azure Cosmos service.
 
 - **Client SDK**: any MongoDB driver (`mongodb-driver-sync`, `pymongo`, `mongodb` Node.js
-  package) — the connection string format is identical.
-- **Engine**: `mongo:7` Community Server — the reference implementation of the protocol.
+  package), and the connection string format is identical.
+- **Engine**: `mongo:7` Community Server, the reference implementation of the protocol.
 - **Known gaps**: Azure-specific index types (wildcard compound), `$lookup` with `let`
   in some API versions, and RU/s throughput governance.
 
 ---
 
-**🟢 Table API — high parity**
+**🟢 Table API: high parity**
 
 The Azure Table Storage REST API is a straightforward OData/JSON HTTP API. floci-az
-implements it directly in-process — no Docker required. Because the protocol is pure HTTP
+implements it directly in-process, with no Docker required. Because the protocol is pure HTTP
 with a well-documented spec, compatibility is structural: the same SDK targets the same URLs
 and receives the same JSON shapes.
 
-- **Client SDK**: `azure-data-tables` SDK for Java, Python, Node.js, .NET — use the official
+- **Client SDK**: `azure-data-tables` SDK for Java, Python, Node.js, .NET. Use the official
   Cosmos DB for Table pattern: `.endpoint()` + `AzureNamedKeyCredential`. See
   [Java quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java).
   The connection string format is also supported for backward compatibility.
-- **Engine**: in-memory (`ConcurrentHashMap`) — instant startup, zero Docker overhead.
+- **Engine**: in-memory (`ConcurrentHashMap`), instant startup, zero Docker overhead.
 - **Supported query operators**: OData `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`;
   `$filter`, `$top`, `$select`.
 - **Known gaps**: Cosmos DB RU/s throughput model, TTL-based expiry, server-side pagination
@@ -810,27 +824,27 @@ and receives the same JSON shapes.
 
 ---
 
-**🟢 Cassandra API — high parity**
+**🟢 Cassandra API: high parity**
 
 Azure Cosmos DB for Cassandra implements the Apache Cassandra CQL binary wire protocol
 (native transport, port 9042). Any CQL-compatible driver connects transparently.
 ScyllaDB is a CQL-compatible drop-in replacement that shares the same driver ecosystem.
 
 - **Client SDK**: DataStax Java Driver (`com.datastax.oss:java-driver-core`), `cassandra-driver-core`,
-  or any CQL v4 client — the contact point and port are all you need to change.
+  or any CQL v4 client. The contact point and port are all you need to change.
 - **Engine**: `scylladb/scylla` (default) or any Apache Cassandra image via the image override.
 - **Known gaps**: some Cosmos-specific TTL semantics, Cosmos RBAC, Cassandra LWT (lightweight
   transactions) edge cases, and `ALLOW FILTERING` query restrictions differ slightly.
 
 ---
 
-**🟡 Gremlin API — medium parity**
+**🟡 Gremlin API: medium parity**
 
 Azure Cosmos DB for Gremlin is built on Apache TinkerPop. Standard Gremlin traversals
 work identically. However, Cosmos DB adds proprietary extensions (partition key semantics,
 bulk executor, certain graph-level operations) that TinkerPop Gremlin Server does not implement.
 
-- **Client SDK**: `gremlin-driver` (`org.apache.tinkerpop:gremlin-driver`) — connects via
+- **Client SDK**: `gremlin-driver` (`org.apache.tinkerpop:gremlin-driver`), connecting via
   WebSocket to port 8182, same as in production.
 - **Engine**: `tinkerpop/gremlin-server`.
 - **Known gaps**: Cosmos DB `pk` partition key column requirement, `addE`/`addV` Cosmos
@@ -838,9 +852,9 @@ bulk executor, certain graph-level operations) that TinkerPop Gremlin Server doe
 
 ---
 
-**🟢 NoSQL / SQL API — very high parity (embedded engine)**
+**🟢 NoSQL / SQL API: very high parity (embedded engine)**
 
-Both NoSQL endpoints are in-process — no Docker, instant startup:
+Both NoSQL endpoints are in-process, with no Docker and instant startup:
 
 | Endpoint | Use case | SQL queries | Docker |
 |---|---|---|---|
@@ -864,7 +878,7 @@ in-process:
 - Type checks: `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`,
   `IS_INTEGER`, `IS_PRIMITIVE`
 - Named parameters (`@name`)
-- **Client SDK**: `azure-cosmos` Java SDK — enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and point to `https://localhost:4577`; fetch the runtime cert from `GET /_floci/tls-cert` and install it into your truststore.
+- **Client SDK**: `azure-cosmos` Java SDK. Enable TLS (`FLOCI_AZ_TLS_ENABLED=true`) and point to `https://localhost:4577`; fetch the runtime cert from `GET /_floci/tls-cert` and install it into your truststore.
 - **Known gaps**: JOIN with nested arrays, full-text / vector search, geospatial,
   multi-region and RU/s governance features.
 
@@ -875,7 +889,7 @@ in-process:
 To prevent configuration errors, note what Floci AZ **does not** do:
 
 1. **HTTPS (most services):** All services run on plain HTTP on port `4577` by default. Do not use `DefaultEndpointsProtocol=https` unless you have explicitly enabled TLS. For SDKs that require an `https://` URL (App Configuration, Key Vault), use a `ForceHttp` transport policy to rewrite the request back to HTTP before it is sent.
-2. **TLS (optional):** Set `FLOCI_AZ_TLS_ENABLED=true` to enable HTTP+HTTPS on the same port `4577` via a protocol-sniffing proxy. A self-signed certificate is generated at runtime and persisted under `data/tls/`; it regenerates automatically when `FLOCI_AZ_HOSTNAME` or `FLOCI_AZ_BASE_URL` changes. Fetch the active certificate PEM from `GET /_floci/tls-cert` to install it dynamically into your truststore. The **Azure Cosmos DB Java SDK** requires TLS — enable this when using it.
+2. **TLS (optional):** Set `FLOCI_AZ_TLS_ENABLED=true` to enable HTTP+HTTPS on the same port `4577` via a protocol-sniffing proxy. A self-signed certificate is generated at runtime and persisted under `data/tls/`; it regenerates automatically when `FLOCI_AZ_HOSTNAME` or `FLOCI_AZ_BASE_URL` changes. Fetch the active certificate PEM from `GET /_floci/tls-cert` to install it dynamically into your truststore. The **Azure Cosmos DB Java SDK** requires TLS. Enable this when using it.
 3. **No Web UI:** There is no dashboard at `4577`. It is an API-only emulator.
 4. **Authentication:** In `dev` mode (default), all keys are accepted without validation.
 5. **Production Scale:** Designed for dev/test. Not for high-availability storage.
