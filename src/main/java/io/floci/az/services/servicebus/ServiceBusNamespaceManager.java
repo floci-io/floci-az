@@ -548,11 +548,13 @@ public class ServiceBusNamespaceManager {
         String queueName = topicName + "/Subscriptions/" + subName;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
-            jolokiaExec(http, baseUrl, auth, mbean,
+            jolokiaExecRequired(http, baseUrl, auth, mbean,
                     "destroyDivert(java.lang.String)",
                     jsonArr(divertName));
-            jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
-                    topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
+            jolokiaExecRequired(http, baseUrl, auth, mbean,
+                    "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
+                    jsonArr(divertName, divertName, topicName + TOPIC_ADDRESS_SUFFIX,
+                            queueName, false, filter, null));
         });
     }
 
@@ -725,18 +727,9 @@ public class ServiceBusNamespaceManager {
 
     private void jolokiaExec(HttpClient http, String baseUrl, String auth,
                               String mbean, String operation, String arguments) {
-        String body = "{\"type\":\"exec\",\"mbean\":\"" + mbean + "\","
-                + "\"operation\":\"" + operation + "\","
-                + "\"arguments\":" + arguments + "}";
         try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Basic " + auth)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = sendJolokiaExec(
+                    http, baseUrl, auth, mbean, operation, arguments);
             if (resp.statusCode() != 200) {
                 String err = resp.body();
                 if (!err.contains("already exists") && !err.contains("already been deployed")) {
@@ -746,6 +739,42 @@ public class ServiceBusNamespaceManager {
         } catch (Exception e) {
             LOG.debugv("Jolokia call failed ({0}): {1}", operation.split("\\(")[0], e.getMessage());
         }
+    }
+
+    private void jolokiaExecRequired(HttpClient http, String baseUrl, String auth,
+                                     String mbean, String operation, String arguments) {
+        try {
+            HttpResponse<String> response = sendJolokiaExec(
+                    http, baseUrl, auth, mbean, operation, arguments);
+            JsonNode payload = MAPPER.readTree(response.body());
+            int jolokiaStatus = payload.path("status").asInt(-1);
+            if (response.statusCode() != 200 || jolokiaStatus != 200) {
+                throw new IllegalStateException("Jolokia " + operation.split("\\(")[0]
+                        + " failed with HTTP " + response.statusCode()
+                        + " and status " + jolokiaStatus + ": " + response.body());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during required Jolokia operation", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Required Jolokia operation failed", e);
+        }
+    }
+
+    private HttpResponse<String> sendJolokiaExec(HttpClient http, String baseUrl, String auth,
+                                                  String mbean, String operation, String arguments)
+            throws IOException, InterruptedException {
+        String body = "{\"type\":\"exec\",\"mbean\":\"" + mbean + "\","
+                + "\"operation\":\"" + operation + "\","
+                + "\"arguments\":" + arguments + "}";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Basic " + auth)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static Map<String, MessageCounts> jolokiaReadMessageCounts(

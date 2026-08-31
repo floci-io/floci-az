@@ -826,23 +826,43 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
 
         String key = ruleKey(account, namespace, rule.topicName(), rule.subscriptionName(), rule.name());
-        boolean existed = store.get(key).isPresent();
+        Optional<StoredObject> previous = store.get(key);
         store.put(key, toStoredObject(key, rule));
         warnOnActionIgnored(rule);
-        applySubscriptionFilter(account, namespace, rule.topicName(), rule.subscriptionName());
+        if (!applySubscriptionFilter(account, namespace, rule.topicName(), rule.subscriptionName())) {
+            restoreRuleMutation(key, previous, account, namespace,
+                    rule.topicName(), rule.subscriptionName());
+            return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
+        }
 
-        return atomEntry(existed ? 200 : 201, ruleEntryXml(namespace, rule));
+        return atomEntry(previous.isPresent() ? 200 : 201, ruleEntryXml(namespace, rule));
     }
 
     Response handleDeleteRule(String account, String namespace,
                                String topicName, String subName, String ruleName) {
         String key = ruleKey(account, namespace, topicName, subName, ruleName);
-        if (store.get(key).isEmpty()) {
+        Optional<StoredObject> previous = store.get(key);
+        if (previous.isEmpty()) {
             return notFoundAtom("Rule not found: " + ruleName);
         }
         store.delete(key);
-        applySubscriptionFilter(account, namespace, topicName, subName);
+        if (!applySubscriptionFilter(account, namespace, topicName, subName)) {
+            restoreRuleMutation(key, previous, account, namespace, topicName, subName);
+            return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
+        }
         return Response.ok().build();
+    }
+
+    private void restoreRuleMutation(String key, Optional<StoredObject> previous,
+                                     String account, String namespace,
+                                     String topicName, String subName) {
+        previous.ifPresentOrElse(
+                stored -> store.put(key, stored),
+                () -> store.delete(key));
+        if (!applySubscriptionFilter(account, namespace, topicName, subName)) {
+            LOG.errorf("Failed to restore broker filter after rolling back rule mutation for '%s/%s'",
+                    topicName, subName);
+        }
     }
 
     List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
@@ -856,21 +876,23 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Recompiles the subscription's rules and re-creates its Artemis queue with the new selector. */
-    private void applySubscriptionFilter(String account, String namespace,
-                                          String topicName, String subName) {
+    private boolean applySubscriptionFilter(String account, String namespace,
+                                             String topicName, String subName) {
         String selector;
         try {
             selector = ServiceBusRuleSelector.forRules(loadRules(account, namespace, topicName, subName));
         } catch (IllegalArgumentException e) {
             LOG.warnf("Cannot compile rules of subscription '%s/%s' to an Artemis filter: %s",
                     topicName, subName, e.getMessage());
-            return;
+            return false;
         }
         try {
             namespaceManager.jolokiaUpdateSubscriptionFilter(namespace, topicName, subName, selector);
+            return true;
         } catch (Exception e) {
             LOG.warnf(e, "Failed to update filter of subscription '%s/%s' in Artemis for namespace '%s'",
                     topicName, subName, namespace);
+            return false;
         }
     }
 

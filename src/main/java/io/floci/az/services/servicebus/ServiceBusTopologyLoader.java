@@ -255,8 +255,9 @@ public class ServiceBusTopologyLoader {
         for (ServiceBusModels.RuleEntity existing :
                 handler.loadRules(ACCOUNT, namespace, topicName, subscription.name())) {
             if (!retainedRuleNames.contains(existing.name())) {
-                handler.handleDeleteRule(
-                        ACCOUNT, namespace, topicName, subscription.name(), existing.name());
+                succeeded("rule", topicName + "/" + subscription.name() + "/" + existing.name(),
+                        handler.handleDeleteRule(
+                                ACCOUNT, namespace, topicName, subscription.name(), existing.name()));
             }
         }
         return applied;
