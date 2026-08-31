@@ -155,4 +155,75 @@ class ServiceBusTopologyLoaderUnitTest {
         verify(handler, never()).handleDeleteRule(
                 "devstoreaccount1", "namespace", "topic", "subscription", "existing");
     }
+
+    @Test
+    void validRuleAllowsUnrelatedStaleRuleRemovalWhenAnotherRuleIsRejected() throws Exception {
+        Path topologyFile = tempDir.resolve("partial-replacement.json");
+        Files.writeString(topologyFile, """
+                {
+                  "UserConfig": {
+                    "Namespaces": [{
+                      "Name": "namespace",
+                      "Topics": [{
+                        "Name": "topic",
+                        "Subscriptions": [{
+                          "Name": "subscription",
+                          "Rules": [
+                            {
+                              "Name": "valid",
+                              "Properties": {
+                                "FilterType": "Sql",
+                                "SqlFilter": { "SqlExpression": "priority > 2" }
+                              }
+                            },
+                            {
+                              "Name": "rejected",
+                              "Properties": {
+                                "FilterType": "Sql",
+                                "SqlFilter": { "SqlExpression": "priority % 2 = 0" }
+                              }
+                            }
+                          ]
+                        }]
+                      }]
+                    }]
+                  }
+                }
+                """);
+
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ServiceBusHandler handler = mock(ServiceBusHandler.class);
+        ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+        ServiceBusModels.RuleEntity stale = ServiceBusModels.RuleEntity.trueFilter(
+                "topic", "subscription", "stale");
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(serviceBus.topologyFile()).thenReturn(Optional.of(topologyFile.toString()));
+        when(serviceBus.mocked()).thenReturn(true);
+        when(namespaceManager.getNamespace(anyString())).thenReturn(Optional.empty());
+        when(handler.handleCreateTopic(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), any(), any()))
+                .thenReturn(Response.status(201).build());
+        when(handler.handleCreateSubscription(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                eq(false), anyString(), any(), any()))
+                .thenReturn(Response.status(201).build());
+        when(handler.putRule(eq("devstoreaccount1"), eq("namespace"), any()))
+                .thenAnswer(invocation -> {
+                    ServiceBusModels.RuleEntity rule = invocation.getArgument(2);
+                    return Response.status("valid".equals(rule.name()) ? 201 : 400).build();
+                });
+        when(handler.loadRules("devstoreaccount1", "namespace", "topic", "subscription"))
+                .thenReturn(List.of(stale));
+        when(handler.handleDeleteRule(
+                "devstoreaccount1", "namespace", "topic", "subscription", "stale"))
+                .thenReturn(Response.ok().build());
+
+        new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
+
+        verify(handler).handleDeleteRule(
+                "devstoreaccount1", "namespace", "topic", "subscription", "stale");
+    }
 }

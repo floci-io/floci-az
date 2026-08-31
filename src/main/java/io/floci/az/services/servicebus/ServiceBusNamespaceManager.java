@@ -267,8 +267,15 @@ public class ServiceBusNamespaceManager {
         }
         if (containerId != null) {
             lifecycleManager.stopAndRemove(containerId, null);
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerId)) {
+                throw new IllegalStateException(
+                        "Could not confirm removal of failed container " + containerId);
+            }
         } else {
-            lifecycleManager.removeIfExists(containerName);
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerName)) {
+                throw new IllegalStateException(
+                        "Could not confirm removal of failed container " + containerName);
+            }
         }
     }
 
@@ -558,25 +565,15 @@ public class ServiceBusNamespaceManager {
         });
     }
 
-    /**
-     * Replaces the filter of an existing subscription divert. The broker applies the new filter
-     * to future routing only, matching Azure's rule-change semantics: messages already routed to
-     * the subscription stay, and attached receivers stay connected to the unchanged queue.
-     */
+    /** Updates the existing subscription divert without interrupting its queue or receivers. */
     public void jolokiaUpdateSubscriptionFilter(String namespaceName, String topicName, String subName,
                                                  String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
-            // Destroy is intentionally best-effort: a failed replacement may already have
-            // removed the divert, and rollback must still be able to recreate it.
-            jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyDivert(java.lang.String)",
-                    jsonArr(divertName));
             jolokiaExecRequired(http, baseUrl, auth, mbean,
-                    "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
-                    jsonArr(divertName, divertName, topicName + TOPIC_ADDRESS_SUFFIX,
-                            queueName, false, filter, null));
+                    "updateDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.util.Map,java.lang.String)",
+                    jsonArr(divertName, queueName, filter, null, Map.of(), null));
         });
     }
 

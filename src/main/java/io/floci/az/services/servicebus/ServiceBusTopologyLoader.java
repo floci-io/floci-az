@@ -255,9 +255,12 @@ public class ServiceBusTopologyLoader {
                     applied++;
                 } else {
                     ruleRejected = true;
+                    if (existingRuleNames.contains(rule.name())) {
+                        retainedRuleNames.add(rule.name());
+                    }
                 }
             }
-            if (ruleRejected) {
+            if (ruleRejected && applied == 0) {
                 existingRuleNames.stream()
                         .filter(name -> !DEFAULT_RULE.equals(name))
                         .forEach(retainedRuleNames::add);

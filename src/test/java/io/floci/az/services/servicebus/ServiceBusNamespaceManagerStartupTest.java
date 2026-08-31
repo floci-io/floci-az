@@ -52,6 +52,7 @@ class ServiceBusNamespaceManagerStartupTest {
         when(lifecycleManager.create(spec)).thenReturn("container-id");
         when(lifecycleManager.startCreated("container-id", spec))
                 .thenThrow(new IllegalStateException("readiness failed"));
+        when(lifecycleManager.removeIfExistsAndConfirm("container-id")).thenReturn(true);
 
         ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
                 config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
@@ -61,6 +62,7 @@ class ServiceBusNamespaceManagerStartupTest {
                 () -> manager.startNamespace("failed", 5672, 5671));
 
         verify(lifecycleManager).stopAndRemove("container-id", null);
+        verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
         assertTrue(error.portsReleased());
         assertTrue(manager.listNamespaces().isEmpty());
     }

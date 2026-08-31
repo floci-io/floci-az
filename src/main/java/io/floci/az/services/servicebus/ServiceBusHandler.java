@@ -875,7 +875,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .toList();
     }
 
-    /** Recompiles the subscription's rules and re-creates its Artemis queue with the new selector. */
+    /** Recompiles the subscription's rules and updates its Artemis divert selector. */
     private boolean applySubscriptionFilter(String account, String namespace,
                                              String topicName, String subName) {
         String selector;
