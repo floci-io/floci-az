@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +53,8 @@ class ServiceBusNamespaceManagerStartupTest {
         when(lifecycleManager.create(spec)).thenReturn("container-id");
         when(lifecycleManager.startCreated("container-id", spec))
                 .thenThrow(new IllegalStateException("readiness failed"));
+        when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-failed"))
+                .thenReturn(true);
         when(lifecycleManager.removeIfExistsAndConfirm("container-id")).thenReturn(true);
 
         ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
@@ -65,5 +68,26 @@ class ServiceBusNamespaceManagerStartupTest {
         verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
         assertTrue(error.portsReleased());
         assertTrue(manager.listNamespaces().isEmpty());
+    }
+
+    @Test
+    void earlyFailureReportsPortsReleasedAfterConfirmedCleanup() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        String containerName = "floci-az-servicebus-failed";
+        when(lifecycleManager.removeIfExistsAndConfirm(containerName)).thenReturn(true);
+        when(tlsGenerator.generate(containerName))
+                .thenThrow(new IllegalStateException("certificate unavailable"));
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, mock(ContainerBuilder.class), lifecycleManager,
+                mock(ServiceBusConfigGenerator.class), tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        assertTrue(error.portsReleased());
+        verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
     }
 }

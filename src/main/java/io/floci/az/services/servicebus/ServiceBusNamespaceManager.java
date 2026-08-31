@@ -164,32 +164,36 @@ public class ServiceBusNamespaceManager {
                 amqpHostPort == 0 ? "dynamic" : amqpHostPort,
                 amqpsHostPort == 0 ? "dynamic" : amqpsHostPort);
 
-        ArtemisTlsGenerator.TlsBundle tls;
-        try {
-            tls = tlsGenerator.generate(containerName);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to generate TLS certificate for Service Bus namespace '" + namespaceName
-                            + "': " + rootMessage(e), e);
-        }
-
-        String brokerXml = configGenerator.generate(namespaceName);
-        lifecycleManager.removeIfExists(containerName);
-
-        ContainerSpec spec = containerBuilder.newContainer(config.services().serviceBus().artemisImage())
-                .withName(containerName)
-                .withEnv("ANONYMOUS_LOGIN", "true")
-                .withLabels(serviceContainerLabels())
-                .withPortBinding(AMQP_PORT, amqpHostPort)
-                .withPortBinding(AMQPS_PORT, amqpsHostPort)
-                .withDynamicPort(JOLOKIA_PORT)
-                .withDockerNetwork(config.services().dockerNetwork())
-                .withLogRotation()
-                .build();
-
         String containerId = null;
         ServiceBusCbsResponder cbs = null;
         try {
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerName)) {
+                throw new IllegalStateException(
+                        "Could not remove stale container " + containerName);
+            }
+
+            ArtemisTlsGenerator.TlsBundle tls;
+            try {
+                tls = tlsGenerator.generate(containerName);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to generate TLS certificate for Service Bus namespace '"
+                                + namespaceName + "': " + rootMessage(e), e);
+            }
+
+            String brokerXml = configGenerator.generate(namespaceName);
+            ContainerSpec spec = containerBuilder.newContainer(
+                            config.services().serviceBus().artemisImage())
+                    .withName(containerName)
+                    .withEnv("ANONYMOUS_LOGIN", "true")
+                    .withLabels(serviceContainerLabels())
+                    .withPortBinding(AMQP_PORT, amqpHostPort)
+                    .withPortBinding(AMQPS_PORT, amqpsHostPort)
+                    .withDynamicPort(JOLOKIA_PORT)
+                    .withDockerNetwork(config.services().dockerNetwork())
+                    .withLogRotation()
+                    .build();
+
             containerId = lifecycleManager.create(spec);
             lifecycleManager.copyFileToContainer(containerId, brokerXml,
                     "/var/lib/artemis-instance/etc-override/broker.xml");
