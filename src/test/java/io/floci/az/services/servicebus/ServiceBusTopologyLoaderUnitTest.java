@@ -21,7 +21,7 @@ class ServiceBusTopologyLoaderUnitTest {
     Path tempDir;
 
     @Test
-    void failedNamespaceIsSkippedWithoutConsumingConfiguredPorts() throws Exception {
+    void failedNamespaceIsSkippedWithoutReusingConfiguredPorts() throws Exception {
         Path topologyFile = tempDir.resolve("Config.json");
         Files.writeString(topologyFile, """
                 {
@@ -52,8 +52,8 @@ class ServiceBusTopologyLoaderUnitTest {
         new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
 
         verify(namespaceManager).startNamespace("failed", 5672, 5671);
-        verify(namespaceManager).startNamespace("working", 5672, 5671);
-        verify(namespaceManager, never()).startNamespace("working", 0, 0);
+        verify(namespaceManager).startNamespace("working", 0, 0);
+        verify(namespaceManager, never()).startNamespace("working", 5672, 5671);
         verifyNoInteractions(handler);
     }
 }

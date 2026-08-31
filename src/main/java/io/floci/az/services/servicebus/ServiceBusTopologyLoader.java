@@ -88,16 +88,17 @@ public class ServiceBusTopologyLoader {
         }
 
         Tally tally = new Tally();
-        boolean first = true;
+        boolean configuredPortsAvailable = true;
         for (ServiceBusTopologyFile.Namespace namespace : namespaces) {
             if (namespace == null || namespace.name() == null || namespace.name().isBlank()) {
                 LOG.error("Skipping a Service Bus topology namespace without a Name");
                 continue;
             }
-            if (!startNamespace(namespace.name(), first)) {
+            boolean useConfiguredPorts = configuredPortsAvailable;
+            configuredPortsAvailable = false;
+            if (!startNamespace(namespace.name(), useConfiguredPorts)) {
                 continue;
             }
-            first = false;
             tally.namespaces++;
             applyNamespace(namespace, tally);
         }
