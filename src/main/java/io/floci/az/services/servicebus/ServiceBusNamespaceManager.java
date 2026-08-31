@@ -548,7 +548,9 @@ public class ServiceBusNamespaceManager {
         String queueName = topicName + "/Subscriptions/" + subName;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
-            jolokiaExecRequired(http, baseUrl, auth, mbean,
+            // Destroy is intentionally best-effort: a failed replacement may already have
+            // removed the divert, and rollback must still be able to recreate it.
+            jolokiaExec(http, baseUrl, auth, mbean,
                     "destroyDivert(java.lang.String)",
                     jsonArr(divertName));
             jolokiaExecRequired(http, baseUrl, auth, mbean,

@@ -8,6 +8,7 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,8 +41,9 @@ class ServiceBusHandlerRuleConsistencyTest {
         ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
         when(storageFactory.create("servicebus")).thenReturn(store);
         when(store.get(key)).thenReturn(Optional.of(stored));
-        when(store.scan(any())).thenReturn(List.of());
+        when(store.scan(any())).thenReturn(List.of(), List.of(stored));
         doThrow(new IllegalStateException("Jolokia unavailable"))
+                .doNothing()
                 .when(namespaceManager)
                 .jolokiaUpdateSubscriptionFilter(
                         anyString(), anyString(), anyString(), anyString());
@@ -52,5 +55,10 @@ class ServiceBusHandlerRuleConsistencyTest {
 
         assertEquals(500, response.getStatus());
         verify(store).put(key, stored);
+        InOrder updates = inOrder(namespaceManager);
+        updates.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+                "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
+        updates.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+                "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_ALL);
     }
 }
