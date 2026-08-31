@@ -1,0 +1,86 @@
+{
+  "UserConfig": {
+    "Namespaces": [
+      {
+        "Name": "sbemulatorns",
+        "Queues": [
+          {
+            "Name": "queue.plain",
+            "Properties": {}
+          },
+          {
+            "Name": "queue.sessions",
+            "Properties": {
+              "DeadLetteringOnMessageExpiration": true,
+              "DefaultMessageTimeToLive": "PT1H",
+              "LockDuration": "PT1M",
+              "MaxDeliveryCount": 3,
+              "RequiresSession": true
+            }
+          },
+          {
+            "Name": "queue.invalid",
+            "Properties": {
+              "LockDuration": "PT99M"
+            }
+          }
+        ],
+        "Topics": [
+          {
+            "Name": "topic.orders",
+            "Properties": {
+              "RequiresDuplicateDetection": true,
+              "DuplicateDetectionHistoryTimeWindow": "PT30S"
+            },
+            "Subscriptions": [
+              {
+                "Name": "all",
+                "Properties": {},
+                "Rules": []
+              },
+              {
+                "Name": "filtered",
+                "Properties": {
+                  "MaxDeliveryCount": 5
+                },
+                "Rules": [
+                  {
+                    "Name": "by-subject",
+                    "Properties": {
+                      "FilterType": "Correlation",
+                      "CorrelationFilter": {
+                        "Properties": {
+                          "region": "eu",
+                          "priority": 3
+                        },
+                        "Label": "order-created"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "Name": "sql",
+                "Properties": {},
+                "Rules": [
+                  {
+                    "Name": "sql-rule",
+                    "Properties": {
+                      "FilterType": "Sql",
+                      "SqlFilter": {
+                        "SqlExpression": "priority > 2"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Logging": {
+      "Type": "File"
+    }
+  }
+}

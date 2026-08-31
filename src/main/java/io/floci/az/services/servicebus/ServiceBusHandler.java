@@ -504,11 +504,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .orElseGet(() -> notFoundAtom("Queue not found: " + queueName));
     }
 
-    private Response handleCreateQueue(String account, String namespace, String queueName,
-                                        boolean requiresSession,
-                                        ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
-                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-                                        ServiceBusEntityXml.DeliverySettings delivery) {
+    Response handleCreateQueue(String account, String namespace, String queueName,
+                                boolean requiresSession,
+                                ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                ServiceBusEntityXml.DeliverySettings delivery) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.QueueEntity existing =
@@ -592,7 +592,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .orElseGet(() -> notFoundAtom("Topic not found: " + topicName));
     }
 
-    private Response handleCreateTopic(
+    Response handleCreateTopic(
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
@@ -692,11 +692,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .orElseGet(() -> notFoundAtom("Subscription not found: " + subName));
     }
 
-    private Response handleCreateSubscription(String account, String namespace,
-                                                String topicName, String subName,
-                                                boolean requiresSession, String body,
-                                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
-                                                ServiceBusEntityXml.DeliverySettings delivery) {
+    Response handleCreateSubscription(String account, String namespace,
+                                       String topicName, String subName,
+                                       boolean requiresSession, String body,
+                                       ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                       ServiceBusEntityXml.DeliverySettings delivery) {
         Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
         if (storedTopic.isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -813,25 +813,29 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     /** Creates or updates a rule, then re-applies the compiled selector to the Artemis queue. */
     private Response handlePutRule(AzureRequest req, String account, String namespace,
                                     String topicName, String subName, String ruleName) {
-        ServiceBusModels.RuleEntity rule =
-                ServiceBusRuleXml.parseRule(topicName, subName, ruleName, readBody(req));
+        return putRule(account, namespace,
+                ServiceBusRuleXml.parseRule(topicName, subName, ruleName, readBody(req)));
+    }
+
+    /** Stores a parsed rule and re-applies the compiled selector; 400 when it cannot compile. */
+    Response putRule(String account, String namespace, ServiceBusModels.RuleEntity rule) {
         try {
             ServiceBusRuleSelector.forRule(rule);
         } catch (IllegalArgumentException e) {
             return badRequestAtom(e.getMessage());
         }
 
-        String key = ruleKey(account, namespace, topicName, subName, ruleName);
+        String key = ruleKey(account, namespace, rule.topicName(), rule.subscriptionName(), rule.name());
         boolean existed = store.get(key).isPresent();
         store.put(key, toStoredObject(key, rule));
         warnOnActionIgnored(rule);
-        applySubscriptionFilter(account, namespace, topicName, subName);
+        applySubscriptionFilter(account, namespace, rule.topicName(), rule.subscriptionName());
 
         return atomEntry(existed ? 200 : 201, ruleEntryXml(namespace, rule));
     }
 
-    private Response handleDeleteRule(String account, String namespace,
-                                       String topicName, String subName, String ruleName) {
+    Response handleDeleteRule(String account, String namespace,
+                               String topicName, String subName, String ruleName) {
         String key = ruleKey(account, namespace, topicName, subName, ruleName);
         if (store.get(key).isEmpty()) {
             return notFoundAtom("Rule not found: " + ruleName);

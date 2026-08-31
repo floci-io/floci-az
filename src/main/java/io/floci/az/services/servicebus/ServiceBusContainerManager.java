@@ -25,12 +25,15 @@ public class ServiceBusContainerManager {
 
     private final EmulatorConfig config;
     private final ServiceBusNamespaceManager namespaceManager;
+    private final ServiceBusTopologyLoader topologyLoader;
 
     @Inject
     public ServiceBusContainerManager(EmulatorConfig config,
-                                       ServiceBusNamespaceManager namespaceManager) {
+                                       ServiceBusNamespaceManager namespaceManager,
+                                       ServiceBusTopologyLoader topologyLoader) {
         this.config = config;
         this.namespaceManager = namespaceManager;
+        this.topologyLoader = topologyLoader;
     }
 
     void onStart(@Observes StartupEvent ev) {
@@ -62,6 +65,11 @@ public class ServiceBusContainerManager {
             }
         } else {
             LOG.info("Service Bus service enabled — namespace starts on first entity management call");
+        }
+        try {
+            topologyLoader.load();
+        } catch (Exception e) {
+            LOG.errorf(e, "Could not load the Service Bus topology file");
         }
     }
 

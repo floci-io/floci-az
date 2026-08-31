@@ -177,6 +177,9 @@ floci-az:
       mocked: true
       # true = the default namespace starts with the emulator (deterministic AMQP endpoint at boot).
       start-on-boot: false
+      # Optional path to a declarative topology file (official emulator Config.json format);
+      # when unset, /ServiceBus_Emulator/ConfigFiles/Config.json is probed.
+      # topology-file: /path/to/Config.json
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"

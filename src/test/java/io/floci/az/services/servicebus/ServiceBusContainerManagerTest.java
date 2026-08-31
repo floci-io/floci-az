@@ -18,6 +18,7 @@ class ServiceBusContainerManagerTest {
     private final EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
     private final EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
     private final ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+    private final ServiceBusTopologyLoader topologyLoader = mock(ServiceBusTopologyLoader.class);
 
     @BeforeEach
     void setUp() {
@@ -30,7 +31,7 @@ class ServiceBusContainerManagerTest {
     void reapsOrphanedContainersWhenBrokerModeStarts() {
         when(serviceBus.mocked()).thenReturn(false);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).reapOrphanedContainers();
     }
@@ -39,7 +40,7 @@ class ServiceBusContainerManagerTest {
     void skipsCleanupInMockedMode() {
         when(serviceBus.mocked()).thenReturn(true);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager, never()).reapOrphanedContainers();
     }
@@ -51,7 +52,43 @@ class ServiceBusContainerManagerTest {
                 .thenThrow(new IllegalStateException("Docker unavailable"));
 
         assertDoesNotThrow(
-                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+                () -> new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null));
+    }
+
+    @Test
+    void loadsTopologyInBrokerMode() {
+        when(serviceBus.mocked()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader).load();
+    }
+
+    @Test
+    void loadsTopologyInMockedMode() {
+        when(serviceBus.mocked()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader).load();
+    }
+
+    @Test
+    void skipsTopologyWhenServiceDisabled() {
+        when(serviceBus.enabled()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader, never()).load();
+    }
+
+    @Test
+    void topologyLoadFailureDoesNotFailApplicationStartup() {
+        when(serviceBus.mocked()).thenReturn(true);
+        org.mockito.Mockito.doThrow(new IllegalStateException("boom")).when(topologyLoader).load();
+
+        assertDoesNotThrow(
+                () -> new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null));
     }
 
     @Test

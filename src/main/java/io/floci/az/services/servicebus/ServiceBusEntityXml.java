@@ -5,7 +5,12 @@ import io.floci.az.core.XmlParser;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
 
-/** Parses settings shared by Service Bus queue and topic descriptions. */
+/**
+ * Parses and validates settings shared by Service Bus queue and topic descriptions.
+ * The {@code parse*} methods take an XML description body; the {@code *Of} methods take
+ * already-extracted values and hold the validation rules, so non-XML callers (the JSON
+ * topology loader) apply exactly the same constraints as the management API.
+ */
 final class ServiceBusEntityXml {
 
     static final long DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS = Duration.ofMinutes(10).toSeconds();
@@ -24,7 +29,15 @@ final class ServiceBusEntityXml {
                 XmlParser.extractFirst(xml, "RequiresDuplicateDetection", "false").trim());
         String rawHistory = XmlParser.extractFirst(
                 xml, "DuplicateDetectionHistoryTimeWindow",
-                DEFAULT_DUPLICATE_DETECTION_HISTORY.toString()).trim();
+                DEFAULT_DUPLICATE_DETECTION_HISTORY.toString());
+        return duplicateDetectionOf(enabled, rawHistory);
+    }
+
+    /** @param isoHistory ISO-8601 duration; {@code null} falls back to the PT10M default */
+    static DuplicateDetectionSettings duplicateDetectionOf(boolean enabled, String isoHistory) {
+        String rawHistory = isoHistory == null
+                ? DEFAULT_DUPLICATE_DETECTION_HISTORY.toString()
+                : isoHistory.trim();
         long historySeconds;
         try {
             Duration history = Duration.parse(rawHistory);
@@ -48,7 +61,15 @@ final class ServiceBusEntityXml {
     record DuplicateDetectionSettings(boolean enabled, long historySeconds) {}
 
     static MessageLifetimeSettings parseMessageLifetime(String xml) {
-        String value = XmlParser.extractFirst(xml, "DefaultMessageTimeToLive", "P14D").trim();
+        String value = XmlParser.extractFirst(xml, "DefaultMessageTimeToLive", "P14D");
+        boolean deadLetterOnExpiration = Boolean.parseBoolean(
+                XmlParser.extractFirst(xml, "DeadLetteringOnMessageExpiration", "false").trim());
+        return messageLifetimeOf(value, deadLetterOnExpiration);
+    }
+
+    /** @param isoTtl ISO-8601 duration; {@code null} falls back to the P14D default */
+    static MessageLifetimeSettings messageLifetimeOf(String isoTtl, boolean deadLetterOnExpiration) {
+        String value = isoTtl == null ? "P14D" : isoTtl.trim();
         final long ttlMillis;
         try {
             ttlMillis = Duration.parse(value).toMillis();
@@ -59,8 +80,6 @@ final class ServiceBusEntityXml {
         if (ttlMillis <= 0) {
             throw new IllegalArgumentException("DefaultMessageTimeToLive must be positive");
         }
-        boolean deadLetterOnExpiration = Boolean.parseBoolean(
-                XmlParser.extractFirst(xml, "DeadLetteringOnMessageExpiration", "false").trim());
         return new MessageLifetimeSettings(ttlMillis, deadLetterOnExpiration);
     }
 
@@ -80,17 +99,22 @@ final class ServiceBusEntityXml {
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("MaxDeliveryCount must be an integer", e);
             }
-            if (maxDeliveryCount < 1 || maxDeliveryCount > MAX_DELIVERY_COUNT_LIMIT) {
-                throw new IllegalArgumentException(
-                        "MaxDeliveryCount must be between 1 and " + MAX_DELIVERY_COUNT_LIMIT);
-            }
+        }
+        return deliveryOf(maxDeliveryCount, XmlParser.extractFirst(xml, "LockDuration", null));
+    }
+
+    /** Null components fall back to the configured emulator-wide defaults in the handler. */
+    static DeliverySettings deliveryOf(Integer maxDeliveryCount, String isoLockDuration) {
+        if (maxDeliveryCount != null
+                && (maxDeliveryCount < 1 || maxDeliveryCount > MAX_DELIVERY_COUNT_LIMIT)) {
+            throw new IllegalArgumentException(
+                    "MaxDeliveryCount must be between 1 and " + MAX_DELIVERY_COUNT_LIMIT);
         }
         Long lockDurationSeconds = null;
-        String rawLock = XmlParser.extractFirst(xml, "LockDuration", null);
-        if (rawLock != null) {
+        if (isoLockDuration != null) {
             final Duration lock;
             try {
-                lock = Duration.parse(rawLock.trim());
+                lock = Duration.parse(isoLockDuration.trim());
             } catch (DateTimeParseException e) {
                 throw new IllegalArgumentException("LockDuration must be an ISO-8601 duration", e);
             }
