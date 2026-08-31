@@ -577,7 +577,7 @@ public class ServiceBusNamespaceManager {
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExecRequired(http, baseUrl, auth, mbean,
                     "updateDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.util.Map,java.lang.String)",
-                    jsonArr(divertName, queueName, filter, null, Map.of(), null));
+                    jsonArr(divertName, queueName, filter, null, Map.of(), "STRIP"));
         });
     }
 
