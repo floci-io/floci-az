@@ -95,10 +95,14 @@ public class ServiceBusTopologyLoader {
                 continue;
             }
             boolean useConfiguredPorts = configuredPortsAvailable;
-            configuredPortsAvailable = false;
-            if (!startNamespace(namespace.name(), useConfiguredPorts)) {
+            NamespaceStartResult startResult = startNamespace(namespace.name(), useConfiguredPorts);
+            if (!startResult.started()) {
+                if (useConfiguredPorts && !startResult.portsReleased()) {
+                    configuredPortsAvailable = false;
+                }
                 continue;
             }
+            configuredPortsAvailable = false;
             tally.namespaces++;
             applyNamespace(namespace, tally);
         }
@@ -125,25 +129,29 @@ public class ServiceBusTopologyLoader {
      * The first namespace binds the configured AMQP host ports; further namespaces (the
      * official emulator supports only one) get dynamic ports so they don't collide.
      */
-    private boolean startNamespace(String name, boolean useConfiguredPorts) {
+    private NamespaceStartResult startNamespace(String name, boolean useConfiguredPorts) {
         if (namespaceManager.getNamespace(name).isPresent()) {
-            return true;
+            return new NamespaceStartResult(true, false);
         }
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         if (sb.mocked()) {
             namespaceManager.startMockedNamespace(name);
-            return true;
+            return new NamespaceStartResult(true, false);
         }
         try {
             namespaceManager.startNamespace(name,
                     useConfiguredPorts ? sb.amqpPort() : 0,
                     useConfiguredPorts ? sb.amqpTlsPort() : 0);
-            return true;
+            return new NamespaceStartResult(true, false);
         } catch (Exception e) {
             LOG.errorf(e, "Could not start Service Bus namespace '%s' from the topology file", name);
-            return false;
+            boolean portsReleased = e instanceof ServiceBusNamespaceManager.NamespaceStartException startError
+                    && startError.portsReleased();
+            return new NamespaceStartResult(false, portsReleased);
         }
     }
+
+    private record NamespaceStartResult(boolean started, boolean portsReleased) {}
 
     private void applyNamespace(ServiceBusTopologyFile.Namespace namespace, Tally tally) {
         for (ServiceBusTopologyFile.Queue queue : orEmpty(namespace.queues())) {

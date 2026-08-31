@@ -56,10 +56,12 @@ class ServiceBusNamespaceManagerStartupTest {
         ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
                 config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
 
-        assertThrows(IllegalStateException.class,
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
                 () -> manager.startNamespace("failed", 5672, 5671));
 
         verify(lifecycleManager).stopAndRemove("container-id", null);
+        assertTrue(error.portsReleased());
         assertTrue(manager.listNamespaces().isEmpty());
     }
 }

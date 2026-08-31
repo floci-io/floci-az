@@ -231,8 +231,28 @@ public class ServiceBusNamespaceManager {
                     namespaceName, amqpEndpoint, amqpsEndpoint);
             return state;
         } catch (RuntimeException e) {
-            cleanupFailedStart(namespaceName, containerName, containerId, cbs);
-            throw e;
+            boolean portsReleased = false;
+            try {
+                cleanupFailedStart(namespaceName, containerName, containerId, cbs);
+                portsReleased = true;
+            } catch (RuntimeException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
+            throw new NamespaceStartException(namespaceName, portsReleased, e);
+        }
+    }
+
+    static final class NamespaceStartException extends RuntimeException {
+
+        private final boolean portsReleased;
+
+        NamespaceStartException(String namespaceName, boolean portsReleased, Throwable cause) {
+            super("Failed to start Service Bus namespace '" + namespaceName + "'", cause);
+            this.portsReleased = portsReleased;
+        }
+
+        boolean portsReleased() {
+            return portsReleased;
         }
     }
 
