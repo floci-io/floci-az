@@ -10,10 +10,12 @@ import org.jboss.logging.Logger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Applies a declarative Service Bus topology at startup from the official emulator's
@@ -44,6 +46,7 @@ public class ServiceBusTopologyLoader {
 
     /** Per-load application counters, local to one {@link #load()} call. */
     private static final class Tally {
+        int namespaces;
         int queues;
         int topics;
         int subscriptions;
@@ -91,13 +94,16 @@ public class ServiceBusTopologyLoader {
                 LOG.error("Skipping a Service Bus topology namespace without a Name");
                 continue;
             }
-            startNamespace(namespace.name(), first);
+            if (!startNamespace(namespace.name(), first)) {
+                continue;
+            }
             first = false;
+            tally.namespaces++;
             applyNamespace(namespace, tally);
         }
         LOG.infov("Loaded Service Bus topology from {0}: {1} namespace(s), {2} queue(s), "
                         + "{3} topic(s), {4} subscription(s), {5} rule(s)",
-                file, namespaces.size(), tally.queues, tally.topics, tally.subscriptions, tally.rules);
+                file, tally.namespaces, tally.queues, tally.topics, tally.subscriptions, tally.rules);
     }
 
     private Path resolveFile() {
@@ -118,21 +124,23 @@ public class ServiceBusTopologyLoader {
      * The first namespace binds the configured AMQP host ports; further namespaces (the
      * official emulator supports only one) get dynamic ports so they don't collide.
      */
-    private void startNamespace(String name, boolean useConfiguredPorts) {
+    private boolean startNamespace(String name, boolean useConfiguredPorts) {
         if (namespaceManager.getNamespace(name).isPresent()) {
-            return;
+            return true;
         }
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         if (sb.mocked()) {
             namespaceManager.startMockedNamespace(name);
-            return;
+            return true;
         }
         try {
             namespaceManager.startNamespace(name,
                     useConfiguredPorts ? sb.amqpPort() : 0,
                     useConfiguredPorts ? sb.amqpTlsPort() : 0);
+            return true;
         } catch (Exception e) {
             LOG.errorf(e, "Could not start Service Bus namespace '%s' from the topology file", name);
+            return false;
         }
     }
 
@@ -201,20 +209,42 @@ public class ServiceBusTopologyLoader {
             return false;
         }
 
-        int applied = 0;
-        for (ServiceBusTopologyFile.Rule rule : orEmpty(subscription.rules())) {
-            if (hasName("rule", rule == null ? null : rule.name())
-                    && applyRule(namespace, topicName, subscription.name(), rule)) {
-                applied++;
-            }
-        }
-        if (applied > 0) {
-            // Declared rules define the complete rule set, as in the official emulator:
-            // drop the implicit $Default TrueFilter so the declared filters actually apply.
-            handler.handleDeleteRule(ACCOUNT, namespace, topicName, subscription.name(), DEFAULT_RULE);
-        }
+        int applied = reconcileRules(namespace, topicName, subscription);
         tally.rules += applied;
         return true;
+    }
+
+    private int reconcileRules(String namespace, String topicName,
+                               ServiceBusTopologyFile.Subscription subscription) {
+        List<ServiceBusTopologyFile.Rule> declaredRules = orEmpty(subscription.rules());
+        Set<String> retainedRuleNames = new HashSet<>();
+        int applied = 0;
+
+        if (declaredRules.isEmpty()) {
+            ServiceBusModels.RuleEntity defaultRule = ServiceBusModels.RuleEntity.trueFilter(
+                    topicName, subscription.name(), DEFAULT_RULE);
+            if (succeeded("rule", topicName + "/" + subscription.name() + "/" + DEFAULT_RULE,
+                    handler.putRule(ACCOUNT, namespace, defaultRule))) {
+                retainedRuleNames.add(DEFAULT_RULE);
+            }
+        } else {
+            for (ServiceBusTopologyFile.Rule rule : declaredRules) {
+                if (hasName("rule", rule == null ? null : rule.name())
+                        && applyRule(namespace, topicName, subscription.name(), rule)) {
+                    retainedRuleNames.add(rule.name());
+                    applied++;
+                }
+            }
+        }
+
+        for (ServiceBusModels.RuleEntity existing :
+                handler.loadRules(ACCOUNT, namespace, topicName, subscription.name())) {
+            if (!retainedRuleNames.contains(existing.name())) {
+                handler.handleDeleteRule(
+                        ACCOUNT, namespace, topicName, subscription.name(), existing.name());
+            }
+        }
+        return applied;
     }
 
     private boolean applyRule(String namespace, String topicName, String subName,

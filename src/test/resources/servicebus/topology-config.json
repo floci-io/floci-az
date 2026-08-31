@@ -73,6 +73,21 @@
                     }
                   }
                 ]
+              },
+              {
+                "Name": "rejected",
+                "Properties": {},
+                "Rules": [
+                  {
+                    "Name": "unsupported",
+                    "Properties": {
+                      "FilterType": "Sql",
+                      "SqlFilter": {
+                        "SqlExpression": "priority % 2 = 0"
+                      }
+                    }
+                  }
+                ]
               }
             ]
           }

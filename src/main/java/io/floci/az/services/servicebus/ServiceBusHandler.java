@@ -845,8 +845,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return Response.ok().build();
     }
 
-    private List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
-                                                         String topicName, String subName) {
+    List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
+                                                 String topicName, String subName) {
         String prefix = rulePrefix(account, namespace, topicName, subName);
         return store.scan(k -> k.startsWith(prefix))
                 .stream()

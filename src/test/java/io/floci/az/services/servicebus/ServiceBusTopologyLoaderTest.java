@@ -3,6 +3,7 @@ package io.floci.az.services.servicebus;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,12 @@ import static org.hamcrest.Matchers.not;
 class ServiceBusTopologyLoaderTest {
 
     private static final String BASE = "/devstoreaccount1-servicebus";
+    private static final String SB_NS =
+            "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
+    private static final String XSI_NS = "http://www.w3.org/2001/XMLSchema-instance";
+
+    @Inject
+    ServiceBusTopologyLoader topologyLoader;
 
     public static class TopologyProfile implements QuarkusTestProfile {
         @Override
@@ -86,7 +93,8 @@ class ServiceBusTopologyLoaderTest {
                 .then().statusCode(200)
                 .body(containsString("<title type=\"text\">all</title>"))
                 .body(containsString("<title type=\"text\">filtered</title>"))
-                .body(containsString("<title type=\"text\">sql</title>"));
+                .body(containsString("<title type=\"text\">sql</title>"))
+                .body(containsString("<title type=\"text\">rejected</title>"));
 
         given().when().get(BASE + "/topic.orders/subscriptions/filtered")
                 .then().statusCode(200)
@@ -119,5 +127,33 @@ class ServiceBusTopologyLoaderTest {
                 .body(not(containsString("$Default")))
                 .body(containsString("SqlFilter"))
                 .body(containsString("priority"));
+    }
+
+    @Test
+    void rejectedDeclaredRulesDoNotRetainDefault() {
+        given().when().get(BASE + "/topic.orders/subscriptions/rejected/rules")
+                .then().statusCode(200)
+                .body(not(containsString("$Default")))
+                .body(not(containsString("unsupported")));
+    }
+
+    @Test
+    void reloadRemovesRulesAbsentFromTopology() {
+        String staleRule = "<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+                + "<content type=\"application/xml\">"
+                + "<RuleDescription xmlns:i=\"" + XSI_NS + "\" xmlns=\"" + SB_NS + "\">"
+                + "<Filter i:type=\"SqlFilter\"><SqlExpression>priority = 1</SqlExpression></Filter>"
+                + "<Name>stale</Name></RuleDescription></content></entry>";
+        String rules = BASE + "/topic.orders/subscriptions/filtered/rules";
+
+        given().body(staleRule).when().put(rules + "/stale").then().statusCode(201);
+
+        topologyLoader.load();
+
+        given().when().get(rules)
+                .then().statusCode(200)
+                .body(containsString("by-subject"))
+                .body(not(containsString("stale")))
+                .body(not(containsString("$Default")));
     }
 }
