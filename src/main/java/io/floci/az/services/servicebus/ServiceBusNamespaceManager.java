@@ -187,46 +187,69 @@ public class ServiceBusNamespaceManager {
                 .withLogRotation()
                 .build();
 
-        String containerId = lifecycleManager.create(spec);
-        lifecycleManager.copyFileToContainer(containerId, brokerXml,
-                "/var/lib/artemis-instance/etc-override/broker.xml");
-        lifecycleManager.copyFileToContainer(containerId, MANAGEMENT_XML,
-                "/var/lib/artemis-instance/etc-override/management.xml");
-        lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
-                "/var/lib/artemis-instance/etc-override/artemis.p12");
-        lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
-                ARTEMIS_EXTENSION_PATH);
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
-                PROTON_J_PATH);
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
-                ARTEMIS_AMQP_PATH);
+        String containerId = null;
+        ServiceBusCbsResponder cbs = null;
+        try {
+            containerId = lifecycleManager.create(spec);
+            lifecycleManager.copyFileToContainer(containerId, brokerXml,
+                    "/var/lib/artemis-instance/etc-override/broker.xml");
+            lifecycleManager.copyFileToContainer(containerId, MANAGEMENT_XML,
+                    "/var/lib/artemis-instance/etc-override/management.xml");
+            lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
+                    "/var/lib/artemis-instance/etc-override/artemis.p12");
+            lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
+                    ARTEMIS_EXTENSION_PATH);
+            lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
+                    PROTON_J_PATH);
+            lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
+                    ARTEMIS_AMQP_PATH);
 
-        ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
+            ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
 
-        EndpointInfo amqpEndpoint  = info.getEndpoint(AMQP_PORT);
-        EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
-        EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
+            EndpointInfo amqpEndpoint = info.getEndpoint(AMQP_PORT);
+            EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
+            EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
 
-        waitForPort(amqpEndpoint, "AMQP");
-        waitForPort(amqpsEndpoint, "AMQPS");
+            waitForPort(amqpEndpoint, "AMQP");
+            waitForPort(amqpsEndpoint, "AMQPS");
 
-        ServiceBusCbsResponder cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
-        cbs.start();
-        cbsResponders.put(namespaceName, cbs);
+            cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
+            cbs.start();
+            cbsResponders.put(namespaceName, cbs);
 
-        NamespaceState state = new NamespaceState(
-                containerId,
-                amqpEndpoint.port(),
-                amqpsEndpoint.port(),
-                tls.certPem(),
-                jolokiaEndpoint.host(),
-                jolokiaEndpoint.port(),
-                false);
-        namespaces.put(namespaceName, state);
+            NamespaceState state = new NamespaceState(
+                    containerId,
+                    amqpEndpoint.port(),
+                    amqpsEndpoint.port(),
+                    tls.certPem(),
+                    jolokiaEndpoint.host(),
+                    jolokiaEndpoint.port(),
+                    false);
+            namespaces.put(namespaceName, state);
 
-        LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
-                namespaceName, amqpEndpoint, amqpsEndpoint);
-        return state;
+            LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
+                    namespaceName, amqpEndpoint, amqpsEndpoint);
+            return state;
+        } catch (RuntimeException e) {
+            cleanupFailedStart(namespaceName, containerName, containerId, cbs);
+            throw e;
+        }
+    }
+
+    private void cleanupFailedStart(String namespaceName, String containerName,
+                                    String containerId, ServiceBusCbsResponder cbs) {
+        namespaces.remove(namespaceName);
+        ServiceBusCbsResponder registeredCbs = cbsResponders.remove(namespaceName);
+        if (registeredCbs != null) {
+            registeredCbs.stop();
+        } else if (cbs != null) {
+            cbs.stop();
+        }
+        if (containerId != null) {
+            lifecycleManager.stopAndRemove(containerId, null);
+        } else {
+            lifecycleManager.removeIfExists(containerName);
+        }
     }
 
     int reapOrphanedContainers() {
