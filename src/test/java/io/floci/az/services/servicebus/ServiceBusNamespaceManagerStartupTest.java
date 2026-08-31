@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,7 +24,7 @@ import static org.mockito.Mockito.when;
 class ServiceBusNamespaceManagerStartupTest {
 
     @Test
-    void failedStartRemovesPartiallyCreatedContainer() throws Exception {
+    void failedDockerStartRemovesContainerWithoutReportingPortsReleased() throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
@@ -66,12 +67,12 @@ class ServiceBusNamespaceManagerStartupTest {
 
         verify(lifecycleManager).stopAndRemove("container-id", null);
         verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
-        assertTrue(error.portsReleased());
+        assertFalse(error.portsReleased());
         assertTrue(manager.listNamespaces().isEmpty());
     }
 
     @Test
-    void earlyFailureReportsPortsReleasedAfterConfirmedCleanup() throws Exception {
+    void earlyFailureDoesNotReportUnprovenPortsReleased() throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class);
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
         ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
@@ -87,7 +88,7 @@ class ServiceBusNamespaceManagerStartupTest {
                 ServiceBusNamespaceManager.NamespaceStartException.class,
                 () -> manager.startNamespace("failed", 5672, 5671));
 
-        assertTrue(error.portsReleased());
+        assertFalse(error.portsReleased());
         verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
     }
 }
