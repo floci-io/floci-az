@@ -874,21 +874,43 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         } catch (IllegalArgumentException e) {
             return badRequestAtom(e.getMessage());
         }
+
+        String prefix = rulePrefix(account, namespace, topicName, subName);
+        List<StoredObject> previousObjects = store.scan(key -> key.startsWith(prefix));
+        List<ServiceBusModels.RuleEntity> previousRules = deserializeRules(previousObjects);
+        String previousSelector;
+        try {
+            previousSelector = ServiceBusRuleSelector.forRules(previousRules);
+        } catch (IllegalArgumentException e) {
+            LOG.errorf(e, "Could not compile stored rules for subscription '%s/%s' in namespace '%s'",
+                    topicName, subName, namespace);
+            return errorAtom(500, "Failed to read the existing Service Bus rule state");
+        }
         if (!applySubscriptionFilter(namespace, topicName, subName, selector)) {
             return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
         }
 
-        String prefix = rulePrefix(account, namespace, topicName, subName);
         Map<String, StoredObject> desiredObjects = new LinkedHashMap<>();
         for (ServiceBusModels.RuleEntity rule : desiredRules) {
             String key = ruleKey(account, namespace, topicName, subName, rule.name());
             desiredObjects.put(key, toStoredObject(key, rule));
         }
-        Set<String> deletedKeys = store.scan(key -> key.startsWith(prefix)).stream()
+        Set<String> deletedKeys = previousObjects.stream()
                 .map(StoredObject::key)
                 .filter(key -> !desiredObjects.containsKey(key))
                 .collect(Collectors.toUnmodifiableSet());
-        store.applyBatch(desiredObjects, deletedKeys);
+        try {
+            store.applyBatch(desiredObjects, deletedKeys);
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Failed to persist rules for subscription '%s/%s' in namespace '%s'",
+                    topicName, subName, namespace);
+            if (!applySubscriptionFilter(namespace, topicName, subName, previousSelector)) {
+                LOG.errorf("Could not restore the previous broker filter for subscription '%s/%s' "
+                                + "in namespace '%s' after rule storage failed",
+                        topicName, subName, namespace);
+            }
+            return errorAtom(500, "Failed to persist the Service Bus rule state");
+        }
         desiredRules.forEach(ServiceBusHandler::warnOnActionIgnored);
         return Response.ok().build();
     }
@@ -896,8 +918,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
                                                  String topicName, String subName) {
         String prefix = rulePrefix(account, namespace, topicName, subName);
-        return store.scan(k -> k.startsWith(prefix))
-                .stream()
+        return deserializeRules(store.scan(key -> key.startsWith(prefix)));
+    }
+
+    private List<ServiceBusModels.RuleEntity> deserializeRules(List<StoredObject> objects) {
+        return objects.stream()
                 .map(obj -> fromBytes(obj.data(), ServiceBusModels.RuleEntity.class))
                 .filter(r -> r != null)
                 .toList();
