@@ -237,11 +237,12 @@ public class ServiceBusNamespaceManager {
                     namespaceName, amqpEndpoint, amqpsEndpoint);
             return state;
         } catch (RuntimeException e) {
+            boolean portsWereBound = containerStarted
+                    || (containerId != null && lifecycleManager.isContainerRunning(containerId));
             boolean portsReleased = false;
             try {
                 cleanupFailedStart(namespaceName, containerName, containerId, cbs);
-                // A successful start proves the configured ports were bindable before cleanup.
-                portsReleased = containerStarted;
+                portsReleased = portsWereBound;
             } catch (RuntimeException cleanupFailure) {
                 e.addSuppressed(cleanupFailure);
             }

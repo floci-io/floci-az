@@ -212,11 +212,15 @@ public class ServiceBusTopologyLoader {
         ServiceBusTopologyFile.EntityProperties p = properties(subscription.properties());
         String path = topicName + "/" + subscription.name();
         warnOnForwarding("subscription", path, p);
+        RulePlan rulePlan = prepareRules(topicName, subscription);
+        ServiceBusModels.RuleEntity initialRule = rulePlan.desiredRules().isEmpty()
+                ? ServiceBusModels.RuleEntity.trueFilter(topicName, subscription.name(), DEFAULT_RULE)
+                : rulePlan.desiredRules().getFirst();
         boolean created;
         try {
             Response response = handler.handleCreateSubscription(ACCOUNT, namespace,
                     topicName, subscription.name(), Boolean.TRUE.equals(p.requiresSession()),
-                    "", lifetime(p), delivery(p));
+                    lifetime(p), delivery(p), initialRule);
             if (!succeeded("subscription", path, response)) {
                 return false;
             }
@@ -226,14 +230,14 @@ public class ServiceBusTopologyLoader {
             return false;
         }
 
-        int applied = reconcileRules(namespace, topicName, subscription, created);
-        tally.rules += applied;
-        return true;
+        RuleReconcileResult result = reconcileRules(
+                namespace, topicName, subscription.name(), created, rulePlan);
+        tally.rules += result.appliedRules();
+        return result.succeeded();
     }
 
-    private int reconcileRules(String namespace, String topicName,
-                               ServiceBusTopologyFile.Subscription subscription,
-                               boolean subscriptionCreated) {
+    private RulePlan prepareRules(String topicName,
+                                  ServiceBusTopologyFile.Subscription subscription) {
         List<ServiceBusTopologyFile.Rule> declaredRules = orEmpty(subscription.rules());
         List<ServiceBusModels.RuleEntity> desiredRules = new ArrayList<>();
         boolean rejected = false;
@@ -258,27 +262,54 @@ public class ServiceBusTopologyLoader {
                     LOG.errorf("Skipping topology rule '%s': %s", path, e.getMessage());
                 }
             }
-            if (rejected && !subscriptionCreated) {
-                LOG.warnf("Keeping existing topology rules for '%s/%s' because its replacement "
-                                + "contains a rejected rule",
-                        topicName, subscription.name());
-                return 0;
-            }
-            if (rejected && desiredRules.isEmpty()) {
-                LOG.warnf("Keeping the implicit $Default rule for new subscription '%s/%s' because "
-                                + "every declared rule was rejected",
-                        topicName, subscription.name());
-                return 0;
-            }
         }
 
-        String path = topicName + "/" + subscription.name();
-        Response response = handler.replaceRules(
-                ACCOUNT, namespace, topicName, subscription.name(), desiredRules);
-        if (!succeeded("rules", path, response)) {
-            return 0;
+        return new RulePlan(declaredRules.isEmpty(), List.copyOf(desiredRules), rejected);
+    }
+
+    private RuleReconcileResult reconcileRules(String namespace, String topicName,
+                                                String subscriptionName,
+                                                boolean subscriptionCreated,
+                                                RulePlan rulePlan) {
+        if (rulePlan.rejected() && !subscriptionCreated) {
+            LOG.warnf("Keeping existing topology rules for '%s/%s' because its replacement "
+                            + "contains a rejected rule",
+                    topicName, subscriptionName);
+            return RuleReconcileResult.success(0);
         }
-        return declaredRules.isEmpty() ? 0 : desiredRules.size();
+        if (rulePlan.rejected() && rulePlan.desiredRules().isEmpty()) {
+            LOG.warnf("Keeping the implicit $Default rule for new subscription '%s/%s' because "
+                            + "every declared rule was rejected",
+                    topicName, subscriptionName);
+            return RuleReconcileResult.success(0);
+        }
+        if (subscriptionCreated && rulePlan.desiredRules().size() == 1) {
+            return RuleReconcileResult.success(rulePlan.declaredRulesEmpty() ? 0 : 1);
+        }
+
+        String path = topicName + "/" + subscriptionName;
+        Response response = handler.replaceRules(
+                ACCOUNT, namespace, topicName, subscriptionName, rulePlan.desiredRules());
+        if (!succeeded("rules", path, response)) {
+            return RuleReconcileResult.failure();
+        }
+        int appliedRules = rulePlan.declaredRulesEmpty() ? 0 : rulePlan.desiredRules().size();
+        return RuleReconcileResult.success(appliedRules);
+    }
+
+    private record RulePlan(boolean declaredRulesEmpty,
+                            List<ServiceBusModels.RuleEntity> desiredRules,
+                            boolean rejected) {}
+
+    private record RuleReconcileResult(boolean succeeded, int appliedRules) {
+
+        private static RuleReconcileResult success(int appliedRules) {
+            return new RuleReconcileResult(true, appliedRules);
+        }
+
+        private static RuleReconcileResult failure() {
+            return new RuleReconcileResult(false, 0);
+        }
     }
 
     static ServiceBusModels.RuleEntity toRuleEntity(String topicName, String subName,

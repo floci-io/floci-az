@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -702,6 +703,29 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                        boolean requiresSession, String body,
                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                        ServiceBusEntityXml.DeliverySettings delivery) {
+        return handleCreateSubscription(account, namespace, topicName, subName,
+                requiresSession, lifetime, delivery,
+                () -> ServiceBusRuleXml.parseDefaultRule(topicName, subName, body)
+                        .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(
+                                topicName, subName, "$Default")));
+    }
+
+    Response handleCreateSubscription(String account, String namespace,
+                                       String topicName, String subName,
+                                       boolean requiresSession,
+                                       ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                       ServiceBusEntityXml.DeliverySettings delivery,
+                                       ServiceBusModels.RuleEntity initialRule) {
+        return handleCreateSubscription(account, namespace, topicName, subName,
+                requiresSession, lifetime, delivery, () -> initialRule);
+    }
+
+    private Response handleCreateSubscription(String account, String namespace,
+                                               String topicName, String subName,
+                                               boolean requiresSession,
+                                               ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                               ServiceBusEntityXml.DeliverySettings delivery,
+                                               Supplier<ServiceBusModels.RuleEntity> initialRuleSupplier) {
         Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
         if (storedTopic.isEmpty()) {
             return notFoundAtom("Topic not found: " + topicName);
@@ -716,11 +740,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return atomEntry(200, subscriptionEntryXml(namespace, existing));
         }
 
-        // A subscription starts with its initial rule: an explicit <DefaultRuleDescription>
-        // from the create body, or Azure's implicit $Default TrueFilter (accept everything).
-        ServiceBusModels.RuleEntity initialRule =
-                ServiceBusRuleXml.parseDefaultRule(topicName, subName, body)
-                        .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(topicName, subName, "$Default"));
+        ServiceBusModels.RuleEntity initialRule = initialRuleSupplier.get();
         String selector;
         try {
             selector = ServiceBusRuleSelector.forRule(initialRule);
@@ -909,6 +929,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 LOG.errorf("Could not restore the previous broker filter for subscription '%s/%s' "
                                 + "in namespace '%s' after rule storage failed",
                         topicName, subName, namespace);
+                stopNamespaceAfterRollbackFailure(namespace, topicName, subName);
             }
             return errorAtom(500, "Failed to persist the Service Bus rule state");
         }
@@ -955,6 +976,24 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             }
         }
         return false;
+    }
+
+    private void stopNamespaceAfterRollbackFailure(String namespace, String topicName, String subName) {
+        try {
+            if (namespaceManager.stopNamespace(namespace)) {
+                LOG.errorf("Stopped Service Bus namespace '%s' to prevent inconsistent delivery for "
+                                + "subscription '%s/%s'",
+                        namespace, topicName, subName);
+            } else {
+                LOG.errorf("Service Bus namespace '%s' was already unavailable after filter rollback "
+                                + "failed for subscription '%s/%s'",
+                        namespace, topicName, subName);
+            }
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Failed to stop inconsistent Service Bus namespace '%s' after filter "
+                            + "rollback failed for subscription '%s/%s'",
+                    namespace, topicName, subName);
+        }
     }
 
     private static void warnOnActionIgnored(ServiceBusModels.RuleEntity rule) {

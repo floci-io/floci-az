@@ -134,4 +134,42 @@ class ServiceBusHandlerRuleConsistencyTest {
         mutation.verify(namespaceManager, times(2)).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void exhaustedBrokerRollbackStopsNamespace() throws Exception {
+        String oldKey = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/old";
+        ServiceBusModels.RuleEntity oldRule = new ServiceBusModels.RuleEntity(
+                "topic", "subscription", "old", "FalseFilter",
+                null, null, null, null, null, null, null, null, null,
+                Map.of(), Map.of(), null, Instant.EPOCH);
+        ServiceBusModels.RuleEntity newRule = ServiceBusModels.RuleEntity.trueFilter(
+                "topic", "subscription", "new");
+        StoredObject stored = new StoredObject(
+                oldKey, MAPPER.writeValueAsBytes(oldRule), Map.of(), Instant.now(), oldKey);
+        StorageBackend<String, StoredObject> store = mock(StorageBackend.class);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+        when(storageFactory.create("servicebus")).thenReturn(store);
+        when(store.scan(any())).thenReturn(List.of(stored));
+        doThrow(new IllegalStateException("storage unavailable"))
+                .when(store).applyBatch(any(), any());
+        doNothing()
+                .doThrow(new IllegalStateException("rollback failed"))
+                .doThrow(new IllegalStateException("rollback failed"))
+                .doThrow(new IllegalStateException("rollback failed"))
+                .when(namespaceManager).jolokiaUpdateSubscriptionFilter(
+                        anyString(), anyString(), anyString(), anyString());
+        when(namespaceManager.stopNamespace("namespace")).thenReturn(true);
+        ServiceBusHandler handler = new ServiceBusHandler(
+                mock(EmulatorConfig.class), namespaceManager, storageFactory);
+
+        Response response = handler.replaceRules(
+                "account", "namespace", "topic", "subscription", List.of(newRule));
+
+        assertEquals(500, response.getStatus());
+        verify(namespaceManager, times(4)).jolokiaUpdateSubscriptionFilter(
+                anyString(), anyString(), anyString(), anyString());
+        verify(namespaceManager).stopNamespace("namespace");
+    }
 }
