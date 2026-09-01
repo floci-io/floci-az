@@ -822,7 +822,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Stores a parsed rule and re-applies the compiled selector; 400 when it cannot compile. */
-    Response putRule(String account, String namespace, ServiceBusModels.RuleEntity rule) {
+    synchronized Response putRule(
+            String account, String namespace, ServiceBusModels.RuleEntity rule) {
         try {
             ServiceBusRuleSelector.forRule(rule);
         } catch (IllegalArgumentException e) {
@@ -844,8 +845,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return atomEntry(previous.isPresent() ? 200 : 201, ruleEntryXml(namespace, rule));
     }
 
-    Response handleDeleteRule(String account, String namespace,
-                               String topicName, String subName, String ruleName) {
+    synchronized Response handleDeleteRule(String account, String namespace,
+                                            String topicName, String subName, String ruleName) {
         String key = ruleKey(account, namespace, topicName, subName, ruleName);
         Optional<StoredObject> previous = store.get(key);
         if (previous.isEmpty()) {
@@ -859,8 +860,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     }
 
     /** Replaces a complete rule set in Artemis before committing matching management state. */
-    Response replaceRules(String account, String namespace, String topicName, String subName,
-                          List<ServiceBusModels.RuleEntity> rules) {
+    synchronized Response replaceRules(String account, String namespace,
+                                       String topicName, String subName,
+                                       List<ServiceBusModels.RuleEntity> rules) {
         Map<String, ServiceBusModels.RuleEntity> desiredByName = new LinkedHashMap<>();
         for (ServiceBusModels.RuleEntity rule : rules) {
             desiredByName.put(rule.name(), rule);
@@ -877,17 +879,17 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         }
 
         String prefix = rulePrefix(account, namespace, topicName, subName);
-        Set<String> desiredKeys = desiredRules.stream()
-                .map(rule -> ruleKey(account, namespace, topicName, subName, rule.name()))
-                .collect(Collectors.toUnmodifiableSet());
-        store.scan(key -> key.startsWith(prefix)).stream()
-                .filter(stored -> !desiredKeys.contains(stored.key()))
-                .forEach(stored -> store.delete(stored.key()));
+        Map<String, StoredObject> desiredObjects = new LinkedHashMap<>();
         for (ServiceBusModels.RuleEntity rule : desiredRules) {
             String key = ruleKey(account, namespace, topicName, subName, rule.name());
-            store.put(key, toStoredObject(key, rule));
-            warnOnActionIgnored(rule);
+            desiredObjects.put(key, toStoredObject(key, rule));
         }
+        Set<String> deletedKeys = store.scan(key -> key.startsWith(prefix)).stream()
+                .map(StoredObject::key)
+                .filter(key -> !desiredObjects.containsKey(key))
+                .collect(Collectors.toUnmodifiableSet());
+        store.applyBatch(desiredObjects, deletedKeys);
+        desiredRules.forEach(ServiceBusHandler::warnOnActionIgnored);
         return Response.ok().build();
     }
 

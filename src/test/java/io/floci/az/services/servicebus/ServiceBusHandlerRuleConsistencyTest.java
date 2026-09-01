@@ -14,10 +14,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -57,6 +59,7 @@ class ServiceBusHandlerRuleConsistencyTest {
         assertEquals(500, response.getStatus());
         verify(store, never()).delete(key);
         verify(store, never()).put(anyString(), any());
+        verify(store, never()).applyBatch(any(), any());
         verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
     }
@@ -87,7 +90,7 @@ class ServiceBusHandlerRuleConsistencyTest {
         InOrder mutation = inOrder(namespaceManager, store);
         mutation.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_ALL);
-        mutation.verify(store).delete(oldKey);
-        mutation.verify(store).put(eq(newKey), any());
+        mutation.verify(store).applyBatch(
+                argThat(puts -> puts.keySet().equals(Set.of(newKey))), eq(Set.of(oldKey)));
     }
 }
