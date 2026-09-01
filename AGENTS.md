@@ -47,65 +47,65 @@ Critical rules:
 
 floci-az follows a layered design:
 
-- **AzureRoutingFilter** — pre-matching JAX-RS filter; extracts account name and service type from the request path; dispatches to the correct `AzureServiceHandler`
-- **AzureServiceHandler** — interface implemented by each service (`getServiceType()`, `canHandle()`, `handle()`)
-- **AzureServiceRegistry** — CDI registry of all handlers; checks `isEnabled()` per service
-- **Service Handler** — parses Azure protocol input, contains business logic, produces Azure-compatible responses
-- **StorageBackend** — pluggable persistence (memory / persistent / hybrid / wal)
+- **AzureRoutingFilter**: pre-matching JAX-RS filter; extracts account name and service type from the request path; dispatches to the correct `AzureServiceHandler`
+- **AzureServiceHandler**: interface implemented by each service (`getServiceType()`, `canHandle()`, `handle()`)
+- **AzureServiceRegistry**: CDI registry of all handlers; checks `isEnabled()` per service
+- **Service Handler**: parses Azure protocol input, contains business logic, produces Azure-compatible responses
+- **StorageBackend**: pluggable persistence (memory / persistent / hybrid / wal)
 
 ### Core Infrastructure
 
-- `EmulatorConfig` — SmallRye `@ConfigMapping`; prefix `floci-az`
-- `AzureRoutingFilter` — path-based routing (suffix detection: `-queue`, `-table`, `-functions`, `-appconfig`, `-keyvault`, `-eventhub`)
-- `AzureServiceRegistry` — handler discovery + `isEnabled()` per service type
-- `BannerLogger` — startup banner listing all enabled services
-- `StorageBackend` + `StorageFactory` — pluggable storage
-- `XmlBuilder` — fluent XML builder with attribute support (`startAttr`, `selfClose`)
-- `XmlParser` — StAX-based XML parser (no extra dependencies)
-- `XmlUtils` — Jackson-based XML serialisation for structured models
+- `EmulatorConfig`: SmallRye `@ConfigMapping`; prefix `floci-az`
+- `AzureRoutingFilter`: path-based routing (suffix detection: `-queue`, `-table`, `-functions`, `-appconfig`, `-keyvault`, `-eventhub`)
+- `AzureServiceRegistry`: handler discovery + `isEnabled()` per service type
+- `BannerLogger`: startup banner listing all enabled services
+- `StorageBackend` + `StorageFactory`: pluggable storage
+- `XmlBuilder`: fluent XML builder with attribute support (`startAttr`, `selfClose`)
+- `XmlParser`: StAX-based XML parser (no extra dependencies)
+- `XmlUtils`: Jackson-based XML serialisation for structured models
 
 ### Sidecar Container Infrastructure (`core/docker/`)
 
 Used by services that delegate to a managed Docker container:
 
-- `ContainerSpec` — immutable container descriptor (record)
-- `ContainerBuilder` — fluent `ContainerSpec` builder (network, ports, mounts, log rotation, DNS)
-- `ContainerLifecycleManager` — create/start/stop/remove containers; volume management; endpoint resolution
-- `ImageCacheService` — pull-once-per-image with registry credential support
-- `PortAllocator` — thread-safe free TCP port allocation
-- `ContainerDetector` — detects whether floci-az is running inside Docker
-- `CurrentContainerNetworkResolver` — resolves which Docker network floci-az is on
-- `DockerHostResolver` — resolves the correct host for child containers to reach floci-az
-- `DockerClientProducer` — CDI producer for `DockerClient`
+- `ContainerSpec`: immutable container descriptor (record)
+- `ContainerBuilder`: fluent `ContainerSpec` builder (network, ports, mounts, log rotation, DNS)
+- `ContainerLifecycleManager`: create/start/stop/remove containers; volume management; endpoint resolution
+- `ImageCacheService`: pull-once-per-image with registry credential support
+- `PortAllocator`: thread-safe free TCP port allocation
+- `ContainerDetector`: detects whether floci-az is running inside Docker
+- `CurrentContainerNetworkResolver`: resolves which Docker network floci-az is on
+- `DockerHostResolver`: resolves the correct host for child containers to reach floci-az
+- `DockerClientProducer`: CDI producer for `DockerClient`
 
 ---
 
 ## Package Layout
 
 ```
-io.floci.az.config           — EmulatorConfig
-io.floci.az.core             — routing, registry, banner, XML utils, auth, DNS
-io.floci.az.core.auth        — auth pipeline, verifiers
-io.floci.az.core.docker      — container infrastructure
-io.floci.az.core.storage     — storage backends
-io.floci.az.services.<svc>   — per-service handlers
+io.floci.az.config           : EmulatorConfig
+io.floci.az.core             : routing, registry, banner, XML utils, auth, DNS
+io.floci.az.core.auth        : auth pipeline, verifiers
+io.floci.az.core.docker      : container infrastructure
+io.floci.az.core.storage     : storage backends
+io.floci.az.services.<svc>   : per-service handlers
 ```
 
 Typical service structure:
 
 ```
 services/<svc>/
-  *Handler.java       — implements AzureServiceHandler
-  *Models.java        — domain objects (optional)
+  *Handler.java       : implements AzureServiceHandler
+  *Models.java        : domain objects (optional)
 ```
 
 Sidecar-based services additionally have:
 
 ```
 services/<svc>/
-  *ContainerManager.java   — @ApplicationScoped, @PostConstruct/@PreDestroy lifecycle
-  *Manager.java            — manages one sidecar (pull, start, health-wait, stop)
-  *ConfigGenerator.java    — generates sidecar config file from EmulatorConfig
+  *ContainerManager.java   : @ApplicationScoped, @PostConstruct/@PreDestroy lifecycle
+  *Manager.java            : manages one sidecar (pull, start, health-wait, stop)
+  *ConfigGenerator.java    : generates sidecar config file from EmulatorConfig
 ```
 
 Rule: copy an existing service pattern before introducing a new one.
@@ -154,7 +154,7 @@ Rules:
 - Always use `StorageFactory` to obtain a `StorageBackend`
 - Do not instantiate storage implementations directly inside handlers
 - Respect lifecycle hooks for load and flush behavior
-- Event Hubs does not use `StorageBackend` — it delegates entirely to the Artemis sidecar
+- Event Hubs does not use `StorageBackend`: it delegates entirely to the Artemis sidecar
 
 When adding storage-related behavior:
 
@@ -181,11 +181,11 @@ When adding config:
 
 Critical areas:
 
-- `base-url` / `hostname` — affects URLs returned in API responses
-- `port` — default 4577
-- `storage.mode` — global default; per-service override via `storage.services.<svc>.mode`
-- `services.docker-network` — shared Docker network for sidecar containers
-- `docker.docker-host` — Docker daemon socket
+- `base-url` / `hostname`: affects URLs returned in API responses
+- `port`: default 4577
+- `storage.mode`: global default; per-service override via `storage.services.<svc>.mode`
+- `services.docker-network`: shared Docker network for sidecar containers
+- `docker.docker-host`: Docker daemon socket
 
 ---
 
@@ -194,9 +194,9 @@ Critical areas:
 Services that use sidecar containers (Event Hubs, Service Bus, SQL, PostgreSQL, Redis, ACR, AKS, ...) follow this pattern:
 
 1. `*ContainerManager` observes `StartupEvent` and calls `*Manager.start()`; `@PreDestroy` calls `stop()`
-2. Startup failures must be **non-fatal** — log an error and return; do not throw and crash the app
+2. Startup failures must be **non-fatal**: log an error and return; do not throw and crash the app
 3. Always call `lifecycleManager.removeIfExists(containerName)` before creating to clean up stale containers
-4. Use `ContainerBuilder` + `ContainerLifecycleManager` — do not call `dockerClient` directly in new code
+4. Use `ContainerBuilder` + `ContainerLifecycleManager`. Do not call `dockerClient` directly in new code
 5. Health-wait after start: TCP poll for AMQP/port-based services; HTTP poll for services with a `/ready` endpoint
 6. Config files generated for sidecars (e.g. `broker.xml`) must use `XmlBuilder` for XML, not string concatenation
 
@@ -232,18 +232,18 @@ make stop
 
 ```
 compatibility-tests/
-  sdk-test-python/      — Azure SDK for Python (pytest): blob/queue/table, cosmos, vm, redis, acr,
+  sdk-test-python/      : Azure SDK for Python (pytest): blob/queue/table, cosmos, vm, redis, acr,
                           managed identity, plus appconfig/ and keyvault/ sub-suites
-  sdk-test-java/        — Azure SDK for Java (BOM; the primary compat target): blob/queue/table,
+  sdk-test-java/        : Azure SDK for Java (BOM; the primary compat target): blob/queue/table,
                           cosmos + all engines, functions, keyvault, appconfig, eventhub,
                           servicebus, eventgrid, apim, sql, postgres, vm, datalake,
                           managed identity
-  sdk-test-node/        — Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
+  sdk-test-node/        : Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
                           keyvault, eventhub, servicebus, managed identity
-  sdk-test-cpp/         — Azure SDK for C++ (GoogleTest via vcpkg): blob, queue. Built from source, so ~6 min cold
-  compat-terraform/     — hashicorp/azurerm Terraform provider (BATS)
-  compat-opentofu/      — OpenTofu with the azurerm provider (BATS)
-  compat-azcli/         — real `az` CLI against a custom registered cloud (BATS)
+  sdk-test-cpp/         : Azure SDK for C++ (GoogleTest via vcpkg): blob, queue. Built from source, so ~6 min cold
+  compat-terraform/     : hashicorp/azurerm Terraform provider (BATS)
+  compat-opentofu/      : OpenTofu with the azurerm provider (BATS)
+  compat-azcli/         : real `az` CLI against a custom registered cloud (BATS)
 ```
 
 Guidelines:
@@ -259,7 +259,7 @@ The Makefile and the CI matrix (`.github/workflows/compatibility.yml`) both run 
 
 **Rule: a suite's env vars must be identical across every `docker run` for that suite in the Makefile and the corresponding matrix `extra_env` entry in `.github/workflows/compatibility.yml`. Define them once (a shared variable), never inline per call site.**
 
-Suite-internal defaults (`FLOCI_AZ_ENDPOINT`, `EVENTHUB_*`, `JEST_JUNIT_*`) are baked as `ENV` in each suite's Dockerfile with the compat-network values — they do NOT belong in the Makefile or `extra_env`. Only network-topology overrides (sidecar hostnames/ports, emulator-endpoint redirects) go there.
+Suite-internal defaults (`FLOCI_AZ_ENDPOINT`, `EVENTHUB_*`, `JEST_JUNIT_*`) are baked as `ENV` in each suite's Dockerfile with the compat-network values. They do NOT belong in the Makefile or `extra_env`. Only network-topology overrides (sidecar hostnames/ports, emulator-endpoint redirects) go there.
 
 Current per-suite env vars that must stay in sync:
 
@@ -276,7 +276,7 @@ Current per-suite env vars that must stay in sync:
 | `sdk-test-node` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
-| `sdk-test-cpp` | none — only the shared `FLOCI_AZ_ENDPOINT` | ✓ (no `extra_env`) |
+| `sdk-test-cpp` | none, only the shared `FLOCI_AZ_ENDPOINT` | ✓ (no `extra_env`) |
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.
 
@@ -306,7 +306,7 @@ If a change affects request parsing, response shape, error handling, persistence
 
 - Handlers return `Response` with Azure-compatible error JSON: `{"error":{"code":"...","message":"..."}}`
 - Use `AzureErrorResponse` helper for XML-format errors (Storage services)
-- Sidecar startup failures must degrade gracefully — log `ERROR` and skip, never throw from `onStart`
+- Sidecar startup failures must degrade gracefully: log `ERROR` and skip, never throw from `onStart`
 
 ---
 
@@ -339,13 +339,13 @@ When adding a sidecar-based service, additionally:
 - **Always prefer constructor injection (`@Inject` on the constructor) over field injection (`@Inject` on fields)** in new or modified code:
   - dependencies become `private final`, so the object is immutable and never observed half-constructed
   - required collaborators are explicit in the signature, and plain unit tests can construct the class without a CDI container
-  - with Quarkus Arc, normal-scoped beans are client proxies — reading *fields* through an injected bean hits the proxy's own field copies, not the contextual instance. Always go through methods on injected beans; constructor injection plus method access avoids this trap entirely
+  - with Quarkus Arc, normal-scoped beans are client proxies, so reading *fields* through an injected bean hits the proxy's own field copies, not the contextual instance. Always go through methods on injected beans; constructor injection plus method access avoids this trap entirely
 - When touching a class that still uses field injection, migrate it to constructor injection if the change is small; otherwise stay consistent within the class and flag it
 
 ### General practices
 
 - Make fields `final` wherever possible; avoid static mutable state
-- Never leave a `catch` block empty — if an exception is intentionally tolerated, log it with enough context to diagnose later
+- Never leave a `catch` block empty. If an exception is intentionally tolerated, log it with enough context to diagnose later
 - Validate inputs at the protocol boundary and fail fast with the correct Azure error shape
 - Keep methods small and focused; extract helpers instead of growing switch/if ladders
 - Prefer self-explanatory code over comments; only add a comment when the WHY is non-obvious
@@ -378,21 +378,21 @@ When adding a sidecar-based service, additionally:
 
 Conventional commits:
 
-- `feat:` — new service or feature
-- `fix:` — bug fix
-- `perf:` — performance improvement
-- `docs:` — documentation only
-- `chore:` — build, CI, dependencies
+- `feat:`: new service or feature
+- `fix:`: bug fix
+- `perf:`: performance improvement
+- `docs:`: documentation only
+- `chore:`: build, CI, dependencies
 
 Do not add `Co-Authored-By` trailers for AI tools in commit messages.
 
 Releases:
 
 - Releases are cut by dispatching the "Release Cut" workflow
-  (`.github/workflows/release-cut.yml`) from `main` — semantic-release computes
+  (`.github/workflows/release-cut.yml`) from `main`. semantic-release computes
   the next version from Conventional Commits, updates `pom.xml`/`CHANGELOG.md`,
   tags, and publishes the GitHub Release; the tag push triggers `release.yml`.
-- The `GH_TOKEN` repo secret must be a PAT (fine-grained, contents: write) —
+- The `GH_TOKEN` repo secret must be a PAT (fine-grained, contents: write):
   tags pushed with the default `GITHUB_TOKEN` do not trigger `release.yml`.
 - Use the workflow's `dry-run` input to preview the next version and notes
   without tagging.
@@ -403,7 +403,7 @@ Releases:
 
 When in doubt about Azure wire protocol behavior, refer to real sources:
 
-- [Azure REST API specs](https://github.com/Azure/azure-rest-api-specs) — the authoritative request/response/error contract
+- [Azure REST API specs](https://github.com/Azure/azure-rest-api-specs): the authoritative request/response/error contract
 - Azure SDK source code ([Java](https://github.com/Azure/azure-sdk-for-java), [Python](https://github.com/Azure/azure-sdk-for-python), [JS](https://github.com/Azure/azure-sdk-for-js))
 - Microsoft official emulator behavior (Azurite for Storage, the official Event Hubs emulator)
 
@@ -415,5 +415,5 @@ Do not invent protocol behavior. If a spec is ambiguous, test against a real Azu
 
 - Do not introduce non-Azure endpoint shapes
 - Do not bypass `StorageFactory` for storage operations
-- Do not call `dockerClient` directly in new service code — use `ContainerBuilder` + `ContainerLifecycleManager`
+- Do not call `dockerClient` directly in new service code. Use `ContainerBuilder` + `ContainerLifecycleManager`
 - Do not make sidecar startup failures fatal (they would break unit tests and environments without Docker)
