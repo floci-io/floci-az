@@ -694,7 +694,7 @@ Use `latest` for stable releases, a pinned version for reproducible builds, and 
 
 ```yaml
 image: floci/floci-az:latest      # recommended
-image: floci/floci-az:0.9.0       # pinned release
+image: floci/floci-az:x.y.z       # pinned release
 image: floci/floci-az:nightly     # track main
 ```
 
