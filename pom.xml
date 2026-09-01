@@ -13,9 +13,9 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.37.4</quarkus.platform.version>
-        <artemis.version>2.44.0</artemis.version>
-        <proton-j.version>0.34.1</proton-j.version>
+        <quarkus.platform.version>3.39.1</quarkus.platform.version>
+        <artemis.version>2.56.0</artemis.version>
+        <proton-j.version>0.35.0</proton-j.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
     </properties>
@@ -98,7 +98,7 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.85</version>
+            <version>1.85.2</version>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
@@ -154,7 +154,7 @@
             </plugin>
             <plugin>
                 <artifactId>maven-dependency-plugin</artifactId>
-                <version>3.8.1</version>
+                <version>3.11.0</version>
                 <executions>
                     <execution>
                         <id>unpack-servicebus-proton-j</id>
@@ -219,7 +219,7 @@
             </plugin>
             <plugin>
                 <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.2.0</version>
                 <executions>
                     <execution>
                         <id>patch-servicebus-artemis-amqp-sources</id>
