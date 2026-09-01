@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -87,6 +88,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
     private final ServiceBusNamespaceManager namespaceManager;
     private final StorageBackend<String, StoredObject> store;
+    private final Map<String, String> pendingTopologyReplayAccounts = new ConcurrentHashMap<>();
 
     @Inject
     public ServiceBusHandler(EmulatorConfig config,
@@ -412,7 +414,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
         try {
             ServiceBusNamespaceManager.NamespaceState state =
-                    namespaceManager.startNamespace(namespaceName, amqpPort, amqpTlsPort);
+                    startNamespaceWithPendingReplay(namespaceName, amqpPort, amqpTlsPort);
             StringBuilder json = new StringBuilder();
             appendNamespaceJson(json, namespaceName, state);
             return Response.status(201).entity(json.toString()).type("application/json").build();
@@ -929,7 +931,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 LOG.errorf("Could not restore the previous broker filter for subscription '%s/%s' "
                                 + "in namespace '%s' after rule storage failed",
                         topicName, subName, namespace);
-                stopNamespaceAfterRollbackFailure(namespace, topicName, subName);
+                recoverNamespaceAfterRollbackFailure(account, namespace, topicName, subName);
             }
             return errorAtom(500, "Failed to persist the Service Bus rule state");
         }
@@ -978,7 +980,11 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         return false;
     }
 
-    private void stopNamespaceAfterRollbackFailure(String namespace, String topicName, String subName) {
+    private void recoverNamespaceAfterRollbackFailure(
+            String account, String namespace, String topicName, String subName) {
+        pendingTopologyReplayAccounts.put(namespace, account);
+        Optional<ServiceBusNamespaceManager.NamespaceState> previousState =
+                namespaceManager.getNamespace(namespace);
         try {
             if (namespaceManager.stopNamespace(namespace)) {
                 LOG.errorf("Stopped Service Bus namespace '%s' to prevent inconsistent delivery for "
@@ -993,6 +999,116 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             LOG.errorf(e, "Failed to stop inconsistent Service Bus namespace '%s' after filter "
                             + "rollback failed for subscription '%s/%s'",
                     namespace, topicName, subName);
+            return;
+        }
+
+        if (previousState.isEmpty()) {
+            return;
+        }
+        if (previousState.get().mocked()) {
+            pendingTopologyReplayAccounts.remove(namespace, account);
+            return;
+        }
+
+        ServiceBusNamespaceManager.NamespaceState state = previousState.get();
+        try {
+            startNamespaceWithPendingReplay(
+                    namespace, state.amqpHostPort(), state.amqpsHostPort());
+            LOG.errorf("Restarted Service Bus namespace '%s' and restored persisted topology after "
+                            + "filter rollback failed for subscription '%s/%s'",
+                    namespace, topicName, subName);
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Failed to restore persisted topology for Service Bus namespace '%s' "
+                            + "after filter rollback failed for subscription '%s/%s'",
+                    namespace, topicName, subName);
+        }
+    }
+
+    private ServiceBusNamespaceManager.NamespaceState startNamespaceWithPendingReplay(
+            String namespace, int amqpPort, int amqpsPort) {
+        ServiceBusNamespaceManager.NamespaceState state =
+                namespaceManager.startNamespace(namespace, amqpPort, amqpsPort);
+        String replayAccount = pendingTopologyReplayAccounts.get(namespace);
+        if (replayAccount == null) {
+            return state;
+        }
+
+        try {
+            replayNamespaceTopology(replayAccount, namespace);
+            pendingTopologyReplayAccounts.remove(namespace, replayAccount);
+            return state;
+        } catch (RuntimeException replayFailure) {
+            stopNamespaceAfterReplayFailure(namespace, replayFailure);
+            throw replayFailure;
+        }
+    }
+
+    private void replayNamespaceTopology(String account, String namespace) {
+        List<ServiceBusModels.QueueEntity> queues = scanDirectChildren(queuePrefix(account, namespace))
+                .stream()
+                .map(obj -> requireStoredEntity(obj, ServiceBusModels.QueueEntity.class))
+                .toList();
+        List<ServiceBusModels.TopicEntity> topics = scanDirectChildren(topicPrefix(account, namespace))
+                .stream()
+                .map(obj -> requireStoredEntity(obj, ServiceBusModels.TopicEntity.class))
+                .toList();
+
+        for (ServiceBusModels.QueueEntity queue : queues) {
+            namespaceManager.jolokiaCreateQueue(
+                    namespace, queue.name(), queue.requiresSession(), queue.lockDurationSeconds(),
+                    queue.maxDeliveryCount(),
+                    new ServiceBusEntityXml.DuplicateDetectionSettings(
+                            queue.requiresDuplicateDetection(), queue.duplicateDetectionHistorySeconds()),
+                    new ServiceBusEntityXml.MessageLifetimeSettings(
+                            queue.defaultMessageTtlMillis(), queue.deadLetteringOnMessageExpiration()));
+        }
+        for (ServiceBusModels.TopicEntity topic : topics) {
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection =
+                    new ServiceBusEntityXml.DuplicateDetectionSettings(
+                            topic.requiresDuplicateDetection(), topic.duplicateDetectionHistorySeconds());
+            namespaceManager.jolokiaCreateTopic(namespace, topic.name(), duplicateDetection);
+            for (StoredObject storedSubscription : scanDirectChildren(
+                    subPrefix(account, namespace, topic.name()))) {
+                ServiceBusModels.SubscriptionEntity subscription = requireStoredEntity(
+                        storedSubscription, ServiceBusModels.SubscriptionEntity.class);
+                String selector = ServiceBusRuleSelector.forRules(
+                        loadRulesForReplay(account, namespace, topic.name(), subscription.name()));
+                namespaceManager.jolokiaCreateSubscription(
+                        namespace, topic.name(), subscription.name(), selector,
+                        subscription.requiresSession(), subscription.lockDurationSeconds(),
+                        subscription.maxDeliveryCount(), duplicateDetection,
+                        new ServiceBusEntityXml.MessageLifetimeSettings(
+                                Math.min(topic.defaultMessageTtlMillis(),
+                                        subscription.defaultMessageTtlMillis()),
+                                subscription.deadLetteringOnMessageExpiration()));
+            }
+        }
+    }
+
+    private List<ServiceBusModels.RuleEntity> loadRulesForReplay(
+            String account, String namespace, String topicName, String subscriptionName) {
+        String prefix = rulePrefix(account, namespace, topicName, subscriptionName);
+        return store.scan(key -> key.startsWith(prefix)).stream()
+                .map(obj -> requireStoredEntity(obj, ServiceBusModels.RuleEntity.class))
+                .toList();
+    }
+
+    private <T> T requireStoredEntity(StoredObject storedObject, Class<T> type) {
+        T entity = fromBytes(storedObject.data(), type);
+        if (entity == null) {
+            throw new IllegalStateException(
+                    "Could not replay stored Service Bus entity " + storedObject.key());
+        }
+        return entity;
+    }
+
+    private void stopNamespaceAfterReplayFailure(String namespace, RuntimeException replayFailure) {
+        try {
+            namespaceManager.stopNamespace(namespace);
+        } catch (RuntimeException stopFailure) {
+            replayFailure.addSuppressed(stopFailure);
+            LOG.errorf(stopFailure,
+                    "Failed to stop partially restored Service Bus namespace '%s'", namespace);
         }
     }
 
@@ -1299,11 +1415,12 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (namespaceManager.getNamespace(name).isPresent()) return;
         EmulatorConfig.ServiceBusConfig sb = config.services().serviceBus();
         if (sb.mocked()) {
+            pendingTopologyReplayAccounts.remove(name);
             namespaceManager.startMockedNamespace(name);
             return;
         }
         try {
-            namespaceManager.startNamespace(name, sb.amqpPort(), sb.amqpTlsPort());
+            startNamespaceWithPendingReplay(name, sb.amqpPort(), sb.amqpTlsPort());
         } catch (Exception e) {
             LOG.errorf(e, "Failed to lazily start Service Bus namespace '%s'", name);
         }
@@ -1426,6 +1543,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     /** Wipes all Service Bus data — used by {@code POST /_admin/reset}. */
     public void clear() {
+        pendingTopologyReplayAccounts.clear();
         store.clear();
     }
 }

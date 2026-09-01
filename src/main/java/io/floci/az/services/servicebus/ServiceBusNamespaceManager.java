@@ -166,6 +166,7 @@ public class ServiceBusNamespaceManager {
 
         String containerId = null;
         ServiceBusCbsResponder cbs = null;
+        boolean createAttempted = false;
         boolean startAttempted = false;
         boolean containerStarted = false;
         try {
@@ -196,6 +197,7 @@ public class ServiceBusNamespaceManager {
                     .withLogRotation()
                     .build();
 
+            createAttempted = true;
             containerId = lifecycleManager.create(spec);
             lifecycleManager.copyFileToContainer(containerId, brokerXml,
                     "/var/lib/artemis-instance/etc-override/broker.xml");
@@ -239,7 +241,9 @@ public class ServiceBusNamespaceManager {
                     namespaceName, amqpEndpoint, amqpsEndpoint);
             return state;
         } catch (RuntimeException e) {
-            boolean configuredPortsReusable = !startAttempted || containerStarted
+            boolean configuredPortsReusable = !createAttempted
+                    || (containerId != null && !startAttempted)
+                    || containerStarted
                     || (containerId != null && lifecycleManager.isContainerRunning(containerId));
             boolean portsReleased = false;
             try {

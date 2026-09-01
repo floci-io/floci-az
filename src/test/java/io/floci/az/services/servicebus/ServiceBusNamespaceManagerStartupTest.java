@@ -93,6 +93,50 @@ class ServiceBusNamespaceManagerStartupTest {
     }
 
     @Test
+    void failedContainerCreationDoesNotReportConfiguredPortsReleased() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+        String containerName = "floci-az-servicebus-failed";
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("failed")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate(containerName))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec))
+                .thenThrow(new IllegalStateException("configured port is already allocated"));
+        when(lifecycleManager.removeIfExistsAndConfirm(containerName)).thenReturn(true);
+
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        assertFalse(error.portsReleased());
+        verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
+    }
+
+    @Test
     void endpointResolutionFailureReportsReleasedPortsAfterCleanup() throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
