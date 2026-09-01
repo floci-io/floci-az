@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions are welcome — bug fixes, new service operations, documentation improvements, or test coverage.
+Contributions are welcome: bug fixes, new service operations, documentation improvements, or test coverage.
 
 ## Development Environment
 
@@ -12,10 +12,10 @@ Contributions are welcome — bug fixes, new service operations, documentation i
 
 ```
 src/main/java/io/floci/az/
-├── config/          # EmulatorConfig — all settings via SmallRye Config
+├── config/          # EmulatorConfig : all settings via SmallRye Config
 ├── core/
 │   ├── auth/        # AuthPipeline, SharedKeyAuthVerifier, BearerTokenVerifier, SasTokenParser
-│   ├── dns/         # EmbeddedDnsServer — DNS resolver injected into function containers
+│   ├── dns/         # EmbeddedDnsServer : DNS resolver injected into function containers
 │   ├── docker/      # DockerClientProducer, DockerHostResolver, ContainerDetector
 │   └── storage/     # StorageBackend, StorageFactory, InMemoryStorage, HybridStorage, WalStorage
 └── services/
@@ -39,7 +39,7 @@ compatibility-tests/
 ./mvnw test
 ```
 
-### Compatibility tests — local (requires running emulator)
+### Compatibility tests: local (requires running emulator)
 
 Start the emulator first:
 ```bash
@@ -54,7 +54,7 @@ make test-node-compat   # Node.js SDK (npm)
 make test-cpp-compat    # C++ SDK (Docker only: the toolchain lives in the image)
 ```
 
-### Compatibility tests — Docker (matches CI)
+### Compatibility tests: Docker (matches CI)
 
 ```bash
 make compat-docker
@@ -66,7 +66,13 @@ Azure Functions invocation tests.
 
 ## Code Style
 
-- Follow existing patterns — controllers stay thin, logic lives in service classes.
+- Follow existing patterns: controllers stay thin, logic lives in service classes.
 - Errors returned to clients must use `AzureErrorResponse` (never raw strings or arbitrary JSON).
 - New config keys belong in `EmulatorConfig`; document them in `docs/configuration/application-yml.md`.
 - New service operations should have a corresponding compatibility test.
+
+## Releases
+
+Stable releases ship on the **1st and 3rd Tuesday of each month**. Merging to `main` does not cut a release: the change rides the next train, and is in that night's `nightly` image either way.
+
+Maintainers cut releases from `main` with the Release Cut workflow, which runs semantic-release over the Conventional Commits since the last tag. That is why the commit type matters: `feat:` and `fix:` move the version, `docs:` and `chore:` do not. `CHANGELOG.md` is generated from those messages and is never edited by hand.
