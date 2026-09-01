@@ -21,10 +21,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,7 +98,7 @@ class ServiceBusHandlerRuleConsistencyTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void failedStorageBatchRestoresPreviousBrokerFilter() throws Exception {
+    void failedStorageBatchRetriesPreviousBrokerFilter() throws Exception {
         String oldKey = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/old";
         ServiceBusModels.RuleEntity oldRule = new ServiceBusModels.RuleEntity(
                 "topic", "subscription", "old", "FalseFilter",
@@ -113,6 +115,11 @@ class ServiceBusHandlerRuleConsistencyTest {
         when(store.scan(any())).thenReturn(List.of(stored));
         doThrow(new IllegalStateException("storage unavailable"))
                 .when(store).applyBatch(any(), any());
+        doNothing()
+                .doThrow(new IllegalStateException("first rollback failed"))
+                .doNothing()
+                .when(namespaceManager).jolokiaUpdateSubscriptionFilter(
+                        anyString(), anyString(), anyString(), anyString());
         ServiceBusHandler handler = new ServiceBusHandler(
                 mock(EmulatorConfig.class), namespaceManager, storageFactory);
 
@@ -124,7 +131,7 @@ class ServiceBusHandlerRuleConsistencyTest {
         mutation.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_ALL);
         mutation.verify(store).applyBatch(any(), any());
-        mutation.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+        mutation.verify(namespaceManager, times(2)).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
     }
 }

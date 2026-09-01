@@ -264,6 +264,12 @@ public class ServiceBusTopologyLoader {
                         topicName, subscription.name());
                 return 0;
             }
+            if (rejected && desiredRules.isEmpty()) {
+                LOG.warnf("Keeping the implicit $Default rule for new subscription '%s/%s' because "
+                                + "every declared rule was rejected",
+                        topicName, subscription.name());
+                return 0;
+            }
         }
 
         String path = topicName + "/" + subscription.name();

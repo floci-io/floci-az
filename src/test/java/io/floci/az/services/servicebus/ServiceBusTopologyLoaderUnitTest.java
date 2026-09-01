@@ -213,4 +213,54 @@ class ServiceBusTopologyLoaderUnitTest {
                 eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
                 argThat(rules -> rules.size() == 1 && "valid".equals(rules.getFirst().name())));
     }
+
+    @Test
+    void newSubscriptionWithOnlyRejectedRulesKeepsDefault() throws Exception {
+        Path topologyFile = tempDir.resolve("rejected-rules.json");
+        Files.writeString(topologyFile, """
+                {
+                  "UserConfig": {
+                    "Namespaces": [{
+                      "Name": "namespace",
+                      "Topics": [{
+                        "Name": "topic",
+                        "Subscriptions": [{
+                          "Name": "subscription",
+                          "Rules": [{
+                            "Name": "invalid",
+                            "Properties": {
+                              "FilterType": "Sql",
+                              "SqlFilter": { "SqlExpression": "priority % 2 = 0" }
+                            }
+                          }]
+                        }]
+                      }]
+                    }]
+                  }
+                }
+                """);
+
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ServiceBusHandler handler = mock(ServiceBusHandler.class);
+        ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(serviceBus.topologyFile()).thenReturn(Optional.of(topologyFile.toString()));
+        when(serviceBus.mocked()).thenReturn(true);
+        when(namespaceManager.getNamespace(anyString())).thenReturn(Optional.empty());
+        when(handler.handleCreateTopic(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), any(), any()))
+                .thenReturn(Response.status(201).build());
+        when(handler.handleCreateSubscription(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                eq(false), anyString(), any(), any()))
+                .thenReturn(Response.status(201).build());
+
+        new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
+
+        verify(handler, never()).replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any());
+    }
 }

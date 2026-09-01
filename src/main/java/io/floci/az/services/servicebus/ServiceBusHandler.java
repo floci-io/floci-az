@@ -68,6 +68,7 @@ import java.util.stream.Collectors;
 public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(ServiceBusHandler.class);
+    private static final int BROKER_ROLLBACK_ATTEMPTS = 3;
 
     private static final String ATOM_XML_CONTENT_TYPE = "application/atom+xml;charset=utf-8";
     private static final String XML_PROLOG = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
@@ -904,7 +905,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         } catch (RuntimeException e) {
             LOG.errorf(e, "Failed to persist rules for subscription '%s/%s' in namespace '%s'",
                     topicName, subName, namespace);
-            if (!applySubscriptionFilter(namespace, topicName, subName, previousSelector)) {
+            if (!restoreSubscriptionFilter(namespace, topicName, subName, previousSelector)) {
                 LOG.errorf("Could not restore the previous broker filter for subscription '%s/%s' "
                                 + "in namespace '%s' after rule storage failed",
                         topicName, subName, namespace);
@@ -939,6 +940,21 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     topicName, subName, namespace);
             return false;
         }
+    }
+
+    private boolean restoreSubscriptionFilter(String namespace, String topicName, String subName,
+                                              String selector) {
+        for (int attempt = 1; attempt <= BROKER_ROLLBACK_ATTEMPTS; attempt++) {
+            if (applySubscriptionFilter(namespace, topicName, subName, selector)) {
+                return true;
+            }
+            if (attempt < BROKER_ROLLBACK_ATTEMPTS) {
+                LOG.warnf("Retrying broker filter rollback for subscription '%s/%s' in namespace "
+                                + "'%s' after attempt %d of %d failed",
+                        topicName, subName, namespace, attempt, BROKER_ROLLBACK_ATTEMPTS);
+            }
+        }
+        return false;
     }
 
     private static void warnOnActionIgnored(ServiceBusModels.RuleEntity rule) {
