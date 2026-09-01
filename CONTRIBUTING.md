@@ -116,8 +116,8 @@ Docker images are never built on contributor PRs, so merging to `main` is always
 ## Release Process (maintainers)
 
 Stable releases ship on the **1st and 3rd Tuesday of each month**. Merging to `main` does
-not cut a release: the change rides the next train, and is in that night's `nightly` image
-either way.
+not cut a release: the change rides the next train, and reaches the `nightly` image on the
+next nightly build.
 
 Releases are cut from `main` with the **Release Cut** workflow
 (Actions → Release Cut → Run workflow). semantic-release analyzes the
