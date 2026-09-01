@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: graalvm/setup-graalvm@0def53c0fd8534bc13416c9469f5be45265824fd # v1
+      - uses: graalvm/setup-graalvm@5298d94fb55a4f185c602eeac5de1b553882abe2 # v1
         with:
           java-version: '25'
           distribution: 'mandrel'
@@ -56,7 +56,7 @@ jobs:
           cp target/*-runner native/arm64/application
           cp target/*.so native/arm64/ 2>/dev/null || true
 
-      - uses: docker/setup-buildx-action@v4.2.0
+      - uses: docker/setup-buildx-action@v4.3.0
 
       - name: Build native Docker image
         uses: docker/build-push-action@v7
@@ -156,7 +156,7 @@ jobs:
         with:
           sparse-checkout: compatibility-tests
 
-      - uses: docker/setup-buildx-action@v4.2.0
+      - uses: docker/setup-buildx-action@v4.3.0
 
       - name: Build test image
         uses: docker/build-push-action@v7
