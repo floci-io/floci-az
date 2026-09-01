@@ -277,23 +277,25 @@ public class ServiceBusTopologyLoader {
                     topicName, subscriptionName);
             return RuleReconcileResult.success(0);
         }
-        if (rulePlan.rejected() && rulePlan.desiredRules().isEmpty()) {
+        boolean keepingImplicitDefault = rulePlan.rejected() && rulePlan.desiredRules().isEmpty();
+        List<ServiceBusModels.RuleEntity> desiredRules = rulePlan.desiredRules();
+        if (keepingImplicitDefault) {
             LOG.warnf("Keeping the implicit $Default rule for new subscription '%s/%s' because "
                             + "every declared rule was rejected",
                     topicName, subscriptionName);
-            return RuleReconcileResult.success(0);
-        }
-        if (subscriptionCreated && rulePlan.desiredRules().size() == 1) {
-            return RuleReconcileResult.success(rulePlan.declaredRulesEmpty() ? 0 : 1);
+            desiredRules = List.of(ServiceBusModels.RuleEntity.trueFilter(
+                    topicName, subscriptionName, DEFAULT_RULE));
         }
 
         String path = topicName + "/" + subscriptionName;
         Response response = handler.replaceRules(
-                ACCOUNT, namespace, topicName, subscriptionName, rulePlan.desiredRules());
+                ACCOUNT, namespace, topicName, subscriptionName, desiredRules);
         if (!succeeded("rules", path, response)) {
             return RuleReconcileResult.failure();
         }
-        int appliedRules = rulePlan.declaredRulesEmpty() ? 0 : rulePlan.desiredRules().size();
+        int appliedRules = rulePlan.declaredRulesEmpty() || keepingImplicitDefault
+                ? 0
+                : rulePlan.desiredRules().size();
         return RuleReconcileResult.success(appliedRules);
     }
 

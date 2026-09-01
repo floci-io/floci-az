@@ -166,6 +166,7 @@ public class ServiceBusNamespaceManager {
 
         String containerId = null;
         ServiceBusCbsResponder cbs = null;
+        boolean startAttempted = false;
         boolean containerStarted = false;
         try {
             if (!lifecycleManager.removeIfExistsAndConfirm(containerName)) {
@@ -209,6 +210,7 @@ public class ServiceBusNamespaceManager {
             lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
                     ARTEMIS_AMQP_PATH);
 
+            startAttempted = true;
             ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
             containerStarted = true;
 
@@ -237,12 +239,12 @@ public class ServiceBusNamespaceManager {
                     namespaceName, amqpEndpoint, amqpsEndpoint);
             return state;
         } catch (RuntimeException e) {
-            boolean portsWereBound = containerStarted
+            boolean configuredPortsReusable = !startAttempted || containerStarted
                     || (containerId != null && lifecycleManager.isContainerRunning(containerId));
             boolean portsReleased = false;
             try {
                 cleanupFailedStart(namespaceName, containerName, containerId, cbs);
-                portsReleased = portsWereBound;
+                portsReleased = configuredPortsReusable;
             } catch (RuntimeException cleanupFailure) {
                 e.addSuppressed(cleanupFailure);
             }

@@ -72,7 +72,7 @@ class ServiceBusNamespaceManagerStartupTest {
     }
 
     @Test
-    void earlyFailureDoesNotReportUnprovenPortsReleased() throws Exception {
+    void cleanedPreStartFailureReportsPortsReleased() throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class);
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
         ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
@@ -88,7 +88,7 @@ class ServiceBusNamespaceManagerStartupTest {
                 ServiceBusNamespaceManager.NamespaceStartException.class,
                 () -> manager.startNamespace("failed", 5672, 5671));
 
-        assertFalse(error.portsReleased());
+        assertTrue(error.portsReleased());
         verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
     }
 

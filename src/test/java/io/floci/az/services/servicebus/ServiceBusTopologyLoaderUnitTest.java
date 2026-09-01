@@ -154,7 +154,7 @@ class ServiceBusTopologyLoaderUnitTest {
     }
 
     @Test
-    void newSubscriptionStartsWithOnlyValidDeclaredRule() throws Exception {
+    void newSubscriptionVerifiesOnlyValidDeclaredRule() throws Exception {
         Path topologyFile = tempDir.resolve("partial-replacement.json");
         Files.writeString(topologyFile, """
                 {
@@ -207,6 +207,9 @@ class ServiceBusTopologyLoaderUnitTest {
                 any(ServiceBusEntityXml.DeliverySettings.class),
                 any(ServiceBusModels.RuleEntity.class)))
                 .thenReturn(Response.status(201).build());
+        when(handler.replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any()))
+                .thenReturn(Response.ok().build());
         new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
 
         verify(handler).handleCreateSubscription(
@@ -214,8 +217,9 @@ class ServiceBusTopologyLoaderUnitTest {
                 eq(false), any(ServiceBusEntityXml.MessageLifetimeSettings.class),
                 any(ServiceBusEntityXml.DeliverySettings.class),
                 argThat(rule -> "valid".equals(rule.name())));
-        verify(handler, never()).replaceRules(
-                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any());
+        verify(handler).replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                argThat(rules -> rules.size() == 1 && "valid".equals(rules.getFirst().name())));
     }
 
     @Test
@@ -263,11 +267,15 @@ class ServiceBusTopologyLoaderUnitTest {
                 any(ServiceBusEntityXml.DeliverySettings.class),
                 any(ServiceBusModels.RuleEntity.class)))
                 .thenReturn(Response.status(201).build());
+        when(handler.replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any()))
+                .thenReturn(Response.ok().build());
 
         new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
 
-        verify(handler, never()).replaceRules(
-                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any());
+        verify(handler).replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                argThat(rules -> rules.size() == 1 && "$Default".equals(rules.getFirst().name())));
     }
 
     @Test
@@ -282,22 +290,13 @@ class ServiceBusTopologyLoaderUnitTest {
                         "Name": "topic",
                         "Subscriptions": [{
                           "Name": "subscription",
-                          "Rules": [
-                            {
+                          "Rules": [{
                               "Name": "first",
                               "Properties": {
                                 "FilterType": "Sql",
                                 "SqlFilter": { "SqlExpression": "priority > 2" }
                               }
-                            },
-                            {
-                              "Name": "second",
-                              "Properties": {
-                                "FilterType": "Sql",
-                                "SqlFilter": { "SqlExpression": "region = 'eu'" }
-                              }
-                            }
-                          ]
+                            }]
                         }]
                       }]
                     }]
@@ -338,6 +337,6 @@ class ServiceBusTopologyLoaderUnitTest {
                         && "priority > 2".equals(rule.sqlExpression())));
         verify(handler).replaceRules(
                 eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
-                argThat(rules -> rules.size() == 2));
+                argThat(rules -> rules.size() == 1 && "first".equals(rules.getFirst().name())));
     }
 }
