@@ -18,9 +18,11 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,7 +32,7 @@ class ServiceBusHandlerRuleConsistencyTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void failedBrokerUpdateRestoresDeletedRule() throws Exception {
+    void failedBrokerUpdateDoesNotDeleteStoredRule() throws Exception {
         String key = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/existing";
         ServiceBusModels.RuleEntity rule = ServiceBusModels.RuleEntity.trueFilter(
                 "topic", "subscription", "existing");
@@ -41,9 +43,8 @@ class ServiceBusHandlerRuleConsistencyTest {
         ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
         when(storageFactory.create("servicebus")).thenReturn(store);
         when(store.get(key)).thenReturn(Optional.of(stored));
-        when(store.scan(any())).thenReturn(List.of(), List.of(stored));
+        when(store.scan(any())).thenReturn(List.of(stored));
         doThrow(new IllegalStateException("Jolokia unavailable"))
-                .doNothing()
                 .when(namespaceManager)
                 .jolokiaUpdateSubscriptionFilter(
                         anyString(), anyString(), anyString(), anyString());
@@ -54,11 +55,39 @@ class ServiceBusHandlerRuleConsistencyTest {
                 "account", "namespace", "topic", "subscription", "existing");
 
         assertEquals(500, response.getStatus());
-        verify(store).put(key, stored);
-        InOrder updates = inOrder(namespaceManager);
-        updates.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+        verify(store, never()).delete(key);
+        verify(store, never()).put(anyString(), any());
+        verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
-        updates.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void replacementCommitsStorageAfterBrokerUpdate() throws Exception {
+        String oldKey = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/old";
+        String newKey = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/new";
+        ServiceBusModels.RuleEntity oldRule = ServiceBusModels.RuleEntity.trueFilter(
+                "topic", "subscription", "old");
+        ServiceBusModels.RuleEntity newRule = ServiceBusModels.RuleEntity.trueFilter(
+                "topic", "subscription", "new");
+        StoredObject stored = new StoredObject(
+                oldKey, MAPPER.writeValueAsBytes(oldRule), Map.of(), Instant.now(), oldKey);
+        StorageBackend<String, StoredObject> store = mock(StorageBackend.class);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+        when(storageFactory.create("servicebus")).thenReturn(store);
+        when(store.scan(any())).thenReturn(List.of(stored));
+        ServiceBusHandler handler = new ServiceBusHandler(
+                mock(EmulatorConfig.class), namespaceManager, storageFactory);
+
+        Response response = handler.replaceRules(
+                "account", "namespace", "topic", "subscription", List.of(newRule));
+
+        assertEquals(200, response.getStatus());
+        InOrder mutation = inOrder(namespaceManager, store);
+        mutation.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
                 "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_ALL);
+        mutation.verify(store).delete(oldKey);
+        mutation.verify(store).put(eq(newKey), any());
     }
 }

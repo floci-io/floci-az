@@ -10,12 +10,11 @@ import org.jboss.logging.Logger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Applies a declarative Service Bus topology at startup from the official emulator's
@@ -23,9 +22,9 @@ import java.util.Set;
  * the same {@link ServiceBusHandler} paths the management API uses, so validation, storage,
  * and Artemis provisioning behave exactly as if an SDK had created them.
  *
- * <p>Rule semantics match the official emulator: valid declarations reconcile exactly and
- * remove the implicit {@code $Default} TrueFilter; a rejected replacement preserves the last
- * valid same-named rule, while a subscription without declarations keeps {@code $Default}.
+ * <p>Rule semantics match the official emulator: valid declarations replace the full rule set
+ * atomically and remove the implicit {@code $Default} TrueFilter. A rejected reload leaves an
+ * existing subscription unchanged, while a new subscription keeps only valid declarations.
  *
  * <p>Loading is best-effort and never fails startup: an unreadable file is skipped with an
  * {@code ERROR}, an invalid entity is skipped with an {@code ERROR} while the rest of the
@@ -66,17 +65,23 @@ public class ServiceBusTopologyLoader {
         this.namespaceManager = namespaceManager;
     }
 
-    public void load() {
+    /**
+     * Loads configured topology when present.
+     *
+     * @return {@code true} when a topology file was discovered, including an invalid file that
+     *         was logged and skipped; {@code false} when no file was discovered
+     */
+    public boolean load() {
         Path file = resolveFile();
         if (file == null) {
-            return;
+            return false;
         }
         ServiceBusTopologyFile.Root root;
         try {
             root = MAPPER.readValue(Files.readAllBytes(file), ServiceBusTopologyFile.Root.class);
         } catch (Exception e) {
             LOG.errorf(e, "Could not parse Service Bus topology file '%s' — no topology loaded", file);
-            return;
+            return true;
         }
         List<ServiceBusTopologyFile.Namespace> namespaces =
                 root == null || root.userConfig() == null || root.userConfig().namespaces() == null
@@ -84,7 +89,7 @@ public class ServiceBusTopologyLoader {
                         : root.userConfig().namespaces();
         if (namespaces.isEmpty()) {
             LOG.warnf("Service Bus topology file '%s' declares no namespaces", file);
-            return;
+            return true;
         }
 
         Tally tally = new Tally();
@@ -109,6 +114,7 @@ public class ServiceBusTopologyLoader {
         LOG.infov("Loaded Service Bus topology from {0}: {1} namespace(s), {2} queue(s), "
                         + "{3} topic(s), {4} subscription(s), {5} rule(s)",
                 file, tally.namespaces, tally.queues, tally.topics, tally.subscriptions, tally.rules);
+        return true;
     }
 
     private Path resolveFile() {
@@ -206,6 +212,7 @@ public class ServiceBusTopologyLoader {
         ServiceBusTopologyFile.EntityProperties p = properties(subscription.properties());
         String path = topicName + "/" + subscription.name();
         warnOnForwarding("subscription", path, p);
+        boolean created;
         try {
             Response response = handler.handleCreateSubscription(ACCOUNT, namespace,
                     topicName, subscription.name(), Boolean.TRUE.equals(p.requiresSession()),
@@ -213,86 +220,59 @@ public class ServiceBusTopologyLoader {
             if (!succeeded("subscription", path, response)) {
                 return false;
             }
+            created = response.getStatus() == 201;
         } catch (IllegalArgumentException e) {
             LOG.errorf("Skipping topology subscription '%s': %s", path, e.getMessage());
             return false;
         }
 
-        int applied = reconcileRules(namespace, topicName, subscription);
+        int applied = reconcileRules(namespace, topicName, subscription, created);
         tally.rules += applied;
         return true;
     }
 
     private int reconcileRules(String namespace, String topicName,
-                               ServiceBusTopologyFile.Subscription subscription) {
+                               ServiceBusTopologyFile.Subscription subscription,
+                               boolean subscriptionCreated) {
         List<ServiceBusTopologyFile.Rule> declaredRules = orEmpty(subscription.rules());
-        Set<String> existingRuleNames = new HashSet<>();
-        for (ServiceBusModels.RuleEntity existing :
-                handler.loadRules(ACCOUNT, namespace, topicName, subscription.name())) {
-            existingRuleNames.add(existing.name());
-        }
-        Set<String> retainedRuleNames = new HashSet<>();
-        int applied = 0;
-        boolean ruleRejected = false;
+        List<ServiceBusModels.RuleEntity> desiredRules = new ArrayList<>();
+        boolean rejected = false;
 
         if (declaredRules.isEmpty()) {
-            ServiceBusModels.RuleEntity defaultRule = ServiceBusModels.RuleEntity.trueFilter(
-                    topicName, subscription.name(), DEFAULT_RULE);
-            if (succeeded("rule", topicName + "/" + subscription.name() + "/" + DEFAULT_RULE,
-                    handler.putRule(ACCOUNT, namespace, defaultRule))) {
-                retainedRuleNames.add(DEFAULT_RULE);
-            } else if (existingRuleNames.contains(DEFAULT_RULE)) {
-                retainedRuleNames.add(DEFAULT_RULE);
-            }
+            desiredRules.add(ServiceBusModels.RuleEntity.trueFilter(
+                    topicName, subscription.name(), DEFAULT_RULE));
         } else {
             for (ServiceBusTopologyFile.Rule rule : declaredRules) {
                 if (!hasName("rule", rule == null ? null : rule.name())) {
-                    ruleRejected = true;
+                    rejected = true;
                     continue;
                 }
-                if (applyRule(namespace, topicName, subscription.name(), rule)) {
-                    retainedRuleNames.add(rule.name());
-                    applied++;
-                } else {
-                    ruleRejected = true;
-                    if (!DEFAULT_RULE.equals(rule.name())
-                            && existingRuleNames.contains(rule.name())) {
-                        retainedRuleNames.add(rule.name());
-                    }
+                String path = topicName + "/" + subscription.name() + "/" + rule.name();
+                try {
+                    ServiceBusModels.RuleEntity entity = toRuleEntity(
+                            topicName, subscription.name(), rule);
+                    ServiceBusRuleSelector.forRule(entity);
+                    desiredRules.add(entity);
+                } catch (IllegalArgumentException e) {
+                    rejected = true;
+                    LOG.errorf("Skipping topology rule '%s': %s", path, e.getMessage());
                 }
             }
-            if (ruleRejected && applied == 0) {
-                // The official emulator drops invalid declarations before seeding, leaving the
-                // subscription's implicit $Default rule (or its previous valid rule set) intact.
-                retainedRuleNames.addAll(existingRuleNames);
-                LOG.warnf("Keeping existing topology rules for '%s/%s' because at least one "
-                                + "declared rule was rejected",
+            if (rejected && !subscriptionCreated) {
+                LOG.warnf("Keeping existing topology rules for '%s/%s' because its replacement "
+                                + "contains a rejected rule",
                         topicName, subscription.name());
+                return 0;
             }
         }
 
-        for (ServiceBusModels.RuleEntity existing :
-                handler.loadRules(ACCOUNT, namespace, topicName, subscription.name())) {
-            if (!retainedRuleNames.contains(existing.name())) {
-                succeeded("rule", topicName + "/" + subscription.name() + "/" + existing.name(),
-                        handler.handleDeleteRule(
-                                ACCOUNT, namespace, topicName, subscription.name(), existing.name()));
-            }
+        String path = topicName + "/" + subscription.name();
+        Response response = handler.replaceRules(
+                ACCOUNT, namespace, topicName, subscription.name(), desiredRules);
+        if (!succeeded("rules", path, response)) {
+            return 0;
         }
-        return applied;
-    }
-
-    private boolean applyRule(String namespace, String topicName, String subName,
-                               ServiceBusTopologyFile.Rule rule) {
-        String path = topicName + "/" + subName + "/" + rule.name();
-        ServiceBusModels.RuleEntity entity;
-        try {
-            entity = toRuleEntity(topicName, subName, rule);
-        } catch (IllegalArgumentException e) {
-            LOG.errorf("Skipping topology rule '%s': %s", path, e.getMessage());
-            return false;
-        }
-        return succeeded("rule", path, handler.putRule(ACCOUNT, namespace, entity));
+        return declaredRules.isEmpty() ? 0 : desiredRules.size();
     }
 
     static ServiceBusModels.RuleEntity toRuleEntity(String topicName, String subName,

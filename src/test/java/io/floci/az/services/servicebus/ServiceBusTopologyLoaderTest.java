@@ -130,10 +130,10 @@ class ServiceBusTopologyLoaderTest {
     }
 
     @Test
-    void rejectedDeclaredRulesRetainDefault() {
+    void rejectedDeclaredRulesDoNotRetainMatchAllDefault() {
         given().when().get(BASE + "/topic.orders/subscriptions/rejected/rules")
                 .then().statusCode(200)
-                .body(containsString("$Default"))
+                .body(not(containsString("$Default")))
                 .body(not(containsString("unsupported")));
     }
 

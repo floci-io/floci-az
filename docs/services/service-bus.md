@@ -58,8 +58,12 @@ attach to pre-provisioned entities and never create them. Semantics:
 
 - The first namespace binds the configured AMQP ports (`amqp-port`/`amqp-tls-port`); the official
   emulator supports a single namespace, and additional namespaces get dynamic ports.
+- A discovered topology file takes precedence over `start-on-boot`; its first namespace owns the
+  configured ports, and no separate `default` namespace is started.
 - A subscription with declared `Rules` gets exactly those rules — the implicit `$Default`
   TrueFilter is removed, as in the official emulator. A subscription with no rules keeps `$Default`.
+- Rule replacement is atomic. If a reload of an existing subscription contains an invalid rule,
+  its previous complete rule set remains active; a new subscription keeps only valid declarations.
 - Entity properties honor the same validation as the management API (`LockDuration` ≤ `PT5M`,
   `MaxDeliveryCount` 1–2000, duplicate-detection window `PT20S`–`P7D`).
 - `ForwardTo`/`ForwardDeadLetteredMessagesTo` are not emulated and log a warning if present.
@@ -212,7 +216,7 @@ services:
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ENABLED` | `true` | Enable/disable the service |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED` | `true` | Mocked mode (management plane only, no Artemis) |
-| `FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT` | `false` | Start the `default` namespace (and its Artemis sidecar) with the emulator instead of on the first management call |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT` | `false` | Start the `default` namespace with the emulator when no topology file is discovered |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_TOPOLOGY_FILE` | *(unset)* | Path to a declarative topology `Config.json`; when unset, `/ServiceBus_Emulator/ConfigFiles/Config.json` is probed |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` | `5673` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_TLS_PORT` | `5674` | Host port for AMQPS |
@@ -228,7 +232,7 @@ floci-az:
     service-bus:
       enabled: true
       mocked: true              # true = management plane only, no Docker. false = real Artemis sidecar
-      start-on-boot: false      # true = default namespace starts with the emulator (see "Deterministic endpoint")
+      start-on-boot: false      # true = default namespace starts when no topology file is discovered
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"

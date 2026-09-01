@@ -11,7 +11,7 @@ import org.jboss.logging.Logger;
 /**
  * Lifecycle manager for Service Bus sidecar containers.
  *
- * When {@code mocked = false} (the default), a namespace starts on its first entity-management
+ * When {@code mocked = false}, a namespace starts on its first entity-management
  * call -- not on boot. Namespaces can also be started explicitly via
  * PUT /{account}-servicebus/namespaces/{ns}. All running namespaces are stopped on shutdown.
  *
@@ -41,35 +41,50 @@ public class ServiceBusContainerManager {
         if (!sb.enabled()) {
             return;
         }
-        if (sb.mocked()) {
+        boolean mocked = sb.mocked();
+        if (mocked) {
             LOG.info("Service Bus service mocked — skipping container startup");
+        } else {
+            try {
+                int reaped = namespaceManager.reapOrphanedContainers();
+                if (reaped > 0) {
+                    LOG.infov("Removed {0} orphaned Service Bus container(s)", reaped);
+                }
+            } catch (Exception e) {
+                LOG.errorf(e, "Could not reap orphaned Service Bus containers");
+            }
+        }
+
+        if (loadTopology()) {
             if (sb.startOnBoot()) {
-                namespaceManager.startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
+                LOG.info("Service Bus topology file takes precedence over start-on-boot");
             }
             return;
         }
-        try {
-            int reaped = namespaceManager.reapOrphanedContainers();
-            if (reaped > 0) {
-                LOG.infov("Removed {0} orphaned Service Bus container(s)", reaped);
-            }
-        } catch (Exception e) {
-            LOG.errorf(e, "Could not reap orphaned Service Bus containers");
-        }
+
         if (sb.startOnBoot()) {
-            try {
-                namespaceManager.startNamespace(
-                        ServiceBusNamespaceManager.DEFAULT_NAMESPACE, sb.amqpPort(), sb.amqpTlsPort());
-            } catch (Exception e) {
-                LOG.errorf(e, "Could not start the default Service Bus namespace on boot");
+            if (mocked) {
+                namespaceManager.startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
+            } else {
+                try {
+                    namespaceManager.startNamespace(
+                            ServiceBusNamespaceManager.DEFAULT_NAMESPACE,
+                            sb.amqpPort(), sb.amqpTlsPort());
+                } catch (Exception e) {
+                    LOG.errorf(e, "Could not start the default Service Bus namespace on boot");
+                }
             }
-        } else {
+        } else if (!mocked) {
             LOG.info("Service Bus service enabled — namespace starts on first entity management call");
         }
+    }
+
+    private boolean loadTopology() {
         try {
-            topologyLoader.load();
+            return topologyLoader.load();
         } catch (Exception e) {
             LOG.errorf(e, "Could not load the Service Bus topology file");
+            return false;
         }
     }
 

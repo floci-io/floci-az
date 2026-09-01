@@ -12,6 +12,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -131,8 +132,6 @@ class ServiceBusTopologyLoaderUnitTest {
         EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
         ServiceBusHandler handler = mock(ServiceBusHandler.class);
         ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
-        ServiceBusModels.RuleEntity existing = ServiceBusModels.RuleEntity.trueFilter(
-                "topic", "subscription", "existing");
         when(config.services()).thenReturn(services);
         when(services.serviceBus()).thenReturn(serviceBus);
         when(serviceBus.topologyFile()).thenReturn(Optional.of(topologyFile.toString()));
@@ -144,20 +143,16 @@ class ServiceBusTopologyLoaderUnitTest {
         when(handler.handleCreateSubscription(
                 eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
                 eq(false), anyString(), any(), any()))
-                .thenReturn(Response.status(201).build());
-        when(handler.putRule(eq("devstoreaccount1"), eq("namespace"), any()))
-                .thenReturn(Response.status(400).build());
-        when(handler.loadRules("devstoreaccount1", "namespace", "topic", "subscription"))
-                .thenReturn(List.of(existing));
+                .thenReturn(Response.ok().build());
 
         new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
 
-        verify(handler, never()).handleDeleteRule(
-                "devstoreaccount1", "namespace", "topic", "subscription", "existing");
+        verify(handler, never()).replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any());
     }
 
     @Test
-    void validRuleRemovesStaleAndRejectedDefaultRules() throws Exception {
+    void newSubscriptionAppliesOnlyValidDeclaredRules() throws Exception {
         Path topologyFile = tempDir.resolve("partial-replacement.json");
         Files.writeString(topologyFile, """
                 {
@@ -196,10 +191,6 @@ class ServiceBusTopologyLoaderUnitTest {
         EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
         ServiceBusHandler handler = mock(ServiceBusHandler.class);
         ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
-        ServiceBusModels.RuleEntity stale = ServiceBusModels.RuleEntity.trueFilter(
-                "topic", "subscription", "stale");
-        ServiceBusModels.RuleEntity defaultRule = ServiceBusModels.RuleEntity.trueFilter(
-                "topic", "subscription", "$Default");
         when(config.services()).thenReturn(services);
         when(services.serviceBus()).thenReturn(serviceBus);
         when(serviceBus.topologyFile()).thenReturn(Optional.of(topologyFile.toString()));
@@ -212,25 +203,14 @@ class ServiceBusTopologyLoaderUnitTest {
                 eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
                 eq(false), anyString(), any(), any()))
                 .thenReturn(Response.status(201).build());
-        when(handler.putRule(eq("devstoreaccount1"), eq("namespace"), any()))
-                .thenAnswer(invocation -> {
-                    ServiceBusModels.RuleEntity rule = invocation.getArgument(2);
-                    return Response.status("valid".equals(rule.name()) ? 201 : 400).build();
-                });
-        when(handler.loadRules("devstoreaccount1", "namespace", "topic", "subscription"))
-                .thenReturn(List.of(stale, defaultRule));
-        when(handler.handleDeleteRule(
-                "devstoreaccount1", "namespace", "topic", "subscription", "stale"))
-                .thenReturn(Response.ok().build());
-        when(handler.handleDeleteRule(
-                "devstoreaccount1", "namespace", "topic", "subscription", "$Default"))
+        when(handler.replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"), any()))
                 .thenReturn(Response.ok().build());
 
         new ServiceBusTopologyLoader(config, handler, namespaceManager).load();
 
-        verify(handler).handleDeleteRule(
-                "devstoreaccount1", "namespace", "topic", "subscription", "stale");
-        verify(handler).handleDeleteRule(
-                "devstoreaccount1", "namespace", "topic", "subscription", "$Default");
+        verify(handler).replaceRules(
+                eq("devstoreaccount1"), eq("namespace"), eq("topic"), eq("subscription"),
+                argThat(rules -> rules.size() == 1 && "valid".equals(rules.getFirst().name())));
     }
 }

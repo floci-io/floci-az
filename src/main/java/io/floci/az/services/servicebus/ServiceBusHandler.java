@@ -22,10 +22,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * HTTP management handler for the Service Bus service.
@@ -827,12 +831,14 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
 
         String key = ruleKey(account, namespace, rule.topicName(), rule.subscriptionName(), rule.name());
         Optional<StoredObject> previous = store.get(key);
-        store.put(key, toStoredObject(key, rule));
-        warnOnActionIgnored(rule);
-        if (!applySubscriptionFilter(account, namespace, rule.topicName(), rule.subscriptionName())) {
-            restoreRuleMutation(key, previous, account, namespace,
-                    rule.topicName(), rule.subscriptionName());
-            return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
+        List<ServiceBusModels.RuleEntity> desiredRules = new ArrayList<>(
+                loadRules(account, namespace, rule.topicName(), rule.subscriptionName()));
+        desiredRules.removeIf(existing -> existing.name().equals(rule.name()));
+        desiredRules.add(rule);
+        Response replacement = replaceRules(
+                account, namespace, rule.topicName(), rule.subscriptionName(), desiredRules);
+        if (replacement.getStatus() / 100 != 2) {
+            return replacement;
         }
 
         return atomEntry(previous.isPresent() ? 200 : 201, ruleEntryXml(namespace, rule));
@@ -845,24 +851,44 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         if (previous.isEmpty()) {
             return notFoundAtom("Rule not found: " + ruleName);
         }
-        store.delete(key);
-        if (!applySubscriptionFilter(account, namespace, topicName, subName)) {
-            restoreRuleMutation(key, previous, account, namespace, topicName, subName);
-            return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
-        }
-        return Response.ok().build();
+        List<ServiceBusModels.RuleEntity> desiredRules = loadRules(account, namespace, topicName, subName)
+                .stream()
+                .filter(rule -> !rule.name().equals(ruleName))
+                .toList();
+        return replaceRules(account, namespace, topicName, subName, desiredRules);
     }
 
-    private void restoreRuleMutation(String key, Optional<StoredObject> previous,
-                                     String account, String namespace,
-                                     String topicName, String subName) {
-        previous.ifPresentOrElse(
-                stored -> store.put(key, stored),
-                () -> store.delete(key));
-        if (!applySubscriptionFilter(account, namespace, topicName, subName)) {
-            LOG.errorf("Failed to restore broker filter after rolling back rule mutation for '%s/%s'",
-                    topicName, subName);
+    /** Replaces a complete rule set in Artemis before committing matching management state. */
+    Response replaceRules(String account, String namespace, String topicName, String subName,
+                          List<ServiceBusModels.RuleEntity> rules) {
+        Map<String, ServiceBusModels.RuleEntity> desiredByName = new LinkedHashMap<>();
+        for (ServiceBusModels.RuleEntity rule : rules) {
+            desiredByName.put(rule.name(), rule);
         }
+        List<ServiceBusModels.RuleEntity> desiredRules = List.copyOf(desiredByName.values());
+        String selector;
+        try {
+            selector = ServiceBusRuleSelector.forRules(desiredRules);
+        } catch (IllegalArgumentException e) {
+            return badRequestAtom(e.getMessage());
+        }
+        if (!applySubscriptionFilter(namespace, topicName, subName, selector)) {
+            return errorAtom(500, "Failed to apply rule filter to the Service Bus broker");
+        }
+
+        String prefix = rulePrefix(account, namespace, topicName, subName);
+        Set<String> desiredKeys = desiredRules.stream()
+                .map(rule -> ruleKey(account, namespace, topicName, subName, rule.name()))
+                .collect(Collectors.toUnmodifiableSet());
+        store.scan(key -> key.startsWith(prefix)).stream()
+                .filter(stored -> !desiredKeys.contains(stored.key()))
+                .forEach(stored -> store.delete(stored.key()));
+        for (ServiceBusModels.RuleEntity rule : desiredRules) {
+            String key = ruleKey(account, namespace, topicName, subName, rule.name());
+            store.put(key, toStoredObject(key, rule));
+            warnOnActionIgnored(rule);
+        }
+        return Response.ok().build();
     }
 
     List<ServiceBusModels.RuleEntity> loadRules(String account, String namespace,
@@ -875,17 +901,9 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 .toList();
     }
 
-    /** Recompiles the subscription's rules and updates its Artemis divert selector. */
-    private boolean applySubscriptionFilter(String account, String namespace,
-                                             String topicName, String subName) {
-        String selector;
-        try {
-            selector = ServiceBusRuleSelector.forRules(loadRules(account, namespace, topicName, subName));
-        } catch (IllegalArgumentException e) {
-            LOG.warnf("Cannot compile rules of subscription '%s/%s' to an Artemis filter: %s",
-                    topicName, subName, e.getMessage());
-            return false;
-        }
+    /** Updates an Artemis subscription divert before its matching management state is committed. */
+    private boolean applySubscriptionFilter(String namespace, String topicName, String subName,
+                                             String selector) {
         try {
             namespaceManager.jolokiaUpdateSubscriptionFilter(namespace, topicName, subName, selector);
             return true;

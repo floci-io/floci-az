@@ -95,7 +95,7 @@ class ServiceBusContainerManagerTest {
     void namespaceStartStaysLazyByDefault() {
         when(serviceBus.mocked()).thenReturn(false);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
         verify(namespaceManager, never()).startMockedNamespace(anyString());
@@ -108,10 +108,21 @@ class ServiceBusContainerManagerTest {
         when(serviceBus.amqpPort()).thenReturn(5673);
         when(serviceBus.amqpTlsPort()).thenReturn(5674);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).startNamespace(
                 ServiceBusNamespaceManager.DEFAULT_NAMESPACE, 5673, 5674);
+    }
+
+    @Test
+    void topologyTakesPrecedenceOverBrokerStartOnBoot() {
+        when(serviceBus.mocked()).thenReturn(false);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(topologyLoader.load()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
     }
 
     @Test
@@ -119,10 +130,21 @@ class ServiceBusContainerManagerTest {
         when(serviceBus.mocked()).thenReturn(true);
         when(serviceBus.startOnBoot()).thenReturn(true);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
         verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void topologyTakesPrecedenceOverMockedStartOnBoot() {
+        when(serviceBus.mocked()).thenReturn(true);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(topologyLoader.load()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(namespaceManager, never()).startMockedNamespace(anyString());
     }
 
     @Test
@@ -136,6 +158,7 @@ class ServiceBusContainerManagerTest {
                 .thenThrow(new IllegalStateException("Docker unavailable"));
 
         assertDoesNotThrow(
-                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+                () -> new ServiceBusContainerManager(
+                        config, namespaceManager, topologyLoader).onStart(null));
     }
 }
