@@ -66,6 +66,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
     public ServiceRoutes routes() {
         return ServiceRoutes.builder()
+                .host(".table.core.windows.net")
                 .account("-table", "table")
                 .build();
 

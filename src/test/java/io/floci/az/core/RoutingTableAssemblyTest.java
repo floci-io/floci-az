@@ -32,13 +32,14 @@ class RoutingTableAssemblyTest {
     @Inject
     AzureRoutingFilter filter;
 
-    /** A4's HOST_ROUTES, verbatim. */
+    /** A4's HOST_ROUTES, plus {@code .table.core.windows.net} (host-style table addressing, #267). */
     private static final Set<Map.Entry<String, String>> GOLDEN_HOST_ROUTES = Set.of(
         Map.entry(".vault.azure.net", "keyvault"),
         Map.entry(".communication.azure.com", "email"),
         Map.entry(".blob.core.windows.net", "blob"),
         Map.entry(".dfs.core.windows.net", "blob"),
         Map.entry(".queue.core.windows.net", "queue"),
+        Map.entry(".table.core.windows.net", "table"),
         Map.entry(".servicebus.windows.net", "servicebus")
     );
 
@@ -95,7 +96,7 @@ class RoutingTableAssemblyTest {
     @Test
     void hostRoutesMatchA4() {
         assertEquals(GOLDEN_HOST_ROUTES, asEntries(filter.hostRoutes()));
-        assertEquals(6, filter.hostRoutes().size(), "no duplicate host suffixes");
+        assertEquals(7, filter.hostRoutes().size(), "no duplicate host suffixes");
     }
 
     @Test

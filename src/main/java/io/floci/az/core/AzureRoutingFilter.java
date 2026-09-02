@@ -18,6 +18,7 @@ import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,6 +55,7 @@ public class AzureRoutingFilter {
         this.vertx = vertx;
         this.stages = List.of(
             this::routeByHostSuffix,
+            this::routeByHostServiceMarker,
             this::routeImds,
             this::routeEntra,
             this::routeArmMetadataEndpoints,
@@ -147,6 +149,14 @@ public class AzureRoutingFilter {
     private volatile List<SuffixRoute> hostRoutes = List.of();
 
     /**
+     * Service marker → serviceType, derived from each host suffix's first label ({@code
+     * .blob.core.windows.net → blob}). Lets {@code {account}.{marker}.{any-host}} route host-style on
+     * emulator hostnames ({@code devstoreaccount1.blob.localhost}, {@code devstoreaccount1.blob.floci-az})
+     * exactly as it would on the production suffix.
+     */
+    private volatile Map<String, String> hostServiceMarkers = Map.of();
+
+    /**
      * Account-name suffix → serviceType (e.g. {@code {account}-queue → queue}), sorted longest-first.
      * Any suffix that is a string-suffix of another is always shorter, so length-descending gives the
      * required most-specific-first match ({@code -cosmos-table} must beat {@code -table}).
@@ -201,6 +211,7 @@ public class AzureRoutingFilter {
         this.hostRoutes = List.copyOf(hosts);
         this.accountSuffixRoutes = List.copyOf(accounts);
         this.providerRoutes = List.copyOf(providers);
+        this.hostServiceMarkers = deriveHostServiceMarkers(hosts);
 
         LOGGER.infof("Routing tables: %d host, %d account-suffix, %d ARM provider routes",
             hostRoutes.size(), accountSuffixRoutes.size(), providerRoutes.size());
@@ -238,6 +249,28 @@ public class AzureRoutingFilter {
                     + provider.marker() + "': " + previous + " and " + provider.serviceType());
             }
         }
+    }
+
+    /**
+     * Derives the service-marker table from the registered host suffixes: the first label of each
+     * suffix names the service ({@code .blob.core.windows.net → blob}, {@code .dfs.… → blob}). Two
+     * suffixes producing the same marker for different service types would make
+     * {@code {account}.{marker}.{host}} ambiguous — fail fast like the other duplicate checks.
+     */
+    static Map<String, String> deriveHostServiceMarkers(List<SuffixRoute> hostRoutes) {
+        Map<String, String> markers = new HashMap<>();
+        for (SuffixRoute route : hostRoutes) {
+            String suffix = route.suffix();
+            int start = suffix.startsWith(".") ? 1 : 0;
+            int end = suffix.indexOf('.', start);
+            String marker = end < 0 ? suffix.substring(start) : suffix.substring(start, end);
+            String previous = markers.putIfAbsent(marker, route.serviceType());
+            if (previous != null && !previous.equals(route.serviceType())) {
+                throw new IllegalStateException("Two service types claim the host service marker '"
+                    + marker + "': " + previous + " and " + route.serviceType());
+            }
+        }
+        return Map.copyOf(markers);
     }
 
     /** Returns the route whose suffix {@code value} ends with, or {@code null} if none matches. */
@@ -336,12 +369,17 @@ public class AzureRoutingFilter {
             || path.startsWith("_floci/") || path.startsWith("_admin");
     }
 
+    /**
+     * Strips the port and lowercases: hostnames are case-insensitive (RFC 4343), so every host
+     * comparison — production suffixes and service markers alike — happens on the lowercase form.
+     */
     private static String hostWithoutPort(String capturedHost) {
         if (capturedHost == null) {
             return null;
         }
         int colon = capturedHost.indexOf(':');
-        return colon < 0 ? capturedHost : capturedHost.substring(0, colon);
+        String host = colon < 0 ? capturedHost : capturedHost.substring(0, colon);
+        return host.toLowerCase(Locale.ROOT);
     }
 
     // ── Routing stages, in chain order ──────────────────────────────────────────
@@ -361,6 +399,37 @@ public class AzureRoutingFilter {
         }
         // Suffixes are mutually exclusive: on an absent handler, fall through rather than retry.
         return dispatchOrServiceDisabled(ctx, stripSuffix(ctx.host(), route), route.serviceType(), ctx.path());
+    }
+
+    /**
+     * Host-style (production-style) addressing on arbitrary emulator hostnames:
+     * {@code {account}.{service}.{rest…}} — e.g. {@code devstoreaccount1.blob.localhost} or
+     * {@code devstoreaccount1.blob.floci-az} — routes exactly like the production suffix
+     * {@code {account}.{service}.core.windows.net}. Real Azure and Azurite both address storage this
+     * way; without this stage a host-style request has its container consumed as the account and
+     * Create Container answers 501, which blocks the Functions host's AzureWebJobsStorage bootstrap
+     * (#267). Path-style callers are unaffected: their hosts carry no service marker as the second
+     * label, so they fall through to the account-suffix terminal unchanged.
+     */
+    private Outcome routeByHostServiceMarker(RoutingContext ctx) {
+        String host = ctx.host();
+        if (host == null) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        int firstDot = host.indexOf('.');
+        if (firstDot <= 0) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        int secondDot = host.indexOf('.', firstDot + 1);
+        if (secondDot < 0 || secondDot == host.length() - 1) {
+            return Fallthrough.TO_NEXT_STAGE; // need {account}.{marker}.{at least one more label}
+        }
+        String serviceType = hostServiceMarkers.get(host.substring(firstDot + 1, secondDot));
+        if (serviceType == null) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        String account = host.substring(0, firstDot);
+        return dispatchOrServiceDisabled(ctx, account, serviceType, ctx.path());
     }
 
     /**
