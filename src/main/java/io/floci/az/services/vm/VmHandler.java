@@ -562,9 +562,17 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries((sub + "/").toLowerCase());
+    }
+
+    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
         return scanAll().stream()
-                .filter(vm -> vm.storageKey().toLowerCase().startsWith(prefix))
+                .filter(vm -> vm.storageKey().toLowerCase().startsWith(storageKeyPrefix))
                 .map(vm -> ArmResources.indexEntry(vm.armId(), vm.getName(), TYPE,
                         vm.getLocation(), vm.getTags()))
                 .toList();

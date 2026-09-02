@@ -655,7 +655,16 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return state.listServersByResourceGroup(sub, rg).stream()
+        return indexEntries(state.listServersByResourceGroup(sub, rg));
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries(state.listServersBySubscription(sub));
+    }
+
+    private static List<Map<String, Object>> indexEntries(List<PostgresState.ServerEntry> servers) {
+        return servers.stream()
                 .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
                         server.location(), server.tags()))
                 .toList();

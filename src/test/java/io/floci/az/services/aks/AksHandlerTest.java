@@ -266,8 +266,8 @@ class AksHandlerTest {
     }
 
     @Test
-    @DisplayName("Clusters appear in the resource-group /resources index")
-    void clusterAppearsInRgResourceIndex() {
+    @DisplayName("Clusters appear in the resource-group and subscription /resources indexes")
+    void clusterAppearsInResourceIndexes() {
         given()
             .contentType("application/json")
             .body("""
@@ -291,5 +291,9 @@ class AksHandlerTest {
             .then().statusCode(200)
             .body("value.find { it.name == 'aks-idx' }.type",
                     equalTo("Microsoft.ContainerService/managedClusters"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'aks-idx' }.type", equalTo("Microsoft.ContainerService/managedClusters"));
     }
 }

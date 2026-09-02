@@ -154,7 +154,7 @@ public class AcrHandlerTest {
     }
 
     @Test
-    void registryAppearsInRgResourceIndex() {
+    void registryAppearsInResourceIndexes() {
         createRegistry("acridx");
 
         given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
@@ -162,5 +162,9 @@ public class AcrHandlerTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'acridx' }.type",
                         is("Microsoft.ContainerRegistry/registries"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'acridx' }.type", is("Microsoft.ContainerRegistry/registries"));
     }
 }

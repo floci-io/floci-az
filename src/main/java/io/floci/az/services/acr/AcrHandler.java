@@ -569,9 +569,17 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries((sub + "/").toLowerCase());
+    }
+
+    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
         return scanAll().stream()
-                .filter(registry -> registry.storageKey().toLowerCase().startsWith(prefix))
+                .filter(registry -> registry.storageKey().toLowerCase().startsWith(storageKeyPrefix))
                 .map(registry -> ArmResources.indexEntry(registry.armId(), registry.getName(), TYPE,
                         registry.getLocation(), registry.getTags()))
                 .toList();

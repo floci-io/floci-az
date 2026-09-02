@@ -188,12 +188,16 @@ class VmHandlerTest {
     }
 
     @Test
-    @DisplayName("VMs appear in the resource-group /resources index")
-    void vmAppearsInRgResourceIndex() {
+    @DisplayName("VMs appear in the resource-group and subscription /resources indexes")
+    void vmAppearsInResourceIndexes() {
         createVm("vm-idx");
         given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG + "/resources" + API)
                 .then().statusCode(200)
                 .body("value.find { it.name == 'vm-idx' }.type",
                         equalTo("Microsoft.Compute/virtualMachines"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'vm-idx' }.type", equalTo("Microsoft.Compute/virtualMachines"));
     }
 }
