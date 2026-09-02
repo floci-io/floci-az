@@ -10,6 +10,7 @@ import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
+import com.azure.messaging.eventhubs.EventHubClientBuilder;
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
@@ -204,6 +205,12 @@ public final class EmulatorConfig {
     static boolean eventHubMocked = false;
 
     /**
+     * AMQPS port of the Event Hubs Artemis broker, as the emulator reported it.
+     * Set by {@link #ensureEventHubNamespace()}.
+     */
+    static int eventHubAmqpsPort = EVENTHUB_AMQPS_PORT;
+
+    /**
      * Starts the default Event Hubs namespace on-demand via the floci-az management API.
      * Idempotent: returns 200 if the namespace is already running.
      *
@@ -237,15 +244,55 @@ public final class EmulatorConfig {
             Map<String, Object> json = mapper.readValue(responseBody, Map.class);
             Object mockedValue = json.get("mocked");
             eventHubMocked = Boolean.TRUE.equals(mockedValue);
+
+            // Prefer the env var (Docker: EVENTHUB_AMQPS_PORT is the internal port).
+            String envPort = System.getenv("EVENTHUB_AMQPS_PORT");
+            if (envPort != null && !envPort.isEmpty()) {
+                eventHubAmqpsPort = Integer.parseInt(envPort);
+            } else if (json.get("amqpsPort") instanceof Number port) {
+                eventHubAmqpsPort = port.intValue();
+            }
+
+            if (!eventHubMocked) {
+                installTrustAll();
+            }
         } catch (Exception e) {
             // If we can't parse the response, leave eventHubMocked as false
         }
     }
 
     /**
+     * Returns an EventHubClientBuilder connected to the emulator's AMQPS port.
+     *
+     * The namespace is named by its Azure fully-qualified form, which is what a client
+     * configured for a real namespace and redirected by a custom endpoint sends — the address
+     * the broker is asked for carries that host, so this is the case worth covering.
+     *
+     * Like the Service Bus builder, this goes over TLS: the SDK hardcodes {@code enableSsl=true}
+     * once {@code customEndpointAddress} is set, so ANONYMOUS_PEER disables chain and hostname
+     * verification for the Artemis self-signed cert.
+     */
+    static EventHubClientBuilder eventHubClientBuilder() {
+        String connStr = String.format(
+                "Endpoint=sb://%s;SharedAccessKeyName=RootManageSharedAccessKey;"
+                + "SharedAccessKey=devkey;",
+                eventHubFullyQualifiedNamespace());
+        EventHubClientBuilder builder = new EventHubClientBuilder()
+                .connectionString(connStr, EVENTHUB_NAME)
+                .customEndpointAddress("https://" + EVENTHUB_HOST + ":" + eventHubAmqpsPort)
+                .transportType(AmqpTransportType.AMQP);
+        setAnonymousPeer(builder);
+        return builder;
+    }
+
+    /** The namespace as Azure names it, capitals and all. */
+    static String eventHubFullyQualifiedNamespace() {
+        return EVENTHUB_NAMESPACE + ".servicebus.windows.net";
+    }
+
+/**
      * Returns the AMQP entity address that Artemis has pre-configured as an ANYCAST address.
-     * The hostname portion must be lowercase because ArtemisConfigGenerator lowercases it
-     * when building the broker.xml addresses.
+     * The hostname is lowercased to match what uamqp sends; the broker configures both spellings.
      */
     static String amqpEntityAddress() {
         return "amqp://" + EVENTHUB_HOST.toLowerCase() + "/" + EVENTHUB_NAMESPACE + "/" + EVENTHUB_NAME;
@@ -385,12 +432,22 @@ public final class EmulatorConfig {
      * uses a self-signed cert that doesn't match the Docker service hostname.
      */
     private static void setAnonymousPeer(ServiceBusClientBuilder builder) {
+        setAnonymousPeer(ServiceBusClientBuilder.class, builder);
+    }
+
+    /** The Event Hubs builder hides {@code verifyMode} the same way; see above. */
+    private static void setAnonymousPeer(EventHubClientBuilder builder) {
+        setAnonymousPeer(EventHubClientBuilder.class, builder);
+    }
+
+    private static void setAnonymousPeer(Class<?> builderType, Object builder) {
         try {
-            Method m = ServiceBusClientBuilder.class.getDeclaredMethod("verifyMode", SslDomain.VerifyMode.class);
+            Method m = builderType.getDeclaredMethod("verifyMode", SslDomain.VerifyMode.class);
             m.setAccessible(true);
             m.invoke(builder, SslDomain.VerifyMode.ANONYMOUS_PEER);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to set ANONYMOUS_PEER on ServiceBusClientBuilder", e);
+            throw new RuntimeException(
+                    "Failed to set ANONYMOUS_PEER on " + builderType.getSimpleName(), e);
         }
     }
 
