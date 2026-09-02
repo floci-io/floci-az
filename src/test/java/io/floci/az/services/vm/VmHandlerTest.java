@@ -186,4 +186,14 @@ class VmHandlerTest {
                 .body("properties.provisioningState", equalTo("Succeeded"))
                 .body("properties.ipConfigurations[0].properties.privateIPAddress", not(emptyOrNullString()));
     }
+
+    @Test
+    @DisplayName("VMs appear in the resource-group /resources index")
+    void vmAppearsInRgResourceIndex() {
+        createVm("vm-idx");
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG + "/resources" + API)
+                .then().statusCode(200)
+                .body("value.find { it.name == 'vm-idx' }.type",
+                        equalTo("Microsoft.Compute/virtualMachines"));
+    }
 }

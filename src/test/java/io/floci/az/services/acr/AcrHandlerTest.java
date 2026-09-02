@@ -152,4 +152,15 @@ public class AcrHandlerTest {
         given().when().delete(registry("acrdelete") + API).then().statusCode(202);
         given().when().get(registry("acrdelete") + API).then().statusCode(404);
     }
+
+    @Test
+    void registryAppearsInRgResourceIndex() {
+        createRegistry("acridx");
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'acridx' }.type",
+                        is("Microsoft.ContainerRegistry/registries"));
+    }
 }

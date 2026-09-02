@@ -15,6 +15,8 @@ import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.acr.AcrModels.Registry;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -62,13 +64,15 @@ import java.util.concurrent.TimeUnit;
  * and {@code loginServer} is the cosmetic {@code {name}.azurecr.io} for management-plane fidelity.</p>
  */
 @ApplicationScoped
-public class AcrHandler implements AzureServiceHandler, Resettable {
+public class AcrHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(AcrHandler.class);
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    private static final String TYPE = "Microsoft.ContainerRegistry/registries";
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String ALNUM =
@@ -459,7 +463,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", registry.armId());
         out.put("name", registry.getName());
-        out.put("type", "Microsoft.ContainerRegistry/registries");
+        out.put("type", TYPE);
         out.put("location", registry.getLocation());
         if (registry.getTags() != null && !registry.getTags().isEmpty()) {
             out.put("tags", registry.getTags());
@@ -554,5 +558,22 @@ public class AcrHandler implements AzureServiceHandler, Resettable {
     /** Wipes all ACR data — used by {@code POST /_admin/reset}. */
     public void clear() {
         storage.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().acr().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return scanAll().stream()
+                .filter(registry -> registry.storageKey().toLowerCase().startsWith(prefix))
+                .map(registry -> ArmResources.indexEntry(registry.armId(), registry.getName(), TYPE,
+                        registry.getLocation(), registry.getTags()))
+                .toList();
     }
 }

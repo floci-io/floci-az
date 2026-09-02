@@ -16,6 +16,8 @@ import io.floci.az.services.vm.VmModels.PowerState;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -59,7 +61,7 @@ import java.util.concurrent.TimeUnit;
  * Power actions are pure state transitions. This keeps the service usable in CI without Docker.</p>
  */
 @ApplicationScoped
-public class VmHandler implements AzureServiceHandler, Resettable {
+public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(VmHandler.class);
 
@@ -69,6 +71,7 @@ public class VmHandler implements AzureServiceHandler, Resettable {
 
     private static final String COMPUTE_MARKER = "/providers/Microsoft.Compute/";
     private static final String API_VERSION = "2024-11-01";
+    private static final String TYPE = "Microsoft.Compute/virtualMachines";
 
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
@@ -360,7 +363,7 @@ public class VmHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", vm.armId());
         out.put("name", vm.getName());
-        out.put("type", "Microsoft.Compute/virtualMachines");
+        out.put("type", TYPE);
         out.put("location", vm.getLocation());
         if (vm.getTags() != null && !vm.getTags().isEmpty()) {
             out.put("tags", vm.getTags());
@@ -548,5 +551,22 @@ public class VmHandler implements AzureServiceHandler, Resettable {
     /** Wipes all VM data — used by {@code POST /_admin/reset}. */
     public void clear() {
         storage.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().vm().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return scanAll().stream()
+                .filter(vm -> vm.storageKey().toLowerCase().startsWith(prefix))
+                .map(vm -> ArmResources.indexEntry(vm.armId(), vm.getName(), TYPE,
+                        vm.getLocation(), vm.getTags()))
+                .toList();
     }
 }
