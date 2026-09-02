@@ -238,13 +238,17 @@ class PostgresHandlerMockedTest {
     }
 
     @Test
-    @DisplayName("Servers appear in the resource-group /resources index")
-    void serverAppearsInRgResourceIndex() {
+    @DisplayName("Servers appear in the resource-group and subscription /resources indexes")
+    void serverAppearsInResourceIndexes() {
         createServer("pg-idx");
 
         given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
                         + "/resources?api-version=2021-04-01")
             .then().statusCode(200)
             .body("value.find { it.name == 'pg-idx' }.type", equalTo("Microsoft.DBforPostgreSQL/flexibleServers"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'pg-idx' }.type", equalTo("Microsoft.DBforPostgreSQL/flexibleServers"));
     }
 }

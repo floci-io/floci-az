@@ -359,13 +359,17 @@ class AciHandlerTest {
     }
 
     @Test
-    @DisplayName("Groups appear in the resource-group /resources index")
-    void groupAppearsInRgResourceIndex() {
+    @DisplayName("Groups appear in the resource-group and subscription /resources indexes")
+    void groupAppearsInResourceIndexes() {
         createGroup("cg-idx");
         given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG + "/resources" + API)
                 .then().statusCode(200)
                 .body("value.find { it.name == 'cg-idx' }.type",
                         equalTo("Microsoft.ContainerInstance/containerGroups"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'cg-idx' }.type", equalTo("Microsoft.ContainerInstance/containerGroups"));
     }
 
     @Test

@@ -202,13 +202,17 @@ class MariaDbHandlerMockedTest {
     }
 
     @Test
-    @DisplayName("Servers appear in the resource-group /resources index")
-    void serverAppearsInRgResourceIndex() {
+    @DisplayName("Servers appear in the resource-group and subscription /resources indexes")
+    void serverAppearsInResourceIndexes() {
         createServer("mariadb-idx");
 
         given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
                         + "/resources?api-version=2021-04-01")
             .then().statusCode(200)
             .body("value.find { it.name == 'mariadb-idx' }.type", equalTo("Microsoft.DBforMariaDB/servers"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'mariadb-idx' }.type", equalTo("Microsoft.DBforMariaDB/servers"));
     }
 }

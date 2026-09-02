@@ -654,9 +654,17 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries((sub + "/").toLowerCase());
+    }
+
+    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
         return scanAll().stream()
-                .filter(cluster -> cluster.storageKey().toLowerCase().startsWith(prefix))
+                .filter(cluster -> cluster.storageKey().toLowerCase().startsWith(storageKeyPrefix))
                 .map(cluster -> ArmResources.indexEntry(cluster.armId(), cluster.getName(), TYPE,
                         cluster.getLocation(), cluster.getTags()))
                 .toList();

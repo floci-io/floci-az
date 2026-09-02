@@ -839,17 +839,28 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
 
     @Override
     public List<Map<String, Object>> listRgResources(String subscription, String resourceGroup) {
+        return indexEntries(subscription, resourceGroup);
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String subscription) {
+        return indexEntries(subscription, null);
+    }
+
+    /** Index entries for a scope; a null resource group means the whole subscription. */
+    private List<Map<String, Object>> indexEntries(String subscription, String resourceGroup) {
         List<Map<String, Object>> resources = new ArrayList<>();
         environments().stream()
                 .filter(environment -> subscription.equalsIgnoreCase(environment.getSubscriptionId()))
-                .filter(environment -> resourceGroup.equalsIgnoreCase(environment.getResourceGroup()))
+                .filter(environment -> resourceGroup == null
+                        || resourceGroup.equalsIgnoreCase(environment.getResourceGroup()))
                 .map(environment -> indexEntry(
-                        environmentId(subscription, resourceGroup, environment.getName()),
+                        environmentId(subscription, environment.getResourceGroup(), environment.getName()),
                         environment.getName(), "Microsoft.App/managedEnvironments", environment.getDocument()))
                 .forEach(resources::add);
         apps().stream()
                 .filter(app -> subscription.equalsIgnoreCase(app.getSubscriptionId()))
-                .filter(app -> resourceGroup.equalsIgnoreCase(app.getResourceGroup()))
+                .filter(app -> resourceGroup == null || resourceGroup.equalsIgnoreCase(app.getResourceGroup()))
                 .map(app -> indexEntry(appId(app), app.getName(), "Microsoft.App/containerApps", app.getDocument()))
                 .forEach(resources::add);
         return resources;
