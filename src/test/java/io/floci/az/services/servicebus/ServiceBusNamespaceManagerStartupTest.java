@@ -1,0 +1,185 @@
+package io.floci.az.services.servicebus;
+
+import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.docker.ContainerBuilder;
+import io.floci.az.core.docker.ContainerLifecycleManager;
+import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.services.eventhub.ArtemisTlsGenerator;
+import org.junit.jupiter.api.Test;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class ServiceBusNamespaceManagerStartupTest {
+
+    @Test
+    void failedDockerStartRemovesContainerWithoutReportingPortsReleased() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("failed")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate("floci-az-servicebus-failed"))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec)).thenReturn("container-id");
+        when(lifecycleManager.startCreated("container-id", spec))
+                .thenThrow(new IllegalStateException("readiness failed"));
+        when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-failed"))
+                .thenReturn(true);
+        when(lifecycleManager.removeIfExistsAndConfirm("container-id")).thenReturn(true);
+
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        verify(lifecycleManager).stopAndRemove("container-id", null);
+        verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
+        assertFalse(error.portsReleased());
+        assertTrue(manager.listNamespaces().isEmpty());
+    }
+
+    @Test
+    void cleanedPreStartFailureReportsPortsReleased() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        String containerName = "floci-az-servicebus-failed";
+        when(lifecycleManager.removeIfExistsAndConfirm(containerName)).thenReturn(true);
+        when(tlsGenerator.generate(containerName))
+                .thenThrow(new IllegalStateException("certificate unavailable"));
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, mock(ContainerBuilder.class), lifecycleManager,
+                mock(ServiceBusConfigGenerator.class), tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        assertTrue(error.portsReleased());
+        verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
+    }
+
+    @Test
+    void failedContainerCreationDoesNotReportConfiguredPortsReleased() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+        String containerName = "floci-az-servicebus-failed";
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("failed")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate(containerName))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec))
+                .thenThrow(new IllegalStateException("configured port is already allocated"));
+        when(lifecycleManager.removeIfExistsAndConfirm(containerName)).thenReturn(true);
+
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        assertFalse(error.portsReleased());
+        verify(lifecycleManager, times(2)).removeIfExistsAndConfirm(containerName);
+    }
+
+    @Test
+    void endpointResolutionFailureReportsReleasedPortsAfterCleanup() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("failed")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate("floci-az-servicebus-failed"))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec)).thenReturn("container-id");
+        when(lifecycleManager.startCreated("container-id", spec))
+                .thenThrow(new IllegalStateException("endpoint resolution failed"));
+        when(lifecycleManager.isContainerRunning("container-id")).thenReturn(true);
+        when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-failed"))
+                .thenReturn(true);
+        when(lifecycleManager.removeIfExistsAndConfirm("container-id")).thenReturn(true);
+
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+
+        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("failed", 5672, 5671));
+
+        assertTrue(error.portsReleased());
+        verify(lifecycleManager).stopAndRemove("container-id", null);
+    }
+}

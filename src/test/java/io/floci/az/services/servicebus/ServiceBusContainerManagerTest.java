@@ -18,6 +18,7 @@ class ServiceBusContainerManagerTest {
     private final EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
     private final EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
     private final ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
+    private final ServiceBusTopologyLoader topologyLoader = mock(ServiceBusTopologyLoader.class);
 
     @BeforeEach
     void setUp() {
@@ -30,7 +31,7 @@ class ServiceBusContainerManagerTest {
     void reapsOrphanedContainersWhenBrokerModeStarts() {
         when(serviceBus.mocked()).thenReturn(false);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).reapOrphanedContainers();
     }
@@ -39,7 +40,7 @@ class ServiceBusContainerManagerTest {
     void skipsCleanupInMockedMode() {
         when(serviceBus.mocked()).thenReturn(true);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager, never()).reapOrphanedContainers();
     }
@@ -51,14 +52,50 @@ class ServiceBusContainerManagerTest {
                 .thenThrow(new IllegalStateException("Docker unavailable"));
 
         assertDoesNotThrow(
-                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+                () -> new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null));
+    }
+
+    @Test
+    void loadsTopologyInBrokerMode() {
+        when(serviceBus.mocked()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader).load();
+    }
+
+    @Test
+    void loadsTopologyInMockedMode() {
+        when(serviceBus.mocked()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader).load();
+    }
+
+    @Test
+    void skipsTopologyWhenServiceDisabled() {
+        when(serviceBus.enabled()).thenReturn(false);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(topologyLoader, never()).load();
+    }
+
+    @Test
+    void topologyLoadFailureDoesNotFailApplicationStartup() {
+        when(serviceBus.mocked()).thenReturn(true);
+        org.mockito.Mockito.doThrow(new IllegalStateException("boom")).when(topologyLoader).load();
+
+        assertDoesNotThrow(
+                () -> new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null));
     }
 
     @Test
     void namespaceStartStaysLazyByDefault() {
         when(serviceBus.mocked()).thenReturn(false);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
         verify(namespaceManager, never()).startMockedNamespace(anyString());
@@ -71,10 +108,21 @@ class ServiceBusContainerManagerTest {
         when(serviceBus.amqpPort()).thenReturn(5673);
         when(serviceBus.amqpTlsPort()).thenReturn(5674);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).startNamespace(
                 ServiceBusNamespaceManager.DEFAULT_NAMESPACE, 5673, 5674);
+    }
+
+    @Test
+    void topologyTakesPrecedenceOverBrokerStartOnBoot() {
+        when(serviceBus.mocked()).thenReturn(false);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(topologyLoader.load()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
     }
 
     @Test
@@ -82,10 +130,21 @@ class ServiceBusContainerManagerTest {
         when(serviceBus.mocked()).thenReturn(true);
         when(serviceBus.startOnBoot()).thenReturn(true);
 
-        new ServiceBusContainerManager(config, namespaceManager).onStart(null);
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
 
         verify(namespaceManager).startMockedNamespace(ServiceBusNamespaceManager.DEFAULT_NAMESPACE);
         verify(namespaceManager, never()).startNamespace(anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void topologyTakesPrecedenceOverMockedStartOnBoot() {
+        when(serviceBus.mocked()).thenReturn(true);
+        when(serviceBus.startOnBoot()).thenReturn(true);
+        when(topologyLoader.load()).thenReturn(true);
+
+        new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null);
+
+        verify(namespaceManager, never()).startMockedNamespace(anyString());
     }
 
     @Test
@@ -99,6 +158,7 @@ class ServiceBusContainerManagerTest {
                 .thenThrow(new IllegalStateException("Docker unavailable"));
 
         assertDoesNotThrow(
-                () -> new ServiceBusContainerManager(config, namespaceManager).onStart(null));
+                () -> new ServiceBusContainerManager(
+                        config, namespaceManager, topologyLoader).onStart(null));
     }
 }

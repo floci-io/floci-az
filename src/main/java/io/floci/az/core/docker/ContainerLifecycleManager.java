@@ -419,6 +419,23 @@ public class ContainerLifecycleManager {
         tryRemoveIfExists(name);
     }
 
+    /**
+     * Force-removes a container and reports whether it is now absent. Unlike the ordinary
+     * best-effort cleanup path, callers can use this result before reusing host resources.
+     */
+    public boolean removeIfExistsAndConfirm(String name) {
+        try {
+            dockerClient.removeContainerCmd(name).withForce(true).exec();
+            LOG.infov("Removed stale container {0}", name);
+            return true;
+        } catch (NotFoundException ignored) {
+            return true;
+        } catch (Exception e) {
+            LOG.warnv("Could not confirm removal of container {0}: {1}", name, e.getMessage());
+            return false;
+        }
+    }
+
     private boolean tryRemoveIfExists(String name) {
         try {
             dockerClient.removeContainerCmd(name).withForce(true).exec();

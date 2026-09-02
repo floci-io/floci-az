@@ -164,69 +164,133 @@ public class ServiceBusNamespaceManager {
                 amqpHostPort == 0 ? "dynamic" : amqpHostPort,
                 amqpsHostPort == 0 ? "dynamic" : amqpsHostPort);
 
-        ArtemisTlsGenerator.TlsBundle tls;
+        String containerId = null;
+        ServiceBusCbsResponder cbs = null;
+        boolean createAttempted = false;
+        boolean startAttempted = false;
+        boolean containerStarted = false;
         try {
-            tls = tlsGenerator.generate(containerName);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to generate TLS certificate for Service Bus namespace '" + namespaceName
-                            + "': " + rootMessage(e), e);
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerName)) {
+                throw new IllegalStateException(
+                        "Could not remove stale container " + containerName);
+            }
+
+            ArtemisTlsGenerator.TlsBundle tls;
+            try {
+                tls = tlsGenerator.generate(containerName);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to generate TLS certificate for Service Bus namespace '"
+                                + namespaceName + "': " + rootMessage(e), e);
+            }
+
+            String brokerXml = configGenerator.generate(namespaceName);
+            ContainerSpec spec = containerBuilder.newContainer(
+                            config.services().serviceBus().artemisImage())
+                    .withName(containerName)
+                    .withEnv("ANONYMOUS_LOGIN", "true")
+                    .withLabels(serviceContainerLabels())
+                    .withPortBinding(AMQP_PORT, amqpHostPort)
+                    .withPortBinding(AMQPS_PORT, amqpsHostPort)
+                    .withDynamicPort(JOLOKIA_PORT)
+                    .withDockerNetwork(config.services().dockerNetwork())
+                    .withLogRotation()
+                    .build();
+
+            createAttempted = true;
+            containerId = lifecycleManager.create(spec);
+            lifecycleManager.copyFileToContainer(containerId, brokerXml,
+                    "/var/lib/artemis-instance/etc-override/broker.xml");
+            lifecycleManager.copyFileToContainer(containerId, MANAGEMENT_XML,
+                    "/var/lib/artemis-instance/etc-override/management.xml");
+            lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
+                    "/var/lib/artemis-instance/etc-override/artemis.p12");
+            lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
+                    ARTEMIS_EXTENSION_PATH);
+            lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
+                    PROTON_J_PATH);
+            lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
+                    ARTEMIS_AMQP_PATH);
+
+            startAttempted = true;
+            ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
+            containerStarted = true;
+
+            EndpointInfo amqpEndpoint = info.getEndpoint(AMQP_PORT);
+            EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
+            EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
+
+            waitForPort(amqpEndpoint, "AMQP");
+            waitForPort(amqpsEndpoint, "AMQPS");
+
+            cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
+            cbs.start();
+            cbsResponders.put(namespaceName, cbs);
+
+            NamespaceState state = new NamespaceState(
+                    containerId,
+                    amqpEndpoint.port(),
+                    amqpsEndpoint.port(),
+                    tls.certPem(),
+                    jolokiaEndpoint.host(),
+                    jolokiaEndpoint.port(),
+                    false);
+            namespaces.put(namespaceName, state);
+
+            LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
+                    namespaceName, amqpEndpoint, amqpsEndpoint);
+            return state;
+        } catch (RuntimeException e) {
+            boolean configuredPortsReusable = !createAttempted
+                    || (containerId != null && !startAttempted)
+                    || containerStarted
+                    || (containerId != null && lifecycleManager.isContainerRunning(containerId));
+            boolean portsReleased = false;
+            try {
+                cleanupFailedStart(namespaceName, containerName, containerId, cbs);
+                portsReleased = configuredPortsReusable;
+            } catch (RuntimeException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
+            throw new NamespaceStartException(namespaceName, portsReleased, e);
+        }
+    }
+
+    static final class NamespaceStartException extends RuntimeException {
+
+        private final boolean portsReleased;
+
+        NamespaceStartException(String namespaceName, boolean portsReleased, Throwable cause) {
+            super("Failed to start Service Bus namespace '" + namespaceName + "'", cause);
+            this.portsReleased = portsReleased;
         }
 
-        String brokerXml = configGenerator.generate(namespaceName);
-        lifecycleManager.removeIfExists(containerName);
+        boolean portsReleased() {
+            return portsReleased;
+        }
+    }
 
-        ContainerSpec spec = containerBuilder.newContainer(config.services().serviceBus().artemisImage())
-                .withName(containerName)
-                .withEnv("ANONYMOUS_LOGIN", "true")
-                .withLabels(serviceContainerLabels())
-                .withPortBinding(AMQP_PORT, amqpHostPort)
-                .withPortBinding(AMQPS_PORT, amqpsHostPort)
-                .withDynamicPort(JOLOKIA_PORT)
-                .withDockerNetwork(config.services().dockerNetwork())
-                .withLogRotation()
-                .build();
-
-        String containerId = lifecycleManager.create(spec);
-        lifecycleManager.copyFileToContainer(containerId, brokerXml,
-                "/var/lib/artemis-instance/etc-override/broker.xml");
-        lifecycleManager.copyFileToContainer(containerId, MANAGEMENT_XML,
-                "/var/lib/artemis-instance/etc-override/management.xml");
-        lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
-                "/var/lib/artemis-instance/etc-override/artemis.p12");
-        lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
-                ARTEMIS_EXTENSION_PATH);
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
-                PROTON_J_PATH);
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
-                ARTEMIS_AMQP_PATH);
-
-        ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
-
-        EndpointInfo amqpEndpoint  = info.getEndpoint(AMQP_PORT);
-        EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
-        EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
-
-        waitForPort(amqpEndpoint, "AMQP");
-        waitForPort(amqpsEndpoint, "AMQPS");
-
-        ServiceBusCbsResponder cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
-        cbs.start();
-        cbsResponders.put(namespaceName, cbs);
-
-        NamespaceState state = new NamespaceState(
-                containerId,
-                amqpEndpoint.port(),
-                amqpsEndpoint.port(),
-                tls.certPem(),
-                jolokiaEndpoint.host(),
-                jolokiaEndpoint.port(),
-                false);
-        namespaces.put(namespaceName, state);
-
-        LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
-                namespaceName, amqpEndpoint, amqpsEndpoint);
-        return state;
+    private void cleanupFailedStart(String namespaceName, String containerName,
+                                    String containerId, ServiceBusCbsResponder cbs) {
+        namespaces.remove(namespaceName);
+        ServiceBusCbsResponder registeredCbs = cbsResponders.remove(namespaceName);
+        if (registeredCbs != null) {
+            registeredCbs.stop();
+        } else if (cbs != null) {
+            cbs.stop();
+        }
+        if (containerId != null) {
+            lifecycleManager.stopAndRemove(containerId, null);
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerId)) {
+                throw new IllegalStateException(
+                        "Could not confirm removal of failed container " + containerId);
+            }
+        } else {
+            if (!lifecycleManager.removeIfExistsAndConfirm(containerName)) {
+                throw new IllegalStateException(
+                        "Could not confirm removal of failed container " + containerName);
+            }
+        }
     }
 
     int reapOrphanedContainers() {
@@ -515,21 +579,15 @@ public class ServiceBusNamespaceManager {
         });
     }
 
-    /**
-     * Replaces the filter of an existing subscription divert. The broker applies the new filter
-     * to future routing only, matching Azure's rule-change semantics: messages already routed to
-     * the subscription stay, and attached receivers stay connected to the unchanged queue.
-     */
+    /** Updates the existing subscription divert without interrupting its queue or receivers. */
     public void jolokiaUpdateSubscriptionFilter(String namespaceName, String topicName, String subName,
                                                  String filter) {
         String queueName = topicName + "/Subscriptions/" + subName;
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
-            jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyDivert(java.lang.String)",
-                    jsonArr(divertName));
-            jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
-                    topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
+            jolokiaExecRequired(http, baseUrl, auth, mbean,
+                    "updateDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.util.Map,java.lang.String)",
+                    jsonArr(divertName, queueName, filter, null, Map.of(), "STRIP"));
         });
     }
 
@@ -702,18 +760,9 @@ public class ServiceBusNamespaceManager {
 
     private void jolokiaExec(HttpClient http, String baseUrl, String auth,
                               String mbean, String operation, String arguments) {
-        String body = "{\"type\":\"exec\",\"mbean\":\"" + mbean + "\","
-                + "\"operation\":\"" + operation + "\","
-                + "\"arguments\":" + arguments + "}";
         try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Basic " + auth)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = sendJolokiaExec(
+                    http, baseUrl, auth, mbean, operation, arguments);
             if (resp.statusCode() != 200) {
                 String err = resp.body();
                 if (!err.contains("already exists") && !err.contains("already been deployed")) {
@@ -723,6 +772,42 @@ public class ServiceBusNamespaceManager {
         } catch (Exception e) {
             LOG.debugv("Jolokia call failed ({0}): {1}", operation.split("\\(")[0], e.getMessage());
         }
+    }
+
+    private void jolokiaExecRequired(HttpClient http, String baseUrl, String auth,
+                                     String mbean, String operation, String arguments) {
+        try {
+            HttpResponse<String> response = sendJolokiaExec(
+                    http, baseUrl, auth, mbean, operation, arguments);
+            JsonNode payload = MAPPER.readTree(response.body());
+            int jolokiaStatus = payload.path("status").asInt(-1);
+            if (response.statusCode() != 200 || jolokiaStatus != 200) {
+                throw new IllegalStateException("Jolokia " + operation.split("\\(")[0]
+                        + " failed with HTTP " + response.statusCode()
+                        + " and status " + jolokiaStatus + ": " + response.body());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during required Jolokia operation", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Required Jolokia operation failed", e);
+        }
+    }
+
+    private HttpResponse<String> sendJolokiaExec(HttpClient http, String baseUrl, String auth,
+                                                  String mbean, String operation, String arguments)
+            throws IOException, InterruptedException {
+        String body = "{\"type\":\"exec\",\"mbean\":\"" + mbean + "\","
+                + "\"operation\":\"" + operation + "\","
+                + "\"arguments\":" + arguments + "}";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Basic " + auth)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static Map<String, MessageCounts> jolokiaReadMessageCounts(

@@ -394,6 +394,14 @@ public interface EmulatorConfig {
         @WithDefault("false")
         boolean startOnBoot();
 
+        /**
+         * Path to a declarative topology file in the official Service Bus emulator's
+         * {@code Config.json} format, applied at startup. When unset, the official emulator's
+         * mount path ({@code /ServiceBus_Emulator/ConfigFiles/Config.json}) is probed, so a
+         * volume written for the official emulator (e.g. by .NET Aspire) works unchanged.
+         */
+        Optional<String> topologyFile();
+
         @WithDefault("5673")
         int amqpPort();
 

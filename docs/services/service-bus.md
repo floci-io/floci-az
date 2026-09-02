@@ -9,8 +9,9 @@ managed automatically by floci-az.
 | Management | HTTP | `/{account}-servicebus/` on `:4577` | `4577` |
 | Data | AMQP 1.0 | Apache ActiveMQ Artemis sidecar | `5673` (AMQP) / `5674` (AMQPS) |
 
-Unlike Event Hubs, entity topology is **not** pre-configured — queues, topics and subscriptions are
-created dynamically through the management API (or auto-created on first use by the SDK).
+Entity topology is created dynamically through the management API (or auto-created on first use by
+the SDK), and can additionally be **pre-provisioned declaratively** from a `Config.json` file in the
+official Service Bus emulator's format — see [Declarative topology](#declarative-topology-configjson).
 
 > **Mocked mode (default).** With `mocked: true` the Artemis sidecar is not started: the management
 > API responds, but the AMQP data plane is unavailable. Set `mocked: false` (and expose the AMQP
@@ -30,6 +31,44 @@ Entity CRUD is served over HTTP at `/{account}-servicebus/`:
 | `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}` | Manage a subscription |
 | `GET` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules` | List subscription rules |
 | `PUT` / `GET` / `DELETE` | `/{account}-servicebus/{topic}/subscriptions/{sub}/rules/{rule}` | Manage a subscription rule |
+
+## Declarative topology (Config.json)
+
+At startup, floci-az applies a declarative topology file in the
+[official Service Bus emulator's `Config.json` format](https://learn.microsoft.com/azure/service-bus-messaging/test-locally-with-service-bus-emulator)
+— the same file .NET Aspire's Service Bus hosting integration writes from the AppHost model. The
+file location is resolved in order:
+
+1. `floci-az.services.service-bus.topology-file` (env `FLOCI_AZ_SERVICES_SERVICE_BUS_TOPOLOGY_FILE`)
+2. `/ServiceBus_Emulator/ConfigFiles/Config.json` — the official emulator's mount path, so a volume
+   prepared for the official emulator works unchanged
+
+```yaml
+services:
+  floci-az:
+    image: floci/floci-az:latest
+    volumes:
+      - ./Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+Namespaces, queues, topics, subscriptions, and rules from the file are created through the same
+code paths as the management API, before any client connects — useful for apps whose consumers
+attach to pre-provisioned entities and never create them. Semantics:
+
+- The first namespace binds the configured AMQP ports (`amqp-port`/`amqp-tls-port`); the official
+  emulator supports a single namespace, and additional namespaces get dynamic ports.
+- A discovered topology file takes precedence over `start-on-boot`; its first namespace owns the
+  configured ports, and no separate `default` namespace is started.
+- A subscription with declared `Rules` gets exactly those rules — the implicit `$Default`
+  TrueFilter is removed, as in the official emulator. A subscription with no rules keeps `$Default`.
+- Rule replacement is atomic. If a reload of an existing subscription contains an invalid rule,
+  its previous complete rule set remains active; a new subscription keeps only valid declarations.
+- Entity properties honor the same validation as the management API (`LockDuration` ≤ `PT5M`,
+  `MaxDeliveryCount` 1–2000, duplicate-detection window `PT20S`–`P7D`).
+- `ForwardTo`/`ForwardDeadLetteredMessagesTo` are not emulated and log a warning if present.
+- Loading is best-effort: an invalid entity is skipped with an `ERROR` log and the rest of the
+  topology still loads; a missing or unparsable file never fails startup.
 
 ## Subscription rules and filters
 
@@ -177,7 +216,8 @@ services:
 |---|---|---|
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ENABLED` | `true` | Enable/disable the service |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED` | `true` | Mocked mode (management plane only, no Artemis) |
-| `FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT` | `false` | Start the `default` namespace (and its Artemis sidecar) with the emulator instead of on the first management call |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_START_ON_BOOT` | `false` | Start the `default` namespace with the emulator when no topology file is discovered |
+| `FLOCI_AZ_SERVICES_SERVICE_BUS_TOPOLOGY_FILE` | *(unset)* | Path to a declarative topology `Config.json`; when unset, `/ServiceBus_Emulator/ConfigFiles/Config.json` is probed |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` | `5673` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_TLS_PORT` | `5674` | Host port for AMQPS |
 | `FLOCI_AZ_SERVICES_SERVICE_BUS_ARTEMIS_IMAGE` | `apache/activemq-artemis:2.44.0` | Artemis image; must match bundled protocol patches |
@@ -192,7 +232,7 @@ floci-az:
     service-bus:
       enabled: true
       mocked: true              # true = management plane only, no Docker. false = real Artemis sidecar
-      start-on-boot: false      # true = default namespace starts with the emulator (see "Deterministic endpoint")
+      start-on-boot: false      # true = default namespace starts when no topology file is discovered
       amqp-port: 5673
       amqp-tls-port: 5674
       artemis-image: "apache/activemq-artemis:2.44.0"
