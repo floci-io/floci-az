@@ -117,6 +117,12 @@ public class BannerLogger {
                     : "image:" + config.services().vm().defaultImage();
             sb.append(serviceStatusDocker("vm", true, vmInfo));
         }
+        if (config.services().containerapps().enabled()) {
+            String containerAppsInfo = config.services().containerapps().mocked()
+                    ? "mocked  (no docker)"
+                    : "mocked  (container-backed mode not yet available)";
+            sb.append(serviceStatusDocker("containerapps", true, containerAppsInfo));
+        }
         if (config.services().redis().enabled()) {
             String redisInfo = config.services().redis().mocked()
                     ? "mocked  (no docker)"

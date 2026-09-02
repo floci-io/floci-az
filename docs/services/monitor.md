@@ -15,6 +15,12 @@ the **Log Analytics query API** (read them back with a subset of KQL), all in-pr
 - **Log Analytics workspaces** — `Microsoft.OperationalInsights/workspaces` CreateOrUpdate, Get,
   Delete; a `customerId` (workspace GUID) is generated when not supplied and indexed for query
   resolution
+- **Shared keys** — `POST .../workspaces/{name}/sharedKeys` returns a deterministic
+  `primarySharedKey`/`secondarySharedKey` pair, stable across repeated calls; this and the
+  subscription-wide list below are what the azurerm provider's Container Apps environment
+  Create/Read need — see [containerapps.md](containerapps.md)
+- **Subscription-wide workspace list** — `GET /subscriptions/{sub}/providers/Microsoft.OperationalInsights/workspaces`
+  (no resource group) lists every workspace in the subscription
 - **Data Collection Endpoints (DCE)** — `Microsoft.Insights/dataCollectionEndpoints` CreateOrUpdate,
   Get, Delete; the returned `logsIngestion.endpoint` points back at the emulator base URL
 - **Data Collection Rules (DCR)** — `Microsoft.Insights/dataCollectionRules` CreateOrUpdate, Get,
@@ -35,6 +41,8 @@ Management operations use ARM paths; ingestion and query use the Monitor data-pl
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
+POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/sharedKeys
+GET    /subscriptions/{sub}/providers/Microsoft.OperationalInsights/workspaces
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}

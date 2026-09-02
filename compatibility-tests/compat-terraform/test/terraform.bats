@@ -189,3 +189,27 @@ setup() {
     assert_output --partial "Running"
     assert_output --partial "Succeeded"
 }
+
+@test "Terraform: log analytics workspace created with customerId" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.OperationalInsights/workspaces/${LAW_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.OperationalInsights/workspaces"
+    assert_output --partial "customerId"
+    assert_output --partial "Succeeded"
+}
+
+@test "Terraform: container app environment created referencing the log analytics workspace" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/managedEnvironments/${CAE_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.App/managedEnvironments"
+    assert_output --partial "defaultDomain"
+    assert_output --partial "Succeeded"
+}
+
+@test "Terraform: container app created in the environment with a latest revision" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.App/containerApps/${CAPP_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.App/containerApps"
+    assert_output --partial "latestRevisionName"
+    assert_output --partial "Succeeded"
+}

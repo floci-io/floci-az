@@ -344,3 +344,48 @@ output "nsg_id" {
 output "application_gateway_id" {
   value = azurerm_application_gateway.agw.id
 }
+
+# ── Container Apps: Log Analytics workspace, environment, app ────────────────
+
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "floci-test-law"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_container_app_environment" "cae" {
+  name                       = "floci-test-cae"
+  resource_group_name        = azurerm_resource_group.rg.name
+  location                   = azurerm_resource_group.rg.location
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+}
+
+resource "azurerm_container_app" "capp" {
+  name                         = "floci-test-capp"
+  resource_group_name          = azurerm_resource_group.rg.name
+  container_app_environment_id = azurerm_container_app_environment.cae.id
+  revision_mode                = "Single"
+
+  template {
+    container {
+      name   = "floci-test-container"
+      image  = "mcr.microsoft.com/k8se/quickstart:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
+    }
+  }
+}
+
+output "container_app_environment_id" {
+  value = azurerm_container_app_environment.cae.id
+}
+
+output "container_app_id" {
+  value = azurerm_container_app.capp.id
+}
+
+output "container_app_latest_revision_name" {
+  value = azurerm_container_app.capp.latest_revision_name
+}

@@ -70,7 +70,8 @@ class RoutingTableAssemblyTest {
     /**
      * A4's PROVIDER_ROUTES minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
      * of the filter's provider lane into the ArmHandler lane (it implements {@code ArmProviderService}),
-     * so it is no longer a filter provider route. Every other entry is unchanged from A4.
+     * so it is no longer a filter provider route. Every other entry is unchanged from A4, plus
+     * {@code Microsoft.App} added by the Container Apps handler.
      */
     private static final Set<Map.Entry<String, String>> GOLDEN_PROVIDER_ROUTES = Set.of(
         Map.entry("/providers/Microsoft.ManagedIdentity/", "managedidentity"),
@@ -83,7 +84,8 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.DBforMariaDB/", "mariadb"),
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
-        Map.entry("/providers/Microsoft.Communication/", "email")
+        Map.entry("/providers/Microsoft.Communication/", "email"),
+        Map.entry("/providers/Microsoft.App/", "containerapps")
     );
 
     private static Set<Map.Entry<String, String>> asEntries(List<SuffixRoute> routes) {
