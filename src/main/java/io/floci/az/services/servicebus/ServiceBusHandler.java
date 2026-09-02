@@ -926,6 +926,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + "<MessageCount>" + counts.total() + "</MessageCount>"
+                + runtimeMetadataXml(q.createdAt(), q.updatedAt())
                 + countDetailsXml(counts)
                 + "</QueueDescription>";
     }
@@ -977,6 +978,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
+                + runtimeMetadataXml(t.createdAt(), t.updatedAt())
                 + countDetailsXml(ServiceBusNamespaceManager.MessageCounts.ZERO)
                 + "</TopicDescription>";
     }
@@ -1040,6 +1042,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + "<MessageCount>" + counts.total() + "</MessageCount>"
+                + runtimeTimestampsXml(s.createdAt(), s.updatedAt())
                 + countDetailsXml(counts)
                 + "</SubscriptionDescription>";
     }
@@ -1110,6 +1113,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<sb:TransferDeadLetterMessageCount>0</sb:TransferDeadLetterMessageCount>"
                 + "<sb:TransferMessageCount>0</sb:TransferMessageCount>"
                 + "</CountDetails>";
+    }
+
+    private String runtimeMetadataXml(Instant createdAt, Instant updatedAt) {
+        return "<SizeInBytes>0</SizeInBytes>" + runtimeTimestampsXml(createdAt, updatedAt);
+    }
+
+    private String runtimeTimestampsXml(Instant createdAt, Instant updatedAt) {
+        return "<CreatedAt>" + ISO8601.format(createdAt) + "</CreatedAt>"
+                + "<UpdatedAt>" + ISO8601.format(updatedAt) + "</UpdatedAt>";
     }
 
     // ── Storage key helpers ───────────────────────────────────────────────────
