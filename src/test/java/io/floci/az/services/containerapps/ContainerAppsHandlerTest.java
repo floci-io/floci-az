@@ -439,6 +439,20 @@ class ContainerAppsHandlerTest {
     }
 
     @Test
+    @DisplayName("listSecrets returns an empty string, never null, for a secret submitted with no value")
+    void appListSecretsNameOnlySecretReturnsEmptyString() {
+        String body = APP_CREATE_BODY.replace(
+                "{\"name\": \"redis-password\", \"value\": \"hunter2\"}",
+                "{\"name\": \"redis-password\"}");
+        given().contentType("application/json").body(body)
+                .when().put(BASE + "/containerApps/app-nullsecret" + API)
+                .then().statusCode(201);
+        given().when().post(BASE + "/containerApps/app-nullsecret/listSecrets" + API)
+                .then().statusCode(200)
+                .body("value.find { it.name == 'redis-password' }.value", equalTo(""));
+    }
+
+    @Test
     @DisplayName("listSecrets on an unknown app returns 404")
     void appListSecretsUnknown404() {
         given().when().post(BASE + "/containerApps/nope/listSecrets" + API)
@@ -460,6 +474,39 @@ class ContainerAppsHandlerTest {
         org.junit.jupiter.api.Assertions.assertEquals(
                 ((Map<?, ?>) first.get("configuration")).get("ingress") instanceof Map<?, ?> i1 ? i1.get("fqdn") : null,
                 ((Map<?, ?>) second.get("configuration")).get("ingress") instanceof Map<?, ?> i2 ? i2.get("fqdn") : null);
+    }
+
+    @Test
+    @DisplayName("PUT the identical body twice is idempotent: revisionSuffix/latestRevisionName/ingress.fqdn never drift")
+    void appRepeatedIdenticalPutIsIdempotent() {
+        Map<String, Object> firstProps = given().contentType("application/json").body(APP_CREATE_BODY)
+                .when().put(BASE + "/containerApps/app-idempotent" + API)
+                .then().statusCode(201)
+                .extract().jsonPath().getMap("properties");
+
+        // A second apply of the exact same config (as `terraform plan` after a no-op apply would
+        // send) must come back 200 with every server-computed field unchanged.
+        Map<String, Object> secondProps = given().contentType("application/json").body(APP_CREATE_BODY)
+                .when().put(BASE + "/containerApps/app-idempotent" + API)
+                .then().statusCode(200)
+                .extract().jsonPath().getMap("properties");
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                firstProps.get("latestRevisionName"), secondProps.get("latestRevisionName"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                ((Map<?, ?>) firstProps.get("template")).get("revisionSuffix"),
+                ((Map<?, ?>) secondProps.get("template")).get("revisionSuffix"));
+        Object firstFqdn = ((Map<?, ?>) firstProps.get("configuration")).get("ingress") instanceof Map<?, ?> i1
+                ? i1.get("fqdn") : null;
+        Object secondFqdn = ((Map<?, ?>) secondProps.get("configuration")).get("ingress") instanceof Map<?, ?> i2
+                ? i2.get("fqdn") : null;
+        org.junit.jupiter.api.Assertions.assertEquals(firstFqdn, secondFqdn);
+
+        Map<String, Object> thirdGetProps = given().when().get(BASE + "/containerApps/app-idempotent" + API)
+                .then().statusCode(200)
+                .extract().jsonPath().getMap("properties");
+        org.junit.jupiter.api.Assertions.assertEquals(
+                secondProps.get("latestRevisionName"), thirdGetProps.get("latestRevisionName"));
     }
 
     // ── jobs: CRUD lifecycle ────────────────────────────────────────────────────

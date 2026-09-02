@@ -836,7 +836,11 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                 entry.put("keyVaultUrl", keyVaultUrl);
                 entry.put("identity", secret.get("identity"));
             } else {
-                entry.put("value", secret.get("value"));
+                // A secret submitted with neither a raw value nor a keyVaultUrl (name-only) reads
+                // back "" rather than null — the real API never returns a null value here, and a
+                // null-vs-empty-string mismatch is itself a plan diff.
+                Object rawValue = secret.get("value");
+                entry.put("value", rawValue != null ? rawValue : "");
             }
             value.add(entry);
         }
