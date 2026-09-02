@@ -190,7 +190,7 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
             LOG.debugv("Could not parse namespace creation body: {0}", e.getMessage());
         }
 
-        Map<String, List<String>> entities = ArtemisConfigGenerator.parseEntities(entitiesStr, consumerGroupsStr);
+        Map<String, ArtemisConfigGenerator.EntitySpec> entities = ArtemisConfigGenerator.parseEntities(entitiesStr, consumerGroupsStr);
 
         if (eh.mocked()) {
             EventHubNamespaceManager.NamespaceState state = namespaceManager.registerMockedNamespace(namespaceName);

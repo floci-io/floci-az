@@ -261,13 +261,18 @@
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="selector = filter.getValue().getDescribed().toString();"
+                                    value="selector = EventHubFilterSupport.rewriteSelector(filter.getValue().getDescribed().toString());"
+                                    failOnNoReplacements="true" />
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="protonSender.setReceiverSettleMode(ReceiverSettleMode.FIRST);"
                                     value="protonSender.setReceiverSettleMode(protonSender.getRemoteReceiverSettleMode());"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
                                     token="final String sourceAddress = ParameterisedAddress.extractAddress(source.getAddress());"
-                                    value="final String sourceAddress = ServiceBusSessionSupport.normalizeEntityPath(ParameterisedAddress.extractAddress(source.getAddress())).replaceFirst(&quot;^/&quot;, &quot;&quot;);"
+                                    value="final String sourceAddress = ServiceBusSessionSupport.normalizeEntityPath(AmqpEntityAddress.toEntityPath(ParameterisedAddress.extractAddress(source.getAddress())));"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
@@ -297,7 +302,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
                                     token="address = SimpleString.of(targetAddress);"
-                                    value="address = SimpleString.of(targetAddress.startsWith(&quot;/&quot;) ? targetAddress.substring(1) : targetAddress);"
+                                    value="address = SimpleString.of(AmqpEntityAddress.toEntityPath(targetAddress));"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"

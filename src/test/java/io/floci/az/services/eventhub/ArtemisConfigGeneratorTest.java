@@ -1,5 +1,6 @@
 package io.floci.az.services.eventhub;
 
+import io.floci.az.services.eventhub.ArtemisConfigGenerator.EntitySpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -16,15 +17,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ArtemisConfigGeneratorTest {
 
     private static final Pattern DIVERT_NAME = Pattern.compile("<divert name=\"([^\"]+)\"");
+    private static final Pattern ADDRESS_NAME = Pattern.compile("<address name=\"([^\"]+)\"");
 
-    private static List<String> divertNames(String namespace, Map<String, List<String>> entities) {
-        String brokerXml = new ArtemisConfigGenerator(null).generate(namespace, entities);
-        List<String> names = new ArrayList<>();
-        Matcher matcher = DIVERT_NAME.matcher(brokerXml);
+    private static String brokerXml(String namespace, Map<String, EntitySpec> entities) {
+        return new ArtemisConfigGenerator(null).generate(namespace, entities);
+    }
+
+    private static List<String> matches(Pattern pattern, String xml) {
+        List<String> found = new ArrayList<>();
+        Matcher matcher = pattern.matcher(xml);
         while (matcher.find()) {
-            names.add(matcher.group(1));
+            found.add(matcher.group(1));
         }
-        return names;
+        return found;
     }
 
     private static void assertAllDistinct(List<String> names) {
@@ -39,9 +44,9 @@ class ArtemisConfigGeneratorTest {
      */
     @Test
     void hubNamesThatSanitizeAlikeKeepDistinctDivertNames() {
-        assertAllDistinct(divertNames("ns", Map.of(
-                "eh.1", List.of("$Default"),
-                "eh-1", List.of("$Default"))));
+        assertAllDistinct(matches(DIVERT_NAME, brokerXml("ns", Map.of(
+                "eh.1", new EntitySpec(2, List.of("$Default")),
+                "eh-1", new EntitySpec(2, List.of("$Default"))))));
     }
 
     /**
@@ -50,36 +55,52 @@ class ArtemisConfigGeneratorTest {
      */
     @Test
     void namesThatJoinToTheSameStringKeepDistinctDivertNames() {
-        assertAllDistinct(divertNames("ns", Map.of(
-                "a-to-b", List.of("c"),
-                "a", List.of("b-to-c"))));
+        assertAllDistinct(matches(DIVERT_NAME, brokerXml("ns", Map.of(
+                "a-to-b", new EntitySpec(1, List.of("c")),
+                "a", new EntitySpec(1, List.of("b-to-c"))))));
     }
 
     /**
-     * EventHubNamespaceManager rebuilds this same topology over Jolokia, naming it through
-     * {@code anycastEntityAddress} and {@code anycastDivertName}. If the generator ever spells
-     * either one itself again the two drift apart, and because the diverts are exclusive the
-     * broker holds two of them over one route — which does not fail, it just delivers every
-     * message twice.
+     * One topology per hub, not one per spelling of its address.
+     *
+     * The AMQP layer reduces every address a client can send to down to the entity path, so the
+     * partition queues hang off that path alone. Generating a copy per host and scheme gave each
+     * spelling its own private hub: a producer on one and a consumer on another read and wrote
+     * different queues, while the management node reported a single hub either way.
      */
     @Test
-    void anycastDivertsAreNamedThroughTheSharedHelpers() {
-        String brokerXml = new ArtemisConfigGenerator(null)
-                .generate("ns", Map.of("eh1", List.of("$Default")));
+    void partitionQueuesExistOncePerHubNotOncePerAddressSpelling() {
+        List<String> partitionZero = matches(ADDRESS_NAME, brokerXml("ns",
+                Map.of("eh1", new EntitySpec(4, List.of("$Default", "other")))))
+                .stream().filter(a -> a.endsWith("/Partitions/0") && a.contains("ConsumerGroups"))
+                .toList();
 
-        String expected = "<divert name=\""
-                + ArtemisConfigGenerator.anycastDivertName("localhost", "eh1", "$Default")
-                + "\"><address>"
-                + ArtemisConfigGenerator.anycastEntityAddress("localhost", "ns", "eh1")
-                + "</address>";
-        assertTrue(brokerXml.contains(expected),
-                "the generator no longer names its diverts the way the namespace manager does");
+        assertEquals(List.of("eh1/ConsumerGroups/$Default/Partitions/0",
+                             "eh1/ConsumerGroups/other/Partitions/0"),
+                     partitionZero.stream().sorted().toList());
+    }
+
+    /**
+     * The Java SDK sends to a pinned partition by addressing it, so that address needs a queue to
+     * attach to. Without one it is auto-created empty and the sends are dropped in silence.
+     */
+    @Test
+    void everyPartitionHasASenderAddress() {
+        List<String> addresses =
+                matches(ADDRESS_NAME, brokerXml("ns", Map.of("eh1", new EntitySpec(3, List.of("$Default")))));
+
+        for (int partition = 0; partition < 3; partition++) {
+            String pinned = ArtemisConfigGenerator.partitionSenderAddress("eh1", partition);
+            assertTrue(addresses.contains(pinned), "no sender address for " + pinned);
+        }
     }
 
     /** The generated file must not change between runs, or every namespace restart rewrites it. */
     @Test
     void generatingTwiceProducesTheSameNames() {
-        Map<String, List<String>> entities = Map.of("eh1", List.of("$Default", "my-consumer-group"));
-        assertEquals(divertNames("ns", entities), divertNames("ns", entities));
+        Map<String, EntitySpec> entities =
+                Map.of("eh1", new EntitySpec(4, List.of("$Default", "my-consumer-group")));
+        assertEquals(matches(DIVERT_NAME, brokerXml("ns", entities)),
+                     matches(DIVERT_NAME, brokerXml("ns", entities)));
     }
 }

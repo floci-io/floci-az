@@ -140,11 +140,9 @@ floci-az:
       enabled: true
     event-hub:
       enabled: true
-      # Deliberately mocked: the Artemis sidecar starts fine, but the AMQP data plane does not yet
-      # work with the Azure SDKs (EventHubCompatibilityTest: 6/6 fail with "Connection reset").
-      # Do NOT flip this to false until that is fixed -- the compat suite self-skips on this flag,
-      # so flipping it turns a silent skip into 6 hard failures. See local/full-parity.md (C1).
-      mocked: true
+      # Real Artemis, not a mock: the AMQP data plane now works with the Azure SDKs, so both compat
+      # suites run for real against it rather than self-skipping on this flag.
+      mocked: false
       default-namespace: emulatorNs1
       entities: "eh1:4"
       amqp-port: 5672
