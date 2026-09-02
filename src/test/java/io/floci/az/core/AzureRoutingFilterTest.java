@@ -288,6 +288,20 @@ class AzureRoutingFilterTest {
     }
 
     @Test
+    void hostStyleAddressingIsCaseInsensitive() {
+        // Hostnames are case-insensitive (RFC 4343): a mixed-case Host must still route host-style,
+        // and the account label must land in the lowercase account namespace.
+        given().header("Host", "DevStoreAccount1.BLOB.Localhost:4577")
+                .queryParam("restype", "container")
+                .when().put("/hoststyle-case")
+                .then().statusCode(201);
+
+        given().when().get("/devstoreaccount1/?comp=list")
+                .then().statusCode(200)
+                .body(containsString("hoststyle-case"));
+    }
+
+    @Test
     void dottedHostWithoutServiceMarkerStaysPathStyle() {
         // A multi-label Host that carries no service marker (an emulator served at an FQDN) must keep
         // path-style resolution: the first path segment is the account, not a container.

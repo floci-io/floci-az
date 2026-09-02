@@ -18,6 +18,7 @@ import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -368,12 +369,17 @@ public class AzureRoutingFilter {
             || path.startsWith("_floci/") || path.startsWith("_admin");
     }
 
+    /**
+     * Strips the port and lowercases: hostnames are case-insensitive (RFC 4343), so every host
+     * comparison — production suffixes and service markers alike — happens on the lowercase form.
+     */
     private static String hostWithoutPort(String capturedHost) {
         if (capturedHost == null) {
             return null;
         }
         int colon = capturedHost.indexOf(':');
-        return colon < 0 ? capturedHost : capturedHost.substring(0, colon);
+        String host = colon < 0 ? capturedHost : capturedHost.substring(0, colon);
+        return host.toLowerCase(Locale.ROOT);
     }
 
     // ── Routing stages, in chain order ──────────────────────────────────────────
