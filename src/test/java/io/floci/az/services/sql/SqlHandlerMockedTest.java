@@ -92,4 +92,25 @@ class SqlHandlerMockedTest {
             .when().get(BASE + "/servers/dbhost/databases/master?api-version=2021-11-01")
             .then().statusCode(200);
     }
+
+    @Test
+    @DisplayName("Servers appear in the resource-group and subscription /resources indexes")
+    void serverAppearsInResourceIndexes() {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{"
+                + "\"administratorLogin\":\"sa\","
+                + "\"administratorLoginPassword\":\"FlociAz_Strong123!\"}}")
+            .when().put(BASE + "/servers/sql-idx?api-version=2021-11-01")
+            .then().statusCode(201);
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/resources?api-version=2021-04-01")
+            .then().statusCode(200)
+            .body("value.find { it.name == 'sql-idx' }.type", equalTo("Microsoft.Sql/servers"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'sql-idx' }.type", equalTo("Microsoft.Sql/servers"));
+    }
 }

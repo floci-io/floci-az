@@ -15,6 +15,8 @@ import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,13 +62,15 @@ import java.util.concurrent.TimeUnit;
  * standard Redis clients can connect to the sidecar.</p>
  */
 @ApplicationScoped
-public class RedisHandler implements AzureServiceHandler, Resettable {
+public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(RedisHandler.class);
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    private static final String TYPE = "Microsoft.Cache/Redis";
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int SSL_PORT = 6380;
@@ -421,7 +425,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", cache.armId());
         out.put("name", cache.getName());
-        out.put("type", "Microsoft.Cache/Redis");
+        out.put("type", TYPE);
         out.put("location", cache.getLocation());
         if (cache.getTags() != null && !cache.getTags().isEmpty()) {
             out.put("tags", cache.getTags());
@@ -506,5 +510,30 @@ public class RedisHandler implements AzureServiceHandler, Resettable {
     /** Wipes all Redis data — used by {@code POST /_admin/reset}. */
     public void clear() {
         storage.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().redis().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries((sub + "/").toLowerCase());
+    }
+
+    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
+        return scanAll().stream()
+                .filter(cache -> cache.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+                .map(cache -> ArmResources.indexEntry(cache.armId(), cache.getName(), TYPE,
+                        cache.getLocation(), cache.getTags()))
+                .toList();
     }
 }

@@ -2,10 +2,10 @@ package io.floci.az.services.aci;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.floci.az.core.arm.ArmResources;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -80,15 +80,8 @@ public class AciModels {
 
         /** Minimal ARM resource map for the resource-group {@code /resources} index. */
         public Map<String, Object> indexEntry() {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("id", armId());
-            entry.put("name", name);
-            entry.put("type", "Microsoft.ContainerInstance/containerGroups");
-            entry.put("location", location);
-            if (tags != null && !tags.isEmpty()) {
-                entry.put("tags", tags);
-            }
-            return entry;
+            return ArmResources.indexEntry(armId(), name,
+                    "Microsoft.ContainerInstance/containerGroups", location, tags);
         }
     }
 

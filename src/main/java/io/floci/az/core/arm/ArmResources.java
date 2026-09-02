@@ -15,6 +15,27 @@ public final class ArmResources {
     private ArmResources() {
     }
 
+    /**
+     * Minimal ARM resource entry for the resource-group {@code /resources} index —
+     * {@code id}, {@code name}, {@code type}, {@code location}, and {@code tags} when non-empty.
+     *
+     * <p>Azure's generic resource listing returns identity fields only; {@code properties} arrives
+     * solely under {@code $expand}. Contributors project their resource onto this shape rather than
+     * echoing the body their {@code GET} returns.</p>
+     */
+    public static Map<String, Object> indexEntry(String id, String name, String type, String location,
+                                                 Map<String, String> tags) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", id);
+        entry.put("name", name);
+        entry.put("type", type);
+        entry.put("location", location);
+        if (tags != null && !tags.isEmpty()) {
+            entry.put("tags", tags);
+        }
+        return entry;
+    }
+
     /** Copy of the resource without the internal routing keys. */
     public static Map<String, Object> stripInternal(Map<String, Object> resource) {
         Map<String, Object> copy = new LinkedHashMap<>(resource);
