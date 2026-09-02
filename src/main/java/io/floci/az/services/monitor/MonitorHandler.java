@@ -18,6 +18,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
@@ -32,6 +33,14 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     private static final Pattern WORKSPACE_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.OperationalInsights/workspaces/([^/?]+)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Subscription-wide workspace list — no {@code resourceGroups} segment. Callers (the azurerm
+     * provider's Container Apps environment Read, in particular) use this to reverse-resolve a
+     * {@code customerId} back to a workspace resource ID.
+     */
+    private static final Pattern WORKSPACE_LIST_PATTERN = Pattern.compile(
+        "subscriptions/[^/]+/providers/Microsoft\\.OperationalInsights/workspaces/?(?:[?].*)?$", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern DCE_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.Insights/dataCollectionEndpoints/([^/?]+)", Pattern.CASE_INSENSITIVE);
@@ -98,7 +107,9 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     public Response handleArm(AzureRequest req, String path, String method, String sub) {
         LOG.debugf("MonitorHandler ARM-plane %s /%s", method, path);
 
-        if (path.contains("/providers/Microsoft.OperationalInsights/workspaces/")) {
+        if (WORKSPACE_LIST_PATTERN.matcher(path).find() && "GET".equals(method)) {
+            return handleWorkspaceSubscriptionList(sub);
+        } else if (path.contains("/providers/Microsoft.OperationalInsights/workspaces/")) {
             return handleWorkspaceArm(req, path, method, sub);
         } else if (path.contains("/providers/Microsoft.Insights/dataCollectionEndpoints/")) {
             return handleDceArm(req, path, method, sub);
@@ -134,7 +145,9 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         String name = m.group(3);
         String key = String.format("workspace/%s/%s/%s", sub, rg, name);
 
-        if ("PUT".equals(method)) {
+        if ("POST".equals(method) && path.toLowerCase(Locale.ROOT).contains("/sharedkeys")) {
+            return handleWorkspaceSharedKeys(key);
+        } else if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
             String location = (String) body.getOrDefault("location", "eastus");
             Map<String, Object> props = (Map<String, Object>) body.getOrDefault("properties", new HashMap<>());
@@ -182,6 +195,44 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return Response.ok().build();
         }
         return Response.status(405).build();
+    }
+
+    /**
+     * {@code POST .../workspaces/{name}/sharedKeys} — returns a deterministic pair of keys derived
+     * from the workspace's storage key, so repeated calls (as the Container Apps environment
+     * Create path makes) see the same value and never produce a plan diff.
+     */
+    private Response handleWorkspaceSharedKeys(String key) {
+        if (store.get(key).isEmpty()) {
+            return Response.status(404).entity("Workspace not found").build();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("primarySharedKey", synthSharedKey(key + ":primary"));
+        result.put("secondarySharedKey", synthSharedKey(key + ":secondary"));
+        return Response.ok(result).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /** {@code GET /subscriptions/{sub}/providers/Microsoft.OperationalInsights/workspaces} — every workspace in the subscription, across all resource groups. */
+    private Response handleWorkspaceSubscriptionList(String sub) {
+        String prefix = "workspace/" + sub + "/";
+        List<Map<String, Object>> workspaces = new ArrayList<>();
+        store.scan(k -> k.startsWith(prefix)).forEach(so -> workspaces.add(parseStoredData(so)));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("value", workspaces);
+        return Response.ok(result).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * Deterministic base64 key material, 64 bytes (88 base64 chars) — the same size as a real
+     * Log Analytics shared key.
+     */
+    private static String synthSharedKey(String seed) {
+        ByteBuffer buf = ByteBuffer.allocate(64);
+        for (int i = 0; i < 4; i++) {
+            UUID part = UUID.nameUUIDFromBytes((seed + ":" + i).getBytes(StandardCharsets.UTF_8));
+            buf.putLong(part.getMostSignificantBits()).putLong(part.getLeastSignificantBits());
+        }
+        return Base64.getEncoder().encodeToString(buf.array());
     }
 
     // -------------------------------------------------------------------------

@@ -81,17 +81,15 @@ import java.util.UUID;
  * {@code provisioningState=Succeeded} with synthetic (but per-resource stable — see
  * {@link #synthLabel}) domains, IPs, and revision names. This is the only mode implemented today.</p>
  *
- * <h2>Out of scope</h2>
+ * <h2>Log Analytics dependency</h2>
  * <p>The environment resource's real {@code Create()} also calls three
  * {@code Microsoft.OperationalInsights} endpoints to seed the Log Analytics workspace's
  * {@code customerId}/{@code sharedKey} (workspace GET, {@code sharedKeys} POST, and a
  * subscription-wide workspace list used on every environment {@code Read()} to reverse-resolve
- * {@code log_analytics_workspace_id}). {@code Microsoft.OperationalInsights/workspaces} is already
- * claimed by {@code MonitorHandler}, which does not implement {@code sharedKeys} or the
- * subscription-wide list today — this handler does not add them (that provider namespace belongs
- * to an existing service's file, out of bounds for this change). A real
- * {@code azurerm_container_app_environment} apply with {@code log_analytics_workspace_id} set will
- * fail against this emulator until that gap is closed in {@code MonitorHandler}.</p>
+ * {@code log_analytics_workspace_id}). That provider namespace belongs to {@link
+ * io.floci.az.services.monitor.MonitorHandler}, which implements all three, so a real
+ * {@code azurerm_container_app_environment} apply with {@code log_analytics_workspace_id} set
+ * works end to end.</p>
  */
 @ApplicationScoped
 public class ContainerAppsHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {

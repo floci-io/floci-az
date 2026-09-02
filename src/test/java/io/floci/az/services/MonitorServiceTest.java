@@ -11,6 +11,7 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 @QuarkusTest
 public class MonitorServiceTest {
@@ -57,6 +58,49 @@ public class MonitorServiceTest {
         given()
             .when().get(workspacePath)
             .then().statusCode(404);
+    }
+
+    @Test
+    void testWorkspaceSharedKeysIsStableAndSubscriptionListIncludesIt() {
+        String workspacePath = String.format("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.OperationalInsights/workspaces/%s", SUB, RG, WORKSPACE_NAME);
+        given()
+            .contentType(ContentType.JSON)
+            .body(Map.of("location", "eastus", "properties", Map.of("retentionInDays", 30)))
+            .when().put(workspacePath)
+            .then().statusCode(201);
+
+        // sharedKeys is a POST action, not a resource — the azurerm provider calls it on every
+        // Container App environment Create/Read to populate appLogsConfiguration.
+        String sharedKeysPath = workspacePath + "/sharedKeys";
+        Map<String, String> firstKeys = given()
+            .when().post(sharedKeysPath)
+            .then().statusCode(200)
+            .body("primarySharedKey", notNullValue())
+            .body("secondarySharedKey", notNullValue())
+            .extract().path("$");
+        String primary = firstKeys.get("primarySharedKey");
+        assertNotEquals(primary, firstKeys.get("secondarySharedKey"), "primary and secondary must not be the same key");
+
+        // Same workspace, called again: must be byte-identical, or a Terraform plan re-run would
+        // see a diff on every apply.
+        given()
+            .when().post(sharedKeysPath)
+            .then().statusCode(200)
+            .body("primarySharedKey", equalTo(primary));
+
+        given()
+            .when().post(workspacePath + "-not-a-real-workspace/sharedKeys")
+            .then().statusCode(404);
+
+        // Subscription-wide list — no /resourceGroups/ segment. The azurerm provider's Container
+        // App environment Read uses this to reverse-resolve customerId back to a workspace ID.
+        String listPath = String.format("/subscriptions/%s/providers/Microsoft.OperationalInsights/workspaces", SUB);
+        given()
+            .when().get(listPath)
+            .then().statusCode(200)
+            .body("value.size()", equalTo(1))
+            .body("value[0].name", equalTo(WORKSPACE_NAME))
+            .body("value[0].properties.customerId", notNullValue());
     }
 
     @Test

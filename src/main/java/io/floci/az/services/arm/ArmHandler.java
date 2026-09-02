@@ -201,6 +201,19 @@ public class ArmHandler implements AzureServiceHandler {
             return Response.ok(Map.of("value", vaults)).build();
         }
 
+        // ── Subscription-level provider-resource listing (delegated) ───────────
+        // e.g. GET subscriptions/{sub}/providers/Microsoft.OperationalInsights/workspaces — a
+        // resource-type list with no /resourceGroups/ segment. Delegates through the same
+        // ArmProviderService lane used for resource-group-scoped provider routes below, so any
+        // lane service can answer its own subscription-wide list without ArmHandler special-casing
+        // each namespace (see the Storage/KeyVault blocks above for why those aren't lane-based).
+        if (path.matches("subscriptions/[^/]+/providers/[^/]+/[^/?]+([?].*)?")) {
+            ArmProviderService provider = providerLane.get(providerNamespace(path));
+            if (provider != null) {
+                return provider.armEnabled() ? provider.handleArm(req, path, method, extractSub(path)) : armNotFound(path);
+            }
+        }
+
         // ── Provider registration check (skip_provider_registration=true still calls this) ──
         // Only matches /subscriptions/{sub}/providers or /subscriptions/{sub}/providers/{namespace}
         // (no resource type segment), so the more-specific handlers above take precedence.

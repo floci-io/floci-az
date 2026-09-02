@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -56,6 +57,14 @@ public class ApiManagementService {
         String[] parts = split(tail);
 
         if (parts.length == 1 && "service".equals(parts[0])) {
+            // No /resourceGroups/ segment means this is the subscription-wide list — reachable now
+            // that ArmHandler delegates subscription-level provider-resource paths through the same
+            // ArmProviderService lane as resource-group-scoped ones. extractRg() would silently
+            // return "unknown" here, so listServices(sub, "unknown") would answer an honest-looking
+            // but always-empty 200 instead of the real subscription-wide list.
+            if (!path.toLowerCase(Locale.ROOT).contains("/resourcegroups/")) {
+                return Response.ok(Map.of("value", listSubscriptionServices(sub))).build();
+            }
             return Response.ok(Map.of("value", listServices(sub, rg))).build();
         }
         if (parts.length < 2 || !"service".equals(parts[0])) {
