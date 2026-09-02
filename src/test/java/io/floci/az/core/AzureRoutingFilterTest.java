@@ -226,4 +226,74 @@ class AzureRoutingFilterTest {
                         + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
                 .then().statusCode(404);
     }
+
+    // ── Host-style addressing on emulator hostnames (#267) ──────────────────────
+    //
+    // Real Azure and Azurite address storage host-style: the account is the first host label and the
+    // container is the first path segment ({account}.{service}.{host}). Without these routes, a
+    // host-style request has its container consumed as the account and Create Container answers 501 —
+    // which blocks the Azure Functions host's AzureWebJobsStorage bootstrap.
+
+    @Test
+    void hostStyleBlobCreateContainerOnEmulatorHost() {
+        // The exact #267 reproduction: PUT /awjh?restype=container, Host: devstoreaccount1.blob.localhost.
+        given().header("Host", "devstoreaccount1.blob.localhost:4577")
+                .queryParam("restype", "container")
+                .when().put("/hoststyle-awjh")
+                .then().statusCode(201);
+    }
+
+    @Test
+    void hostStyleAndPathStyleShareTheAccountNamespace() {
+        // A blob written host-style (docker-alias-shaped hostname) must be readable path-style:
+        // both addressings resolve to the same account.
+        given().header("Host", "devstoreaccount1.blob.floci-az")
+                .queryParam("restype", "container")
+                .when().put("/hoststyle-shared")
+                .then().statusCode(201);
+        given().header("Host", "devstoreaccount1.blob.floci-az")
+                .header("x-ms-blob-type", "BlockBlob").body("host-style payload")
+                .when().put("/hoststyle-shared/blob1")
+                .then().statusCode(201);
+
+        given().when().get("/devstoreaccount1/hoststyle-shared/blob1")
+                .then().statusCode(200)
+                .body(containsString("host-style payload"));
+    }
+
+    @Test
+    void hostStyleQueueListOnEmulatorHost() {
+        given().header("Host", "devstoreaccount1.queue.localhost:4577")
+                .when().get("/?comp=list")
+                .then().statusCode(200)
+                .body(containsString("EnumerationResults"));
+    }
+
+    @Test
+    void hostStyleTableCreateOnEmulatorHost() {
+        given().header("Host", "devstoreaccount1.table.localhost:4577")
+                .contentType("application/json")
+                .body("{\"TableName\":\"hostStyleTbl\"}")
+                .when().post("/Tables")
+                .then().statusCode(201);
+    }
+
+    @Test
+    void hostTableCoreWindowsNetRoutesToTable() {
+        given().header("Host", "acct.table.core.windows.net")
+                .contentType("application/json")
+                .body("{\"TableName\":\"hostSuffixTbl\"}")
+                .when().post("/Tables")
+                .then().statusCode(201);
+    }
+
+    @Test
+    void dottedHostWithoutServiceMarkerStaysPathStyle() {
+        // A multi-label Host that carries no service marker (an emulator served at an FQDN) must keep
+        // path-style resolution: the first path segment is the account, not a container.
+        given().header("Host", "floci-az.mycorp.local:4577")
+                .when().get("/devstoreaccount1/?comp=list")
+                .then().statusCode(200)
+                .body(containsString("EnumerationResults"));
+    }
 }
