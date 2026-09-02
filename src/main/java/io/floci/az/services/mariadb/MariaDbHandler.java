@@ -7,6 +7,8 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -37,9 +39,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code Microsoft.DBforMariaDB/servers}, not flexibleServers).
  */
 @ApplicationScoped
-public class MariaDbHandler implements AzureServiceHandler, Resettable {
+public class MariaDbHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(MariaDbHandler.class);
+    private static final String TYPE = "Microsoft.DBforMariaDB/servers";
 
     private static final String NS = "/providers/Microsoft.DBforMariaDB/";
 
@@ -511,7 +514,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("id", s.armId());
         resp.put("name", s.serverName());
-        resp.put("type", "Microsoft.DBforMariaDB/servers");
+        resp.put("type", TYPE);
         resp.put("location", s.location());
         if (!s.tags().isEmpty()) resp.put("tags", s.tags());
         resp.put("properties", props);
@@ -639,5 +642,20 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable {
         });
         state.clear();
         startLocks.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().mariaDb().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return state.listServersByResourceGroup(sub, rg).stream()
+                .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
+                        server.location(), server.tags()))
+                .toList();
     }
 }

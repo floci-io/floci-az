@@ -264,4 +264,32 @@ class AksHandlerTest {
             .body("properties.count", equalTo(3))
             .body("properties.vmSize", equalTo("Standard_D4s_v3"));
     }
+
+    @Test
+    @DisplayName("Clusters appear in the resource-group /resources index")
+    void clusterAppearsInRgResourceIndex() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "kubernetesVersion": "1.29",
+                    "dnsPrefix": "idx-aks-dns",
+                    "agentPoolProfiles": [
+                      {"name": "nodepool1", "count": 1, "vmSize": "Standard_DS2_v2",
+                       "osType": "Linux", "mode": "System"}
+                    ]
+                  }
+                }
+                """)
+            .when().put(BASE + "/managedClusters/aks-idx?api-version=2024-04-01")
+            .then().statusCode(201);
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/resources?api-version=2021-04-01")
+            .then().statusCode(200)
+            .body("value.find { it.name == 'aks-idx' }.type",
+                    equalTo("Microsoft.ContainerService/managedClusters"));
+    }
 }
