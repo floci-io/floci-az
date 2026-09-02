@@ -128,6 +128,7 @@ public interface EmulatorConfig {
         AksConfig              aks();
         AciConfig              aci();
         VmConfig               vm();
+        ContainerAppsConfig    containerapps();
         ApimConfig             apim();
         RedisConfig            redis();
         AcrConfig              acr();
@@ -314,6 +315,23 @@ public interface EmulatorConfig {
         /** Default Docker image used when an imageReference cannot be resolved (non-mocked mode). */
         @WithDefault("ubuntu:22.04")
         String defaultImage();
+    }
+
+    /**
+     * Microsoft.App — Container Apps (managed environments, container apps, and jobs).
+     */
+    interface ContainerAppsConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * When {@code true}, no Docker container/runtime is started; environments, apps and jobs
+         * transition immediately to {@code provisioningState=Succeeded} with synthetic domains,
+         * IPs and revision names. This is the only mode implemented today — real Docker-backed
+         * replicas are a later PR, mirroring ACI's PR 1/PR 2 split. Useful for tests without Docker.
+         */
+        @WithDefault("true")
+        boolean mocked();
     }
 
     interface RedisConfig {
