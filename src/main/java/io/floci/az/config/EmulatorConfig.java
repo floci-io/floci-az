@@ -86,6 +86,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig serviceBus();
         ServiceStorageConfig sql();
         ServiceStorageConfig monitor();
+        ServiceStorageConfig containerApps();
     }
 
     interface ServiceStorageConfig {
@@ -138,7 +139,7 @@ public interface EmulatorConfig {
         NetworkConfig          network();
         EventGridConfig        eventGrid();
         ManagedIdentityConfig  managedIdentity();
-
+        ContainerAppsConfig    containerApps();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -370,6 +371,24 @@ public interface EmulatorConfig {
         /** When {@code true}, k3s containers are left running when floci-az shuts down. */
         @WithDefault("false")
         boolean keepRunningOnShutdown();
+    }
+
+    /** Microsoft.App — managed environments and Docker-backed Container Apps. */
+    interface ContainerAppsConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, preserve ARM state and revisions without starting application containers. */
+        @WithDefault("true")
+        boolean mocked();
+
+        /** DNS suffix used for emulated environment, app, and revision FQDNs. */
+        @WithDefault("azurecontainerapps.io")
+        String dnsSuffix();
+
+        /** Timeout for proxied ingress requests to application containers. */
+        @WithDefault("60")
+        int ingressTimeoutSeconds();
     }
 
     interface ServiceBusConfig {

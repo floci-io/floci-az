@@ -28,7 +28,12 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +162,69 @@ public class ContainerLifecycleManager {
 
         Map<Integer, EndpointInfo> endpoints = resolveEndpoints(containerId, spec);
         return new ContainerInfo(containerId, endpoints);
+    }
+
+    /** Returns IP addresses assigned to a container's Docker network namespace. */
+    public List<String> containerAddresses(String containerId) {
+        try {
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            if (inspect.getNetworkSettings() == null) {
+                return List.of();
+            }
+            var networks = inspect.getNetworkSettings().getNetworks();
+            if (networks == null || networks.isEmpty()) {
+                return List.of();
+            }
+            List<String> addresses = new ArrayList<>();
+            for (ContainerNetwork network : networks.values()) {
+                if (network.getIpAddress() != null && !network.getIpAddress().isBlank()) {
+                    addresses.add(network.getIpAddress());
+                }
+                if (network.getGlobalIPv6Address() != null && !network.getGlobalIPv6Address().isBlank()) {
+                    addresses.add(network.getGlobalIPv6Address());
+                }
+            }
+            return List.copyOf(addresses);
+        } catch (NotFoundException e) {
+            LOG.debugv("Container {0} disappeared before its addresses could be inspected", containerId);
+            return List.of();
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not inspect Docker addresses for container {0}: {1}",
+                    containerId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Returns IP addresses for running containers carrying every required label. */
+    public List<String> runningContainerAddresses(Map<String, String> requiredLabels) {
+        try {
+            return dockerClient.listContainersCmd().withShowAll(false).exec().stream()
+                    .filter(container -> hasRequiredLabels(container, requiredLabels))
+                    .flatMap(container -> containerAddresses(container.getId()).stream())
+                    .distinct()
+                    .toList();
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not inspect running Docker containers by label: {0}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Tests whether an IP literal exactly matches one of the supplied IP literals. */
+    public static boolean matchesAnyAddress(String address, Collection<String> addresses) {
+        if (address == null || address.isBlank()) {
+            return false;
+        }
+        try {
+            byte[] candidate = InetAddress.getByName(address).getAddress();
+            for (String expected : addresses) {
+                if (Arrays.equals(candidate, InetAddress.getByName(expected).getAddress())) {
+                    return true;
+                }
+            }
+        } catch (UnknownHostException e) {
+            return false;
+        }
+        return false;
     }
 
     /**
