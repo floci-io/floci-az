@@ -40,6 +40,8 @@ AZCLI_IMAGE     = compat-azcli
 POD_IDENTITY_ENV = -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
 SUITE_ENV_PYTHON = $(POD_IDENTITY_ENV)
 SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
+	--add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1 \
+	-e FLOCI_AZ_ABFS_LOOPBACK=true \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQPS_PORT=5671 \
 	-e SERVICEBUS_NAMESPACE=default

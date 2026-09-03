@@ -65,6 +65,31 @@ class DataLakeCompatibilityTest {
     }
 
     @Test
+    @DisplayName("rename: moves a directory tree through dfs endpoint")
+    void renameDirectoryMovesDescendants() {
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = client.createFileSystem(name);
+        try {
+            DataLakeDirectoryClient source = fileSystem.createDirectory("source-dir");
+            source.createFile("part.parquet");
+
+            DataLakeDirectoryClient renamed = source.rename(name, "destination-dir");
+
+            // DataLakePathClient.exists() is implemented through the SDK's BlockBlobClient.
+            // Use DFS-native access-control requests here so this compatibility test validates
+            // the renamed path through the Data Lake endpoint rather than the Blob endpoint.
+            assertNotNull(renamed.getAccessControl());
+            assertNotNull(renamed.getFileClient("part.parquet").getAccessControl());
+
+            DataLakeStorageException sourceMissing = assertThrows(
+                    DataLakeStorageException.class, source::getAccessControl);
+            assertEquals(404, sourceMissing.getStatusCode());
+        } finally {
+            client.deleteFileSystem(name);
+        }
+    }
+
+    @Test
     @DisplayName("user delegation key: SDK-generated SAS can create path through dfs endpoint")
     void userDelegationKeyCanGenerateUsableDfsSas() throws Exception {
         OffsetDateTime start = OffsetDateTime.now().minusMinutes(5);

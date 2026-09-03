@@ -29,6 +29,23 @@ public record AzureErrorResponse(
             .build();
     }
 
+    /**
+     * Azure Data Lake Storage Gen2 data-plane errors use the DataLakeStorageError
+     * envelope: {"error":{"code":"...","message":"..."}}. Hadoop ABFS
+     * 3.3.x parses this JSON body to obtain the service error code; returning
+     * only the x-ms-error-code header or a Blob-style XML body leaves the ABFS
+     * storageErrorCode empty.
+     */
+    public Response toDataLakeJsonResponse(int httpStatus) {
+        return Response.status(httpStatus)
+            .type(MediaType.APPLICATION_JSON)
+            .header("x-ms-error-code", Code)
+            .entity(Map.of("error", Map.of(
+                "code", Code,
+                "message", Message)))
+            .build();
+    }
+
     // The Table service wraps errors in the OData envelope; SDKs (notably .NET
     // Azure.Data.Tables) parse the body, not just the x-ms-error-code header.
     public Response toODataResponse(int httpStatus) {

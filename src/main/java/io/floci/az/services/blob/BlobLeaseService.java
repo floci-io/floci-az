@@ -11,9 +11,14 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Blob lease state and the Lease Blob operation (comp=lease).
+ * Shared Blob Storage and ADLS Gen2 Path lease state.
  *
- * <p>Leases are the coordination primitive of the Azure Functions host:
+ * <p>The Blob endpoint uses {@code PUT ?comp=lease}; the DFS endpoint used by
+ * Hadoop ABFS uses {@code POST /filesystem/path} with {@code x-ms-lease-action}.
+ * Both wire protocols share the same in-memory lease state so a path cannot be
+ * leased independently through the Blob and DFS aliases.
+ *
+ * <p>Leases are also the coordination primitive of the Azure Functions host:
  * WebJobs singleton/timer locks and Durable Functions partition management
  * are blob leases. Lease state is kept in memory only — like a real lease it
  * is transient runtime state, and an emulator restart is equivalent to every
@@ -34,14 +39,7 @@ public class BlobLeaseService {
         String action = header(request, "x-ms-lease-action");
         Instant now = Instant.now();
         BlobLease lease = leases.get(blobKey);
-        Response response = switch (action == null ? "" : action.toLowerCase()) {
-            case "acquire" -> acquire(request, blobKey, lease, now);
-            case "renew" -> renew(request, blobKey, lease, now);
-            case "change" -> change(request, blobKey, lease, now);
-            case "release" -> release(request, blobKey, lease, now);
-            case "break" -> breakLease(request, blobKey, lease, now);
-            default -> invalidHeaderValue();
-        };
+        Response response = dispatchLeaseOperation(request, blobKey, lease, now, false);
         if (response.getStatus() >= 400) {
             return response;
         }
@@ -51,7 +49,39 @@ public class BlobLeaseService {
                 .build();
     }
 
-    private Response acquire(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
+
+    /**
+     * ADLS Gen2 Path Lease operation. Hadoop ABFS uses POST directly on the DFS path
+     * rather than Blob Storage's PUT ?comp=lease wire shape. Lease state is shared
+     * with Blob leases so both endpoints observe one coherent emulator lease.
+     */
+    public synchronized Response handleDataLakeLeaseOp(AzureRequest request, String blobKey,
+                                                       String etag, String lastModifiedRfc1123) {
+        Response response = dispatchLeaseOperation(request, blobKey, leases.get(blobKey), Instant.now(), true);
+        if (response.getStatus() >= 400) {
+            return response;
+        }
+        return Response.fromResponse(response)
+                .header("ETag", etag)
+                .header("Last-Modified", lastModifiedRfc1123)
+                .build();
+    }
+
+    private Response dispatchLeaseOperation(AzureRequest request, String blobKey, BlobLease lease,
+                                            Instant now, boolean dataLake) {
+        String action = header(request, "x-ms-lease-action");
+        return switch (action == null ? "" : action.toLowerCase()) {
+            case "acquire" -> acquire(request, blobKey, lease, now, dataLake);
+            case "renew" -> renew(request, blobKey, lease, now, dataLake);
+            case "change" -> change(request, blobKey, lease, now, dataLake);
+            case "release" -> release(request, blobKey, lease, now, dataLake);
+            case "break" -> breakLease(request, blobKey, lease, now, dataLake);
+            default -> error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
+        };
+    }
+
+    private Response acquire(AzureRequest request, String blobKey, BlobLease lease, Instant now, boolean dataLake) {
         int duration;
         try {
             duration = Integer.parseInt(header(request, "x-ms-lease-duration") == null
@@ -60,19 +90,20 @@ public class BlobLeaseService {
             duration = 0;
         }
         if (duration != -1 && (duration < 15 || duration > 60)) {
-            return invalidHeaderValue();
+            return error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
         }
         String proposed = header(request, "x-ms-proposed-lease-id");
         if (proposed != null && !isGuid(proposed)) {
-            return invalidHeaderValue();
+            return error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
         }
 
         if (lease != null && lease.activeAt(now)) {
             boolean reacquireSameId = lease.stateAt(now) == BlobLease.State.LEASED
                     && proposed != null && proposed.equalsIgnoreCase(lease.leaseId());
             if (!reacquireSameId) {
-                return new AzureErrorResponse("LeaseAlreadyPresent",
-                        "There is already a lease present.").toXmlResponse(409);
+                return error("LeaseAlreadyPresent", "There is already a lease present.", 409, dataLake);
             }
         }
 
@@ -83,71 +114,75 @@ public class BlobLeaseService {
                 .build();
     }
 
-    private Response renew(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
+    private Response renew(AzureRequest request, String blobKey, BlobLease lease, Instant now, boolean dataLake) {
         String leaseId = header(request, "x-ms-lease-id");
         if (leaseId == null || leaseId.isBlank()) {
-            return missingRequiredHeader();
+            return error("MissingRequiredHeader",
+                    "An HTTP header that's mandatory for this request is not specified.", 400, dataLake);
         }
         if (lease == null) {
-            return leaseNotPresent();
+            return error("LeaseNotPresentWithLeaseOperation",
+                    "There is currently no lease on the blob.", 409, dataLake);
         }
         if (!lease.leaseId().equalsIgnoreCase(leaseId)) {
-            return new AzureErrorResponse("LeaseIdMismatchWithLeaseOperation",
-                    "The lease ID specified did not match the lease ID for the blob.")
-                    .toXmlResponse(409);
+            return error("LeaseIdMismatchWithLeaseOperation",
+                    "The lease ID specified did not match the lease ID for the blob.", 409, dataLake);
         }
         BlobLease.State state = lease.stateAt(now);
         if (state == BlobLease.State.BREAKING || state == BlobLease.State.BROKEN) {
-            return new AzureErrorResponse("LeaseIsBrokenAndCannotBeRenewed",
-                    "The lease ID matched, but the lease has been broken explicitly and cannot be renewed.")
-                    .toXmlResponse(409);
+            return error("LeaseIsBrokenAndCannotBeRenewed",
+                    "The lease ID matched, but the lease has been broken explicitly and cannot be renewed.", 409, dataLake);
         }
         leases.put(blobKey, lease.renewed(now));
         return Response.ok().header("x-ms-lease-id", lease.leaseId()).build();
     }
 
-    private Response change(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
+    private Response change(AzureRequest request, String blobKey, BlobLease lease, Instant now, boolean dataLake) {
         String leaseId = header(request, "x-ms-lease-id");
         String proposed = header(request, "x-ms-proposed-lease-id");
         if (leaseId == null || leaseId.isBlank() || proposed == null || proposed.isBlank()) {
-            return missingRequiredHeader();
+            return error("MissingRequiredHeader",
+                    "An HTTP header that's mandatory for this request is not specified.", 400, dataLake);
         }
         if (!isGuid(proposed)) {
-            return invalidHeaderValue();
+            return error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
         }
         if (lease == null || !lease.activeAt(now)) {
-            return leaseNotPresent();
+            return error("LeaseNotPresentWithLeaseOperation",
+                    "There is currently no lease on the blob.", 409, dataLake);
         }
         if (!lease.leaseId().equalsIgnoreCase(leaseId)) {
-            return new AzureErrorResponse("LeaseIdMismatchWithLeaseOperation",
-                    "The lease ID specified did not match the lease ID for the blob.")
-                    .toXmlResponse(409);
+            return error("LeaseIdMismatchWithLeaseOperation",
+                    "The lease ID specified did not match the lease ID for the blob.", 409, dataLake);
         }
         BlobLease changed = lease.changed(proposed);
         leases.put(blobKey, changed);
         return Response.ok().header("x-ms-lease-id", changed.leaseId()).build();
     }
 
-    private Response release(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
+    private Response release(AzureRequest request, String blobKey, BlobLease lease, Instant now, boolean dataLake) {
         String leaseId = header(request, "x-ms-lease-id");
         if (leaseId == null || leaseId.isBlank()) {
-            return missingRequiredHeader();
+            return error("MissingRequiredHeader",
+                    "An HTTP header that's mandatory for this request is not specified.", 400, dataLake);
         }
         if (lease == null) {
-            return leaseNotPresent();
+            return error("LeaseNotPresentWithLeaseOperation",
+                    "There is currently no lease on the blob.", 409, dataLake);
         }
         if (!lease.leaseId().equalsIgnoreCase(leaseId)) {
-            return new AzureErrorResponse("LeaseIdMismatchWithLeaseOperation",
-                    "The lease ID specified did not match the lease ID for the blob.")
-                    .toXmlResponse(409);
+            return error("LeaseIdMismatchWithLeaseOperation",
+                    "The lease ID specified did not match the lease ID for the blob.", 409, dataLake);
         }
         leases.remove(blobKey);
         return Response.ok().build();
     }
 
-    private Response breakLease(AzureRequest request, String blobKey, BlobLease lease, Instant now) {
+    private Response breakLease(AzureRequest request, String blobKey, BlobLease lease, Instant now, boolean dataLake) {
         if (lease == null || !lease.activeAt(now)) {
-            return leaseNotPresent();
+            return error("LeaseNotPresentWithLeaseOperation",
+                    "There is currently no lease on the blob.", 409, dataLake);
         }
         int breakPeriod;
         String breakPeriodHeader = header(request, "x-ms-lease-break-period");
@@ -155,10 +190,12 @@ public class BlobLeaseService {
             try {
                 breakPeriod = Integer.parseInt(breakPeriodHeader);
             } catch (NumberFormatException e) {
-                return invalidHeaderValue();
+                return error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
             }
             if (breakPeriod < 0 || breakPeriod > 60) {
-                return invalidHeaderValue();
+                return error("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.", 400, dataLake);
             }
         } else {
             // Default: infinite leases break immediately, fixed leases run out their term.
@@ -173,21 +210,9 @@ public class BlobLeaseService {
                 .build();
     }
 
-    private static Response leaseNotPresent() {
-        return new AzureErrorResponse("LeaseNotPresentWithLeaseOperation",
-                "There is currently no lease on the blob.").toXmlResponse(409);
-    }
-
-    private static Response missingRequiredHeader() {
-        return new AzureErrorResponse("MissingRequiredHeader",
-                "An HTTP header that's mandatory for this request is not specified.")
-                .toXmlResponse(400);
-    }
-
-    private static Response invalidHeaderValue() {
-        return new AzureErrorResponse("InvalidHeaderValue",
-                "The value for one of the HTTP headers is not in the correct format.")
-                .toXmlResponse(400);
+    private static Response error(String code, String message, int status, boolean dataLake) {
+        AzureErrorResponse error = new AzureErrorResponse(code, message);
+        return dataLake ? error.toDataLakeJsonResponse(status) : error.toXmlResponse(status);
     }
 
     private static boolean isGuid(String value) {
@@ -240,6 +265,28 @@ public class BlobLeaseService {
         } else if (requestLeaseId != null) {
             return new AzureErrorResponse("LeaseNotPresentWithBlobOperation",
                     "There is currently no lease on the blob.").toXmlResponse(412);
+        }
+        return null;
+    }
+
+    /** Data Lake variant of {@link #validateWrite} using the DFS JSON error envelope. */
+    Response validateDataLakeWrite(AzureRequest request, String blobKey) {
+        String requestLeaseId = header(request, "x-ms-lease-id");
+        BlobLease lease = leases.get(blobKey);
+        Instant now = Instant.now();
+        if (lease != null && lease.activeAt(now)) {
+            if (requestLeaseId == null) {
+                return error("LeaseIdMissing",
+                        "There is currently a lease on the path and no lease ID was specified in the request.",
+                        412, true);
+            }
+            if (!lease.leaseId().equalsIgnoreCase(requestLeaseId)) {
+                return error("LeaseIdMismatchWithBlobOperation",
+                        "The lease ID specified did not match the lease ID for the path.", 412, true);
+            }
+        } else if (requestLeaseId != null) {
+            return error("LeaseNotPresentWithBlobOperation",
+                    "There is currently no lease on the path.", 412, true);
         }
         return null;
     }

@@ -290,11 +290,16 @@ public class AzureRoutingFilter {
         // Capture context before switching threads
         String path0 = requestContext.getUriInfo().getPath();
         HttpHeaders headers = httpHeaders;
-        // Capture Host header now (JAX-RS request scope may not propagate to the blocking thread).
-        // Try both canonical and lowercase forms since HTTP header names are case-insensitive.
-        String h = requestContext.getHeaders().getFirst("Host");
-        if (h == null) {
-            h = requestContext.getHeaders().getFirst("host");
+        // Capture the request authority/host now (JAX-RS request scope may not propagate to the
+        // blocking thread). Under HTTP/2 the wire protocol uses :authority instead of a Host
+        // header, while UriInfo exposes the resolved authority for both HTTP/1.1 and HTTP/2.
+        String h = requestContext.getUriInfo().getRequestUri().getHost();
+        if (h == null || h.isBlank()) {
+            // Fallback for servlet/JAX-RS implementations that do not expose an absolute request URI.
+            h = requestContext.getHeaders().getFirst("Host");
+            if (h == null) {
+                h = requestContext.getHeaders().getFirst("host");
+            }
         }
         final String capturedHost = h;
 
@@ -656,7 +661,7 @@ public class AzureRoutingFilter {
         }
         AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
             ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
-            null, ctx.secure());
+            Map.of(), null, ctx.secure(), ctx.host());
         LOGGER.infof("Dispatching %s request to %s: %s %s", label,
             handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
         return new Handled(handler.get().handle(request));
@@ -672,7 +677,7 @@ public class AzureRoutingFilter {
         });
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
-            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure());
+            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(), ctx.host());
         return request.withAuthContext(authPipeline.resolve(request));
     }
 

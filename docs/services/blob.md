@@ -25,9 +25,19 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **User delegation SAS enforcement** — validates SDK-generated user delegation SAS signatures,
   expiry, signed key validity, permissions, and container/blob/directory resource scope for Blob
   and ADLS path operations
-- **ADLS Path - List** — supports Java DataLake SDK `listPaths` over the DFS endpoint, including
-  recursive and non-recursive listing, directory filters, deterministic continuation tokens, and
-  user delegation SAS list-scope checks
+- **ADLS Gen2 / Hadoop ABFS 3.3.4 path operations** - supports the DFS wire shapes used by
+  `org.apache.hadoop:hadoop-azure:3.3.4`: conditional file/directory create, path status and
+  properties, append/flush, recursive delete, file/directory rename, POSIX owner/group/permission/ACL
+  metadata, `checkAccess`, and the ADLS Path Lease POST API. Hadoop's default conditional-create
+  overwrite flow (`409` -> status/ETag -> `If-Match`) is modeled explicitly.
+- **ADLS filesystem operations** - create/delete a filesystem and get/set filesystem properties via
+  `?resource=filesystem`. Root `getAccessControl` is supported so Hadoop can auto-detect HNS and
+  resolve `getFileStatus("/")` without forcing `fs.azure.account.hns.enabled=true`.
+- **ADLS Path - List** - supports Java DataLake SDK `listPaths` and Hadoop `listStatus`, including
+  recursive/non-recursive listing, directory filters, exact-file singleton results, server pagination,
+  and Hadoop 3.3.4's Base64 HNS `startFrom` continuation token.
+- **ADLS AppendBlob mode** - recognizes Hadoop's `blobType=AppendBlob` create mode and enforces
+  sequential append positions, including append requests carrying `flush=true` / `close=true`.
 - **Range download** — `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download** — `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **Metadata** — `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
@@ -98,15 +108,24 @@ floci-az:
 
 - **Shared Key signatures are accepted but not cryptographically verified** — the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
+- **ADLS large-operation behavior is simplified** - directory rename and recursive delete complete
+  atomically in the local backend rather than reproducing Azure's server-side multi-request batching.
+  Hadoop observes a completed operation with no continuation token, which is protocol-compatible for
+  the caller. The full Azure source/destination lease-transfer and time-condition matrix is not modeled.
+- **ADLS access control is metadata-compatible, not a full POSIX authorization engine** - owner,
+  group, permissions and ACLs round-trip through the Hadoop/DFS wire protocol, and `checkAccess`
+  validates path existence and request shape. It does not deny requests based on emulated POSIX ACLs;
+  authentication/SAS authorization remains the emulator's access-control boundary.
+- **ADLS close/event semantics are storage-only** - `close=true` is accepted and committed data is
+  immediately visible, but Azure Event Grid/change-notification side effects are not emulated.
 - **SAS enforcement is scoped to user delegation SAS** — SDK-generated user delegation SAS tokens
   for container (`sr=c`), blob (`sr=b`), and ADLS directory (`sr=d`) resources are validated.
   Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
   are not fully modeled. User delegation keys are protected by a process-local secret, so SAS
   tokens issued by a previous emulator process are invalid after restart.
-- **Snapshots, versioning, leases, and tiering are not modeled.** `Get Blob` and
-  `Get Container Properties` still report the lease headers Azure always returns, fixed at the
-  unleased values (`x-ms-lease-status: unlocked`, `x-ms-lease-state: available`), because strict SDK
-  clients require them. There is no way to acquire a lease, so these values never change.
+- **Snapshots, versioning, and tiering are not modeled.** Blob leases and ADLS Path leases share
+  the emulator's in-memory lease state and support acquire/renew/change/release/break. Lease state is
+  intentionally process-local and is lost when the emulator restarts.
 - **`x-ms-server-encrypted: true` is reported although no encryption is performed** — blob data is
   stored as-is by the configured storage backend. The header mirrors the
   `x-ms-request-server-encrypted` already returned on upload and exists for SDK compatibility.

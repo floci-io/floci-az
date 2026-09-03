@@ -28,6 +28,7 @@ public class BlobServiceTest {
     private static final String CONTAINER = "test-container";
     private static final String BLOB = "test-blob.txt";
     private static final String BLOB_CONTENT = "Hello, Blob!";
+    private static final String DATALAKE_ID_FOR_TESTS = "00000000-0000-0000-0000-000000000000";
     private static final Pattern ISO_UTC_SECONDS = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
 
     @Inject
@@ -630,6 +631,524 @@ public class BlobServiceTest {
     }
 
     @Test
+    void dataLakeDeleteMissingPathReturnsPathNotFound() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().delete("/{container}/missing?recursive=true", CONTAINER)
+            .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .header("x-ms-error-code", "PathNotFound")
+            .body("error.code", equalTo("PathNotFound"))
+            .body("error.message", equalTo("The specified path does not exist."));
+    }
+
+    @Test
+    void dataLakeReadMissingPathReturnsPathNotFound() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/missing.txt", CONTAINER)
+            .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .header("x-ms-error-code", "PathNotFound")
+            .body("error.code", equalTo("PathNotFound"))
+            .body("error.message", equalTo("The specified path does not exist."));
+    }
+
+    @Test
+    void dataLakeReadMissingFilesystemReturnsFilesystemNotFound() {
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/missing-filesystem/file.txt")
+            .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .header("x-ms-error-code", "FilesystemNotFound")
+            .body("error.code", equalTo("FilesystemNotFound"))
+            .body("error.message", equalTo("The specified filesystem does not exist."));
+    }
+
+    @Test
+    void blobDeleteMissingBlobStillReturnsBlobNotFound() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().delete("/{account}/{container}/missing", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "BlobNotFound");
+    }
+
+    @Test
+    void dataLakeRecursiveDeleteRemovesDirectoryAndDescendants() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/dir?resource=directory", CONTAINER)
+            .then().statusCode(201);
+        for (String path : new String[] {"dir/a.txt", "dir/sub/b.txt"}) {
+            given()
+                .header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .when().put("/{container}/{path}?resource=file", CONTAINER, path)
+                .then().statusCode(201);
+        }
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().delete("/{container}/dir?recursive=true", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeNonRecursiveDeleteRejectsNonEmptyDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/dir?resource=directory", CONTAINER)
+            .then().statusCode(201);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/dir/file.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().delete("/{container}/dir?recursive=false", CONTAINER)
+            .then()
+            .statusCode(409)
+            .contentType("application/json")
+            .header("x-ms-error-code", "DirectoryNotEmpty")
+            .body("error.code", equalTo("DirectoryNotEmpty"));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", hasItem("dir/file.txt"));
+    }
+
+    @Test
+    void dataLakeNonRecursiveDeleteAllowsEmptyDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/empty?resource=directory", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().delete("/{container}/empty?recursive=false", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=empty", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+    }
+
+    @Test
+    void dataLakeRecursiveDeleteSupportsImplicitDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/implicit/file.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().delete("/{container}/implicit?recursive=true", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(0));
+    }
+
+    @Test
+    void dataLakeGetStatusReturnsFileAndImplicitDirectoryProperties() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/implicit/file.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/implicit/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "file")
+            .header("Content-Length", "0")
+            .header("x-ms-owner", DATALAKE_ID_FOR_TESTS)
+            .header("x-ms-group", DATALAKE_ID_FOR_TESTS);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/implicit", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "directory")
+            .header("Content-Length", "0")
+            .header("x-ms-permissions", "rwxr-x---");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/missing", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+    }
+
+    @Test
+    void dataLakeAppendAndFlushCommitsOutOfOrderChunks() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/file.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        // Stage the second chunk first. ABFS may have multiple async writes in flight.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("def".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append")
+            .queryParam("position", 3)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("abc".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append")
+            .queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(202);
+
+        // Appended data is uncommitted until flush, so status still reports the empty file.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("Content-Length", "0");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush")
+            .queryParam("position", 6)
+            .queryParam("retainUncommittedData", false)
+            .queryParam("close", true)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "file")
+            .header("Content-Length", "6");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(equalTo("abcdef"));
+    }
+
+    @Test
+    void dataLakeFlushRejectsNonContiguousData() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/file.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("def".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append")
+            .queryParam("position", 3)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush")
+            .queryParam("position", 6)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .header("x-ms-error-code", "InvalidFlushPosition")
+            .body("error.code", equalTo("InvalidFlushPosition"));
+    }
+
+    @Test
+    void dataLakeCreatePathRejectsNonZeroContentLength() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .contentType("application/octet-stream")
+            .body("payload".getBytes(StandardCharsets.UTF_8))
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .header("x-ms-error-code", "ContentLengthMustBeZero")
+            .body("error.code", equalTo("ContentLengthMustBeZero"));
+    }
+
+    @Test
+    void dataLakeRenameMovesImplicitDirectoryTreeLikeHadoopFileOutputCommitter() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        String parent = "output/_temporary/0";
+        String source = parent + "/_temporary/attempt_001";
+        String destination = parent + "/task_001";
+        String child = source + "/part-00000.parquet";
+        String movedChild = destination + "/part-00000.parquet";
+
+        // Spark creates the commit parent, but the attempt directory can be implicit:
+        // only the part file itself exists below it.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/{path}?resource=directory", CONTAINER, parent)
+            .then().statusCode(201);
+
+        createAndFlushDataLakeFile(child, "parquet-bytes");
+
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/" + source, StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .header("If-None-Match", "*")
+            .when().put("/{container}/{path}", CONTAINER, destination)
+            .then()
+            .statusCode(201)
+            .header("Content-Length", "0");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/{path}", CONTAINER, source)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "PathNotFound");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/{path}", CONTAINER, destination)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "directory");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/{path}", CONTAINER, movedChild)
+            .then()
+            .statusCode(200)
+            .body(equalTo("parquet-bytes"));
+    }
+
+    @Test
+    void dataLakeRenameMovesFileAndPreservesContent() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        createAndFlushDataLakeFile("source.txt", "source-data");
+
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .header("If-None-Match", "*")
+            .when().put("/{container}/destination.txt", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/source.txt", CONTAINER)
+            .then().statusCode(404);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/destination.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(equalTo("source-data"));
+    }
+
+    @Test
+    void dataLakeRenameHonorsHadoopIfNoneMatchDestinationCondition() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String path : new String[] {"source.txt", "destination.txt"}) {
+            createAndFlushDataLakeFile(path, path);
+        }
+
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .header("If-None-Match", "*")
+            .when().put("/{container}/destination.txt", CONTAINER)
+            .then()
+            .statusCode(412)
+            .contentType("application/json")
+            .header("x-ms-error-code", "ConditionNotMet")
+            .body("error.code", equalTo("ConditionNotMet"));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/source.txt", CONTAINER)
+            .then().statusCode(200).body(equalTo("source.txt"));
+    }
+
+    @Test
+    void dataLakeRenameOverwritesDestinationWhenNoConditionIsSpecified() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        createAndFlushDataLakeFile("source.txt", "new-data");
+        createAndFlushDataLakeFile("destination.txt", "old-data");
+
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .when().put("/{container}/destination.txt", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/destination.txt", CONTAINER)
+            .then().statusCode(200).body(equalTo("new-data"));
+    }
+
+    @Test
+    void dataLakeRenameRejectsNonZeroContentLength() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/source.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .body("unexpected-body")
+            .when().put("/{container}/destination.txt", CONTAINER)
+            .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .header("x-ms-error-code", "ContentLengthMustBeZero")
+            .body("error.code", equalTo("ContentLengthMustBeZero"));
+    }
+
+    @Test
+    void dataLakeRenameMissingSourceReturnsSourcePathNotFound() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/missing", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .header("If-None-Match", "*")
+            .when().put("/{container}/destination", CONTAINER)
+            .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .header("x-ms-error-code", "SourcePathNotFound")
+            .body("error.code", equalTo("SourcePathNotFound"));
+    }
+
+    @Test
+    void dataLakeRenameRequiresExistingDestinationParent() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/source.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .header("If-None-Match", "*")
+            .when().put("/{container}/missing-parent/destination.txt", CONTAINER)
+            .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .header("x-ms-error-code", "RenameDestinationParentPathNotFound")
+            .body("error.code", equalTo("RenameDestinationParentPathNotFound"));
+    }
+
+    @Test
+    void dataLakeRenameRejectsDestinationBelowSourceDirectory() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().put("/{container}/source?resource=directory", CONTAINER)
+            .then().statusCode(201);
+        String encodedSource = java.net.URLEncoder.encode(
+                "/" + CONTAINER + "/source", StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-rename-source", encodedSource)
+            .when().put("/{container}/source/child", CONTAINER)
+            .then()
+            .statusCode(409)
+            .contentType("application/json")
+            .header("x-ms-error-code", "InvalidRenameSourcePath")
+            .body("error.code", equalTo("InvalidRenameSourcePath"));
+    }
+
+    @Test
     void dataLakeRecursiveRootListingReturnsNestedFiles() {
         createContainerWithDataLakePaths();
 
@@ -730,21 +1249,62 @@ public class BlobServiceTest {
     }
 
     @Test
-    void dataLakeDirectoryListingRejectsFilePath() {
+    void dataLakeListPathsReturnsExactFileForHadoopListStatus() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
         given()
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
-            .when().put("/{container}/file?resource=file", CONTAINER)
+            .when().put("/{container}/file.csv?resource=file", CONTAINER)
             .then()
             .statusCode(201);
 
         given()
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
-            .when().get("/{container}?resource=filesystem&recursive=true&directory=file", CONTAINER)
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("abcdef".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append")
+            .queryParam("position", 0)
+            .when().put("/{container}/file.csv", CONTAINER)
             .then()
-            .statusCode(404)
-            .header("x-ms-error-code", "PathNotFound");
+            .statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush")
+            .queryParam("position", 6)
+            .queryParam("retainUncommittedData", false)
+            .queryParam("close", true)
+            .when().put("/{container}/file.csv", CONTAINER)
+            .then()
+            .statusCode(200);
+
+        // Hadoop ABFS 3.3.4 implements FileSystem.listStatus(file) by sending
+        // List Paths with directory=<file> and recursive=false. The service
+        // response must represent the existing file as a singleton PathList;
+        // returning PathNotFound breaks Hadoop/Spark file discovery.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=false&directory=file.csv", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(1))
+            .body("paths[0].name", equalTo("file.csv"))
+            .body("paths[0].isDirectory", equalTo(false))
+            .body("paths[0].contentLength", equalTo(6));
+
+        // Keep recursive=true compatible as well; callers may issue the same
+        // exact-path probe with recursive listing enabled.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}?resource=filesystem&recursive=true&directory=file.csv", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths", hasSize(1))
+            .body("paths[0].name", equalTo("file.csv"))
+            .body("paths[0].isDirectory", equalTo(false))
+            .body("paths[0].contentLength", equalTo(6));
     }
 
     @Test
@@ -792,6 +1352,423 @@ public class BlobServiceTest {
             .then()
             .statusCode(400)
             .header("x-ms-error-code", "InvalidQueryParameterValue");
+    }
+
+    @Test
+    void dataLakeFilesystemCrudAndProperties() {
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-properties", "environment=ZGV2")
+            .queryParam("resource", "filesystem")
+            .when().put("/{container}", CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .when().head("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-properties", "environment=ZGV2");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .header("x-ms-properties", "environment=cHJvZA==")
+            .queryParam("resource", "filesystem")
+            .when().put("/{container}", CONTAINER)
+            .then()
+            .statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .when().head("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-properties", "environment=cHJvZA==");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .when().delete("/{container}", CONTAINER)
+            .then()
+            .statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .when().head("/{container}", CONTAINER)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "FilesystemNotFound");
+    }
+
+    @Test
+    void dataLakeRootAccessControlSupportsHnsDetectionAndRootStatus() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getAccessControl")
+            .queryParam("upn", false)
+            .when().head("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-owner", DATALAKE_ID_FOR_TESTS)
+            .header("x-ms-group", DATALAKE_ID_FOR_TESTS)
+            .header("x-ms-permissions", "rwxr-x---")
+            .header("x-ms-acl", not(isEmptyOrNullString()))
+            .header("ETag", not(isEmptyOrNullString()))
+            .header("Last-Modified", not(isEmptyOrNullString()));
+
+        // Plain HEAD is getPathStatus(includeProperties=true) and is also valid on root.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().head("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "directory")
+            .header("Content-Length", "0")
+            .header("x-ms-properties", notNullValue());
+    }
+
+    @Test
+    void dataLakeConditionalCreateSupportsHadoopDefaultOverwriteProtocol() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("If-None-Match", "*")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("If-None-Match", "*")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "PathAlreadyExists")
+            .header("x-ms-existing-resource-type", "file")
+            .body("error.code", equalTo("PathAlreadyExists"));
+
+        String etag = given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200)
+            .extract().header("ETag");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("If-Match", etag)
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("If-Match", "\"wrong-etag\"")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "ConditionNotMet");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "directory")
+            .when().put("/{container}/dir", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("If-None-Match", "*")
+            .queryParam("resource", "directory")
+            .when().put("/{container}/dir", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-existing-resource-type", "directory");
+    }
+
+    @Test
+    void dataLakePathPropertiesPreserveFileBytesAndSupportXattrs() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(201);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("abcdef".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(202);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush").queryParam("position", 6)
+            .queryParam("retainUncommittedData", false).queryParam("close", true)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .header("x-ms-properties", "user.test=dmFsdWU=")
+            .queryParam("action", "setProperties")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-properties", "user.test=dmFsdWU=")
+            .header("Content-Length", "6");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200).body(equalTo("abcdef"));
+    }
+
+    @Test
+    void dataLakeAccessControlPreservesFileBytes() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(201);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream").body("payload".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(202);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush").queryParam("position", 7)
+            .queryParam("retainUncommittedData", false).queryParam("close", true)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(200);
+
+        String acl = "user::rw-,user:alice:r--,group::r--,mask::r--,other::---";
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .header("x-ms-owner", "alice")
+            .header("x-ms-group", "analytics")
+            .header("x-ms-acl", acl)
+            .queryParam("action", "setAccessControl")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getAccessControl")
+            .queryParam("upn", true)
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-owner", "alice")
+            .header("x-ms-group", "analytics")
+            .header("x-ms-acl", acl)
+            .header("x-ms-permissions", "rw-r-----+");
+
+        // Hadoop setPermission sends an octal mode using the same setAccessControl action.
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .header("x-ms-permissions", "0750")
+            .queryParam("action", "setAccessControl")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getAccessControl")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-permissions", "rwxr-x---+")
+            .header("x-ms-acl", allOf(
+                    containsString("user:alice:r--"),
+                    containsString("mask::r-x")));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200).body(equalTo("payload"));
+    }
+
+    @Test
+    void dataLakeUnknownActionCannotFallThroughAndTruncateFile() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(201);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .body("abc".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(202);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush").queryParam("position", 3)
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(200);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "futureHadoopAction")
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then()
+            .statusCode(501)
+            .contentType("application/json")
+            .header("x-ms-error-code", "NotImplemented");
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200).body(equalTo("abc"));
+    }
+
+    @Test
+    void dataLakeCheckAccessUsesHnsWireContract() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(201);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "checkAccess").queryParam("fsAction", "r--")
+            .when().head("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "checkAccess").queryParam("fsAction", "r--")
+            .when().head("/{container}/missing", CONTAINER)
+            .then().statusCode(404).header("x-ms-error-code", "PathNotFound");
+    }
+
+    @Test
+    void dataLakePathLeaseSupportsHadoopPostApiAndWriteGuard() {
+        String leaseId = "11111111-1111-1111-1111-111111111111";
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/file.txt", CONTAINER).then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-lease-action", "acquire")
+            .header("x-ms-lease-duration", "-1")
+            .header("x-ms-proposed-lease-id", leaseId)
+            .when().post("/{container}/file.txt", CONTAINER)
+            .then().statusCode(201).header("x-ms-lease-id", leaseId);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .body("abc".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(412).header("x-ms-error-code", "LeaseIdMissing");
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .header("x-ms-lease-id", leaseId)
+            .body("abc".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/file.txt", CONTAINER)
+            .then().statusCode(202);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-lease-action", "renew").header("x-ms-lease-id", leaseId)
+            .when().post("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200).header("x-ms-lease-id", leaseId);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-lease-action", "release").header("x-ms-lease-id", leaseId)
+            .when().post("/{container}/file.txt", CONTAINER)
+            .then().statusCode(200);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-lease-action", "acquire").header("x-ms-lease-duration", "-1")
+            .header("x-ms-proposed-lease-id", leaseId)
+            .when().post("/{container}/file.txt", CONTAINER)
+            .then().statusCode(201);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-lease-action", "break").header("x-ms-lease-break-period", "0")
+            .when().post("/{container}/file.txt", CONTAINER)
+            .then().statusCode(202).header("x-ms-lease-time", "0");
+    }
+
+    @Test
+    void dataLakeAppendBlobSupportsSequentialHadoopAppendMode() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file").queryParam("blobType", "AppendBlob")
+            .when().put("/{container}/append.log", CONTAINER).then().statusCode(201);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .body("abc".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 0)
+            .when().put("/{container}/append.log", CONTAINER)
+            .then().statusCode(202);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .body("def".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 3)
+            .queryParam("flush", true).queryParam("close", true)
+            .when().put("/{container}/append.log", CONTAINER)
+            .then().statusCode(200);
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .body("again".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append").queryParam("position", 3)
+            .when().put("/{container}/append.log", CONTAINER)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidQueryParameterValue");
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/append.log", CONTAINER)
+            .then().statusCode(200).header("Content-Length", "6");
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().get("/{container}/append.log", CONTAINER)
+            .then().statusCode(200).body(equalTo("abcdef"));
+    }
+
+    @Test
+    void dataLakeListPathsAcceptsHadoopXnsStartFromContinuation() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "directory")
+            .when().put("/{container}/folder", CONTAINER).then().statusCode(201);
+        for (String file : new String[] {"afile", "bfile", "hfile", "ifile"}) {
+            given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .queryParam("resource", "file")
+                .when().put("/{container}/folder/{file}", CONTAINER, file)
+                .then().statusCode(201);
+        }
+
+        // Hadoop ABFS 3.3.4 generateContinuationTokenForXns() uses
+        // Base64("<crc64> 0 <startFrom>"). CRC validation is intentionally
+        // unnecessary in the emulator; the service treats the token as opaque.
+        String token = Base64.getEncoder().encodeToString("123456789 0 hfile".getBytes(StandardCharsets.UTF_8));
+
+        given().header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "filesystem")
+            .queryParam("recursive", false)
+            .queryParam("directory", "folder")
+            .queryParam("continuation", token)
+            .when().get("/{container}", CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("paths.name", contains("folder/hfile", "folder/ifile"));
     }
 
     @Test
@@ -1647,6 +2624,38 @@ public class BlobServiceTest {
                 + "&sp=r"
                 + "&srq=operation"
                 + "&sig=" + signature;
+    }
+
+    private void createAndFlushDataLakeFile(String path, String content) {
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("resource", "file")
+            .when().put("/{container}/{path}", CONTAINER, path)
+            .then().statusCode(201);
+
+        if (bytes.length > 0) {
+            given()
+                .header("Host", ACCOUNT + ".dfs.core.windows.net")
+                .header("X-Http-Method-Override", "PATCH")
+                .contentType("application/octet-stream")
+                .body(bytes)
+                .queryParam("action", "append")
+                .queryParam("position", 0)
+                .when().put("/{container}/{path}", CONTAINER, path)
+                .then().statusCode(202);
+        }
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush")
+            .queryParam("position", bytes.length)
+            .queryParam("retainUncommittedData", false)
+            .queryParam("close", true)
+            .when().put("/{container}/{path}", CONTAINER, path)
+            .then().statusCode(200);
     }
 
     private static String canonicalName(String container, String blobName) {
