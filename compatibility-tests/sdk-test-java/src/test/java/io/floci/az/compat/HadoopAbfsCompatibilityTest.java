@@ -14,6 +14,7 @@ import org.junit.jupiter.api.TestInstance;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
@@ -149,7 +150,10 @@ class HadoopAbfsCompatibilityTest {
         }
 
         void start() throws IOException {
-            serverSocket = new ServerSocket(listenPort);
+            serverSocket = new ServerSocket(
+                    listenPort,
+                    50,
+                    InetAddress.getByName("127.0.0.1"));
             running.set(true);
             executor.submit(this::acceptLoop);
         }
