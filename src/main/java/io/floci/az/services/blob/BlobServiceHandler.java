@@ -22,6 +22,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -43,6 +44,20 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private static final String BLK_PREFIX = "__blk__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final String CREATION_TIME_KEY = "CreationTime";
+    private static final String DATALAKE_APPEND_PREFIX = "__abfs_append__:";
+    private static final String DATALAKE_OWNER = DataLakePathOperations.DEFAULT_OWNER;
+    private static final String DATALAKE_GROUP = DataLakePathOperations.DEFAULT_GROUP;
+    private static final String DATALAKE_FILE_PERMISSIONS = DataLakePathOperations.DEFAULT_FILE_PERMISSIONS;
+    private static final String DATALAKE_DIRECTORY_PERMISSIONS = DataLakePathOperations.DEFAULT_DIRECTORY_PERMISSIONS;
+    private static final String DATALAKE_RESOURCE_TYPE_KEY = DataLakePathOperations.RESOURCE_TYPE;
+    private static final String DATALAKE_OWNER_KEY = DataLakePathOperations.OWNER_KEY;
+    private static final String DATALAKE_GROUP_KEY = DataLakePathOperations.GROUP_KEY;
+    private static final String DATALAKE_PERMISSIONS_KEY = DataLakePathOperations.PERMISSIONS_KEY;
+    private static final String DATALAKE_ACL_KEY = DataLakePathOperations.ACL_KEY;
+    private static final String DATALAKE_PROPERTIES_KEY = DataLakePathOperations.PROPERTIES_KEY;
+    private static final String DATALAKE_FILESYSTEM_PROPERTIES_KEY = "DataLakeFilesystemProperties";
+    private static final String DATALAKE_DEFAULT_FILE_ACL = "user::rw-,group::r--,other::---";
+    private static final String DATALAKE_DEFAULT_DIRECTORY_ACL = "user::rwx,group::r-x,other::---";
     private static final Map<String, String> BLOB_HTTP_PROPERTY_HEADERS = Map.of(
             "x-ms-blob-cache-control", HttpHeaders.CACHE_CONTROL,
             "x-ms-blob-content-disposition", "Content-Disposition",
@@ -145,11 +160,46 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String blobName = parts.length > 1 ? parts[1] : "";
 
             String comp = query.get("comp");
+            String action = query.get("action");
+            boolean dataLakeRequest = isDataLakeRequest(request);
 
             if (blobName.isEmpty()) {
-                if ("GET".equalsIgnoreCase(method) && comp == null
-                        && "filesystem".equals(query.get("resource"))) {
-                    response = listDataLakePaths(request, containerName);
+                if (dataLakeRequest && "filesystem".equals(query.get("resource"))
+                        && (comp != null || action != null)) {
+                    // ADLS filesystem operations do not use Blob-style `comp` or path `action`
+                    // dispatch. Fail closed so unsupported query shapes cannot be mistaken for
+                    // List Paths or another filesystem operation.
+                    response = dataLakeNotImplemented();
+                } else if (dataLakeRequest && "filesystem".equals(query.get("resource"))) {
+                    if ("GET".equalsIgnoreCase(method)) {
+                        response = listDataLakePaths(request, containerName);
+                    } else if ("HEAD".equalsIgnoreCase(method)) {
+                        response = getDataLakeFilesystemProperties(request, containerName);
+                    } else if ("PUT".equalsIgnoreCase(method)
+                            && "PATCH".equalsIgnoreCase(request.headers().getHeaderString("X-Http-Method-Override"))) {
+                        response = setDataLakeFilesystemProperties(request, containerName);
+                    } else if ("PUT".equalsIgnoreCase(method)) {
+                        response = createDataLakeFilesystem(request, containerName);
+                    } else if ("DELETE".equalsIgnoreCase(method)) {
+                        response = deleteDataLakeFilesystem(request, containerName);
+                    } else {
+                        response = dataLakeNotImplemented();
+                    }
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && (action == null || "getStatus".equals(action))) {
+                    response = getDataLakeRootPathStatus(request, containerName);
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && "getAccessControl".equals(action)) {
+                    response = getDataLakeAccessControl(request, containerName, null);
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && "checkAccess".equals(action)) {
+                    response = checkDataLakeAccess(request, containerName, null);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method)
+                        && "setAccessControl".equals(action)) {
+                    response = setDataLakeAccessControl(request, containerName, null);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method)
+                        && "setProperties".equals(action)) {
+                    response = setDataLakePathProperties(request, containerName, null);
                 } else if ("GET".equalsIgnoreCase(method) && "list".equals(comp)) {
                     response = listBlobs(request, containerName);
                 } else if (comp != null) {
@@ -165,10 +215,48 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) && "container".equals(query.get("restype"))) {
                     response = getContainer(request, containerName, "HEAD".equalsIgnoreCase(method));
                 } else {
-                    response = notImplemented();
+                    response = dataLakeRequest ? dataLakeNotImplemented() : notImplemented();
                 }
             } else {
-                if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
+                String renameSource = request.headers().getHeaderString("x-ms-rename-source");
+
+                if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && renameSource != null) {
+                    response = renameDataLakePath(request, containerName, blobName, renameSource);
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && (action == null || "getStatus".equals(action))) {
+                    response = getDataLakePathStatus(request, containerName, blobName);
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && "getAccessControl".equals(action)) {
+                    response = getDataLakeAccessControl(request, containerName, blobName);
+                } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
+                        && "checkAccess".equals(action)) {
+                    response = checkDataLakeAccess(request, containerName, blobName);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "append".equals(action)) {
+                    response = appendDataLakePath(request, containerName, blobName);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "flush".equals(action)) {
+                    response = flushDataLakePath(request, containerName, blobName);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "setProperties".equals(action)) {
+                    response = setDataLakePathProperties(request, containerName, blobName);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "setAccessControl".equals(action)) {
+                    response = setDataLakeAccessControl(request, containerName, blobName);
+                } else if (dataLakeRequest && "POST".equalsIgnoreCase(method)
+                        && request.headers().getHeaderString("x-ms-lease-action") != null) {
+                    response = leaseDataLakePath(request, containerName, blobName);
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method)
+                        && action == null && ("file".equals(query.get("resource"))
+                        || "directory".equals(query.get("resource")))) {
+                    response = createDataLakePath(request, containerName, blobName);
+                } else if (dataLakeRequest && action != null) {
+                    // Never allow an ADLS Path Update action to fall through into PutBlob:
+                    // Hadoop setProperties/setAccessControl requests have empty bodies and a
+                    // generic blob write would silently truncate the file.
+                    response = dataLakeNotImplemented();
+                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method)) {
+                    // Every Hadoop ABFS 3.3.4 DFS PUT shape is explicitly handled above
+                    // (create, rename, append/flush, properties, ACL). An unknown DFS PUT
+                    // must fail closed rather than being mistaken for a Blob Put operation.
+                    response = dataLakeNotImplemented();
+                } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
                     response = leaseBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
@@ -184,14 +272,22 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = getBlockList(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && isPutBlob(request, comp)) {
                     response = putBlob(request, containerName, blobName);
+                } else if (dataLakeRequest && "GET".equalsIgnoreCase(method)) {
+                    response = readDataLakePath(request, containerName, blobName);
                 } else if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
                     response = getBlob(request, containerName, blobName, "HEAD".equalsIgnoreCase(method));
                 } else if ("DELETE".equalsIgnoreCase(method)) {
-                    response = deleteBlob(request, containerName, blobName);
+                    response = dataLakeRequest
+                            ? deleteDataLakePath(request, containerName, blobName)
+                            : deleteBlob(request, containerName, blobName);
                 } else {
-                    response = notImplemented();
+                    response = dataLakeRequest ? dataLakeNotImplemented() : notImplemented();
                 }
             }
+        }
+
+        if (isDataLakeRequest(request) && response.getStatus() >= 400) {
+            response = normalizeDataLakeErrorResponse(response);
         }
 
         return Response.fromResponse(response)
@@ -214,6 +310,29 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response notImplemented() {
         return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                 .toXmlResponse(501);
+    }
+
+    private Response dataLakeNotImplemented() {
+        return new AzureErrorResponse("NotImplemented", "The requested Data Lake operation is not implemented.")
+                .toDataLakeJsonResponse(501);
+    }
+
+    private static Response normalizeDataLakeErrorResponse(Response response) {
+        if (response.getMediaType() != null
+                && response.getMediaType().isCompatible(MediaType.APPLICATION_JSON_TYPE)) {
+            return response;
+        }
+        String code = response.getHeaderString("x-ms-error-code");
+        if (code == null || code.isBlank()) {
+            code = response.getStatus() == 404 ? "PathNotFound" : "OperationFailed";
+        }
+        return Response.fromResponse(response)
+                .type(MediaType.APPLICATION_JSON_TYPE)
+                .header("x-ms-error-code", code)
+                .entity(Map.of("error", Map.of(
+                        "code", code,
+                        "message", "The requested Data Lake operation failed.")))
+                .build();
     }
 
     /** PUT /{container}/{blob}?comp=lease — Lease Blob (acquire/renew/change/release/break). */
@@ -328,8 +447,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             store.delete(nsKey(request.accountName(), containerName));
             String objPrefix = request.accountName() + "/" + containerName + "/";
             String blkPrefix = BLK_PREFIX + objPrefix;
+            String appendPrefix = DATALAKE_APPEND_PREFIX + objPrefix;
             store.keys().stream()
-                    .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix))
+                    .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix) || k.startsWith(appendPrefix))
                     .toList()
                     .forEach(store::delete);
             leaseService.onContainerDeleted(objPrefix);
@@ -407,6 +527,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 String etag = UUID.randomUUID().toString();
                 store.put(objKey(request.accountName(), containerName, blobName),
                         new StoredObject(blobName, data, metadata, Instant.now(), etag));
+                if ("file".equals(dataLakeResourceType)) {
+                    clearDataLakeAppendChunks(request.accountName(), containerName, blobName);
+                }
 
                 return Response.status(Response.Status.CREATED)
                         .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
@@ -418,6 +541,1307 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         } catch (IOException e) {
             return Response.serverError().build();
         }
+    }
+
+
+    // ── ADLS Gen2 filesystem/path compatibility for Hadoop ABFS 3.3.4 ───────
+
+    private Response createDataLakeFilesystem(AzureRequest request, String filesystem) {
+        Response authFailure = authorizeCreate(request, filesystem, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            String key = nsKey(request.accountName(), filesystem);
+            if (store.get(key).isPresent()) {
+                return new AzureErrorResponse("FilesystemAlreadyExists",
+                        "The specified filesystem already exists.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            Instant now = Instant.now();
+            Map<String, String> metadata = defaultDataLakeMetadata("", true, null);
+            metadata.put(DATALAKE_FILESYSTEM_PROPERTIES_KEY,
+                    headerOrEmpty(request, "x-ms-properties"));
+            metadata.put(CREATION_TIME_KEY, now.toString());
+            String etag = UUID.randomUUID().toString();
+            store.put(key, new StoredObject("", new byte[0], metadata, now, etag));
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .build();
+        });
+    }
+
+    private Response getDataLakeRootPathStatus(AzureRequest request, String filesystem) {
+        Response authFailure = authorizeRead(request, filesystem, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Optional<StoredObject> sentinel = store.get(nsKey(request.accountName(), filesystem));
+        if (sentinel.isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        StoredObject object = sentinel.get();
+        Map<String, String> metadata = object.metadata();
+        Response.ResponseBuilder builder = Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(effectiveLastModified(object)))
+                .header("ETag", effectiveEtag(object, nsKey(request.accountName(), filesystem)))
+                .header(HttpHeaders.CONTENT_LENGTH, 0)
+                .header("x-ms-resource-type", "directory")
+                .header("x-ms-owner", metadata.getOrDefault(DATALAKE_OWNER_KEY, DATALAKE_OWNER))
+                .header("x-ms-group", metadata.getOrDefault(DATALAKE_GROUP_KEY, DATALAKE_GROUP))
+                .header("x-ms-permissions", metadata.getOrDefault(
+                        DATALAKE_PERMISSIONS_KEY, DATALAKE_DIRECTORY_PERMISSIONS))
+                .header("x-ms-request-server-encrypted", "true");
+        if (request.queryParams().get("action") == null) {
+            builder.header("x-ms-properties", metadata.getOrDefault(DATALAKE_PROPERTIES_KEY, ""));
+        }
+        return builder.build();
+    }
+
+    private Response getDataLakeFilesystemProperties(AzureRequest request, String filesystem) {
+        Response authFailure = authorizeRead(request, filesystem, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Optional<StoredObject> sentinel = store.get(nsKey(request.accountName(), filesystem));
+        if (sentinel.isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        StoredObject so = sentinel.get();
+        Instant modified = effectiveLastModified(so);
+        return Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(modified))
+                .header("ETag", effectiveEtag(so, nsKey(request.accountName(), filesystem)))
+                .header("x-ms-properties", so.metadata().getOrDefault(DATALAKE_FILESYSTEM_PROPERTIES_KEY, ""))
+                .build();
+    }
+
+    private Response setDataLakeFilesystemProperties(AzureRequest request, String filesystem) {
+        Response authFailure = authorizeWrite(request, filesystem, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            String key = nsKey(request.accountName(), filesystem);
+            Optional<StoredObject> sentinel = store.get(key);
+            if (sentinel.isEmpty()) {
+                return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            StoredObject current = sentinel.get();
+            Map<String, String> metadata = new HashMap<>(current.metadata());
+            metadata.put(DATALAKE_FILESYSTEM_PROPERTIES_KEY, headerOrEmpty(request, "x-ms-properties"));
+            ensureDataLakeDefaults(metadata, true);
+            Instant now = Instant.now();
+            String etag = UUID.randomUUID().toString();
+            store.put(key, new StoredObject(current.key(), current.data(), metadata, now, etag));
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .build();
+        });
+    }
+
+    private Response deleteDataLakeFilesystem(AzureRequest request, String filesystem) {
+        Response authFailure = authorizeDelete(request, filesystem, null);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            String nsKey = nsKey(request.accountName(), filesystem);
+            if (store.get(nsKey).isEmpty()) {
+                return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            store.delete(nsKey);
+            String objectPrefix = request.accountName() + "/" + filesystem + "/";
+            String blockPrefix = BLK_PREFIX + objectPrefix;
+            String appendPrefix = DATALAKE_APPEND_PREFIX + objectPrefix;
+            store.keys().stream()
+                    .filter(key -> key.startsWith(objectPrefix)
+                            || key.startsWith(blockPrefix)
+                            || key.startsWith(appendPrefix))
+                    .toList()
+                    .forEach(store::delete);
+            leaseService.onContainerDeleted(objectPrefix);
+            return Response.status(Response.Status.ACCEPTED).build();
+        });
+    }
+
+    /** Hadoop createPath(), including its default conditional-overwrite flow. */
+    private Response createDataLakePath(AzureRequest request, String filesystem, String path) {
+        String contentLengthHeader = request.headers().getHeaderString(HttpHeaders.CONTENT_LENGTH);
+        if (contentLengthHeader != null) {
+            try {
+                if (Long.parseLong(contentLengthHeader) != 0L) {
+                    return new AzureErrorResponse("ContentLengthMustBeZero",
+                            "The Content-Length request header must be zero.")
+                            .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                }
+            } catch (NumberFormatException e) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+        }
+
+        boolean directory = "directory".equals(request.queryParams().get("resource"));
+        String key = objKey(request.accountName(), filesystem, path);
+        return leaseService.exclusively(() -> {
+            if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+                return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            DataLakePathState state = resolveDataLakePath(request.accountName(), filesystem, path);
+            boolean exists = state != null;
+            Response authFailure = exists
+                    ? authorizeWrite(request, filesystem, path)
+                    : authorizeCreate(request, filesystem, path);
+            if (authFailure != null) {
+                return authFailure;
+            }
+
+            String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
+            if (exists && ifNoneMatch != null && "*".equals(ifNoneMatch.trim())) {
+                Response error = new AzureErrorResponse("PathAlreadyExists",
+                        "The specified path already exists.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                return Response.fromResponse(error)
+                        .header("x-ms-existing-resource-type", state.directory() ? "directory" : "file")
+                        .build();
+            }
+
+            String ifMatch = request.headers().getHeaderString(HttpHeaders.IF_MATCH);
+            if (ifMatch != null && (state == null || !etagMatches(ifMatch, state.object().etag()))) {
+                return new AzureErrorResponse("ConditionNotMet",
+                        "The condition specified using HTTP conditional header(s) is not met.")
+                        .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+
+            if (state != null && state.directory() != directory) {
+                return new AzureErrorResponse("PathConflict",
+                        "The path conflicts with an existing resource of a different type.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+
+            Response leaseFailure = state != null && !state.implicit()
+                    ? leaseService.validateDataLakeWrite(request, key)
+                    : null;
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+
+            Optional<StoredObject> existing = store.get(key);
+            Map<String, String> metadata = defaultDataLakeMetadata(path, directory, request);
+            metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
+            if (existing.isPresent()) {
+                // Conditional overwrite replaces file content but keeps path identity and user
+                // properties. Hadoop supplies x-ms-permissions/x-ms-umask on create; when it does
+                // not, preserve the existing POSIX mode/ACL rather than resetting them to defaults.
+                Map<String, String> currentMetadata = existing.get().metadata();
+                copyIfPresent(currentMetadata, metadata, DATALAKE_PROPERTIES_KEY);
+                copyIfPresent(currentMetadata, metadata, DATALAKE_OWNER_KEY);
+                copyIfPresent(currentMetadata, metadata, DATALAKE_GROUP_KEY);
+                String requestedPermissions = request.headers().getHeaderString("x-ms-permissions");
+                if (requestedPermissions == null || requestedPermissions.isBlank()) {
+                    copyIfPresent(currentMetadata, metadata, DATALAKE_PERMISSIONS_KEY);
+                    copyIfPresent(currentMetadata, metadata, DATALAKE_ACL_KEY);
+                } else {
+                    metadata.put(DATALAKE_ACL_KEY, applyPermissionsToAcl(
+                            currentMetadata.get(DATALAKE_ACL_KEY), metadata.get(DATALAKE_PERMISSIONS_KEY)));
+                }
+            }
+
+            String requestedBlobType = request.queryParams().get("blobType");
+            metadata.put("BlobType", "AppendBlob".equalsIgnoreCase(requestedBlobType)
+                    ? "AppendBlob" : "BlockBlob");
+            String etag = UUID.randomUUID().toString();
+            Instant now = Instant.now();
+            store.put(key, new StoredObject(path, new byte[0], metadata, now, etag));
+            if (!directory) {
+                clearDataLakeAppendChunks(request.accountName(), filesystem, path);
+            }
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header(HttpHeaders.CONTENT_LENGTH, 0)
+                    .build();
+        });
+    }
+
+    private Response setDataLakePathProperties(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeWrite(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            DataLakePathState state = resolveDataLakePath(request.accountName(), filesystem, path);
+            if (state == null) {
+                return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            boolean root = path == null || path.isBlank() || "/".equals(path);
+            // Validate against the visible ETag first. Implicit directories expose a
+            // deterministic synthetic ETag; materializing a marker before this check
+            // would replace it and make Hadoop getAclStatus -> setAcl If-Match fail.
+            Response conditionFailure = validateDataLakeConditions(request, Optional.of(state.object()));
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            StoredObject current = root
+                    ? state.object()
+                    : materializeIfImplicitDirectory(request.accountName(), filesystem, path, state);
+            if (!root) {
+                Response leaseFailure = leaseService.validateDataLakeWrite(request,
+                        objKey(request.accountName(), filesystem, path));
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+            }
+            Map<String, String> metadata = new HashMap<>(current.metadata());
+            metadata.put(DATALAKE_PROPERTIES_KEY, headerOrEmpty(request, "x-ms-properties"));
+            ensureDataLakeDefaults(metadata, state.directory());
+            String etag = UUID.randomUUID().toString();
+            Instant now = Instant.now();
+            String storageKey = root ? nsKey(request.accountName(), filesystem)
+                    : objKey(request.accountName(), filesystem, path);
+            String objectName = root ? current.key() : path;
+            store.put(storageKey,
+                    new StoredObject(objectName, current.data(), metadata, now, etag));
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .build();
+        });
+    }
+
+    private Response getDataLakeAccessControl(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeRead(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        DataLakePathState state = resolveDataLakePath(request.accountName(), filesystem, path);
+        if (state == null) {
+            return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        StoredObject object = state.object();
+        Map<String, String> metadata = object.metadata();
+        String permissions = metadata.getOrDefault(DATALAKE_PERMISSIONS_KEY,
+                state.directory() ? DATALAKE_DIRECTORY_PERMISSIONS : DATALAKE_FILE_PERMISSIONS);
+        String acl = metadata.getOrDefault(DATALAKE_ACL_KEY,
+                state.directory() ? DATALAKE_DEFAULT_DIRECTORY_ACL : DATALAKE_DEFAULT_FILE_ACL);
+        return Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(effectiveLastModified(object)))
+                .header("ETag", effectiveEtag(object, state.key()))
+                .header("x-ms-owner", metadata.getOrDefault(DATALAKE_OWNER_KEY, DATALAKE_OWNER))
+                .header("x-ms-group", metadata.getOrDefault(DATALAKE_GROUP_KEY, DATALAKE_GROUP))
+                .header("x-ms-permissions", permissions)
+                .header("x-ms-acl", acl)
+                .build();
+    }
+
+    private Response setDataLakeAccessControl(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeWrite(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+                return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            DataLakePathState state = resolveDataLakePath(request.accountName(), filesystem, path);
+            if (state == null) {
+                return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            boolean root = path == null || path.isBlank() || "/".equals(path);
+            // Validate against the visible ETag first. Implicit directories expose a
+            // deterministic synthetic ETag; materializing a marker before this check
+            // would replace it and make Hadoop getAclStatus -> setAcl If-Match fail.
+            Response conditionFailure = validateDataLakeConditions(request, Optional.of(state.object()));
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            StoredObject current = root
+                    ? state.object()
+                    : materializeIfImplicitDirectory(request.accountName(), filesystem, path, state);
+            if (!root) {
+                Response leaseFailure = leaseService.validateDataLakeWrite(request,
+                        objKey(request.accountName(), filesystem, path));
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+            }
+
+            Map<String, String> metadata = new HashMap<>(current.metadata());
+            ensureDataLakeDefaults(metadata, state.directory());
+            putIfHeaderPresent(request, metadata, "x-ms-owner", DATALAKE_OWNER_KEY);
+            putIfHeaderPresent(request, metadata, "x-ms-group", DATALAKE_GROUP_KEY);
+
+            String permissionHeader = request.headers().getHeaderString("x-ms-permissions");
+            if (permissionHeader != null && !permissionHeader.isBlank()) {
+                String permissions = normalizeDataLakePermissions(permissionHeader, null, state.directory());
+                String updatedAcl = applyPermissionsToAcl(metadata.get(DATALAKE_ACL_KEY), permissions);
+                metadata.put(DATALAKE_ACL_KEY, updatedAcl);
+                // Hadoop derives FileStatus.hasAcl from the trailing '+' in x-ms-permissions.
+                // chmod/setPermission must not make an existing extended ACL disappear; the
+                // group mode bits update mask:: while named ACL entries stay intact.
+                metadata.put(DATALAKE_PERMISSIONS_KEY,
+                        isExtendedAcl(updatedAcl) && !permissions.endsWith("+")
+                                ? permissions + "+" : permissions);
+            }
+
+            String aclHeader = request.headers().getHeaderString("x-ms-acl");
+            if (aclHeader != null) {
+                metadata.put(DATALAKE_ACL_KEY, aclHeader);
+                if (permissionHeader == null || permissionHeader.isBlank()) {
+                    String derived = permissionsFromAcl(aclHeader, state.directory());
+                    if (isExtendedAcl(aclHeader) && !derived.endsWith("+")) {
+                        derived += "+";
+                    }
+                    metadata.put(DATALAKE_PERMISSIONS_KEY, derived);
+                }
+            }
+
+            Instant now = Instant.now();
+            String etag = UUID.randomUUID().toString();
+            String storageKey = root ? nsKey(request.accountName(), filesystem)
+                    : objKey(request.accountName(), filesystem, path);
+            store.put(storageKey, new StoredObject(current.key(), current.data(), metadata, now, etag));
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .build();
+        });
+    }
+
+    private Response checkDataLakeAccess(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeRead(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        String fsAction = request.queryParams().get("fsAction");
+        if (fsAction == null || fsAction.isBlank() || !fsAction.matches("[rwx-]{1,3}")) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        if (resolveDataLakePath(request.accountName(), filesystem, path) == null) {
+            return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        // Authentication/authorization is already handled by the emulator. Hadoop only needs
+        // the HNS access-check wire contract here; a full POSIX authorization engine is outside
+        // the storage emulator scope.
+        return Response.ok().build();
+    }
+
+    private Response leaseDataLakePath(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeWrite(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            DataLakePathState state = resolveDataLakePath(request.accountName(), filesystem, path);
+            if (state == null) {
+                return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            StoredObject object = materializeIfImplicitDirectory(request.accountName(), filesystem, path, state);
+            return leaseService.handleDataLakeLeaseOp(request,
+                    objKey(request.accountName(), filesystem, path),
+                    object.etag(), RFC1123_DATE_TIME.format(object.lastModified()));
+        });
+    }
+
+    private DataLakePathState resolveDataLakePath(String account, String filesystem, String path) {
+        if (path == null || path.isBlank() || "/".equals(path)) {
+            String key = nsKey(account, filesystem);
+            return store.get(key).map(object -> new DataLakePathState(key, object, true, false, true)).orElse(null);
+        }
+        String normalized = normalizeDataLakePath(path);
+        if (normalized == null) {
+            return null;
+        }
+        String key = objKey(account, filesystem, normalized);
+        Optional<StoredObject> exact = store.get(key);
+        if (exact.isPresent()) {
+            boolean directory = "directory".equals(exact.get().metadata().get(DATALAKE_RESOURCE_TYPE_KEY));
+            return new DataLakePathState(key, exact.get(), directory, false, false);
+        }
+        String prefix = key + "/";
+        List<StoredObject> descendants = store.scan(candidate -> candidate.startsWith(prefix)).stream()
+                .filter(object -> !isDataLakeInternalStoredObject(object))
+                .toList();
+        if (descendants.isEmpty()) {
+            return null;
+        }
+        StoredObject latest = descendants.stream()
+                .max(Comparator.comparing(StoredObject::lastModified))
+                .orElse(NS_SENTINEL);
+        Map<String, String> metadata = defaultDataLakeMetadata(normalized, true, null);
+        String etag = "implicit-" + Integer.toHexString(key.hashCode());
+        StoredObject synthetic = new StoredObject(normalized, new byte[0], metadata,
+                effectiveLastModified(latest), etag);
+        return new DataLakePathState(key, synthetic, true, true, false);
+    }
+
+    private StoredObject materializeIfImplicitDirectory(
+            String account, String filesystem, String path, DataLakePathState state) {
+        if (!state.implicit()) {
+            return state.object();
+        }
+        String normalized = normalizeDataLakePath(path);
+        Map<String, String> metadata = new HashMap<>(state.object().metadata());
+        metadata.put("Name", normalized);
+        metadata.put(DATALAKE_RESOURCE_TYPE_KEY, "directory");
+        metadata.put(CREATION_TIME_KEY, state.object().lastModified().toString());
+        ensureDataLakeDefaults(metadata, true);
+        String etag = UUID.randomUUID().toString();
+        StoredObject marker = new StoredObject(normalized, new byte[0], metadata,
+                Instant.now(), etag);
+        store.put(objKey(account, filesystem, normalized), marker);
+        return marker;
+    }
+
+    private static Map<String, String> defaultDataLakeMetadata(
+            String path, boolean directory, AzureRequest request) {
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("Name", path == null ? "" : path);
+        metadata.put(DATALAKE_RESOURCE_TYPE_KEY, directory ? "directory" : "file");
+        metadata.put(DATALAKE_OWNER_KEY, DATALAKE_OWNER);
+        metadata.put(DATALAKE_GROUP_KEY, DATALAKE_GROUP);
+        String requestedPermissions = request == null ? null
+                : request.headers().getHeaderString("x-ms-permissions");
+        String umask = request == null ? null : request.headers().getHeaderString("x-ms-umask");
+        String permissions = normalizeDataLakePermissions(requestedPermissions, umask, directory);
+        metadata.put(DATALAKE_PERMISSIONS_KEY, permissions);
+        metadata.put(DATALAKE_ACL_KEY, aclFromPermissions(permissions));
+        return metadata;
+    }
+
+    private static void ensureDataLakeDefaults(Map<String, String> metadata, boolean directory) {
+        metadata.putIfAbsent(DATALAKE_RESOURCE_TYPE_KEY, directory ? "directory" : "file");
+        metadata.putIfAbsent(DATALAKE_OWNER_KEY, DATALAKE_OWNER);
+        metadata.putIfAbsent(DATALAKE_GROUP_KEY, DATALAKE_GROUP);
+        String permissions = metadata.getOrDefault(DATALAKE_PERMISSIONS_KEY,
+                directory ? DATALAKE_DIRECTORY_PERMISSIONS : DATALAKE_FILE_PERMISSIONS);
+        metadata.put(DATALAKE_PERMISSIONS_KEY, permissions);
+        metadata.putIfAbsent(DATALAKE_ACL_KEY, aclFromPermissions(permissions));
+    }
+
+    private static String normalizeDataLakePermissions(String permissions, String umask, boolean directory) {
+        if (permissions == null || permissions.isBlank()) {
+            return directory ? DATALAKE_DIRECTORY_PERMISSIONS : DATALAKE_FILE_PERMISSIONS;
+        }
+        String value = permissions.trim();
+        if (value.matches("[0-7]{3,4}")) {
+            int mode = Integer.parseInt(value, 8);
+            if (umask != null && umask.trim().matches("[0-7]{3,4}")) {
+                mode &= ~Integer.parseInt(umask.trim(), 8);
+            }
+            return symbolicPermissions(mode);
+        }
+        return value;
+    }
+
+    private static String symbolicPermissions(int mode) {
+        StringBuilder result = new StringBuilder(9);
+        int[] bits = {0400, 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001};
+        char[] chars = {'r','w','x','r','w','x','r','w','x'};
+        for (int i = 0; i < bits.length; i++) {
+            result.append((mode & bits[i]) != 0 ? chars[i] : '-');
+        }
+        if ((mode & 01000) != 0) {
+            result.setCharAt(8, result.charAt(8) == 'x' ? 't' : 'T');
+        }
+        return result.toString();
+    }
+
+    private static String aclFromPermissions(String permissionString) {
+        String permissions = permissionString == null ? "---------" : permissionString.replace("+", "");
+        if (permissions.length() < 9) {
+            permissions = "---------";
+        }
+        return "user::" + permissions.substring(0, 3)
+                + ",group::" + permissions.substring(3, 6)
+                + ",other::" + permissions.substring(6, 9);
+    }
+
+    private static String permissionsFromAcl(String acl, boolean directory) {
+        if (acl == null || acl.isBlank()) {
+            return directory ? DATALAKE_DIRECTORY_PERMISSIONS : DATALAKE_FILE_PERMISSIONS;
+        }
+        String user = null, group = null, mask = null, other = null;
+        for (String entry : acl.split(",")) {
+            String trimmed = entry.trim();
+            if (trimmed.startsWith("user::")) user = trimmed.substring("user::".length());
+            if (trimmed.startsWith("group::")) group = trimmed.substring("group::".length());
+            if (trimmed.startsWith("mask::")) mask = trimmed.substring("mask::".length());
+            if (trimmed.startsWith("other::")) other = trimmed.substring("other::".length());
+        }
+        if (user == null || group == null || other == null) {
+            return directory ? DATALAKE_DIRECTORY_PERMISSIONS : DATALAKE_FILE_PERMISSIONS;
+        }
+        return user + (mask != null ? mask : group) + other;
+    }
+
+    /**
+     * chmod/setPermission changes the POSIX mode without deleting named ACL
+     * entries. For an extended ACL the mode's group bits represent the ACL
+     * mask; for a basic ACL they represent group:: directly.
+     */
+    private static String applyPermissionsToAcl(String existingAcl, String permissionString) {
+        String permissions = permissionString == null ? "---------" : permissionString.replace("+", "");
+        if (permissions.length() < 9 || existingAcl == null || existingAcl.isBlank()) {
+            return aclFromPermissions(permissionString);
+        }
+        boolean extended = isExtendedAcl(existingAcl);
+        List<String> entries = new ArrayList<>();
+        boolean userSeen = false, groupSeen = false, maskSeen = false, otherSeen = false;
+        for (String entry : existingAcl.split(",")) {
+            String trimmed = entry.trim();
+            if (trimmed.startsWith("user::")) {
+                entries.add("user::" + permissions.substring(0, 3));
+                userSeen = true;
+            } else if (trimmed.startsWith("group::") && !extended) {
+                entries.add("group::" + permissions.substring(3, 6));
+                groupSeen = true;
+            } else if (trimmed.startsWith("mask::") && extended) {
+                entries.add("mask::" + permissions.substring(3, 6));
+                maskSeen = true;
+            } else if (trimmed.startsWith("other::")) {
+                entries.add("other::" + permissions.substring(6, 9));
+                otherSeen = true;
+            } else {
+                entries.add(trimmed);
+                if (trimmed.startsWith("group::")) groupSeen = true;
+            }
+        }
+        if (!userSeen) entries.add("user::" + permissions.substring(0, 3));
+        if (!groupSeen) entries.add("group::" + permissions.substring(3, 6));
+        if (extended && !maskSeen) entries.add("mask::" + permissions.substring(3, 6));
+        if (!otherSeen) entries.add("other::" + permissions.substring(6, 9));
+        return String.join(",", entries);
+    }
+
+    private static boolean isExtendedAcl(String acl) {
+        if (acl == null || acl.isBlank()) {
+            return false;
+        }
+        for (String entry : acl.split(",")) {
+            String value = entry.trim();
+            if (value.startsWith("default:") || value.startsWith("mask::")) {
+                return true;
+            }
+            if ((value.startsWith("user:") && !value.startsWith("user::"))
+                    || (value.startsWith("group:") && !value.startsWith("group::"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Response validateDataLakeConditions(AzureRequest request, Optional<StoredObject> object) {
+        String ifMatch = request.headers().getHeaderString(HttpHeaders.IF_MATCH);
+        if (ifMatch != null && object.map(StoredObject::etag)
+                .filter(etag -> etagMatches(ifMatch, etag)).isEmpty()) {
+            return new AzureErrorResponse("ConditionNotMet",
+                    "The condition specified using HTTP conditional header(s) is not met.")
+                    .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
+        if (ifNoneMatch != null && object.map(StoredObject::etag)
+                .filter(etag -> etagMatches(ifNoneMatch, etag)).isPresent()) {
+            return new AzureErrorResponse("ConditionNotMet",
+                    "The condition specified using HTTP conditional header(s) is not met.")
+                    .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        return null;
+    }
+
+    private static void putIfHeaderPresent(
+            AzureRequest request, Map<String, String> metadata, String header, String metadataKey) {
+        String value = request.headers().getHeaderString(header);
+        if (value != null && !value.isBlank()) {
+            metadata.put(metadataKey, value);
+        }
+    }
+
+    private static void copyIfPresent(Map<String, String> source, Map<String, String> target, String key) {
+        if (source.containsKey(key)) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    private static String headerOrEmpty(AzureRequest request, String name) {
+        String value = request.headers().getHeaderString(name);
+        return value == null ? "" : value;
+    }
+
+    private static Instant effectiveLastModified(StoredObject object) {
+        return object.lastModified() == null || object.lastModified().equals(Instant.EPOCH)
+                ? Instant.now() : object.lastModified();
+    }
+
+    private static String effectiveEtag(StoredObject object, String key) {
+        return object.etag() == null || object.etag().isBlank()
+                ? "implicit-" + Integer.toHexString(key.hashCode()) : object.etag();
+    }
+
+    private record DataLakePathState(
+            String key, StoredObject object, boolean directory, boolean implicit, boolean root) {}
+
+    /**
+     * ADLS Gen2 Path Rename (Path - Create with x-ms-rename-source).
+     *
+     * <p>Hadoop ABFS 3.3.4 sends a PUT to the destination path with a URL-encoded
+     * {@code x-ms-rename-source: /{filesystem}/{sourcePath}} header and
+     * {@code If-None-Match: *}. Spark's FileOutputCommitter uses directory renames
+     * extensively, and its source task directory may be implicit (only descendant
+     * objects exist). The move therefore operates on the complete storage-key prefix
+     * and applies all puts/deletes in one storage batch.
+     */
+    private Response renameDataLakePath(
+            AzureRequest request,
+            String destinationFilesystem,
+            String destinationPath,
+            String renameSourceHeader
+    ) {
+        String contentLengthHeader = request.headers().getHeaderString(HttpHeaders.CONTENT_LENGTH);
+        if (contentLengthHeader != null) {
+            try {
+                if (Long.parseLong(contentLengthHeader) != 0L) {
+                    return new AzureErrorResponse("ContentLengthMustBeZero",
+                            "The Content-Length request header must be zero.")
+                            .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                }
+            } catch (NumberFormatException e) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+        }
+
+        RenameSource source = parseDataLakeRenameSource(renameSourceHeader);
+        if (source == null) {
+            return new AzureErrorResponse("InvalidSourceUri", "The source URI is invalid.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        String renameMode = request.queryParams().get("mode");
+        if (renameMode != null && !"posix".equals(renameMode) && !"legacy".equals(renameMode)) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        String normalizedDestination = normalizeDataLakePath(destinationPath);
+        if (normalizedDestination == null) {
+            return new AzureErrorResponse("InvalidDestinationPath",
+                    "The specified path, or an element of the path, exists and its resource type is invalid for this operation.")
+                    .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+
+        if (source.filesystem().equals(destinationFilesystem)
+                && (source.path().equals(normalizedDestination)
+                || normalizedDestination.startsWith(source.path() + "/"))) {
+            return new AzureErrorResponse("InvalidRenameSourcePath",
+                    "The source directory cannot be the same as the destination directory, nor can the destination be a subdirectory of the source directory.")
+                    .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+
+        return leaseService.exclusively(() -> renameDataLakePathLocked(
+                request, source, destinationFilesystem, normalizedDestination));
+    }
+
+    private Response renameDataLakePathLocked(
+            AzureRequest request,
+            RenameSource source,
+            String destinationFilesystem,
+            String destinationPath
+    ) {
+        if (store.get(nsKey(request.accountName(), destinationFilesystem)).isEmpty()
+                || store.get(nsKey(request.accountName(), source.filesystem())).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        String destinationParent = parentDataLakePath(destinationPath);
+        if (destinationParent != null) {
+            DataLakePathOperations.DeletePlan parent = dataLakePathOperations.planDelete(
+                    request.accountName(), destinationFilesystem, destinationParent);
+            if (!parent.exists()) {
+                return new AzureErrorResponse("RenameDestinationParentPathNotFound",
+                        "The parent directory of the destination path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            if (!parent.directory()) {
+                return new AzureErrorResponse("InvalidDestinationPath",
+                        "The specified path, or an element of the path, exists and its resource type is invalid for this operation.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+        }
+
+        DataLakePathOperations.RenamePlan plan = dataLakePathOperations.planRename(
+                request.accountName(),
+                source.filesystem(),
+                source.path(),
+                destinationFilesystem,
+                destinationPath);
+
+        if (!plan.exists()) {
+            return new AzureErrorResponse("SourcePathNotFound",
+                    "The source path for a rename operation does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Response sourceConditionFailure = validateDataLakeRenameSourceConditions(request, plan);
+        if (sourceConditionFailure != null) {
+            return sourceConditionFailure;
+        }
+
+        DataLakePathOperations.DeletePlan destination = dataLakePathOperations.planDelete(
+                request.accountName(), destinationFilesystem, destinationPath);
+
+        Response conditionFailure = validateDataLakeRenameDestinationConditions(request, destination);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
+
+        if (destination.exists()) {
+            if (plan.directory() != destination.directory()) {
+                return new AzureErrorResponse("InvalidSourceOrDestinationResourceType",
+                        "The source and destination resource type must be identical.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            if (destination.nonEmptyDirectory()) {
+                return new AzureErrorResponse("DirectoryNotEmpty",
+                        "The destination directory is not empty.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+        }
+
+        Map<String, StoredObject> puts = new LinkedHashMap<>();
+        Set<String> deletes = new LinkedHashSet<>();
+        Instant renamedAt = Instant.now();
+        String destinationObjectPrefix = request.accountName() + "/" + destinationFilesystem + "/";
+
+        for (String sourceKey : plan.sourceKeys()) {
+            StoredObject sourceObject = store.get(sourceKey).orElse(null);
+            if (sourceObject == null) {
+                return new AzureErrorResponse("SourcePathNotFound",
+                        "The source path for a rename operation does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            String destinationKey = plan.destinationKeyFor(sourceKey);
+            String movedPath = destinationKey.substring(destinationObjectPrefix.length());
+            Map<String, String> metadata = new HashMap<>(sourceObject.metadata());
+            metadata.put("Name", movedPath);
+            String etag = UUID.randomUUID().toString();
+
+            puts.put(destinationKey,
+                    new StoredObject(movedPath, sourceObject.data(), metadata, renamedAt, etag));
+            deletes.add(sourceKey);
+        }
+
+        // A non-conditional rename overwrites an existing file or empty directory.
+        if (destination.exists()) {
+            if (destination.exactKey() != null && destination.exactObject() != null) {
+                deletes.add(destination.exactKey());
+            }
+            deletes.addAll(destination.descendantKeys());
+            String destinationAppendBase = DATALAKE_APPEND_PREFIX + request.accountName() + "/"
+                    + destinationFilesystem + "/" + destinationPath;
+            store.keys().stream()
+                    .filter(key -> key.startsWith(destinationAppendBase + ":pos:")
+                            || key.startsWith(destinationAppendBase + "/"))
+                    .forEach(deletes::add);
+        }
+
+        // Preserve any staged ADLS append data if a file/directory is renamed while
+        // uncommitted chunks exist. Spark normally flushes before rename, but moving the
+        // staging namespace keeps the emulator's path state internally coherent.
+        String sourceAppendBase = DATALAKE_APPEND_PREFIX + request.accountName() + "/"
+                + source.filesystem() + "/" + source.path();
+        String destinationAppendBase = DATALAKE_APPEND_PREFIX + request.accountName() + "/"
+                + destinationFilesystem + "/" + destinationPath;
+        for (String appendKey : store.keys().stream()
+                .filter(key -> key.startsWith(sourceAppendBase + ":pos:") || key.startsWith(sourceAppendBase + "/"))
+                .sorted()
+                .toList()) {
+            StoredObject chunk = store.get(appendKey).orElse(null);
+            if (chunk == null) {
+                continue;
+            }
+            String movedAppendKey = destinationAppendBase + appendKey.substring(sourceAppendBase.length());
+            puts.put(movedAppendKey, chunk);
+            deletes.add(appendKey);
+        }
+
+        store.applyBatch(puts, deletes);
+
+        StoredObject destinationRoot = puts.get(plan.destinationKey());
+        String etag = destinationRoot != null
+                ? destinationRoot.etag()
+                : "implicit-" + Integer.toHexString(plan.destinationKey().hashCode());
+
+        return Response.status(Response.Status.CREATED)
+                .header("Last-Modified", RFC1123_DATE_TIME.format(renamedAt))
+                .header("ETag", etag)
+                .header("x-ms-request-server-encrypted", "true")
+                .header(HttpHeaders.CONTENT_LENGTH, 0)
+                .build();
+    }
+
+    private Response validateDataLakeRenameSourceConditions(
+            AzureRequest request,
+            DataLakePathOperations.RenamePlan source
+    ) {
+        StoredObject exact = source.exactObject();
+        String ifNoneMatch = request.headers().getHeaderString("x-ms-source-if-none-match");
+        if (ifNoneMatch != null) {
+            if ("*".equals(ifNoneMatch.trim()) && source.exists()) {
+                return new AzureErrorResponse("SourceConditionNotMet",
+                        "The source condition specified using HTTP conditional header(s) is not met.")
+                        .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+            if (exact != null && etagMatches(ifNoneMatch, exact.etag())) {
+                return new AzureErrorResponse("SourceConditionNotMet",
+                        "The source condition specified using HTTP conditional header(s) is not met.")
+                        .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+        }
+
+        String ifMatch = request.headers().getHeaderString("x-ms-source-if-match");
+        if (ifMatch != null && (exact == null || !etagMatches(ifMatch, exact.etag()))) {
+            return new AzureErrorResponse("SourceConditionNotMet",
+                    "The source condition specified using HTTP conditional header(s) is not met.")
+                    .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        return null;
+    }
+
+    private Response validateDataLakeRenameDestinationConditions(
+            AzureRequest request,
+            DataLakePathOperations.DeletePlan destination
+    ) {
+        String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
+        if (ifNoneMatch != null) {
+            if ("*".equals(ifNoneMatch.trim()) && destination.exists()) {
+                return new AzureErrorResponse("ConditionNotMet",
+                        "The condition specified using HTTP conditional header(s) is not met.")
+                        .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+            if (destination.exactObject() != null
+                    && etagMatches(ifNoneMatch, destination.exactObject().etag())) {
+                return new AzureErrorResponse("ConditionNotMet",
+                        "The condition specified using HTTP conditional header(s) is not met.")
+                        .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+        }
+
+        String ifMatch = request.headers().getHeaderString(HttpHeaders.IF_MATCH);
+        if (ifMatch != null && (destination.exactObject() == null
+                || !etagMatches(ifMatch, destination.exactObject().etag()))) {
+            return new AzureErrorResponse("ConditionNotMet",
+                    "The condition specified using HTTP conditional header(s) is not met.")
+                    .toDataLakeJsonResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        return null;
+    }
+
+    private static RenameSource parseDataLakeRenameSource(String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        try {
+            int queryStart = header.indexOf('?');
+            String encodedPath = queryStart >= 0 ? header.substring(0, queryStart) : header;
+            String decoded = URLDecoder.decode(encodedPath, StandardCharsets.UTF_8);
+            while (decoded.startsWith("/")) {
+                decoded = decoded.substring(1);
+            }
+            String[] parts = decoded.split("/", 2);
+            if (parts.length != 2 || parts[0].isBlank()) {
+                return null;
+            }
+            String normalizedPath = normalizeDataLakePath(parts[1]);
+            return normalizedPath == null ? null : new RenameSource(parts[0], normalizedPath);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static String normalizeDataLakePath(String path) {
+        if (path == null) {
+            return null;
+        }
+        String normalized = path;
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/") && !normalized.isEmpty()) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private static String parentDataLakePath(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash < 0 ? null : path.substring(0, slash);
+    }
+
+    private record RenameSource(String filesystem, String path) {}
+
+    /**
+     * ADLS Gen2 Get Path Properties / Get Status.
+     *
+     * Hadoop ABFS uses HEAD ?action=getStatus for FileSystem.exists()/getFileStatus().
+     * A directory may be implicit (no marker object) as long as descendants exist, so this
+     * cannot be implemented as a plain Blob HEAD lookup.
+     */
+    private Response getDataLakePathStatus(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeRead(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        String key = objKey(request.accountName(), filesystem, path);
+        Optional<StoredObject> exact = store.get(key);
+        List<StoredObject> descendants = List.of();
+        boolean directory;
+        StoredObject source;
+
+        if (exact.isPresent()) {
+            source = exact.get();
+            directory = "directory".equals(source.metadata().get("DataLakeResourceType"));
+        } else {
+            String prefix = key + "/";
+            descendants = store.scan(candidate -> candidate.startsWith(prefix));
+            descendants = descendants.stream()
+                    .filter(object -> !isDataLakeInternalStoredObject(object))
+                    .toList();
+            if (descendants.isEmpty()) {
+                return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            directory = true;
+            source = descendants.stream()
+                    .max(Comparator.comparing(StoredObject::lastModified))
+                    .orElse(NS_SENTINEL);
+        }
+
+        long contentLength = directory ? 0 : source.data().length;
+        String etag = exact.map(StoredObject::etag)
+                .orElseGet(() -> "implicit-" + Integer.toHexString(key.hashCode()));
+        Instant lastModified = source.lastModified().equals(Instant.EPOCH) ? Instant.now() : source.lastModified();
+
+        boolean implicitDirectory = directory && exact.isEmpty();
+        Map<String, String> metadata = implicitDirectory ? Map.of() : source.metadata();
+        Response.ResponseBuilder builder = Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(lastModified))
+                .header("ETag", etag)
+                .header(HttpHeaders.CONTENT_LENGTH, contentLength)
+                .header("x-ms-resource-type", directory ? "directory" : "file")
+                .header("x-ms-owner", metadata.getOrDefault(DATALAKE_OWNER_KEY, DATALAKE_OWNER))
+                .header("x-ms-group", metadata.getOrDefault(DATALAKE_GROUP_KEY, DATALAKE_GROUP))
+                .header("x-ms-permissions", metadata.getOrDefault(DATALAKE_PERMISSIONS_KEY, directory
+                        ? DATALAKE_DIRECTORY_PERMISSIONS
+                        : DATALAKE_FILE_PERMISSIONS))
+                .header("x-ms-request-server-encrypted", "true");
+        if (request.queryParams().get("action") == null) {
+            builder.header("x-ms-properties", metadata.getOrDefault(DATALAKE_PROPERTIES_KEY, ""));
+        }
+        leaseService.addLeaseHeaders(builder, key);
+
+        return builder.build();
+    }
+
+    /**
+     * ADLS Gen2 Append Data. Hadoop 3.3.x sends this as HTTP PUT with
+     * X-Http-Method-Override: PATCH and action=append.
+     *
+     * Chunks are staged under an internal key so asynchronous/out-of-order ABFS uploads do not
+     * become visible until Flush commits a contiguous byte range.
+     */
+    private Response appendDataLakePath(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeWrite(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Long position = parseNonNegativeLong(request.queryParams().get("position"));
+        if (position == null) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        try {
+            byte[] data = request.bodyStream().readAllBytes();
+            return leaseService.exclusively(() -> {
+                String key = objKey(request.accountName(), filesystem, path);
+                Optional<StoredObject> existing = store.get(key);
+                if (existing.isEmpty()) {
+                    return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                            .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+                }
+                if ("directory".equals(existing.get().metadata().get("DataLakeResourceType"))) {
+                    return new AzureErrorResponse("InvalidSourceOrDestinationResourceType",
+                            "The source and destination resource type must be identical.")
+                            .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+
+                Response conditionFailure = validateBlobConditions(request, existing);
+                if (conditionFailure != null) {
+                    return conditionFailure;
+                }
+                Response leaseFailure = leaseService.validateDataLakeWrite(request, key);
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+
+                if ("AppendBlob".equalsIgnoreCase(existing.get().metadata().get("BlobType"))) {
+                    if (position != existing.get().data().length) {
+                        return new AzureErrorResponse("InvalidQueryParameterValue",
+                                "The append position does not match the current length of the append blob.")
+                                .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                    }
+                    byte[] committed = Arrays.copyOf(existing.get().data(), existing.get().data().length + data.length);
+                    System.arraycopy(data, 0, committed, existing.get().data().length, data.length);
+                    Map<String, String> metadata = new HashMap<>(existing.get().metadata());
+                    metadata.put(DATALAKE_RESOURCE_TYPE_KEY, "file");
+                    metadata.put("Name", path);
+                    String etag = UUID.randomUUID().toString();
+                    Instant now = Instant.now();
+                    store.put(key, new StoredObject(path, committed, metadata, now, etag));
+                    boolean flush = Boolean.parseBoolean(request.queryParams().getOrDefault("flush", "false"));
+                    return Response.status(flush ? Response.Status.OK : Response.Status.ACCEPTED)
+                            .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                            .header("ETag", etag)
+                            .header("Content-Length", 0)
+                            .build();
+                }
+
+                String stageKey = dataLakeAppendChunkKey(request.accountName(), filesystem, path, position);
+                Map<String, String> metadata = Map.of(
+                        "DataLakeAppendPosition", Long.toString(position),
+                        "Name", path);
+                store.put(stageKey, new StoredObject(path, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+
+                if (Boolean.parseBoolean(request.queryParams().getOrDefault("flush", "false"))) {
+                    return flushDataLakePathLocked(request, filesystem, path, position + data.length);
+                }
+
+                return Response.status(Response.Status.ACCEPTED)
+                        .header("Content-Length", 0)
+                        .build();
+            });
+        } catch (IOException e) {
+            return Response.serverError().build();
+        }
+    }
+
+    /** ADLS Gen2 Flush Data (HTTP PUT + X-Http-Method-Override: PATCH, action=flush). */
+    private Response flushDataLakePath(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeWrite(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        Long position = parseNonNegativeLong(request.queryParams().get("position"));
+        if (position == null) {
+            return new AzureErrorResponse("InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        return leaseService.exclusively(() -> flushDataLakePathLocked(request, filesystem, path, position));
+    }
+
+    private Response flushDataLakePathLocked(AzureRequest request, String filesystem, String path, long position) {
+        String key = objKey(request.accountName(), filesystem, path);
+        Optional<StoredObject> existing = store.get(key);
+        if (existing.isEmpty()) {
+            return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        StoredObject current = existing.get();
+        if ("directory".equals(current.metadata().get("DataLakeResourceType"))) {
+            return new AzureErrorResponse("InvalidFlushOperation",
+                    "The specified resource cannot be flushed as a file.")
+                    .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+
+        Response conditionFailure = validateBlobConditions(request, existing);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
+        Response leaseFailure = leaseService.validateDataLakeWrite(request, key);
+        if (leaseFailure != null) {
+            return leaseFailure;
+        }
+
+        if ("AppendBlob".equalsIgnoreCase(current.metadata().get("BlobType"))) {
+            if (position != current.data().length) {
+                return new AzureErrorResponse("InvalidFlushPosition",
+                        "The position query parameter value must equal the current append blob length.")
+                        .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(current.lastModified()))
+                    .header("ETag", current.etag())
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0)
+                    .build();
+        }
+
+        String stagePrefix = dataLakeAppendChunkPrefix(request.accountName(), filesystem, path);
+        List<StoredObject> chunks = store.scan(candidate -> candidate.startsWith(stagePrefix)).stream()
+                .sorted(Comparator.comparingLong(BlobServiceHandler::dataLakeAppendPosition))
+                .toList();
+
+        long committedLength = current.data().length;
+        long coveredThrough = Math.min(committedLength, position);
+        for (StoredObject chunk : chunks) {
+            long start = dataLakeAppendPosition(chunk);
+            long end = start + chunk.data().length;
+            if (start > coveredThrough && start < position) {
+                return new AzureErrorResponse("InvalidFlushPosition",
+                        "The uploaded data is not contiguous or the position query parameter value is not equal "
+                                + "to the length of the file after appending the uploaded data.")
+                        .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            if (start <= coveredThrough) {
+                coveredThrough = Math.max(coveredThrough, Math.min(end, position));
+            }
+        }
+        if (coveredThrough < position) {
+            return new AzureErrorResponse("InvalidFlushPosition",
+                    "The uploaded data is not contiguous or the position query parameter value is not equal "
+                            + "to the length of the file after appending the uploaded data.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        if (position > Integer.MAX_VALUE) {
+            return new AzureErrorResponse("OutOfRangeQueryParameterValue",
+                    "One of the query parameters specified in the request URI is outside the permissible range.")
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+
+        byte[] committed = Arrays.copyOf(current.data(), Math.toIntExact(position));
+        for (StoredObject chunk : chunks) {
+            long start = dataLakeAppendPosition(chunk);
+            if (start >= position) {
+                continue;
+            }
+            int copyLength = Math.toIntExact(Math.min((long) chunk.data().length, position - start));
+            System.arraycopy(chunk.data(), 0, committed, Math.toIntExact(start), copyLength);
+        }
+
+        Map<String, String> metadata = new HashMap<>(current.metadata());
+        metadata.put("DataLakeResourceType", "file");
+        metadata.put("Name", path);
+        String etag = UUID.randomUUID().toString();
+        store.put(key, new StoredObject(path, committed, metadata, Instant.now(), etag));
+
+        boolean retainUncommitted = Boolean.parseBoolean(
+                request.queryParams().getOrDefault("retainUncommittedData", "false"));
+        if (!retainUncommitted) {
+            store.keys().stream()
+                    .filter(candidate -> candidate.startsWith(stagePrefix))
+                    .toList()
+                    .forEach(store::delete);
+        } else {
+            store.scan(candidate -> candidate.startsWith(stagePrefix)).stream()
+                    .filter(chunk -> dataLakeAppendPosition(chunk) + chunk.data().length <= position)
+                    .map(chunk -> dataLakeAppendChunkKey(request.accountName(), filesystem, path,
+                            dataLakeAppendPosition(chunk)))
+                    .toList()
+                    .forEach(store::delete);
+        }
+
+        return Response.ok()
+                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                .header("ETag", etag)
+                .header("x-ms-request-server-encrypted", "true")
+                .header("Content-Length", 0)
+                .build();
+    }
+
+    private static Long parseNonNegativeLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            return parsed >= 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static long dataLakeAppendPosition(StoredObject chunk) {
+        return Long.parseLong(chunk.metadata().get("DataLakeAppendPosition"));
+    }
+
+    private static String dataLakeAppendChunkPrefix(String account, String filesystem, String path) {
+        return DATALAKE_APPEND_PREFIX + account + "/" + filesystem + "/" + path + ":pos:";
+    }
+
+    private static String dataLakeAppendChunkKey(
+            String account, String filesystem, String path, long position) {
+        return dataLakeAppendChunkPrefix(account, filesystem, path) + String.format(Locale.ROOT, "%020d", position);
+    }
+
+    private void clearDataLakeAppendChunks(String account, String filesystem, String path) {
+        String prefix = dataLakeAppendChunkPrefix(account, filesystem, path);
+        store.keys().stream()
+                .filter(candidate -> candidate.startsWith(prefix))
+                .toList()
+                .forEach(store::delete);
+    }
+
+    private void clearDataLakeAppendChunksUnderPath(String account, String filesystem, String path) {
+        String base = DATALAKE_APPEND_PREFIX + account + "/" + filesystem + "/" + path;
+        store.keys().stream()
+                .filter(candidate -> candidate.startsWith(base + ":pos:") || candidate.startsWith(base + "/"))
+                .toList()
+                .forEach(store::delete);
+    }
+
+    private static boolean isDataLakeInternalStoredObject(StoredObject object) {
+        return object.metadata().containsKey("DataLakeAppendPosition");
     }
 
     private Response getBlob(AzureRequest request, String containerName, String blobName, boolean headOnly) {
@@ -503,6 +1927,75 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         return rb.build();
+    }
+
+    /** GET /{filesystem}/{path} through the DFS endpoint (ADLS Path - Read). */
+    private Response readDataLakePath(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeRead(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        if (store.get(objKey(request.accountName(), filesystem, path)).isEmpty()) {
+            return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        // Reuse Blob read/range/condition handling once DFS namespace semantics have been resolved.
+        return getBlob(request, filesystem, path, false);
+    }
+
+    private Response deleteDataLakePath(AzureRequest request, String filesystem, String path) {
+        Response authFailure = authorizeDelete(request, filesystem, path);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (store.get(nsKey(request.accountName(), filesystem)).isEmpty()) {
+            return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
+                    .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+
+        return leaseService.exclusively(() -> {
+            DataLakePathOperations.DeletePlan plan =
+                    dataLakePathOperations.planDelete(request.accountName(), filesystem, path);
+
+            if (!plan.exists()) {
+                return new AzureErrorResponse("PathNotFound", "The specified path does not exist.")
+                        .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            boolean recursive = Boolean.parseBoolean(request.queryParams().getOrDefault("recursive", "false"));
+            if (plan.nonEmptyDirectory() && !recursive) {
+                return new AzureErrorResponse("DirectoryNotEmpty",
+                        "The recursive query parameter value must be true to delete a non-empty directory.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+
+            if (plan.exactObject() != null) {
+                Response conditionFailure = validateBlobConditions(request, Optional.of(plan.exactObject()));
+                if (conditionFailure != null) {
+                    return conditionFailure;
+                }
+                Response leaseFailure = leaseService.validateWrite(request, plan.exactKey());
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+            }
+
+            for (String descendantKey : plan.descendantKeys()) {
+                store.delete(descendantKey);
+                leaseService.onBlobDeleted(descendantKey);
+            }
+            if (plan.exactObject() != null) {
+                store.delete(plan.exactKey());
+                leaseService.onBlobDeleted(plan.exactKey());
+            }
+            clearDataLakeAppendChunksUnderPath(request.accountName(), filesystem, path);
+
+            return Response.status(Response.Status.ACCEPTED).build();
+        });
     }
 
     private Response deleteBlob(AzureRequest request, String containerName, String blobName) {
@@ -669,12 +2162,16 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         boolean recursive = Boolean.parseBoolean(request.queryParams().getOrDefault("recursive", "false"));
         List<DataLakePathListResponse.PathEntry> entries =
                 dataLakePathOperations.list(request.accountName(), filesystem, directory, recursive);
-        int start = parseContinuation(request.queryParams().get("continuation"));
-        if (start < 0) {
+        DataLakeContinuation continuation = parseDataLakeContinuation(
+                request.queryParams().get("continuation"));
+        if (!continuation.valid()) {
             return new AzureErrorResponse("InvalidQueryParameterValue",
                     "Value for one of the query parameters specified in the request URI is invalid.")
-                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
+        int start = continuation.startFrom() == null
+                ? continuation.offset()
+                : findDataLakeStartIndex(entries, directory, continuation.startFrom());
         int maxResults = parseDataLakeMaxResults(request.queryParams().get("maxResults"));
         int end = Math.min(start + maxResults, entries.size());
         List<DataLakePathListResponse.PathEntry> page = start >= entries.size()
@@ -711,16 +2208,68 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    private static int parseContinuation(String value) {
+    /**
+     * Parse either Floci's server-generated numeric page offset or the HNS
+     * startFrom continuation token generated by Hadoop ABFS 3.3.4. Hadoop's
+     * XNS token is Base64("<crc64> 0 <entryName>"). We intentionally do not
+     * validate Hadoop's CRC: Azure treats the token as opaque and the emulator
+     * only needs the observable lexical startFrom behavior.
+     */
+    private static DataLakeContinuation parseDataLakeContinuation(String value) {
         if (value == null || value.isBlank()) {
-            return 0;
+            return new DataLakeContinuation(0, null, true);
         }
         try {
             int parsed = Integer.parseInt(value);
-            return parsed < 0 ? -1 : parsed;
-        } catch (NumberFormatException e) {
-            return -1;
+            return parsed < 0
+                    ? new DataLakeContinuation(0, null, false)
+                    : new DataLakeContinuation(parsed, null, true);
+        } catch (NumberFormatException ignored) {
+            // Hadoop HNS startFrom token is opaque Base64 rather than an integer.
         }
+        try {
+            String decoded = new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+            int firstSpace = decoded.indexOf(' ');
+            int secondSpace = firstSpace < 0 ? -1 : decoded.indexOf(' ', firstSpace + 1);
+            if (firstSpace <= 0 || secondSpace <= firstSpace + 1 || secondSpace == decoded.length() - 1) {
+                return new DataLakeContinuation(0, null, false);
+            }
+            String marker = decoded.substring(firstSpace + 1, secondSpace);
+            if (!"0".equals(marker)) {
+                return new DataLakeContinuation(0, null, false);
+            }
+            String startFrom = decoded.substring(secondSpace + 1);
+            if (startFrom.isBlank() || startFrom.startsWith("/")) {
+                return new DataLakeContinuation(0, null, false);
+            }
+            return new DataLakeContinuation(0, startFrom, true);
+        } catch (IllegalArgumentException e) {
+            return new DataLakeContinuation(0, null, false);
+        }
+    }
+
+    private static int findDataLakeStartIndex(
+            List<DataLakePathListResponse.PathEntry> entries,
+            String directory,
+            String startFrom) {
+        String normalizedDirectory = normalizeDataLakePath(directory);
+        for (int index = 0; index < entries.size(); index++) {
+            String name = entries.get(index).name();
+            String relative = name;
+            if (normalizedDirectory != null && !normalizedDirectory.isBlank()) {
+                String prefix = normalizedDirectory + "/";
+                if (name.startsWith(prefix)) {
+                    relative = name.substring(prefix.length());
+                }
+            }
+            if (relative.compareTo(startFrom) >= 0) {
+                return index;
+            }
+        }
+        return entries.size();
+    }
+
+    private record DataLakeContinuation(int offset, String startFrom, boolean valid) {
     }
 
     // ── Block Blob ────────────────────────────────────────────────────────────
@@ -1036,6 +2585,19 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             ids.add(m.group(1).trim());
         }
         return ids;
+    }
+
+    private static boolean isDataLakeRequest(AzureRequest request) {
+        String host = request.host();
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String normalizedHost = host.trim().toLowerCase(Locale.ROOT);
+        int portSeparator = normalizedHost.indexOf(':');
+        if (portSeparator >= 0) {
+            normalizedHost = normalizedHost.substring(0, portSeparator);
+        }
+        return normalizedHost.endsWith(".dfs.core.windows.net");
     }
 
     public void clear() {
