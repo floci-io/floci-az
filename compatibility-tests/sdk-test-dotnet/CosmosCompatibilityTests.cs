@@ -107,6 +107,17 @@ public sealed class CosmosCompatibilityTests
                     requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey("missing") }),
                 cancellationToken);
             await Assert.That(missingPartition.Count).IsEqualTo(0);
+            try
+            {
+                await container.CreateItemAsync(new QueryItem("wrong-partition", "b", 4),
+                    new PartitionKey("a"), cancellationToken: cancellationToken);
+                throw new InvalidOperationException("A mismatched partition header unexpectedly authorized a write");
+            }
+            catch (CosmosException error)
+            {
+                await Assert.That(error.StatusCode).IsEqualTo(System.Net.HttpStatusCode.BadRequest);
+                await Assert.That(error.SubStatusCode).IsEqualTo(1001);
+            }
         }
         finally
         {

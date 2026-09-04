@@ -67,6 +67,36 @@ class CosmosQueryPartitionTest {
     }
 
     @Test
+    void rejectsWritesWhoseHeaderDisagreesWithDocumentPartition() {
+        String body = "{\"id\":\"a1\",\"tenant\":{\"key\":\"bob\"}}";
+        given().contentType("application/json").header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .body(body).post(DOCS).then().statusCode(400);
+        given().contentType("application/json").header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .header("x-ms-documentdb-is-upsert", "true").body(body).post(DOCS).then().statusCode(400);
+        given().contentType("application/json").header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .body(body).put(DOCS + "/a1").then().statusCode(400);
+        query("SELECT * FROM c", "[\"alice\"]", null).then()
+                .body("Documents.id", containsInAnyOrder("a1", "a2"));
+        query("SELECT * FROM c", "[\"bob\"]", null).then().body("Documents.id", contains("b1"));
+    }
+
+    @Test
+    void rejectsPartitionChangesThroughPatchAndTransactionalBatch() {
+        String patch = "{\"operations\":[{\"op\":\"set\",\"path\":\"/tenant/key\",\"value\":\"bob\"}]}";
+        given().contentType("application/json").header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .body(patch).patch(DOCS + "/a1").then().statusCode(400);
+        for (String operation : new String[] {"Create", "Upsert", "Replace", "Patch"}) {
+            String body = operation.equals("Patch") ? patch : "{\"id\":\"a1\",\"tenant\":{\"key\":\"bob\"}}";
+            given().contentType("application/json").header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                    .header("x-ms-cosmos-is-batch-request", "true")
+                    .body("[{\"operationType\":\"%s\",\"id\":\"a1\",\"resourceBody\":%s}]".formatted(operation, body))
+                    .post(DOCS).then().body("[0].statusCode", is(400));
+        }
+        query("SELECT * FROM c", "[\"alice\"]", null).then()
+                .body("Documents.id", containsInAnyOrder("a1", "a2"));
+    }
+
+    @Test
     void malformedScopeDoesNotBecomeCrossPartitionQuery() {
         for (String scope : new String[] {"oops", "{}", "[]", "[[]]", "[{\"x\":1}]", "[1,2]"}) {
             given().contentType("application/query+json")

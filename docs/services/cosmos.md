@@ -23,6 +23,8 @@ Queries with `x-ms-documentdb-partitionkey` (including .NET `QueryRequestOptions
 are scoped to the configured logical partition before SQL filtering, aggregation, ordering and
 pagination. Key values retain their JSON types; `[null]` and `[{}]` select null and undefined
 keys respectively. Omitting the header permits cross-partition queries. Malformed scopes return 400.
+Writes reject partition headers that disagree with the document body, and patches cannot change
+partition-key values. Transactional batches enforce the same rules before committing staged writes.
 
 ### .NET query planner configuration
 

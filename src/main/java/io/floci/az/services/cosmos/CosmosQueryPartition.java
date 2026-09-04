@@ -15,6 +15,25 @@ final class CosmosQueryPartition {
 
     private CosmosQueryPartition() {}
 
+    static boolean samePartition(Map<String, Object> before, Map<String, Object> after,
+            Map<String, Object> container) {
+        JsonNode original = MAPPER.valueToTree(before);
+        JsonNode updated = MAPPER.valueToTree(after);
+        JsonNode paths = MAPPER.valueToTree(container).path("partitionKey").path("paths");
+        for (JsonNode path : paths) {
+            JsonNode left = original.at(path.asText());
+            JsonNode right = updated.at(path.asText());
+            if (left.isNumber() && right.isNumber()) {
+                if (left.decimalValue().compareTo(right.decimalValue()) != 0) {
+                    return false;
+                }
+            } else if (!left.equals(right)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static Predicate<Map<String, Object>> parse(String header, Map<String, Object> container) {
         if (header == null) {
             return document -> true;

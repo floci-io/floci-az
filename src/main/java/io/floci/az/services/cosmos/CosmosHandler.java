@@ -610,6 +610,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         boolean upsert = "True".equalsIgnoreCase(req.headers().getHeaderString("x-ms-documentdb-is-upsert"));
 
         Map<String, Object> collMeta = parseData(collFound.get());
+        Response partitionFailure = partitionKeyFailure(req, collMeta, body);
+        if (partitionFailure != null) {
+            return partitionFailure;
+        }
         String pk     = resolvePartitionKey(body, collMeta, req);
         String pkEnc  = encodeKey(pk);
         String docKey = docKey(req.accountName(), dbId, collId, pkEnc, id);
@@ -650,6 +654,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         body.put("id", docId);
 
         Map<String, Object> collMeta = parseData(collFound.get());
+        Response partitionFailure = partitionKeyFailure(req, collMeta, body);
+        if (partitionFailure != null) {
+            return partitionFailure;
+        }
         String pk     = resolvePartitionKey(body, collMeta, req);
         String pkEnc  = encodeKey(pk);
         String docKey = docKey(req.accountName(), dbId, collId, pkEnc, docId);
@@ -694,6 +702,12 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         Map<String, Object> doc = parseData(obj);
 
+        Map<String, Object> collMeta = parseData(store.get(collKey(req.accountName(), dbId, collId)).orElseThrow());
+        Response partitionFailure = partitionKeyFailure(req, collMeta, doc);
+        if (partitionFailure != null) {
+            return partitionFailure;
+        }
+
         // The Cosmos DB PATCH body can arrive in two forms:
         //   1. {"operations": [...]}  — Java / Python SDKs
         //   2. [{op, path, value}, …] — Node SDK (sends the array directly)
@@ -703,6 +717,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             return errorResponse(412, "PreconditionFailed", "The patch filter predicate was not satisfied.");
         }
         applyPatchOperations(doc, patch.operations());
+        if (!CosmosQueryPartition.samePartition(parseData(obj), doc, collMeta)) {
+            return errorResponse(400, "BadRequest", "The partition key cannot be changed by a patch.");
+        }
 
         Instant now  = Instant.now();
         String  etag = newEtag();
@@ -853,6 +870,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         String pkEnc = encodeKey(extractPartitionKeyValue(req));
         Object defaultTtl = containerDefaultTtl(collFound);
+        Map<String, Object> collMeta = parseData(collFound.get());
 
         List<Map<String, Object>> operations;
         boolean hybridRow;
@@ -882,7 +900,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             String ifMatch = op.get("ifMatch") instanceof String value ? value : null;
             String ifNoneMatch = op.get("ifNoneMatch") instanceof String value ? value : null;
 
-            Map<String, Object> result = switch (opType) {
+            StoredObject beforeWrite = staged.get(docKey(req.accountName(), dbId, collId, pkEnc, docId));
+            boolean partitionMismatch = body != null && Set.of("Create", "Upsert", "Replace").contains(opType)
+                    && partitionKeyFailure(req, collMeta, body) != null;
+            Map<String, Object> result = partitionMismatch ? batchResultError(400) : switch (opType) {
                 case "Create"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, false,
                         defaultTtl, ifMatch, ifNoneMatch);
                 case "Upsert"  -> batchCreate(staged, req.accountName(), dbId, collId, pkEnc, body, true,
@@ -896,6 +917,16 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                         defaultTtl, ifMatch, ifNoneMatch);
                 default        -> batchResultError(400);
             };
+            // Patches must preserve the partition even when the request omits its partition header.
+            if (((Number) result.get("statusCode")).intValue() < 400
+                    && "Patch".equals(opType)) {
+                Map<String, Object> written = (Map<String, Object>) result.get("resourceBody");
+                if (partitionKeyFailure(req, collMeta, written) != null
+                        || (beforeWrite != null && !CosmosQueryPartition.samePartition(
+                                parseData(beforeWrite), written, collMeta))) {
+                    result = batchResultError(400);
+                }
+            }
             results.add(result);
 
             if (((Number) result.get("statusCode")).intValue() >= 400) {
@@ -1289,6 +1320,21 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     // -----------------------------------------------------------------------
     // Partition key helpers
     // -----------------------------------------------------------------------
+
+    private Response partitionKeyFailure(AzureRequest req, Map<String, Object> container,
+            Map<String, Object> document) {
+        try {
+            if (!CosmosQueryPartition.parse(
+                    req.headers().getHeaderString("x-ms-documentdb-partitionkey"), container).test(document)) {
+                return Response.fromResponse(errorResponse(400, "BadRequest",
+                        "PartitionKey extracted from document doesn't match the one specified in the header"))
+                        .header("x-ms-substatus", "1001").build();
+            }
+        } catch (IllegalArgumentException e) {
+            return errorResponse(400, "BadRequest", e.getMessage());
+        }
+        return null;
+    }
 
     private String extractPartitionKeyValue(AzureRequest req) {
         String header = req.headers().getHeaderString("x-ms-documentdb-partitionkey");
