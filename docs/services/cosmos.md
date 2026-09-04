@@ -15,7 +15,8 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
   - `ORDER BY field [ASC|DESC]`, multiple fields — like Azure, an `ORDER BY` over two or more properties requires a matching composite index on the container, otherwise the query fails with `400 BadRequest` (error `SC2104`)
   - `OFFSET n LIMIT m` pagination
   - `SELECT VALUE COUNT(1)` aggregation
-  - Named parameters (`@param`)
+  - Named parameters (`@param`), including array values in `ARRAY_CONTAINS(@values, c.field)`;
+    both membership arguments may be expressions, and `NOT ARRAY_CONTAINS(...)` excludes matches
 - **System properties** — `_rid`, `_self`, `_etag`, `_ts`, `_attachments` auto-generated on every write
 - **Partition keys** — resolved from `x-ms-documentdb-partitionkey` header or extracted from document body using the container's configured path
 
