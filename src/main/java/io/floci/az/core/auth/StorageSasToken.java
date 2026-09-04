@@ -98,6 +98,11 @@ public record StorageSasToken(
         return permissions != null && permissions.indexOf(permission) >= 0;
     }
 
+    public boolean isUserDelegation() {
+        return signedObjectId != null || signedTenantId != null || signedKeyStart != null
+                || signedKeyExpiry != null || signedKeyService != null || signedKeyVersion != null;
+    }
+
     public boolean hasAnyPermission(char... candidates) {
         for (char candidate : candidates) {
             if (hasPermission(candidate)) {

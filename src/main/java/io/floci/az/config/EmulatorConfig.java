@@ -516,6 +516,9 @@ public interface EmulatorConfig {
         /** dev: accept any credentials. strict: validate HMAC-SHA256 signatures. */
         @WithDefault("dev")
         String mode();
+
+        /** Base64 account keys used to validate shared-key Blob service SAS signatures. */
+        java.util.Map<String, String> storageAccountKeys();
     }
 
     interface AppConfigServiceConfig {
