@@ -157,8 +157,6 @@ public class CosmosQueryEngine {
                     + "(?:\\s+WHERE\\s+(.+))?\\s*\\)");
     private static final Pattern DOTNET_WRAPPED_COUNT_PATTERN = Pattern.compile(
             "(?i)^SELECT\\s+VALUE\\s+\\[\\{\\s*\"item\"\\s*:\\s*COUNT\\s*\\((?:1|\\*)\\)\\s*}]\\s+FROM\\b");
-    private static final Pattern DOTNET_ORDER_BY_ITEM_PATTERN = Pattern.compile(
-            "\\{\\s*\"item\"\\s*:\\s*(.+)\\s*}", Pattern.CASE_INSENSITIVE);
 
     ParsedQuery parse(String sql) {
         String upper = sql.toUpperCase();
@@ -423,12 +421,10 @@ public class CosmosQueryEngine {
             return Pattern.compile(regex, pFlags).matcher(s).find();
         }
 
-        // ARRAY_CONTAINS(field, value [, partial])
-        m = Pattern.compile("(?i)ARRAY_CONTAINS\\s*\\(([^,]+),\\s*(.+?)(?:,\\s*(true|false))?\\s*\\)").matcher(pred);
+        // Both arguments are expressions: the array may itself be a parameter or literal.
+        m = Pattern.compile("(?i)ARRAY_CONTAINS\\s*\\(.*\\)").matcher(pred);
         if (m.matches()) {
-            Object arr  = resolve(doc, m.group(1).trim());
-            Object srch = parseLiteral(m.group(2).trim());
-            return arr instanceof List<?> list && list.stream().anyMatch(item -> objectEquals(item, srch));
+            return Boolean.TRUE.equals(resolveExpr(doc, pred));
         }
 
         // field IN (val1, val2, …)
@@ -662,17 +658,30 @@ public class CosmosQueryEngine {
 
     private String substituteParams(String sql, List<Map<String, Object>> params) {
         if (params == null || params.isEmpty()) return sql;
+        Map<String, String> literals = new HashMap<>();
         for (Map<String, Object> p : params) {
             String name  = (String) p.get("name");
-            Object value = p.get("value");
-            if (name == null) continue;
-            sql = sql.replace(name, toLiteral(value));
+            if (name != null) {
+                literals.put(name, toLiteral(p.get("value")));
+            }
         }
-        return sql;
+        // Match complete parameter tokens, never text within literals or replacement values.
+        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|@[A-Za-z_][A-Za-z0-9_]*")
+                .matcher(sql);
+        return tokens.replaceAll(match -> Matcher.quoteReplacement(
+                literals.getOrDefault(match.group(), match.group())));
     }
 
     private String toLiteral(Object value) {
         if (value == null)             return "null";
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::toLiteral).collect(Collectors.joining(",", "[", "]"));
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .map(entry -> toLiteral(String.valueOf(entry.getKey())) + ":" + toLiteral(entry.getValue()))
+                    .collect(Collectors.joining(",", "{", "}"));
+        }
         // Escape embedded quotes with SQL-standard doubling ('') rather than a
         // backslash escape.  A doubled quote keeps the string scanners' state
         // balanced across the literal boundary (they exit then immediately
@@ -712,7 +721,9 @@ public class CosmosQueryEngine {
     }
 
     private String normalizeWhitespace(String s) {
-        return s.trim().replaceAll("\\s+", " ");
+        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|\\s+").matcher(s.trim());
+        return tokens.replaceAll(match -> Matcher.quoteReplacement(
+                Character.isWhitespace(match.group().charAt(0)) ? " " : match.group()));
     }
 
     // -----------------------------------------------------------------------
@@ -831,20 +842,25 @@ public class CosmosQueryEngine {
         if ("false".equalsIgnoreCase(expr)) return Boolean.FALSE;
 
         if (expr.startsWith("[") && expr.endsWith("]")) {
-            List<Map<String, Object>> items = new ArrayList<>();
-            for (String rawItem : splitTopLevel(expr.substring(1, expr.length() - 1), ',')) {
-                Matcher orderByItem = DOTNET_ORDER_BY_ITEM_PATTERN.matcher(rawItem.trim());
-                if (!orderByItem.matches()) {
-                    items.clear();
-                    break;
+            String content = expr.substring(1, expr.length() - 1).trim();
+            if (content.isEmpty()) {
+                return List.of();
+            }
+            return splitTopLevel(content, ',').stream().map(item -> resolveExpr(doc, item)).toList();
+        }
+        if (expr.startsWith("{") && expr.endsWith("}")) {
+            Map<String, Object> object = new LinkedHashMap<>();
+            String content = expr.substring(1, expr.length() - 1).trim();
+            if (!content.isEmpty()) {
+                for (String property : splitTopLevel(content, ',')) {
+                    List<String> pair = splitTopLevel(property, ':');
+                    if (pair.size() != 2) {
+                        throw new IllegalArgumentException("Invalid object expression: " + expr);
+                    }
+                    object.put(stripQuotes(pair.get(0).trim()), resolveExpr(doc, pair.get(1)));
                 }
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("item", resolveExpr(doc, orderByItem.group(1).trim()));
-                items.add(item);
             }
-            if (!items.isEmpty()) {
-                return items;
-            }
+            return object;
         }
 
         // Numeric literal
@@ -989,6 +1005,8 @@ public class CosmosQueryEngine {
             case "RAND"    -> Math.random();
 
             // ── Array functions ───────────────────────────────────────────
+            case "ARRAY_CONTAINS" -> a0 instanceof List<?> list
+                    && list.stream().anyMatch(item -> objectEquals(item, a1));
             case "ARRAY_LENGTH" -> a0 instanceof List<?> list ? (long) list.size() : null;
 
             case "ARRAY_SLICE" -> {

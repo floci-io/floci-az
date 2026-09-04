@@ -57,6 +57,22 @@ public sealed class CosmosCompatibilityTests
             await Assert.That(selected.Select(item => item.Id))
                 .IsEquivalentTo(["one", "two", "three"]);
 
+            List<QueryItem> included = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>(new QueryDefinition(
+                    "SELECT * FROM c WHERE ARRAY_CONTAINS(@ids, c.id)")
+                    .WithParameter("@ids", new[] { "one", "three" })), cancellationToken);
+            await Assert.That(included.Select(item => item.Id)).IsEquivalentTo(["one", "three"]);
+            List<QueryItem> excluded = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>(new QueryDefinition(
+                    "SELECT * FROM c WHERE NOT ARRAY_CONTAINS(@ids, c.id)")
+                    .WithParameter("@ids", new[] { "one", "three" })), cancellationToken);
+            await Assert.That(excluded.Select(item => item.Id)).IsEquivalentTo(["two"]);
+            List<QueryItem> empty = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>(new QueryDefinition(
+                    "SELECT * FROM c WHERE ARRAY_CONTAINS(@ids, c.id)")
+                    .WithParameter("@ids", Array.Empty<string>())), cancellationToken);
+            await Assert.That(empty.Count).IsEqualTo(0);
+
             List<QueryItem> ordered = await ReadAll(
                 container.GetItemQueryIterator<QueryItem>("SELECT * FROM c ORDER BY c.rank"),
                 cancellationToken);
