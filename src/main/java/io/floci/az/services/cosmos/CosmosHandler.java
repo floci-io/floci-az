@@ -1147,7 +1147,15 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         List<Map<String, Object>> allDocs =
                 liveDocuments(req.accountName(), dbId, collId, containerDefaultTtl(collFound));
 
-        CosmosQueryEngine.QueryResult result = queryEngine.execute(parsed, allDocs);
+        final List<Map<String, Object>> scopedDocs;
+        try {
+            scopedDocs = allDocs.stream().filter(CosmosQueryPartition.parse(
+                    req.headers().getHeaderString("x-ms-documentdb-partitionkey"),
+                    parseData(collFound.get()))).toList();
+        } catch (IllegalArgumentException e) {
+            return errorResponse(400, "BadRequest", e.getMessage());
+        }
+        CosmosQueryEngine.QueryResult result = queryEngine.execute(parsed, scopedDocs);
 
         // ---- Pagination ----
         int maxItemCount = parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count"));

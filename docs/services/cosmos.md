@@ -19,6 +19,11 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 - **System properties** — `_rid`, `_self`, `_etag`, `_ts`, `_attachments` auto-generated on every write
 - **Partition keys** — resolved from `x-ms-documentdb-partitionkey` header or extracted from document body using the container's configured path
 
+Queries with `x-ms-documentdb-partitionkey` (including .NET `QueryRequestOptions.PartitionKey`)
+are scoped to the configured logical partition before SQL filtering, aggregation, ordering and
+pagination. Key values retain their JSON types; `[null]` and `[{}]` select null and undefined
+keys respectively. Omitting the header permits cross-partition queries. Malformed scopes return 400.
+
 ### .NET query planner configuration
 
 The account response advertises query-engine capabilities. Floci-AZ emits 20 keys, while the

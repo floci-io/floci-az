@@ -85,6 +85,28 @@ public sealed class CosmosCompatibilityTests
                         .WithParameter("@pk", "b")),
                 cancellationToken);
             await Assert.That(crossPartition.Select(item => item.Id)).IsEquivalentTo(["two"]);
+
+            var partitionOptions = new QueryRequestOptions
+            {
+                PartitionKey = new PartitionKey("a"),
+                MaxItemCount = 1
+            };
+            List<QueryItem> scoped = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>(
+                    "SELECT * FROM c ORDER BY c.rank", requestOptions: partitionOptions),
+                cancellationToken);
+            await Assert.That(scoped.Select(item => item.Id)).IsEquivalentTo(["one", "three"]);
+            await Assert.That(scoped[0].Id).IsEqualTo("three");
+            List<int> scopedCounts = await ReadAll(
+                container.GetItemQueryIterator<int>(
+                    "SELECT VALUE COUNT(1) FROM c", requestOptions: partitionOptions),
+                cancellationToken);
+            await Assert.That(scopedCounts).IsEquivalentTo([2]);
+            List<QueryItem> missingPartition = await ReadAll(
+                container.GetItemQueryIterator<QueryItem>("SELECT * FROM c",
+                    requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey("missing") }),
+                cancellationToken);
+            await Assert.That(missingPartition.Count).IsEqualTo(0);
         }
         finally
         {
