@@ -87,6 +87,11 @@ public class StorageSasAuthorization {
             // Stored access policies need their own lookup and revocation semantics.
             return Optional.of(authenticationFailed());
         }
+        if (!token.isUserDelegation() && "d".equals(token.resource())
+                && (token.directoryDepth() == null
+                    || LocalDate.parse(token.version()).isBefore(LocalDate.parse("2020-02-10")))) {
+            return Optional.of(authenticationFailed());
+        }
         if (!signatureMatches(request, container, path, token)) {
             return Optional.of(authenticationFailed());
         }

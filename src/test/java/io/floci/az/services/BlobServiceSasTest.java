@@ -58,6 +58,38 @@ class BlobServiceSasTest {
     }
 
     @Test
+    void directoryServiceSasScopesDescendantsAndListing() throws Exception {
+        for (String path : new String[] {"dir/file", "dir/sub/leaf", "sibling/file", "directory/file"}) {
+            given().header("x-ms-blob-type", "BlockBlob").body(path)
+                    .put(BASE + "/" + path).then().statusCode(201);
+        }
+        var sas = sas("rl", "d", "dir", "2020-02-10");
+        sas.put("sdd", "1");
+        for (String path : new String[] {"dir/file", "dir/sub/leaf"}) {
+            given().queryParams(sas).get(BASE + "/" + path).then().statusCode(200).body(equalTo(path));
+        }
+        given().queryParams(sas).queryParam("resource", "filesystem").queryParam("recursive", "true")
+                .queryParam("directory", "dir").get(BASE).then().statusCode(200)
+                .body("paths.name", org.hamcrest.Matchers.containsInAnyOrder("dir/file", "dir/sub/leaf"));
+        for (String path : new String[] {"sibling/file", "directory/file", "file"}) {
+            given().queryParams(sas).get(BASE + "/" + path).then().statusCode(403);
+        }
+        given().queryParams(sas).queryParam("resource", "filesystem").queryParam("recursive", "true")
+                .get(BASE).then().statusCode(403);
+    }
+
+    @Test
+    void directoryServiceSasRequiresDepthAndSupportedVersion() throws Exception {
+        var missingDepth = sas("l", "d", "dir", "2020-02-10");
+        given().queryParams(missingDepth).queryParam("resource", "filesystem")
+                .queryParam("directory", "dir").get(BASE).then().statusCode(403);
+        var oldVersion = sas("l", "d", "dir", "2018-11-09");
+        oldVersion.put("sdd", "1");
+        given().queryParams(oldVersion).queryParam("resource", "filesystem")
+                .queryParam("directory", "dir").get(BASE).then().statusCode(403);
+    }
+
+    @Test
     void incompleteDelegationTokenCannotFallBackToServiceSigning() throws Exception {
         var sas = sas("r", "b", "file", "2020-12-06");
         sas.put("sktid", "incomplete-delegation");
