@@ -104,7 +104,8 @@ floci-az:
   different key. Unknown accounts and invalid signatures are rejected, including in dev mode,
   as are expired tokens and operations outside the granted permissions. This is separate from
   the permissive Shared Key `Authorization` header behavior above.
-  SDK-generated user delegation SAS tokens
+  Shared-key service SAS supports directory scope (`sr=d`). Directory service SAS requires
+  `sdd` and version 2020-02-10 or later. SDK-generated user delegation SAS tokens
   for container (`sr=c`), blob (`sr=b`), and ADLS directory (`sr=d`) resources are validated.
   Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
   are not fully modeled. User delegation keys are protected by a process-local secret, so SAS

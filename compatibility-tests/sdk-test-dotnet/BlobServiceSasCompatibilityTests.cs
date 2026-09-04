@@ -3,6 +3,8 @@ using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
+using System.Net;
+using System.Net.Sockets;
 
 namespace FlociAz.Compatibility;
 
@@ -14,9 +16,16 @@ public sealed class BlobServiceSasCompatibilityTests
     public async Task ServiceSasReadsAndUploadsWithAccountKey(CancellationToken cancellationToken)
     {
         string endpoint = Environment.GetEnvironmentVariable("FLOCI_AZ_ENDPOINT") ?? "http://localhost:4577";
+        // Storage SDKs identify account-in-path endpoints by IP; Docker DNS names use host-style parsing.
+        var endpointUri = new UriBuilder(endpoint);
+        if (endpointUri.Uri.HostNameType == UriHostNameType.Dns)
+        {
+            IPAddress[] addresses = await Dns.GetHostAddressesAsync(endpointUri.Host, cancellationToken);
+            endpointUri.Host = addresses.First(address => address.AddressFamily == AddressFamily.InterNetwork).ToString();
+        }
         var credentials = new StorageSharedKeyCredential("devstoreaccount1",
             "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==");
-        var service = new BlobServiceClient(new Uri($"{endpoint}/devstoreaccount1"), credentials);
+        var service = new BlobServiceClient(new Uri($"{endpointUri.Uri.AbsoluteUri.TrimEnd('/')}/devstoreaccount1"), credentials);
         var container = service.GetBlobContainerClient($"dotnet-sas-{Guid.NewGuid():N}");
         await container.CreateAsync(PublicAccessType.None, cancellationToken: cancellationToken);
         try
