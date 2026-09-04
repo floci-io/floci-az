@@ -69,6 +69,8 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     @Override
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
+        // Normalize fixed-route comparisons only; preserve the original path for resource parsing.
+        String routePath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
         String method = req.method().toUpperCase();
         String account = req.accountName();
 
@@ -87,20 +89,20 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         }
 
         // Root probe — azurerm provider polls this to confirm the vault is reachable.
-        if (path.isEmpty() || path.equals("/")) {
+        if (routePath.isEmpty()) {
             return Response.ok(java.util.Map.of(
                 "type", "Microsoft.KeyVault/vaults",
                 "id",   "https://" + account + ".vault.azure.net/"
             )).build();
         }
 
-        if ("secrets".equals(path)) {
+        if ("secrets".equals(routePath)) {
             return "GET".equals(method) ? listSecrets(account) : methodNotAllowed();
         }
         if (path.startsWith("secrets/")) {
             return handleSecrets(req, method, account, path.substring("secrets/".length()));
         }
-        if ("deletedsecrets".equals(path)) {
+        if ("deletedsecrets".equals(routePath)) {
             return "GET".equals(method) ? listDeletedSecrets(account) : methodNotAllowed();
         }
         if (path.startsWith("deletedsecrets/")) {
@@ -109,7 +111,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
         // Certificate contacts — azurerm provider reads this after key vault creation.
         // Return an empty contacts list so the provider sees no contacts configured.
-        if ("certificates/contacts".equals(path)) {
+        if ("certificates/contacts".equals(routePath)) {
             if ("GET".equals(method)) {
                 return Response.ok(java.util.Map.of(
                     "id", "https://" + account + ".vault.azure.net/certificates/contacts",
