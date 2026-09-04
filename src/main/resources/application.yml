@@ -245,3 +245,5 @@ floci-az:
     # dev: accept any credentials without signature validation
     # strict: validate HMAC-SHA256 signatures
     mode: dev
+    storage-account-keys:
+      devstoreaccount1: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="

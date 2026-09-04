@@ -94,3 +94,17 @@ floci-az:
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable/disable App Configuration |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |
+
+Blob service SAS signing keys are configured per account (independent of `auth.mode`):
+
+```yaml
+floci-az:
+  auth:
+    storage-account-keys:
+      myaccount: "<base64-account-key>"
+```
+
+`devstoreaccount1` defaults to the standard Azurite account key. For that existing entry, the
+environment override is `FLOCI_AZ_AUTH_STORAGE_ACCOUNT_KEYS_DEVSTOREACCOUNT1`.
+Use YAML to declare additional account names. User delegation SAS keeps its separate,
+process-local signing keys.

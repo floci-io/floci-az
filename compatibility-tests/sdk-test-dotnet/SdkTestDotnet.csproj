@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.2" />
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="TUnit" Version="1.63.0" />

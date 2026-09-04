@@ -2,6 +2,7 @@ package io.floci.az.core.auth;
 
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.config.EmulatorConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -24,10 +25,17 @@ public class StorageSasAuthorization {
     private static final String HMAC_SHA256 = "HmacSHA256";
 
     private final UserDelegationKeyMaterial keyMaterial;
+    private final java.util.Map<String, String> storageAccountKeys;
 
     @Inject
-    public StorageSasAuthorization(UserDelegationKeyMaterial keyMaterial) {
+    public StorageSasAuthorization(UserDelegationKeyMaterial keyMaterial, EmulatorConfig config) {
         this.keyMaterial = keyMaterial;
+        this.storageAccountKeys = java.util.Map.copyOf(config.auth().storageAccountKeys());
+        for (String key : storageAccountKeys.values()) {
+            if (Base64.getDecoder().decode(key).length == 0) {
+                throw new IllegalArgumentException("Storage account SAS signing keys must not be empty");
+            }
+        }
     }
 
     public Optional<Response> authorizeRead(AzureRequest request, String container, String path, StorageSasToken token) {
@@ -72,7 +80,16 @@ public class StorageSasAuthorization {
                 || token.delegatedUserTenantId() != null || token.delegatedUserObjectId() != null) {
             return Optional.of(authenticationFailed());
         }
-        if (!delegationKeyValid(token)) {
+        if (token.isUserDelegation() && !delegationKeyValid(token)) {
+            return Optional.of(authenticationFailed());
+        }
+        if (!token.isUserDelegation() && token.identifier() != null) {
+            // Stored access policies need their own lookup and revocation semantics.
+            return Optional.of(authenticationFailed());
+        }
+        if (!token.isUserDelegation() && "d".equals(token.resource())
+                && (token.directoryDepth() == null
+                    || LocalDate.parse(token.version()).isBefore(LocalDate.parse("2020-02-10")))) {
             return Optional.of(authenticationFailed());
         }
         if (!signatureMatches(request, container, path, token)) {
@@ -110,11 +127,34 @@ public class StorageSasAuthorization {
 
     private boolean signatureMatches(AzureRequest request, String container, String path, StorageSasToken token) {
         String canonicalName = canonicalName(request.accountName(), container, signedPath(token, path));
-        String expected = hmac(keyMaterial.signingKeyForAccount(request.accountName()), stringToSign(request, token, canonicalName));
+        String key = token.isUserDelegation()
+                ? keyMaterial.signingKeyForAccount(request.accountName())
+                : storageAccountKeys.get(request.accountName());
+        if (key == null) {
+            return false;
+        }
+        String signedFields = token.isUserDelegation()
+                ? stringToSign(request, token, canonicalName)
+                : serviceStringToSign(token, canonicalName);
+        String expected = hmac(key, signedFields);
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8),
                 token.signature().getBytes(StandardCharsets.UTF_8)
         );
+    }
+
+    // Service SAS has its own layout; delegation-key and agent fields are not included.
+    private static String serviceStringToSign(StorageSasToken token, String canonicalName) {
+        var fields = new java.util.ArrayList<>(Arrays.asList(
+                value(token.permissions()), value(token.startTime()), value(token.expiryTime()),
+                canonicalName, value(token.identifier()), value(token.ipRange()), value(token.protocol()),
+                value(token.version()), value(token.resource()), value(token.snapshotTime())));
+        if (!LocalDate.parse(token.version()).isBefore(LocalDate.parse("2020-12-06"))) {
+            fields.add(value(token.encryptionScope()));
+        }
+        fields.addAll(Arrays.asList(value(token.cacheControl()), value(token.contentDisposition()),
+                value(token.contentEncoding()), value(token.contentLanguage()), value(token.contentType())));
+        return String.join("\n", fields);
     }
 
     private static String signedPath(StorageSasToken token, String requestPath) {
