@@ -226,4 +226,28 @@ class AzureRoutingFilterTest {
                         + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
                 .then().statusCode(404);
     }
+
+    @Test
+    void policyProviderRoutesToPolicyAtEveryScope() {
+        // Tenant-rooted built-in listing: no segment precedes "providers/", yet the guarded policy
+        // route must still claim it (empty, since no built-ins are seeded).
+        given().when().get("/providers/Microsoft.Authorization/policyDefinitions?api-version=2025-03-01")
+                .then().statusCode(200)
+                .body(containsString("\"value\":[]"));
+        // Subscription-rooted: a missing definition is the policy 404, not the generic ARM 404.
+        given().when().get("/subscriptions/s/providers/Microsoft.Authorization/policyDefinitions/none"
+                        + "?api-version=2025-03-01")
+                .then().statusCode(404)
+                .body(containsString("PolicyDefinitionNotFound"));
+    }
+
+    @Test
+    void policyGuardLeavesOtherAuthorizationResourcesToArm() {
+        // Role assignments share the Microsoft.Authorization namespace but are not policy resources:
+        // the policy guard must not capture them.
+        given().when().get("/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/"
+                        + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
+                .then().statusCode(404)
+                .body(org.hamcrest.Matchers.not(containsString("Policy")));
+    }
 }

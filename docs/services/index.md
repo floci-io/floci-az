@@ -29,6 +29,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Monitor / Log Analytics** | ARM path (`Microsoft.OperationalInsights` / `Microsoft.Insights`) + `/dataCollectionRules/...` + `/v1/workspaces/...` | ✅ Workspaces, Data Collection Endpoints/Rules; Logs Ingestion API; Log Analytics query with a KQL subset (`where`/`project`/`take`/`limit`, timespan) |
 | **Communication Services Email** | `/emails:send` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ✅ ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style); ARM communication/email services + domains. No real delivery |
 | **Managed Identity** | ARM path (`Microsoft.ManagedIdentity`) + `/metadata/identity/oauth2/token` | ✅ User-assigned identities + federated identity credentials, system-assigned `identities/default`, IMDS token endpoint (`ManagedIdentityCredential` via `AZURE_POD_IDENTITY_AUTHORITY_HOST`); tokens signed with the Entra key |
+| **Azure Policy** | ARM path (`Microsoft.Authorization/policy*`) | ✅ Policy definitions, set definitions, assignments and exemptions at management-group, subscription, resource-group and resource scope; control plane only (no rule evaluation, no compliance data, no built-in definitions) |
 
 ## Unified Endpoint
 

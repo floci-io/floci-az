@@ -138,6 +138,7 @@ public interface EmulatorConfig {
         NetworkConfig          network();
         EventGridConfig        eventGrid();
         ManagedIdentityConfig  managedIdentity();
+        PolicyConfig           policy();
 
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
@@ -198,6 +199,15 @@ public interface EmulatorConfig {
          */
         @WithDefault("subscriptions/00000000-0000-0000-0000-000000000001")
         String systemAssignedScope();
+    }
+
+    /**
+     * Azure Policy control plane under Microsoft.Authorization: policy definitions, set definitions,
+     * assignments and exemptions. Control plane only; rules are stored, never evaluated.
+     */
+    interface PolicyConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

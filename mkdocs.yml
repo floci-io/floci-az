@@ -94,5 +94,6 @@ nav:
     - Azure Monitor / Log Analytics: services/monitor.md
     - Communication Services Email: services/email.md
     - Managed Identity: services/managed-identity.md
+    - Azure Policy: services/policy.md
   - Contributing: contributing.md
   - Changelog: changelog.md
