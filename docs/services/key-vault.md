@@ -9,6 +9,7 @@ Compatible with `azure-keyvault-secrets` SDKs (Python, Java, JavaScript, .NET).
 - **Soft-delete lifecycle** — delete moves a secret to the deleted namespace; recover or purge it
 - **Properties update** — update `content_type`, `tags`, `enabled`, `nbf`, `exp` without changing the value
 - **Attributes** — `enabled`, `not_before`, `expires_on`; disabled secrets return 403 on get
+- **Optional timestamps** — unset `nbf` and `exp` attributes are omitted from responses; supplied values remain numeric Unix timestamps
 - **List operations** — list active secrets, deleted secrets, or versions of a specific secret
 - **Backup** — backup a secret (base64-encoded blob)
 - **32-char hex version IDs** — matches Azure's version ID format

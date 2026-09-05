@@ -491,9 +491,13 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> attrs = new LinkedHashMap<>();
         attrs.put("enabled", Boolean.parseBoolean(meta.getOrDefault("enabled", "true")));
         String nbf = meta.get("nbf");
-        attrs.put("nbf", (nbf != null && !nbf.isEmpty() && !"null".equals(nbf)) ? parseLong(nbf, 0L) : null);
+        if (nbf != null && !nbf.isEmpty() && !"null".equals(nbf)) {
+            attrs.put("nbf", parseLong(nbf, 0L));
+        }
         String exp = meta.get("exp");
-        attrs.put("exp", (exp != null && !exp.isEmpty() && !"null".equals(exp)) ? parseLong(exp, 0L) : null);
+        if (exp != null && !exp.isEmpty() && !"null".equals(exp)) {
+            attrs.put("exp", parseLong(exp, 0L));
+        }
         attrs.put("created", parseLong(meta.get("created"), 0L));
         attrs.put("updated", parseLong(meta.get("updated"), 0L));
         attrs.put("recoveryLevel", RECOVERY_LEVEL);
