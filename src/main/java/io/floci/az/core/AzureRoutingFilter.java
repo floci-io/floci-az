@@ -457,18 +457,26 @@ public class AzureRoutingFilter {
     }
 
     /**
-     * ARM management-plane provider routing: {@code subscriptions/{sub}/.../providers/Microsoft.X/...}.
-     * Iterated in {@link #providerRoutes} order (guarded first): Managed Identity is guarded so its provider
-     * segment must be the last {@code /providers/} in the path — identity-scoped children (role
-     * assignments, locks, ...) have a later segment and fall through to {@link #routeArmGeneric}. All of
-     * these must precede the generic ARM stage, which would otherwise swallow every path.
+     * ARM management-plane provider routing: {@code subscriptions/{sub}/.../providers/Microsoft.X/...}
+     * and the tenant-rooted {@code providers/Microsoft.X/...} forms (built-in policy definitions,
+     * management-group scopes). Iterated in {@link #providerRoutes} order (guarded first): Managed
+     * Identity is guarded so its provider segment must be the last {@code /providers/} in the path;
+     * identity-scoped children (role assignments, locks, ...) have a later segment and fall through to
+     * {@link #routeArmGeneric}. Azure Policy is guarded so it claims only the policy resource types of
+     * Microsoft.Authorization. All of these must precede the generic ARM stage, which would otherwise
+     * swallow every path.
      */
     private Outcome routeArmProviders(RoutingContext ctx) {
-        if (!ctx.path().startsWith("subscriptions/")) {
+        String path = ctx.path();
+        boolean tenantRooted = path.startsWith("providers/");
+        if (!path.startsWith("subscriptions/") && !tenantRooted) {
             return Fallthrough.TO_NEXT_STAGE;
         }
+        // A tenant-rooted path has no segment before "providers/", so the "/providers/<ns>/" marker is
+        // matched against the slash-prefixed path; guards see the same form.
+        String markerPath = tenantRooted ? "/" + path : path;
         for (ResolvedProvider route : providerRoutes) {
-            if (!ctx.path().contains(route.marker()) || !route.guard().test(ctx.path())) {
+            if (!markerPath.contains(route.marker()) || !route.guard().test(markerPath)) {
                 continue;
             }
             // A disabled provider service declines, letting a later provider (or generic ARM) claim it.

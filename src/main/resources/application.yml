@@ -240,6 +240,8 @@ floci-az:
       # ARM scope that seeds the system-assigned IMDS identity; set it to your resource's
       # scope so IMDS tokens match GET {scope}/.../identities/default reads.
       system-assigned-scope: subscriptions/00000000-0000-0000-0000-000000000001
+    policy:
+      enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions (control plane only, no rule evaluation)
 
   auth:
     # dev: accept any credentials without signature validation

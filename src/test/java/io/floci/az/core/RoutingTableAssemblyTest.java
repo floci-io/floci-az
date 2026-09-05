@@ -70,10 +70,12 @@ class RoutingTableAssemblyTest {
     /**
      * A4's PROVIDER_ROUTES minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
      * of the filter's provider lane into the ArmHandler lane (it implements {@code ArmProviderService}),
-     * so it is no longer a filter provider route. Every other entry is unchanged from A4.
+     * so it is no longer a filter provider route. {@code Microsoft.Authorization} was added later for
+     * the guarded Azure Policy route. Every other entry is unchanged from A4.
      */
     private static final Set<Map.Entry<String, String>> GOLDEN_PROVIDER_ROUTES = Set.of(
         Map.entry("/providers/Microsoft.ManagedIdentity/", "managedidentity"),
+        Map.entry("/providers/Microsoft.Authorization/", "policy"),
         Map.entry("/providers/Microsoft.ContainerService/", "aks"),
         Map.entry("/providers/Microsoft.ContainerRegistry/", "acr"),
         Map.entry("/providers/Microsoft.ContainerInstance/", "aci"),
@@ -129,15 +131,17 @@ class RoutingTableAssemblyTest {
     }
 
     /**
-     * Managed Identity's guarded route must be tried before the broader providers: a path may carry both
-     * a Compute/ContainerService segment and a trailing ManagedIdentity segment. Handler discovery order
-     * is arbitrary, so the filter's guarded-first sort is what guarantees this.
+     * The guarded routes (Managed Identity, Azure Policy) must be tried before the broader providers: a
+     * path may carry both a Compute/ContainerService segment and a trailing ManagedIdentity or
+     * Authorization segment. Handler discovery order is arbitrary, so the filter's guarded-first sort is
+     * what guarantees this.
      */
     @Test
-    void guardedManagedIdentityProviderIsTriedFirst() {
+    void guardedProvidersAreTriedBeforeUnguardedOnes() {
         List<Map.Entry<String, String>> providers = filter.providerRoutesInMatchOrder();
-        assertEquals("managedidentity", providers.get(0).getValue(),
-            "the guarded Managed Identity route must sort first, got " + providers);
+        assertEquals(Set.of("managedidentity", "policy"),
+            Set.of(providers.get(0).getValue(), providers.get(1).getValue()),
+            "the guarded Managed Identity and Azure Policy routes must sort first, got " + providers);
     }
 
     /**
