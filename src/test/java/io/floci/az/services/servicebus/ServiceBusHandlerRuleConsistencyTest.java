@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +28,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class ServiceBusHandlerRuleConsistencyTest {
@@ -138,42 +138,21 @@ class ServiceBusHandlerRuleConsistencyTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void exhaustedBrokerRollbackRestartsNamespaceWithPersistedTopology() throws Exception {
-        String queueKey = "sb/account/namespace/queues/queue";
-        String topicKey = "sb/account/namespace/topics/topic";
-        String subscriptionKey = "sb/account/namespace/topics/topic/subscriptions/subscription";
+    void exhaustedBrokerRollbackLeavesNamespaceRunning() throws Exception {
         String oldKey = "sb/account/namespace/topics/topic/subscriptions/subscription/rules/old";
-        ServiceBusModels.QueueEntity queue = new ServiceBusModels.QueueEntity(
-                "queue", 10, 60, 1024, false, false, 600,
-                86_400_000, false, Instant.EPOCH, Instant.EPOCH);
-        ServiceBusModels.TopicEntity topic = new ServiceBusModels.TopicEntity(
-                "topic", 1024, false, 600, 86_400_000, Instant.EPOCH, Instant.EPOCH);
-        ServiceBusModels.SubscriptionEntity subscription = new ServiceBusModels.SubscriptionEntity(
-                "topic", "subscription", 10, 60, false, 86_400_000,
-                false, Instant.EPOCH, Instant.EPOCH);
         ServiceBusModels.RuleEntity oldRule = new ServiceBusModels.RuleEntity(
                 "topic", "subscription", "old", "FalseFilter",
                 null, null, null, null, null, null, null, null, null,
                 Map.of(), Map.of(), null, Instant.EPOCH);
         ServiceBusModels.RuleEntity newRule = ServiceBusModels.RuleEntity.trueFilter(
                 "topic", "subscription", "new");
-        List<StoredObject> storedObjects = List.of(
-                new StoredObject(queueKey, MAPPER.writeValueAsBytes(queue),
-                        Map.of(), Instant.now(), queueKey),
-                new StoredObject(topicKey, MAPPER.writeValueAsBytes(topic),
-                        Map.of(), Instant.now(), topicKey),
-                new StoredObject(subscriptionKey, MAPPER.writeValueAsBytes(subscription),
-                        Map.of(), Instant.now(), subscriptionKey),
-                new StoredObject(oldKey, MAPPER.writeValueAsBytes(oldRule),
-                        Map.of(), Instant.now(), oldKey));
+        StoredObject stored = new StoredObject(
+                oldKey, MAPPER.writeValueAsBytes(oldRule), Map.of(), Instant.now(), oldKey);
         StorageBackend<String, StoredObject> store = mock(StorageBackend.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         ServiceBusNamespaceManager namespaceManager = mock(ServiceBusNamespaceManager.class);
         when(storageFactory.create("servicebus")).thenReturn(store);
-        when(store.scan(any())).thenAnswer(invocation -> {
-            Predicate<String> predicate = invocation.getArgument(0);
-            return storedObjects.stream().filter(obj -> predicate.test(obj.key())).toList();
-        });
+        when(store.scan(any())).thenReturn(List.of(stored));
         doThrow(new IllegalStateException("storage unavailable"))
                 .when(store).applyBatch(any(), any());
         doNothing()
@@ -182,12 +161,6 @@ class ServiceBusHandlerRuleConsistencyTest {
                 .doThrow(new IllegalStateException("rollback failed"))
                 .when(namespaceManager).jolokiaUpdateSubscriptionFilter(
                         anyString(), anyString(), anyString(), anyString());
-        ServiceBusNamespaceManager.NamespaceState namespaceState =
-                new ServiceBusNamespaceManager.NamespaceState(
-                        "container", 5672, 5671, "certificate", "localhost", 8161, false);
-        when(namespaceManager.getNamespace("namespace")).thenReturn(Optional.of(namespaceState));
-        when(namespaceManager.stopNamespace("namespace")).thenReturn(true);
-        when(namespaceManager.startNamespace("namespace", 5672, 5671)).thenReturn(namespaceState);
         ServiceBusHandler handler = new ServiceBusHandler(
                 mock(EmulatorConfig.class), namespaceManager, storageFactory);
 
@@ -195,15 +168,14 @@ class ServiceBusHandlerRuleConsistencyTest {
                 "account", "namespace", "topic", "subscription", List.of(newRule));
 
         assertEquals(500, response.getStatus());
-        verify(namespaceManager, times(4)).jolokiaUpdateSubscriptionFilter(
-                anyString(), anyString(), anyString(), anyString());
-        verify(namespaceManager).stopNamespace("namespace");
-        verify(namespaceManager).startNamespace("namespace", 5672, 5671);
-        verify(namespaceManager).jolokiaCreateQueue(
-                eq("namespace"), eq("queue"), eq(false), eq(60L), eq(10), any(), any());
-        verify(namespaceManager).jolokiaCreateTopic(eq("namespace"), eq("topic"), any());
-        verify(namespaceManager).jolokiaCreateSubscription(
-                eq("namespace"), eq("topic"), eq("subscription"),
-                eq(ServiceBusRuleSelector.MATCH_NONE), eq(false), eq(60L), eq(10), any(), any());
+        InOrder mutation = inOrder(namespaceManager, store);
+        mutation.verify(namespaceManager).jolokiaUpdateSubscriptionFilter(
+                "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_ALL);
+        mutation.verify(store).applyBatch(any(), any());
+        mutation.verify(namespaceManager, times(3)).jolokiaUpdateSubscriptionFilter(
+                "namespace", "topic", "subscription", ServiceBusRuleSelector.MATCH_NONE);
+        verifyNoMoreInteractions(namespaceManager);
+        verify(store, never()).delete(anyString());
+        verify(store, never()).put(anyString(), any());
     }
 }

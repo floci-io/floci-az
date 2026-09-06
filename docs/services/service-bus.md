@@ -105,6 +105,10 @@ dead-lettering).
   etc. compare with their declared type; other non-string types compare as strings.
 - Rule changes update the subscription's filter in place (messages already routed to the
   subscription stay, receivers stay attached) and, as on Azure, apply to future messages only.
+- If persisting a rule change fails, the emulator retries restoring the previous broker filter
+  and returns HTTP 500. If every rollback attempt fails, it logs the inconsistency and leaves
+  the broker running to preserve queued messages and client connections. The broker filter
+  may then differ from stored rules until a later successful rule update reconciles them.
 
 ## Message sessions
 
