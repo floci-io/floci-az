@@ -98,7 +98,7 @@ class RoutingTableAssemblyTest {
     @Test
     void hostRoutesMatchA4() {
         assertEquals(GOLDEN_HOST_ROUTES, asEntries(filter.hostRoutes()));
-        assertEquals(7, filter.hostRoutes().size(), "no duplicate host suffixes");
+        assertEquals(GOLDEN_HOST_ROUTES.size(), filter.hostRoutes().size(), "no duplicate host suffixes");
     }
 
     @Test

@@ -759,7 +759,8 @@ public class AzureRoutingFilter {
         });
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
-            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath());
+            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(),
+            ctx.host(), ctx.remoteAddress(), ctx.rawPath());
         return request.withAuthContext(authPipeline.resolve(request));
     }
 
