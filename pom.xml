@@ -7,13 +7,13 @@
     <version>0.12.0</version>
 
     <properties>
-        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.39.1</quarkus.platform.version>
+        <quarkus.platform.version>3.39.2</quarkus.platform.version>
         <!-- Coupled to the Artemis sidecar image (application.yml *.artemis-image): the patched
              artemis-amqp-protocol and proton-j jars built below replace the same-version jars inside
              that image, so these two only move together with the image tag. Guarded by
@@ -21,7 +21,7 @@
         <artemis.version>2.44.0</artemis.version>
         <proton-j.version>0.34.1</proton-j.version>
         <skipITs>true</skipITs>
-        <surefire-plugin.version>3.5.6</surefire-plugin.version>
+        <surefire-plugin.version>3.6.0</surefire-plugin.version>
     </properties>
 
     <dependencyManagement>
