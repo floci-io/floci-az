@@ -16,9 +16,16 @@ public final class EventHubFilterSupport {
 
    private static final String ANNOTATION_PREFIX = "amqp.annotation.";
 
-   /** {@code amqp.annotation.x-opt-offset > '@latest'} — the start position with no numeric form. */
+   /**
+    * {@code amqp.annotation.x-opt-offset > '@latest'} — the start position with no numeric form.
+    *
+    * <p>The quotes are optional because the SDKs disagree about them: the Java and Rust clients
+    * quote the operand, the .NET one does not. Accepting either costs nothing, and requiring them
+    * refused a .NET consumer's attach outright — {@code @latest} is no more a valid selector token
+    * unquoted than quoted, so what reached the parser had nothing where the operand should be.
+    */
    private static final Pattern LATEST =
-      Pattern.compile("amqp\\.annotation\\.x-opt-offset\\s*>=?\\s*'@latest'");
+      Pattern.compile("amqp\\.annotation\\.x-opt-offset\\s*>=?\\s*(?:'@latest'|@latest)");
 
    /** A quoted operand on one of the rewritten properties, e.g. {@code floci_offset > '-1'}. */
    private static final Pattern QUOTED_OPERAND = Pattern.compile(
