@@ -101,7 +101,7 @@ services:
 | `FLOCI_AZ_SERVICES_EVENT_HUB_AMQP_PORT` | `5672` | Host port for AMQP (Artemis) |
 | `FLOCI_AZ_SERVICES_EVENT_HUB_KAFKA_ENABLED` | `false` | Enable Kafka-compatible endpoint |
 | `FLOCI_AZ_SERVICES_EVENT_HUB_KAFKA_PORT` | `9093` | Host port for Kafka (Redpanda) |
-| `FLOCI_AZ_SERVICES_EVENT_HUB_ARTEMIS_IMAGE` | `apache/activemq-artemis:latest` | Artemis image |
+| `FLOCI_AZ_SERVICES_EVENT_HUB_ARTEMIS_IMAGE` | `apache/activemq-artemis:2.44.0` | Artemis image; must match the Artemis version floci-az was built against, because the patched AMQP jars it copies in are version-specific |
 | `FLOCI_AZ_SERVICES_EVENT_HUB_REDPANDA_IMAGE` | `redpandadata/redpanda:latest` | Redpanda image |
 
 ### application.yml

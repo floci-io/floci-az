@@ -13,6 +13,11 @@ updates:
     ignore:
       - dependency-name: "com.networknt:json-schema-validator"
         versions: [">=2.0.0"]
+      # artemis-amqp-protocol and proton-j are patched at build time and copied over the same-version
+      # jars inside the apache/activemq-artemis sidecar image, so they only move together with that
+      # image tag (application.yml) — bump them by hand, see ArtemisPatchVersions.
+      - dependency-name: "org.apache.activemq:*"
+      - dependency-name: "org.apache.qpid:proton-j"
     labels:
       - "dependencies"
       - "java"

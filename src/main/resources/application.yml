@@ -149,7 +149,7 @@ floci-az:
       amqp-tls-port: 5671
       kafka-enabled: false
       kafka-port: 9093
-      artemis-image: "apache/activemq-artemis:latest"
+      artemis-image: "apache/activemq-artemis:2.44.0"   # must match artemis.version in pom.xml (patched jars are version-specific)
       redpanda-image: "redpandadata/redpanda:latest"
       consumer-groups: "$Default,my-consumer-group"
     sql:

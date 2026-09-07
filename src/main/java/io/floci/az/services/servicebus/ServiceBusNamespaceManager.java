@@ -47,14 +47,12 @@ public class ServiceBusNamespaceManager {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
-    static final String PROTON_PATCH_RESOURCE = "/artemis/proton-j-0.34.1-floci-az-proton-patch.jar";
-    static final String ARTEMIS_AMQP_PATCH_RESOURCE =
-            "/artemis/artemis-amqp-protocol-2.44.0-floci-az-artemis-amqp-patch.jar";
+    static final String PROTON_PATCH_RESOURCE = ArtemisPatchVersions.PROTON_PATCH_RESOURCE;
+    static final String ARTEMIS_AMQP_PATCH_RESOURCE = ArtemisPatchVersions.ARTEMIS_AMQP_PATCH_RESOURCE;
     private static final String ARTEMIS_EXTENSION_PATH =
             "/var/lib/artemis-instance/lib/floci-az-servicebus-extension.jar";
-    private static final String PROTON_J_PATH = "/opt/activemq-artemis/lib/proton-j-0.34.1.jar";
-    private static final String ARTEMIS_AMQP_PATH =
-            "/opt/activemq-artemis/lib/artemis-amqp-protocol-2.44.0.jar";
+    private static final String PROTON_J_PATH = ArtemisPatchVersions.PROTON_J_CONTAINER_PATH;
+    private static final String ARTEMIS_AMQP_PATH = ArtemisPatchVersions.ARTEMIS_AMQP_CONTAINER_PATH;
     private static final String MANAGEMENT_XML = """
             <?xml version="1.0" encoding="UTF-8"?>
             <management-context xmlns="http://activemq.apache.org/schema">
