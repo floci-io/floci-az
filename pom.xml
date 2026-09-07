@@ -98,6 +98,12 @@
             <artifactId>commons-compress</artifactId>
             <version>1.28.0</version>
         </dependency>
+        <!-- GraalVM substitution annotations (see core/docker/graal); provided, never packaged. -->
+        <dependency>
+            <groupId>org.graalvm.sdk</groupId>
+            <artifactId>nativeimage</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <!-- BouncyCastle for self-signed TLS cert generation (Artemis AMQP TLS) -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
