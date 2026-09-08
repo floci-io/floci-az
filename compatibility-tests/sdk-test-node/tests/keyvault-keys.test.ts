@@ -73,7 +73,8 @@ test("create and get EC key", async () => {
 test("create and get oct key", async () => {
   const n = uid("oct");
   const key = await client.createOctKey(n, { keySize: 256 });
-  expect(key.key?.k).toBeTruthy();
+  // Symmetric key material is never released in a Key Vault response.
+  expect(key.key?.k).toBeUndefined();
   expect((await client.getKey(n)).name).toBe(n);
   await client.beginDeleteKey(n);
 });
@@ -125,12 +126,12 @@ test("backup and restore key", async () => {
 
   const backup = await client.backupKey(n);
   expect(backup).toBeInstanceOf(Uint8Array);
-  expect(backup.length).toBeGreaterThan(0);
+  expect(backup!.length).toBeGreaterThan(0);
 
   await client.beginDeleteKey(n);
   await client.purgeDeletedKey(n);
 
-  const restored = await client.restoreKeyBackup(backup);
+  const restored = await client.restoreKeyBackup(backup!);
   expect(restored.name).toBe(n);
   await client.beginDeleteKey(n);
 });
@@ -209,9 +210,11 @@ test("A256GCM encrypt/decrypt round-trip", async () => {
   const c = cryptoClient(n, key.properties.version!);
 
   const res = await c.encrypt("A256GCM", Buffer.from("gcm-plaintext"));
-  const decrypted = await c.decrypt("A256GCM", res.result, {
-    iv: res.iv,
-    authenticationTag: res.authenticationTag,
+  const decrypted = await c.decrypt({
+    algorithm: "A256GCM",
+    ciphertext: res.result,
+    iv: res.iv!,
+    authenticationTag: res.authenticationTag!,
   });
   expect(Buffer.from(decrypted.result).toString()).toBe("gcm-plaintext");
 

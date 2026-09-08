@@ -76,15 +76,15 @@ class KeyVaultKeysTest {
     }
 
     @Test
-    @DisplayName("POST create oct key returns k (never stripped)")
-    void createOctKeyReturnsK() {
+    @DisplayName("POST create oct key strips symmetric key material")
+    void createOctKeyStripsK() {
         given().header("Authorization", AUTH)
                 .contentType(ContentType.JSON)
                 .body("{\"kty\":\"oct\",\"key_size\":256}")
                 .when().post(BASE + "/keys/oct1/create" + API)
                 .then().statusCode(200)
                 .body("key.kty", equalTo("oct"))
-                .body("key.k", notNullValue());
+                .body("key.k", nullValue());
     }
 
     @Test
@@ -252,6 +252,38 @@ class KeyVaultKeysTest {
     // ── Backup / restore ───────────────────────────────────────────────────────
 
     @Test
+    @DisplayName("recreating a soft-deleted key name returns 409 until purged")
+    void recreateSoftDeletedKeyConflicts() {
+        given().header("Authorization", AUTH)
+                .contentType(ContentType.JSON)
+                .body("{\"kty\":\"RSA\",\"key_size\":2048}")
+                .when().post(BASE + "/keys/recreate1/create" + API)
+                .then().statusCode(200);
+
+        given().header("Authorization", AUTH)
+                .when().delete(BASE + "/keys/recreate1" + API)
+                .then().statusCode(200);
+
+        // Create over the soft-deleted name must conflict.
+        given().header("Authorization", AUTH)
+                .contentType(ContentType.JSON)
+                .body("{\"kty\":\"RSA\",\"key_size\":2048}")
+                .when().post(BASE + "/keys/recreate1/create" + API)
+                .then().statusCode(409)
+                .body("error.code", equalTo("Conflict"));
+
+        // Purge frees the name for recreation.
+        given().header("Authorization", AUTH)
+                .when().delete(BASE + "/deletedkeys/recreate1" + API)
+                .then().statusCode(204);
+        given().header("Authorization", AUTH)
+                .contentType(ContentType.JSON)
+                .body("{\"kty\":\"RSA\",\"key_size\":2048}")
+                .when().post(BASE + "/keys/recreate1/create" + API)
+                .then().statusCode(200);
+    }
+
+    @Test
     @DisplayName("backup → restore round-trip; restore over existing is 409")
     void backupRestoreRoundTrip() {
         Response created = given().header("Authorization", AUTH)
@@ -386,9 +418,42 @@ class KeyVaultKeysTest {
                 .body("id", equalTo("https://hsm1.managedhsm.azure.net/"));
     }
 
-    // ── Crypto version resolution ──────────────────────────────────────────────
+    // ── Managed HSM / Key Vault isolation ──────────────────────────────────────
 
     @Test
+    @DisplayName("Key Vault and Managed HSM key namespaces are isolated")
+    void vaultAndManagedHsmNamespacesIsolated() {
+        String mhsmBase = "/devstoreaccount1-managedhsm";
+
+        // A key created in the vault must not be visible through the Managed HSM flavor.
+        given().header("Authorization", AUTH)
+                .contentType(ContentType.JSON)
+                .body("{\"kty\":\"RSA\",\"key_size\":2048}")
+                .when().post(BASE + "/keys/isov/create" + API)
+                .then().statusCode(200);
+        given().header("Authorization", AUTH)
+                .when().get(mhsmBase + "/keys/isov" + API)
+                .then().statusCode(404)
+                .body("error.code", equalTo("KeyNotFound"));
+        given().header("Authorization", AUTH)
+                .when().get(mhsmBase + "/keys" + API)
+                .then().statusCode(200)
+                .body("value.size()", equalTo(0));
+
+        // And a key created in the HSM must not be visible through the vault flavor.
+        given().header("Authorization", AUTH)
+                .contentType(ContentType.JSON)
+                .body("{\"kty\":\"RSA\",\"key_size\":2048}")
+                .when().post(mhsmBase + "/keys/isoh/create" + API)
+                .then().statusCode(200)
+                .body("key.kid", containsString("managedhsm.azure.net/keys/isoh/"));
+        given().header("Authorization", AUTH)
+                .when().get(BASE + "/keys/isoh" + API)
+                .then().statusCode(404)
+                .body("error.code", equalTo("KeyNotFound"));
+    }
+
+    // ── Crypto version resolution ──────────────────────────────────────────────    @Test
     @DisplayName("crypto ops with empty or omitted version resolve to the latest version")
     void cryptoOpWithEmptyVersionResolvesLatest() {
         given().header("Authorization", AUTH)

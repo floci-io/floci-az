@@ -306,6 +306,9 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
                     case "GET"    -> keys.getKey(account, name, hsm);
                     case "PUT"    -> keys.importKey(req, account, name, hsm);
                     case "DELETE" -> keys.deleteKey(account, name, hsm);
+                    // az keyvault key set-attributes PATCHes the latest version with an empty
+                    // version segment (/keys/{name}/).
+                    case "PATCH"  -> keys.updateKeyPropertiesLatest(req, account, name, hsm);
                     default       -> methodNotAllowed();
                 };
             }
@@ -322,6 +325,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             case "GET"    -> keys.getKey(account, rest, hsm);
             case "PUT"    -> keys.importKey(req, account, rest, hsm);
             case "DELETE" -> keys.deleteKey(account, rest, hsm);
+            case "PATCH"  -> keys.updateKeyPropertiesLatest(req, account, rest, hsm);
             default       -> methodNotAllowed();
         };
     }
@@ -334,7 +338,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         }
         return switch (method) {
             case "GET"    -> keys.getDeletedKey(account, rest, hsm);
-            case "DELETE" -> keys.purgeDeletedKey(account, rest);
+            case "DELETE" -> keys.purgeDeletedKey(account, rest, hsm);
             default       -> methodNotAllowed();
         };
     }

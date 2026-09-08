@@ -2,7 +2,6 @@
 Compatibility tests for Azure Key Vault Keys and Cryptography.
 """
 import os
-import re
 import time
 import uuid
 import hashlib
@@ -24,12 +23,12 @@ def unique(prefix="key"):
 
 
 # The emulator returns key ids with host `devstoreaccount1.vault.azure.net`, which
-# does not resolve back to the emulator. We therefore build the key id ourselves from
-# the configured endpoint so cryptographic requests route back to the emulator. Never
-# pass the returned KeyVaultKey directly to a CryptographyClient (it would use the
-# unusable returned id).
+# does not resolve back to the emulator. We build a host-based key id (the only shape
+# parse_key_vault_id accepts) and have the transport rewrite the request back onto the
+# emulator's path-based route: https://devstoreaccount1.vault.azure.net/keys/... becomes
+# {endpoint}/devstoreaccount1-keyvault/keys/....
 _ENDPOINT = os.environ.get("FLOCI_AZ_ENDPOINT", "http://localhost:4577")
-_VAULT_URL = re.sub(r"^http://", "https://", _ENDPOINT) + "/devstoreaccount1-keyvault"
+_VAULT_HOST = "devstoreaccount1.vault.azure.net"
 
 
 class _FakeCredential(TokenCredential):
@@ -39,12 +38,14 @@ class _FakeCredential(TokenCredential):
 
 class _ForceHttpTransport(RequestsTransport):
     def send(self, request, **kwargs):
-        request.url = request.url.replace("https://", "http://", 1)
+        request.url = request.url.replace(
+            f"https://{_VAULT_HOST}/", f"{_ENDPOINT}/devstoreaccount1-keyvault/", 1
+        )
         return super().send(request, **kwargs)
 
 
 def _crypto(key_name, key_version):
-    kid = f"{_VAULT_URL}/keys/{key_name}/{key_version}"
+    kid = f"https://{_VAULT_HOST}/keys/{key_name}/{key_version}"
     return CryptographyClient(
         kid,
         credential=_FakeCredential(),
@@ -82,7 +83,8 @@ def test_create_and_get_ec_key(keys_client):
 def test_create_and_get_oct_key(keys_client):
     name = unique("oct")
     created = keys_client.create_oct_key(name, size=256)
-    assert created.key.k is not None
+    # Symmetric key material is never released in a Key Vault response.
+    assert created.key.k is None
 
     assert keys_client.get_key(name).name == name
     keys_client.begin_delete_key(name).result()

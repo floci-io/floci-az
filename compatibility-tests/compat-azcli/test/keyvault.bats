@@ -47,7 +47,7 @@ setup() {
 
     run az_json keyvault key list --vault-name "$KV_NAME"
     assert_success
-    assert_not_empty "$(echo "$output" | jq -r '.[].kid')"
+    [ -n "$(echo "$output" | jq -r '.[].kid')" ]
 
     run az keyvault key delete --vault-name "$KV_NAME" -n "$KEY_NAME" -o none
     assert_success
@@ -82,7 +82,7 @@ setup() {
     assert_success
     local ciphertext
     ciphertext=$(echo "$output" | jq -r '.result')
-    assert_not_empty "$ciphertext"
+    [ -n "$ciphertext" ]
 
     run az_json keyvault key decrypt --vault-name "$KV_NAME" -n "$CRYPTO_KEY_NAME" \
         --algorithm RSA-OAEP-256 --value "$ciphertext"
@@ -112,7 +112,7 @@ setup() {
 
     run az_json keyvault key list-deleted --vault-name "$KV_NAME"
     assert_success
-    assert_not_empty "$(echo "$output" | jq -r '.[].kid')"
+    [ -n "$(echo "$output" | jq -r '.[].kid')" ]
 
     run az keyvault key recover --vault-name "$KV_NAME" -n "$LIFECYCLE_KEY_NAME" -o none
     assert_success

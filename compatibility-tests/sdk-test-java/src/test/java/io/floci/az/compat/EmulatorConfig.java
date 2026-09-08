@@ -188,6 +188,35 @@ public final class EmulatorConfig {
         }
     }
 
+    /**
+     * The Azure SDKs require a {@code https://{account}.vault.azure.net/keys/...} key identifier for
+     * cryptography clients and derive the request URL from its host, dropping any path component. The
+     * emulator is reached over path-based routing instead, so this policy rewrites each crypto request
+     * from the host-based URL to {@code http://{endpoint}/{account}-keyvault/keys/...}.
+     */
+    static final class KeyVaultDataPlanePolicy implements HttpPipelinePolicy {
+        private final String accountPath;
+
+        KeyVaultDataPlanePolicy(String accountPath) {
+            this.accountPath = accountPath;
+        }
+
+        @Override
+        public Mono<HttpResponse> process(HttpPipelineCallContext context, HttpPipelineNextPolicy next) {
+            URL url = context.getHttpRequest().getUrl();
+            URI endpoint = URI.create(BASE);
+            try {
+                String path = "/" + accountPath + url.getPath();
+                String query = url.getQuery();
+                context.getHttpRequest().setUrl(new URL("http", endpoint.getHost(), endpoint.getPort(),
+                        path + (query != null ? "?" + query : "")));
+            } catch (MalformedURLException e) {
+                return Mono.error(e);
+            }
+            return next.process();
+        }
+    }
+
     // ── Event Hubs / AMQP ────────────────────────────────────────────────────
 
     static final String EVENTHUB_HOST =
@@ -344,11 +373,23 @@ public final class EmulatorConfig {
     }
 
     static CryptographyClient buildCryptographyClient(String keyName, String keyVersion) {
-        String keyIdentifier = keyVaultUrl() + "/keys/" + keyName + "/" + keyVersion;
+        return buildCryptographyClient(keyName, keyVersion, false);
+    }
+
+    /** Managed HSM cryptography client: same handler, routed via the {@code -managedhsm} suffix. */
+    static CryptographyClient buildManagedHsmCryptographyClient(String keyName, String keyVersion) {
+        return buildCryptographyClient(keyName, keyVersion, true);
+    }
+
+    private static CryptographyClient buildCryptographyClient(String keyName, String keyVersion, boolean hsm) {
+        String host = hsm
+                ? "https://" + ACCOUNT + ".managedhsm.azure.net"
+                : "https://" + ACCOUNT + ".vault.azure.net";
+        String keyIdentifier = host + "/keys/" + keyName + "/" + keyVersion;
         return new CryptographyClientBuilder()
                 .keyIdentifier(keyIdentifier)
                 .credential(req -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
-                .addPolicy(new ForceHttpPolicy())
+                .addPolicy(new KeyVaultDataPlanePolicy(ACCOUNT + (hsm ? "-managedhsm" : "-keyvault")))
                 .disableChallengeResourceVerification()
                 .buildClient();
     }

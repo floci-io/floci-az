@@ -79,7 +79,8 @@ class KeyVaultKeysCompatibilityTest {
     void createAndGetOctKey() {
         String n = name("oct");
         KeyVaultKey created = client.createOctKey(new CreateOctKeyOptions(n).setKeySize(256));
-        assertNotNull(created.getKey().getK());
+        // Symmetric key material is never released in a Key Vault response.
+        assertNull(created.getKey().getK());
 
         assertEquals(n, client.getKey(n).getName());
         client.beginDeleteKey(n);

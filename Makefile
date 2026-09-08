@@ -478,8 +478,19 @@ smoke-native-crypto:
 	./target/*-runner & echo $$! > /tmp/floci-az-native.pid
 	@echo "Waiting for floci-az native runner on port $(PORT)..."
 	@EXIT=0; \
-	until curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1; do sleep 1; done; \
-	bash scripts/native-crypto-smoke.sh || EXIT=$$?; \
+	ATTEMPTS=0; \
+	until curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1; do \
+		ATTEMPTS=$$((ATTEMPTS + 1)); \
+		if [ $$ATTEMPTS -ge 120 ]; then \
+			echo "floci-az native runner did not become healthy after 120s" >&2; \
+			EXIT=1; \
+			break; \
+		fi; \
+		sleep 1; \
+	done; \
+	if [ $$EXIT -eq 0 ]; then \
+		bash scripts/native-crypto-smoke.sh || EXIT=$$?; \
+	fi; \
 	kill $$(cat /tmp/floci-az-native.pid 2>/dev/null) 2>/dev/null || true; \
 	rm -f /tmp/floci-az-native.pid; \
 	exit $$EXIT

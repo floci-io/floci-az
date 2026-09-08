@@ -280,7 +280,10 @@ final class KeyVaultCrypto {
         }
     }
 
-    /** Strips private fields for the wire. {@code oct} keys keep {@code k} — SDKs rely on it. */
+    /**
+     * Strips private fields for the wire. Symmetric ({@code oct}) key material is never released in
+     * any response; the full JWK (including {@code k}) stays server-side for crypto operations.
+     */
     static Map<String, Object> publicJwk(Map<String, Object> full) {
         String kty = (String) full.get("kty");
         String base = baseKty(kty);
@@ -303,7 +306,6 @@ final class KeyVaultCrypto {
                 pub.put("y", full.get("y"));
             }
             case "oct" -> {
-                pub.put("k", full.get("k"));
                 if (full.containsKey("keySize")) {
                     pub.put("key_size", full.get("keySize"));
                 }
@@ -400,6 +402,7 @@ final class KeyVaultCrypto {
             }
             case "A128GCM", "A192GCM", "A256GCM" -> {
                 requireOct(base, alg);
+                requireOctSize(jwk, alg);
                 yield gcmEncrypt(jwk, value, iv, aad);
             }
             default -> throw new CryptoException("Unsupported algorithm: " + alg);
@@ -423,6 +426,7 @@ final class KeyVaultCrypto {
             }
             case "A128GCM", "A192GCM", "A256GCM" -> {
                 requireOct(base, alg);
+                requireOctSize(jwk, alg);
                 yield gcmDecrypt(jwk, value, iv, aad, tag);
             }
             default -> throw new CryptoException("Unsupported algorithm: " + alg);
@@ -542,6 +546,23 @@ final class KeyVaultCrypto {
     private static void requireOct(String base, String alg) {
         if (!"oct".equals(base)) {
             throw new CryptoException("Algorithm " + alg + " requires an oct key");
+        }
+    }
+
+    /** Rejects an AES-GCM algorithm when the stored oct key's size does not match the algorithm. */
+    private static void requireOctSize(Map<String, Object> jwk, String alg) {
+        int bits = jwk.get("keySize") instanceof Number n ? n.intValue() : 0;
+        if (bits == 0 && jwk.get("k") instanceof String k) {
+            bits = b64UrlDecode(k).length * 8;
+        }
+        int expected = switch (alg) {
+            case "A128GCM" -> 128;
+            case "A192GCM" -> 192;
+            case "A256GCM" -> 256;
+            default -> 0;
+        };
+        if (bits != expected) {
+            throw new CryptoException("Algorithm " + alg + " requires a " + expected + "-bit key");
         }
     }
 

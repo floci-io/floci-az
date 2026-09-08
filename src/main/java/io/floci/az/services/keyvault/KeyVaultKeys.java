@@ -97,6 +97,11 @@ final class KeyVaultKeys {
 
     private Response storeNewKey(AzureRequest req, String account, String name,
             Map<String, Object> jwk, Map<String, Object> body, boolean hsm) {
+        // Recreating a name that is soft-deleted (not purged) is a 409 until it is recovered or purged.
+        if (store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
+            return kvError(409, "Conflict",
+                    "A key with (name/id) " + name + " was recently deleted and must be recovered or purged first.");
+        }
         @SuppressWarnings("unchecked")
         Map<String, Object> attrs = body.get("attributes") instanceof Map<?, ?> m
                 ? (Map<String, Object>) m : new LinkedHashMap<>();
@@ -114,13 +119,13 @@ final class KeyVaultKeys {
             return kvError(400, "BadParameter", e.getMessage());
         }
 
-        StoredObject versionObj = new StoredObject(keyVersionKey(account, name, versionId),
+        StoredObject versionObj = new StoredObject(keyVersionKey(account, name, versionId, hsm),
                 toBytes(jwk), meta, Instant.now(), newVersionId().substring(0, 16));
         store.put(versionObj.key(), versionObj);
 
         Map<String, String> latestMeta = new HashMap<>(versionObj.metadata());
         latestMeta.put("latestVersion", versionId);
-        String latestKey = keyLatestKey(account, name);
+        String latestKey = keyLatestKey(account, name, hsm);
         store.put(latestKey, new StoredObject(latestKey, versionObj.data(), latestMeta,
                 versionObj.lastModified(), versionObj.etag()));
 
@@ -131,7 +136,7 @@ final class KeyVaultKeys {
     // ── Read ───────────────────────────────────────────────────────────────────
 
     Response getKey(String account, String name, boolean hsm) {
-        Optional<StoredObject> opt = store.get(keyLatestKey(account, name));
+        Optional<StoredObject> opt = store.get(keyLatestKey(account, name, hsm));
         if (opt.isEmpty()) {
             return keyNotFound(name);
         }
@@ -141,10 +146,10 @@ final class KeyVaultKeys {
     }
 
     Response getKeyVersion(String account, String name, String version, boolean hsm) {
-        if (store.get(deletedKeyKey(account, name)).isPresent()) {
+        if (store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
             return keyNotFound(name + "/" + version);
         }
-        Optional<StoredObject> opt = store.get(keyVersionKey(account, name, version));
+        Optional<StoredObject> opt = store.get(keyVersionKey(account, name, version, hsm));
         if (opt.isEmpty()) {
             return keyNotFound(name + "/" + version);
         }
@@ -152,7 +157,7 @@ final class KeyVaultKeys {
     }
 
     Response listKeys(String account, boolean hsm) {
-        String prefix = account + "/keys/";
+        String prefix = keysPrefix(account, hsm);
         List<Map<String, Object>> items = store.scan(k -> k.startsWith(prefix))
                 .stream()
                 .filter(obj -> !obj.key().substring(prefix.length()).contains("/"))
@@ -165,10 +170,10 @@ final class KeyVaultKeys {
     }
 
     Response listKeyVersions(String account, String name, boolean hsm) {
-        if (store.get(deletedKeyKey(account, name)).isPresent()) {
+        if (store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
             return keyNotFound(name);
         }
-        String prefix = account + "/keys/" + name + "/versions/";
+        String prefix = keyVersionsPrefix(account, name, hsm);
         List<Map<String, Object>> items = store.scan(k -> k.startsWith(prefix))
                 .stream()
                 .map(obj -> {
@@ -182,10 +187,10 @@ final class KeyVaultKeys {
     // ── Update (PATCH) ─────────────────────────────────────────────────────────
 
     Response updateKeyProperties(AzureRequest req, String account, String name, String version, boolean hsm) {
-        if (store.get(deletedKeyKey(account, name)).isPresent()) {
+        if (store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
             return keyNotFound(name + "/" + version);
         }
-        String versionKey = keyVersionKey(account, name, version);
+        String versionKey = keyVersionKey(account, name, version, hsm);
         Optional<StoredObject> opt = store.get(versionKey);
         if (opt.isEmpty()) {
             return keyNotFound(name + "/" + version);
@@ -215,7 +220,7 @@ final class KeyVaultKeys {
         StoredObject updated = new StoredObject(versionKey, toBytes(data), meta, updatedAt, newEtag);
         store.put(versionKey, updated);
 
-        String latestKey = keyLatestKey(account, name);
+        String latestKey = keyLatestKey(account, name, hsm);
         store.get(latestKey).ifPresent(latest -> {
             if (version.equals(latest.metadata().get("latestVersion"))) {
                 Map<String, String> latestMeta = new HashMap<>(meta);
@@ -227,10 +232,23 @@ final class KeyVaultKeys {
         return Response.ok(toJson(keyBundle(account, name, version, updated, hsm)), "application/json").build();
     }
 
+    /**
+     * {@code PATCH /keys/{name}} with no version: the Azure CLI's {@code key set-attributes} PATCHes
+     * the latest version with an empty version segment. Resolves the latest version and delegates.
+     */
+    Response updateKeyPropertiesLatest(AzureRequest req, String account, String name, boolean hsm) {
+        Optional<StoredObject> opt = store.get(keyLatestKey(account, name, hsm));
+        if (opt.isEmpty()) {
+            return keyNotFound(name);
+        }
+        String version = opt.get().metadata().getOrDefault("latestVersion", opt.get().metadata().get("version"));
+        return updateKeyProperties(req, account, name, version, hsm);
+    }
+
     // ── Delete / deleted / recover / purge ─────────────────────────────────────
 
     Response deleteKey(String account, String name, boolean hsm) {
-        String latestKey = keyLatestKey(account, name);
+        String latestKey = keyLatestKey(account, name, hsm);
         Optional<StoredObject> opt = store.get(latestKey);
         if (opt.isEmpty()) {
             return keyNotFound(name);
@@ -242,7 +260,7 @@ final class KeyVaultKeys {
         Map<String, String> deletedMeta = new HashMap<>(obj.metadata());
         deletedMeta.put("deletedDate", String.valueOf(now));
         deletedMeta.put("scheduledPurgeDate", String.valueOf(purge));
-        String deletedKey = deletedKeyKey(account, name);
+        String deletedKey = deletedKeyKey(account, name, hsm);
         store.put(deletedKey, new StoredObject(deletedKey, obj.data(), deletedMeta,
                 obj.lastModified(), obj.etag()));
         store.delete(latestKey);
@@ -253,7 +271,7 @@ final class KeyVaultKeys {
     }
 
     Response getDeletedKey(String account, String name, boolean hsm) {
-        Optional<StoredObject> opt = store.get(deletedKeyKey(account, name));
+        Optional<StoredObject> opt = store.get(deletedKeyKey(account, name, hsm));
         if (opt.isEmpty()) {
             return deletedKeyNotFound(name);
         }
@@ -266,7 +284,7 @@ final class KeyVaultKeys {
     }
 
     Response listDeletedKeys(String account, boolean hsm) {
-        String prefix = account + "/deletedkeys/";
+        String prefix = deletedKeysPrefix(account, hsm);
         List<Map<String, Object>> items = store.scan(k -> k.startsWith(prefix))
                 .stream()
                 .map(obj -> {
@@ -281,7 +299,7 @@ final class KeyVaultKeys {
     }
 
     Response recoverDeletedKey(String account, String name, boolean hsm) {
-        String deletedKey = deletedKeyKey(account, name);
+        String deletedKey = deletedKeyKey(account, name, hsm);
         Optional<StoredObject> opt = store.get(deletedKey);
         if (opt.isEmpty()) {
             return deletedKeyNotFound(name);
@@ -292,12 +310,12 @@ final class KeyVaultKeys {
         restoredMeta.remove("deletedDate");
         restoredMeta.remove("scheduledPurgeDate");
 
-        String latestKey = keyLatestKey(account, name);
+        String latestKey = keyLatestKey(account, name, hsm);
         store.put(latestKey, new StoredObject(latestKey, obj.data(), restoredMeta,
                 obj.lastModified(), obj.etag()));
 
         String versionId = restoredMeta.getOrDefault("latestVersion", restoredMeta.get("version"));
-        String versionKey = keyVersionKey(account, name, versionId);
+        String versionKey = keyVersionKey(account, name, versionId, hsm);
         if (store.get(versionKey).isEmpty()) {
             Map<String, String> versionMeta = new HashMap<>(restoredMeta);
             versionMeta.remove("latestVersion");
@@ -311,23 +329,23 @@ final class KeyVaultKeys {
                 "application/json").build();
     }
 
-    Response purgeDeletedKey(String account, String name) {
-        String deletedKey = deletedKeyKey(account, name);
+    Response purgeDeletedKey(String account, String name, boolean hsm) {
+        String deletedKey = deletedKeyKey(account, name, hsm);
         if (store.get(deletedKey).isEmpty()) {
             return deletedKeyNotFound(name);
         }
         store.delete(deletedKey);
-        String versionPrefix = account + "/keys/" + name + "/versions/";
+        String versionPrefix = keyVersionsPrefix(account, name, hsm);
         store.scan(k -> k.startsWith(versionPrefix)).forEach(obj -> store.delete(obj.key()));
         // Also remove any rotation policy so a recreated key does not inherit it.
-        store.delete(rotationPolicyKey(account, name));
+        store.delete(rotationPolicyKey(account, name, hsm));
         return Response.noContent().build();
     }
 
     // ── Backup / restore ───────────────────────────────────────────────────────
 
     Response backupKey(String account, String name, boolean hsm) {
-        Optional<StoredObject> opt = store.get(keyLatestKey(account, name));
+        Optional<StoredObject> opt = store.get(keyLatestKey(account, name, hsm));
         if (opt.isEmpty()) {
             return keyNotFound(name);
         }
@@ -335,7 +353,7 @@ final class KeyVaultKeys {
 
         Map<String, Object> snapshot = new LinkedHashMap<>();
         List<Map<String, Object>> versions = new ArrayList<>();
-        String versionPrefix = account + "/keys/" + name + "/versions/";
+        String versionPrefix = keyVersionsPrefix(account, name, hsm);
         store.scan(k -> k.startsWith(versionPrefix)).forEach(v -> {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("version", v.key().substring(versionPrefix.length()));
@@ -347,7 +365,7 @@ final class KeyVaultKeys {
         snapshot.put("versions", versions);
         snapshot.put("latestVersion", obj.metadata().getOrDefault("latestVersion", obj.metadata().get("version")));
         snapshot.put("tags", parseStoredData(obj).get("tags"));
-        snapshot.put("rotationPolicy", store.get(rotationPolicyKey(account, name))
+        snapshot.put("rotationPolicy", store.get(rotationPolicyKey(account, name, hsm))
                 .map(this::parseStoredData).orElse(null));
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -374,8 +392,8 @@ final class KeyVaultKeys {
             if (name == null || !name.matches("^[a-zA-Z0-9-]+$")) {
                 return kvError(400, "BadParameter", "Invalid key name in backup snapshot.");
             }
-            if (store.get(keyLatestKey(account, name)).isPresent()
-                    || store.get(deletedKeyKey(account, name)).isPresent()) {
+            if (store.get(keyLatestKey(account, name, hsm)).isPresent()
+                    || store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
                 return kvError(409, "Conflict", "A key with (name/id) " + name + " already exists in this key vault.");
             }
 
@@ -444,7 +462,7 @@ final class KeyVaultKeys {
             // Write pass: only after every entry has validated successfully.
             StoredObject latest = null;
             for (RestoredVersion restored : validated) {
-                StoredObject versionObj = new StoredObject(keyVersionKey(account, name, restored.version()),
+                StoredObject versionObj = new StoredObject(keyVersionKey(account, name, restored.version(), hsm),
                         toBytes(restored.jwk()), restored.meta(), Instant.now(), newVersionId().substring(0, 16));
                 store.put(versionObj.key(), versionObj);
                 if (restored.version().equals(chosenLatest)) {
@@ -454,7 +472,7 @@ final class KeyVaultKeys {
 
             Map<String, String> latestMeta = new HashMap<>(latest.metadata());
             latestMeta.put("latestVersion", chosenLatest);
-            store.put(keyLatestKey(account, name), new StoredObject(keyLatestKey(account, name),
+            store.put(keyLatestKey(account, name, hsm), new StoredObject(keyLatestKey(account, name, hsm),
                     latest.data(), latestMeta, latest.lastModified(), latest.etag()));
 
             if (snapshot.get("rotationPolicy") instanceof Map<?, ?> policy) {
@@ -464,12 +482,12 @@ final class KeyVaultKeys {
                 Map<String, String> meta = new HashMap<>();
                 meta.put("created", String.valueOf(now));
                 meta.put("updated", String.valueOf(now));
-                store.put(rotationPolicyKey(account, name), new StoredObject(rotationPolicyKey(account, name),
+                store.put(rotationPolicyKey(account, name, hsm), new StoredObject(rotationPolicyKey(account, name, hsm),
                         toBytes(policyMap), meta, Instant.now(), newVersionId().substring(0, 16)));
             }
 
             return Response.ok(toJson(keyBundle(account, name, chosenLatest,
-                    store.get(keyLatestKey(account, name)).get(), hsm)), "application/json").build();
+                    store.get(keyLatestKey(account, name, hsm)).get(), hsm)), "application/json").build();
         } catch (KeyVaultCrypto.CryptoException e) {
             return kvError(400, "BadParameter", e.getMessage());
         } catch (Exception e) {
@@ -481,16 +499,16 @@ final class KeyVaultKeys {
     // ── Rotation policy ────────────────────────────────────────────────────────
 
     Response getRotationPolicy(String account, String name, boolean hsm) {
-        if (store.get(keyLatestKey(account, name)).isEmpty()) {
+        if (store.get(keyLatestKey(account, name, hsm)).isEmpty()) {
             return keyNotFound(name);
         }
-        Map<String, Object> policy = store.get(rotationPolicyKey(account, name))
+        Map<String, Object> policy = store.get(rotationPolicyKey(account, name, hsm))
                 .map(this::parseStoredData).orElseGet(this::defaultPolicy);
         return Response.ok(toJson(policyBundle(account, name, policy, hsm)), "application/json").build();
     }
 
     Response putRotationPolicy(AzureRequest req, String account, String name, boolean hsm) {
-        if (store.get(keyLatestKey(account, name)).isEmpty()) {
+        if (store.get(keyLatestKey(account, name, hsm)).isEmpty()) {
             return keyNotFound(name);
         }
         Map<String, Object> body = parseBody(req);
@@ -502,7 +520,7 @@ final class KeyVaultKeys {
         Map<String, String> meta = new HashMap<>();
         meta.put("created", String.valueOf(now));
         meta.put("updated", String.valueOf(now));
-        String key = rotationPolicyKey(account, name);
+        String key = rotationPolicyKey(account, name, hsm);
         store.put(key, new StoredObject(key, toBytes(policy), meta, Instant.now(),
                 newVersionId().substring(0, 16)));
 
@@ -510,7 +528,7 @@ final class KeyVaultKeys {
     }
 
     Response rotateKey(String account, String name, boolean hsm) {
-        Optional<StoredObject> opt = store.get(keyLatestKey(account, name));
+        Optional<StoredObject> opt = store.get(keyLatestKey(account, name, hsm));
         if (opt.isEmpty()) {
             return keyNotFound(name);
         }
@@ -546,23 +564,23 @@ final class KeyVaultKeys {
         versionMeta.put("created", String.valueOf(now));
         versionMeta.put("updated", String.valueOf(now));
 
-        StoredObject versionObj = new StoredObject(keyVersionKey(account, name, versionId),
+        StoredObject versionObj = new StoredObject(keyVersionKey(account, name, versionId, hsm),
                 toBytes(newJwk), versionMeta, Instant.now(), newVersionId().substring(0, 16));
         store.put(versionObj.key(), versionObj);
 
         Map<String, String> latestMeta = new HashMap<>(versionMeta);
         latestMeta.put("latestVersion", versionId);
-        store.put(keyLatestKey(account, name), new StoredObject(keyLatestKey(account, name),
+        store.put(keyLatestKey(account, name, hsm), new StoredObject(keyLatestKey(account, name, hsm),
                 toBytes(newJwk), latestMeta, Instant.now(), newVersionId().substring(0, 16)));
 
         return Response.ok(toJson(keyBundle(account, name, versionId,
-                store.get(keyVersionKey(account, name, versionId)).get(), hsm)), "application/json").build();
+                store.get(keyVersionKey(account, name, versionId, hsm)).get(), hsm)), "application/json").build();
     }
 
     // ── Cryptographic operations ───────────────────────────────────────────────
 
     Response cryptoOp(AzureRequest req, String account, String name, String version, String op, boolean hsm) {
-        StoredObject keyObj = resolveKeyForCrypto(account, name, version);
+        StoredObject keyObj = resolveKeyForCrypto(account, name, version, hsm);
         if (keyObj == null) {
             return keyNotFound(name + (version != null && !version.isEmpty() ? "/" + version : ""));
         }
@@ -670,14 +688,14 @@ final class KeyVaultKeys {
         }
     }
 
-    private StoredObject resolveKeyForCrypto(String account, String name, String version) {
-        if (store.get(deletedKeyKey(account, name)).isPresent()) {
+    private StoredObject resolveKeyForCrypto(String account, String name, String version, boolean hsm) {
+        if (store.get(deletedKeyKey(account, name, hsm)).isPresent()) {
             return null;
         }
         if (version != null && !version.isEmpty()) {
-            return store.get(keyVersionKey(account, name, version)).orElse(null);
+            return store.get(keyVersionKey(account, name, version, hsm)).orElse(null);
         }
-        return store.get(keyLatestKey(account, name)).orElse(null);
+        return store.get(keyLatestKey(account, name, hsm)).orElse(null);
     }
 
     private static String requiredKeyOp(String op) {
@@ -790,20 +808,36 @@ final class KeyVaultKeys {
 
     // ── Storage helpers ────────────────────────────────────────────────────────
 
-    private String keyLatestKey(String account, String name) {
-        return account + "/keys/" + name;
+    // Managed HSM and Key Vault share the same handler, so storage keys are scoped per flavor to
+    // keep {account}-keyvault and {account}-managedhsm namespaces fully isolated. The non-HSM
+    // layout ({account}/keys/...) is unchanged from before; HSM keys live under {account}/hsm/.
+
+    private String keyLatestKey(String account, String name, boolean hsm) {
+        return (hsm ? account + "/hsm/keys/" : account + "/keys/") + name;
     }
 
-    private String keyVersionKey(String account, String name, String version) {
-        return account + "/keys/" + name + "/versions/" + version;
+    private String keyVersionKey(String account, String name, String version, boolean hsm) {
+        return keyLatestKey(account, name, hsm) + "/versions/" + version;
     }
 
-    private String deletedKeyKey(String account, String name) {
-        return account + "/deletedkeys/" + name;
+    private String deletedKeyKey(String account, String name, boolean hsm) {
+        return (hsm ? account + "/hsm/deletedkeys/" : account + "/deletedkeys/") + name;
     }
 
-    private String rotationPolicyKey(String account, String name) {
-        return account + "/keys/" + name + "/rotationpolicy";
+    private String rotationPolicyKey(String account, String name, boolean hsm) {
+        return keyLatestKey(account, name, hsm) + "/rotationpolicy";
+    }
+
+    private String keysPrefix(String account, boolean hsm) {
+        return hsm ? account + "/hsm/keys/" : account + "/keys/";
+    }
+
+    private String keyVersionsPrefix(String account, String name, boolean hsm) {
+        return keyLatestKey(account, name, hsm) + "/versions/";
+    }
+
+    private String deletedKeysPrefix(String account, boolean hsm) {
+        return hsm ? account + "/hsm/deletedkeys/" : account + "/deletedkeys/";
     }
 
     // ── URL builders ───────────────────────────────────────────────────────────

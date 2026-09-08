@@ -176,8 +176,33 @@ class KeyVaultCryptoTest {
         assertFalse(Arrays.equals(callerIv, URL_DECODER.decode(serverIv)));
     }
 
-    // ── Sign / verify ──────────────────────────────────────────────────────────
+    @Test
+    @DisplayName("AES-GCM algorithm/key-size mismatch returns 400 BadParameter")
+    void gcmAlgorithmKeySizeMismatch400() {
+        // A128GCM against a 256-bit key and A256GCM against a 128-bit key must both be rejected.
+        Response small = createKey("gcmsmall", "oct", null, 128);
+        Response large = createKey("gcmlarge", "oct", null, 256);
 
+        given().header("Authorization", AUTH).contentType(ContentType.JSON)
+                .body("{\"alg\":\"A256GCM\",\"value\":\"" + b64Url("x") + "\"}")
+                .when().post(kidPath(small.jsonPath().getString("key.kid")) + "/encrypt" + API)
+                .then().statusCode(400)
+                .body("error.code", equalTo("BadParameter"));
+
+        given().header("Authorization", AUTH).contentType(ContentType.JSON)
+                .body("{\"alg\":\"A128GCM\",\"value\":\"" + b64Url("x") + "\"}")
+                .when().post(kidPath(large.jsonPath().getString("key.kid")) + "/encrypt" + API)
+                .then().statusCode(400)
+                .body("error.code", equalTo("BadParameter"));
+
+        given().header("Authorization", AUTH).contentType(ContentType.JSON)
+                .body("{\"alg\":\"A192GCM\",\"value\":\"" + b64Url("x") + "\"}")
+                .when().post(kidPath(large.jsonPath().getString("key.kid")) + "/encrypt" + API)
+                .then().statusCode(400)
+                .body("error.code", equalTo("BadParameter"));
+    }
+
+    // ── Sign / verify ──────────────────────────────────────────────────────────
     @Test
     @DisplayName("RS256 sign/verify; verify returns {\"value\":true} with no kid")
     void rs256SignVerify() {
