@@ -396,7 +396,7 @@ public class StorageSasAuthorization {
         APPEND {
             @Override
             boolean allowedBy(StorageSasToken token) {
-                return token.hasPermission('a');
+                return token.hasAnyPermission('a', 'w');
             }
         };
 
