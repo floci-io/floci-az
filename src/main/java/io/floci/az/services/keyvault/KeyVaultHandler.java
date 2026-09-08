@@ -33,11 +33,13 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
     private final StorageBackend<String, StoredObject> store;
     private final EmulatorConfig config;
+    private final KeyVaultKeys keys;
 
     @Inject
     public KeyVaultHandler(StorageFactory factory, EmulatorConfig config) {
         this.store = factory.create("keyvault");
         this.config = config;
+        this.keys = new KeyVaultKeys(store);
     }
 
     @Override
@@ -56,7 +58,9 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     public ServiceRoutes routes() {
         return ServiceRoutes.builder()
                 .host(".vault.azure.net")
+                .host(".managedhsm.azure.net")
                 .account("-keyvault", "keyvault")
+                .account("-managedhsm", "keyvault")
                 .build();
 
     }
@@ -76,24 +80,32 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
         LOG.debugf("KeyVault %s /%s", method, path);
 
+        // Managed HSM flavor: strip the port from Host so {account}.managedhsm.azure.net:4577 still matches.
+        String host = req.headers().getHeaderString("Host");
+        String hostWithoutPort = host != null
+                ? (host.contains(":") ? host.substring(0, host.indexOf(':')) : host) : null;
+        String accountSuffix = req.headers().getHeaderString("x-floci-account-suffix");
+        boolean hsm = (hostWithoutPort != null && hostWithoutPort.endsWith(".managedhsm.azure.net"))
+                || "-managedhsm".equals(accountSuffix);
+
         // The Azure SDK challenge_auth_policy sends a bodiless probe to elicit a challenge, then
         // retries with the real body. Return 401 with a Bearer challenge so the SDK caches it and
         // sends subsequent requests with the Authorization header and their original bodies.
         String auth = req.headers().getHeaderString("Authorization");
         if (auth == null || auth.isEmpty()) {
+            String challengeResource = hsm ? "https://managedhsm.azure.net" : "https://vault.azure.net";
             return Response.status(401)
                     .header("WWW-Authenticate",
                             "Bearer authorization=\"https://login.microsoftonline.com/common\", "
-                            + "resource=\"https://vault.azure.net\"")
+                            + "resource=\"" + challengeResource + "\"")
                     .build();
         }
 
         // Root probe — azurerm provider polls this to confirm the vault is reachable.
         if (routePath.isEmpty()) {
-            return Response.ok(java.util.Map.of(
-                "type", "Microsoft.KeyVault/vaults",
-                "id",   "https://" + account + ".vault.azure.net/"
-            )).build();
+            String probeType = hsm ? "Microsoft.KeyVault/managedHSMs" : "Microsoft.KeyVault/vaults";
+            String probeId = "https://" + account + (hsm ? ".managedhsm.azure.net/" : ".vault.azure.net/");
+            return Response.ok(java.util.Map.of("type", probeType, "id", probeId)).build();
         }
 
         if ("secrets".equals(routePath)) {
@@ -109,6 +121,23 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return handleDeletedSecrets(req, method, account, path.substring("deletedsecrets/".length()));
         }
 
+        // Keys data plane
+        if ("keys".equals(path)) {
+            return "GET".equals(method) ? keys.listKeys(account, hsm) : methodNotAllowed();
+        }
+        if (path.startsWith("keys/")) {
+            return handleKeys(req, method, account, path.substring("keys/".length()), hsm);
+        }
+        if ("deletedkeys".equals(path)) {
+            return "GET".equals(method) ? keys.listDeletedKeys(account, hsm) : methodNotAllowed();
+        }
+        if (path.startsWith("deletedkeys/")) {
+            return handleDeletedKeys(req, method, account, path.substring("deletedkeys/".length()), hsm);
+        }
+        if ("rng".equals(path)) {
+            return "POST".equals(method) ? handleRng(req) : methodNotAllowed();
+        }
+
         // Certificate contacts — azurerm provider reads this after key vault creation.
         // Return an empty contacts list so the provider sees no contacts configured.
         if ("certificates/contacts".equals(routePath)) {
@@ -121,7 +150,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return methodNotAllowed();
         }
 
-        return kvError(404, "BadRequest", "Resource not found: " + path);
+        return kvError(404, "KeyNotFound", "Resource not found: " + path);
     }
 
     // -------------------------------------------------------------------------
@@ -193,6 +222,146 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             case "DELETE" -> purgeDeletedSecret(account, rest);
             default       -> methodNotAllowed();
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // Keys sub-routers
+    // -------------------------------------------------------------------------
+
+    private Response handleKeys(AzureRequest req, String method, String account, String rest, boolean hsm) {
+        // /keys/{name}/backup
+        int backupIdx = rest.indexOf("/backup");
+        if (backupIdx != -1) {
+            String name = rest.substring(0, backupIdx);
+            return "POST".equals(method) ? keys.backupKey(account, name, hsm) : methodNotAllowed();
+        }
+
+        // /keys/restore — POST restores; any other verb treats "restore" as a key name.
+        if ("restore".equals(rest) && "POST".equals(method)) {
+            return keys.restoreKey(req, account, hsm);
+        }
+
+        // /keys/{name}/create (POST; a PUT /keys/{name} is an import)
+        int createIdx = rest.indexOf("/create");
+        if (createIdx != -1) {
+            String name = rest.substring(0, createIdx);
+            return "POST".equals(method) ? keys.createKey(req, account, name, hsm) : methodNotAllowed();
+        }
+
+        // /keys/{name}/versions[/{version}]
+        int versionsIdx = rest.indexOf("/versions");
+        if (versionsIdx != -1) {
+            String name = rest.substring(0, versionsIdx);
+            String afterVersions = rest.substring(versionsIdx + "/versions".length());
+            if (afterVersions.isEmpty() || "/".equals(afterVersions)) {
+                return "GET".equals(method) ? keys.listKeyVersions(account, name, hsm) : methodNotAllowed();
+            }
+            String version = afterVersions.startsWith("/") ? afterVersions.substring(1) : afterVersions;
+            return switch (method) {
+                case "GET"   -> keys.getKeyVersion(account, name, version, hsm);
+                case "PATCH" -> keys.updateKeyProperties(req, account, name, version, hsm);
+                default      -> methodNotAllowed();
+            };
+        }
+
+        // /keys/{name}/rotationpolicy
+        int rotationIdx = rest.indexOf("/rotationpolicy");
+        if (rotationIdx != -1) {
+            String name = rest.substring(0, rotationIdx);
+            return switch (method) {
+                case "GET" -> keys.getRotationPolicy(account, name, hsm);
+                case "PUT" -> keys.putRotationPolicy(req, account, name, hsm);
+                default    -> methodNotAllowed();
+            };
+        }
+
+        // /keys/{name}/rotate
+        int rotateIdx = rest.indexOf("/rotate");
+        if (rotateIdx != -1) {
+            String name = rest.substring(0, rotateIdx);
+            return "POST".equals(method) ? keys.rotateKey(account, name, hsm) : methodNotAllowed();
+        }
+
+        // /keys/{name}/{version}[/{op}] or /keys/{name}/{op} (empty/omitted version)
+        int slash = rest.indexOf('/');
+        if (slash != -1) {
+            String name = rest.substring(0, slash);
+            String remainder = rest.substring(slash + 1);
+            int slash2 = remainder.indexOf('/');
+            if (slash2 != -1) {
+                String version = remainder.substring(0, slash2);
+                String op = remainder.substring(slash2 + 1);
+                if (isCryptoOp(op)) {
+                    return "POST".equals(method) ? keys.cryptoOp(req, account, name, version, op, hsm)
+                            : methodNotAllowed();
+                }
+                return kvError(404, "KeyNotFound", "Resource not found: " + pathLabel(name, remainder));
+            }
+            if (isCryptoOp(remainder)) {
+                return "POST".equals(method) ? keys.cryptoOp(req, account, name, "", remainder, hsm)
+                        : methodNotAllowed();
+            }
+            if (remainder.isEmpty()) {
+                return switch (method) {
+                    case "GET"    -> keys.getKey(account, name, hsm);
+                    case "PUT"    -> keys.importKey(req, account, name, hsm);
+                    case "DELETE" -> keys.deleteKey(account, name, hsm);
+                    default       -> methodNotAllowed();
+                };
+            }
+            String version = remainder;
+            return switch (method) {
+                case "GET"   -> keys.getKeyVersion(account, name, version, hsm);
+                case "PATCH" -> keys.updateKeyProperties(req, account, name, version, hsm);
+                default      -> methodNotAllowed();
+            };
+        }
+
+        // /keys/{name} (latest)
+        return switch (method) {
+            case "GET"    -> keys.getKey(account, rest, hsm);
+            case "PUT"    -> keys.importKey(req, account, rest, hsm);
+            case "DELETE" -> keys.deleteKey(account, rest, hsm);
+            default       -> methodNotAllowed();
+        };
+    }
+
+    private Response handleDeletedKeys(AzureRequest req, String method, String account, String rest, boolean hsm) {
+        int recoverIdx = rest.indexOf("/recover");
+        if (recoverIdx != -1) {
+            String name = rest.substring(0, recoverIdx);
+            return "POST".equals(method) ? keys.recoverDeletedKey(account, name, hsm) : methodNotAllowed();
+        }
+        return switch (method) {
+            case "GET"    -> keys.getDeletedKey(account, rest, hsm);
+            case "DELETE" -> keys.purgeDeletedKey(account, rest);
+            default       -> methodNotAllowed();
+        };
+    }
+
+    private Response handleRng(AzureRequest req) {
+        Map<String, Object> body = parseBody(req);
+        int count = 32;
+        if (body.get("count") instanceof Number n) {
+            count = n.intValue();
+        }
+        if (count < 1 || count > 128) {
+            return kvError(400, "BadParameter", "The count parameter must be between 1 and 128.");
+        }
+        byte[] bytes = new byte[count];
+        new java.security.SecureRandom().nextBytes(bytes);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("value", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+        return Response.ok(toJson(response), "application/json").build();
+    }
+
+    private static boolean isCryptoOp(String op) {
+        return op.equals("encrypt") || op.equals("decrypt") || op.equals("wrapkey")
+                || op.equals("unwrapkey") || op.equals("sign") || op.equals("verify");
+    }
+
+    private static String pathLabel(String name, String remainder) {
+        return "keys/" + name + "/" + remainder;
     }
 
     // -------------------------------------------------------------------------

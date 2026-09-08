@@ -6,7 +6,8 @@
         test-entra-node test-entra-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean
+        test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean \
+        smoke-native-crypto
 
 MVN            = ./mvnw
 PORT           = 4577
@@ -469,6 +470,19 @@ test-compat:
 test: build
 	$(MVN) test
 	$(MAKE) compat-docker
+
+# ── Native-Image Crypto Smoke Gate ────────────────────────────────────────────
+
+smoke-native-crypto:
+	$(MVN) package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-Ob" -q
+	./target/*-runner & echo $$! > /tmp/floci-az-native.pid
+	@echo "Waiting for floci-az native runner on port $(PORT)..."
+	@EXIT=0; \
+	until curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1; do sleep 1; done; \
+	bash scripts/native-crypto-smoke.sh || EXIT=$$?; \
+	kill $$(cat /tmp/floci-az-native.pid 2>/dev/null) 2>/dev/null || true; \
+	rm -f /tmp/floci-az-native.pid; \
+	exit $$EXIT
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

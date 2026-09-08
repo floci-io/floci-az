@@ -91,6 +91,45 @@ class AzureRoutingFilterTest {
     }
 
     @Test
+    void managedhsmSuffixRoutesToKeyVault() {
+        given().when().get("/devstoreaccount1-managedhsm/secrets/foo?api-version=7.4")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("Bearer"));
+    }
+
+    @Test
+    void managedhsmSuffixActivatesHsmFlavor() {
+        given().when().get("/devstoreaccount1-managedhsm/secrets/foo?api-version=7.4")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("resource=\"https://managedhsm.azure.net\""));
+    }
+
+    @Test
+    void clientSuppliedAccountSuffixHeaderIsIgnored() {
+        // A client-crafted x-floci-account-suffix must not flip an ordinary vault request to HSM flavor.
+        given().header("x-floci-account-suffix", "-managedhsm")
+                .when().get("/devstoreaccount1-keyvault/secrets/foo?api-version=7.4")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("resource=\"https://vault.azure.net\""));
+    }
+
+    @Test
+    void clientSuppliedSuffixHeaderIgnoredOnHostRoute() {
+        // The host-based route does NOT overwrite the suffix header, so only the strip protects it.
+        given().header("Host", "myvault.vault.azure.net")
+                .header("x-floci-account-suffix", "-managedhsm")
+                .when().get("/secrets/foo?api-version=7.4")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("resource=\"https://vault.azure.net\""));
+    }
+
+    // NOTE: a mixed-case variant of the spoof header is intentionally not pinned here. RESTEasy's
+    // header map is already case-insensitive at the current Quarkus version, so a test asserting
+    // "X-Floci-Account-Suffix" is stripped cannot distinguish the case-insensitive strip loop in
+    // AzureRoutingFilter from a plain single-key remove. That loop is defense-in-depth (kept), and
+    // its behavior is already covered by the two suffix-spoofing tests above.
+
+    @Test
     void blobDefaultAccountRoutesToBlob() {
         given().when().get("/devstoreaccount1/?comp=list")
                 .then().statusCode(200)
@@ -185,7 +224,7 @@ class AzureRoutingFilterTest {
     @Test
     void keyVaultCollectionsAtArmBaseRouteToKeyVault() {
         for (String collection : new String[] {
-                "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys"}) {
+                "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys", "rng"}) {
             assertKeyVaultChallenge("/" + collection + "?api-version=7.4");
             assertKeyVaultChallenge("/" + collection + "/foo?api-version=7.4");
         }

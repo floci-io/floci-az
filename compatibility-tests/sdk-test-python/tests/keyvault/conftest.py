@@ -5,6 +5,7 @@ import pytest
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.core.pipeline.transport import RequestsTransport
 from azure.keyvault.secrets import SecretClient
+from azure.keyvault.keys import KeyClient
 
 
 class FakeCredential(TokenCredential):
@@ -31,6 +32,27 @@ VAULT_URL = re.sub(r"^http://", "https://", ENDPOINT) + "/devstoreaccount1-keyva
 def client():
     return SecretClient(
         vault_url=VAULT_URL,
+        credential=FakeCredential(),
+        transport=ForceHttpTransport(),
+        verify_challenge_resource=False,
+    )
+
+
+@pytest.fixture
+def keys_client():
+    return KeyClient(
+        vault_url=VAULT_URL,
+        credential=FakeCredential(),
+        transport=ForceHttpTransport(),
+        verify_challenge_resource=False,
+    )
+
+
+@pytest.fixture
+def hsm_keys_client():
+    hsm_url = re.sub(r"^http://", "https://", ENDPOINT) + "/devstoreaccount1-managedhsm"
+    return KeyClient(
+        vault_url=hsm_url,
         credential=FakeCredential(),
         transport=ForceHttpTransport(),
         verify_challenge_resource=False,

@@ -14,6 +14,10 @@ import com.azure.messaging.eventhubs.EventHubClientBuilder;
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClient;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
+import com.azure.security.keyvault.keys.KeyClient;
+import com.azure.security.keyvault.keys.KeyClientBuilder;
+import com.azure.security.keyvault.keys.cryptography.CryptographyClient;
+import com.azure.security.keyvault.keys.cryptography.CryptographyClientBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.qpid.jms.JmsConnectionFactory;
@@ -316,6 +320,41 @@ public final class EmulatorConfig {
                 .addPolicy(new ForceHttpPolicy())
                 .disableChallengeResourceVerification()
                 .buildClient();
+    }
+
+    static KeyClient buildKeyClient() {
+        String vaultUrl = keyVaultUrl();
+        return new KeyClientBuilder()
+                .vaultUrl(vaultUrl)
+                .credential(req -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
+                .addPolicy(new ForceHttpPolicy())
+                .disableChallengeResourceVerification()
+                .buildClient();
+    }
+
+    /** Managed HSM data-plane client: same handler, but routed via the {@code -managedhsm} suffix. */
+    static KeyClient buildManagedHsmKeyClient() {
+        String vaultUrl = BASE.replace("http://", "https://") + "/" + ACCOUNT + "-managedhsm";
+        return new KeyClientBuilder()
+                .vaultUrl(vaultUrl)
+                .credential(req -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
+                .addPolicy(new ForceHttpPolicy())
+                .disableChallengeResourceVerification()
+                .buildClient();
+    }
+
+    static CryptographyClient buildCryptographyClient(String keyName, String keyVersion) {
+        String keyIdentifier = keyVaultUrl() + "/keys/" + keyName + "/" + keyVersion;
+        return new CryptographyClientBuilder()
+                .keyIdentifier(keyIdentifier)
+                .credential(req -> Mono.just(new AccessToken("fake-token", OffsetDateTime.now().plusHours(1))))
+                .addPolicy(new ForceHttpPolicy())
+                .disableChallengeResourceVerification()
+                .buildClient();
+    }
+
+    private static String keyVaultUrl() {
+        return BASE.replace("http://", "https://") + "/" + ACCOUNT + "-keyvault";
     }
 
     // ── Service Bus ───────────────────────────────────────────────────────────

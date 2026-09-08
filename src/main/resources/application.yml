@@ -33,6 +33,7 @@ quarkus:
       --initialize-at-run-time=io.floci.az.services.redis.RedisHandler,
       --initialize-at-run-time=io.floci.az.services.entra.TokenIssuer,
       --initialize-at-run-time=io.floci.az.services.entra.SigningKeyProvider,
+      --initialize-at-run-time=io.floci.az.services.keyvault.KeyVaultCrypto,
       --initialize-at-run-time=io.floci.az.services.eventgrid.EventGridService
 
 floci-az:
