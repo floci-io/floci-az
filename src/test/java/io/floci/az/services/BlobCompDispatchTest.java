@@ -68,6 +68,18 @@ public class BlobCompDispatchTest {
     }
 
     @Test
+    void appendBlockOnBlockBlobIsNotMistakenForPutBlob() {
+        given()
+                .body("appended content")
+                .when().put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, BLOB)
+                .then()
+                .statusCode(409)
+                .header("x-ms-error-code", equalTo("InvalidBlobType"));
+
+        assertBlobIntact();
+    }
+
+    @Test
     void copyBlobIsNotMistakenForPutBlob() {
         given()
                 .header("x-ms-copy-source",

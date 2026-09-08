@@ -2023,6 +2023,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 if (conditionFailure != null) {
                     return conditionFailure;
                 }
+                Response appendConditionFailure = validateAppendConditions(request, blob, appended.length);
+                if (appendConditionFailure != null) {
+                    return appendConditionFailure;
+                }
                 Response leaseFailure = leaseService.validateWrite(request, key);
                 if (leaseFailure != null) {
                     return leaseFailure;
@@ -2044,6 +2048,50 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         } catch (IOException e) {
             return Response.serverError().build();
         }
+    }
+
+    private static Response validateAppendConditions(AzureRequest request, StoredObject blob, int appendedLength) {
+        String appendPosition = request.headers().getHeaderString("x-ms-blob-condition-appendpos");
+        if (appendPosition != null) {
+            Long expectedOffset = parseAppendCondition(appendPosition);
+            if (expectedOffset == null) {
+                return invalidAppendConditionHeader();
+            }
+            if (expectedOffset != blob.data().length) {
+                return new AzureErrorResponse("AppendPositionConditionNotMet",
+                        "The append position condition specified was not met.")
+                        .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+        }
+
+        String maxSize = request.headers().getHeaderString("x-ms-blob-condition-maxsize");
+        if (maxSize != null) {
+            Long maximumSize = parseAppendCondition(maxSize);
+            if (maximumSize == null) {
+                return invalidAppendConditionHeader();
+            }
+            if ((long) blob.data().length + appendedLength > maximumSize) {
+                return new AzureErrorResponse("MaxBlobSizeConditionNotMet",
+                        "The max blob size condition specified was not met.")
+                        .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+        }
+        return null;
+    }
+
+    private static Long parseAppendCondition(String value) {
+        try {
+            long parsed = Long.parseLong(value);
+            return parsed >= 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Response invalidAppendConditionHeader() {
+        return new AzureErrorResponse("InvalidHeaderValue",
+                "The value for one of the HTTP headers is not in the correct format.")
+                .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
     }
 
     private Response deleteBlob(AzureRequest request, String containerName, String blobName) {

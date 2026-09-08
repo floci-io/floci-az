@@ -532,6 +532,22 @@ public class BlobServiceTest {
             .statusCode(412)
             .header("x-ms-error-code", "ConditionNotMet");
 
+        given()
+            .header("x-ms-blob-condition-appendpos", "1")
+            .body("blocked")
+            .put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "AppendPositionConditionNotMet");
+
+        given()
+            .header("x-ms-blob-condition-maxsize", "0")
+            .body("blocked")
+            .put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "MaxBlobSizeConditionNotMet");
+
         String leaseId = given()
             .header("x-ms-lease-action", "acquire")
             .header("x-ms-lease-duration", "-1")
