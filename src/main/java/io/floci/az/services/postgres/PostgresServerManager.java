@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -43,9 +44,13 @@ public class PostgresServerManager {
     @Inject ContainerLifecycleManager containerManager;
     @Inject ContainerBuilder containerBuilder;
     @Inject ContainerDetector containerDetector;
+    @Inject PortAllocator portAllocator;
 
     /** containerId → container name, for cleanup on shutdown. */
     private final ConcurrentHashMap<String, String> managedContainers = new ConcurrentHashMap<>();
+
+    /** containerId -> the fixed host port claimed for it, so the claim is released with the container. */
+    private final ConcurrentHashMap<String, Integer> claimedPorts = new ConcurrentHashMap<>();
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -64,9 +69,22 @@ public class PostgresServerManager {
 
         LOG.infof("Starting PostgreSQL container: server=%s image=%s", entry.serverName(), image);
 
+        int configuredPort = pgConfig.defaultPort();
+
+        int requestedHostPort = portAllocator.claimOrZero(configuredPort);
+
+        if (configuredPort > 0 && requestedHostPort == 0) {
+
+            LOG.warnf("Configured PostgreSQL default-port %d is unavailable (already claimed or in use) "
+
+                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
+
+        }
+
+
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
-            .withDynamicPort(PG_CONTAINER_PORT)   // OS picks host port (used for host networking)
+            .withPortBinding(PG_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("POSTGRES_USER", entry.administratorLogin())
             .withEnv("POSTGRES_PASSWORD", entry.administratorLoginPassword())
@@ -74,7 +92,17 @@ public class PostgresServerManager {
             .withLogRotation()
             .build();
 
-        var info = containerManager.createAndStart(spec);
+        ContainerLifecycleManager.ContainerInfo info;
+        try {
+            info = containerManager.createAndStart(spec);
+        } catch (RuntimeException e) {
+            // No container exists to clean up here, but the port claim must not outlive the
+            // attempt or the next create for this server cannot have its configured port.
+            if (requestedHostPort > 0) {
+                portAllocator.release(requestedHostPort);
+            }
+            throw e;
+        }
         String containerId = info.containerId();
 
         int hostPort = Optional.ofNullable(info.getEndpoint(PG_CONTAINER_PORT))
@@ -96,6 +124,16 @@ public class PostgresServerManager {
         }
 
         managedContainers.put(containerId, containerName);
+
+        // Record the port we claimed, not the one Docker reported: only a claimed port is
+
+        // reserved in the allocator, and only that one may be released later.
+
+        if (requestedHostPort > 0) {
+
+            claimedPorts.put(containerId, requestedHostPort);
+
+        }
         LOG.infof("PostgreSQL container started: server=%s containerId=%s endpoint=%s:%d",
             entry.serverName(), containerId, reachableHost, reachablePort);
 
@@ -109,12 +147,21 @@ public class PostgresServerManager {
     /**
      * Stops and removes the container associated with the given server entry.
      */
+    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
+    private void releaseClaimedPort(String containerId) {
+        Integer claimed = claimedPorts.remove(containerId);
+        if (claimed != null) {
+            portAllocator.release(claimed);
+        }
+    }
+
     public void stopServer(PostgresState.ServerEntry entry) {
         if (entry.containerId() == null) return;
         LOG.infof("Stopping PostgreSQL container: server=%s containerId=%s",
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
+        releaseClaimedPort(entry.containerId());
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -172,5 +219,7 @@ public class PostgresServerManager {
             }
         }
         managedContainers.clear();
+        claimedPorts.values().forEach(portAllocator::release);
+        claimedPorts.clear();
     }
 }

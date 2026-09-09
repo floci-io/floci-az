@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -40,19 +41,25 @@ public class SqlServerManager {
     private final ContainerLifecycleManager containerManager;
     private final ContainerBuilder containerBuilder;
     private final ContainerDetector containerDetector;
+    private final PortAllocator portAllocator;
 
     /** containerId → container name, for cleanup on shutdown. */
     private final ConcurrentHashMap<String, String> managedContainers = new ConcurrentHashMap<>();
+
+    /** containerId -> the fixed host port claimed for it, so the claim is released with the container. */
+    private final ConcurrentHashMap<String, Integer> claimedPorts = new ConcurrentHashMap<>();
 
     @Inject
     public SqlServerManager(EmulatorConfig config,
                             ContainerLifecycleManager containerManager,
                             ContainerBuilder containerBuilder,
-                            ContainerDetector containerDetector) {
+                            ContainerDetector containerDetector,
+                            PortAllocator portAllocator) {
         this.config = config;
         this.containerManager = containerManager;
         this.containerBuilder = containerBuilder;
         this.containerDetector = containerDetector;
+        this.portAllocator = portAllocator;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -76,9 +83,22 @@ public class SqlServerManager {
 
         LOG.infof("Starting SQL Server container: server=%s image=%s", entry.serverName(), image);
 
+        int configuredPort = sqlConfig.defaultPort();
+
+        int requestedHostPort = portAllocator.claimOrZero(configuredPort);
+
+        if (configuredPort > 0 && requestedHostPort == 0) {
+
+            LOG.warnf("Configured SQL Server default-port %d is unavailable (already claimed or in use) "
+
+                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
+
+        }
+
+
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
-            .withDynamicPort(SQL_CONTAINER_PORT)   // OS picks host port (used for host networking)
+            .withPortBinding(SQL_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("ACCEPT_EULA", "Y")
             .withEnv("MSSQL_SA_PASSWORD", password)
@@ -107,6 +127,16 @@ public class SqlServerManager {
         }
 
         managedContainers.put(containerId, containerName);
+
+        // Record the port we claimed, not the one Docker reported: only a claimed port is
+
+        // reserved in the allocator, and only that one may be released later.
+
+        if (requestedHostPort > 0) {
+
+            claimedPorts.put(containerId, requestedHostPort);
+
+        }
         LOG.infof("SQL Server container started: server=%s containerId=%s endpoint=%s:%d",
             entry.serverName(), containerId, reachableHost, reachablePort);
 
@@ -114,6 +144,7 @@ public class SqlServerManager {
             waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
         } catch (RuntimeException startupFailure) {
             managedContainers.remove(containerId);
+            releaseClaimedPort(containerId);
             try {
                 containerManager.stopAndRemove(containerId, null);
             } catch (RuntimeException cleanupFailure) {
@@ -131,12 +162,21 @@ public class SqlServerManager {
     /**
      * Stops and removes the container associated with the given server entry.
      */
+    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
+    private void releaseClaimedPort(String containerId) {
+        Integer claimed = claimedPorts.remove(containerId);
+        if (claimed != null) {
+            portAllocator.release(claimed);
+        }
+    }
+
     public void stopServer(SqlState.SqlServerEntry entry) {
         if (entry.containerId() == null) return;
         LOG.infof("Stopping SQL Server container: server=%s containerId=%s",
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
+        releaseClaimedPort(entry.containerId());
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -221,6 +261,8 @@ public class SqlServerManager {
             }
         }
         managedContainers.clear();
+        claimedPorts.values().forEach(portAllocator::release);
+        claimedPorts.clear();
     }
 
     /** Thrown when the SQL Server EULA has not been explicitly accepted. */

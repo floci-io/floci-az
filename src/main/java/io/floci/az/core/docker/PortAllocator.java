@@ -43,6 +43,31 @@ public class PortAllocator {
     }
 
     /**
+     * Claims one specific host port when it is configured and actually available.
+     *
+     * <p>Used by the per-server database sidecars, where a configured port expresses a preference
+     * that only the first server can be given: the second server asking for the same port, or a
+     * port an unrelated process already holds, falls back to an OS-assigned one. Returning
+     * {@code 0} rather than throwing is what makes that fallback expressible, and {@code 0} is
+     * already the repo-wide "let the OS pick" sentinel, so the result can be handed straight to
+     * {@code withPortBinding}.
+     *
+     * @param port the configured host port; {@code 0} or negative means no preference
+     * @return {@code port} if it was claimed (release it with {@link #release(int)}), else {@code 0}
+     */
+    public synchronized int claimOrZero(int port) {
+        if (port <= 0) {
+            return 0;
+        }
+        if (reserved.contains(port) || !isPortFree(port)) {
+            return 0;
+        }
+        reserved.add(port);
+        LOG.debugv("Claimed configured host port {0}", String.valueOf(port));
+        return port;
+    }
+
+    /**
      * Marks a port as reserved without probing whether it is free. Used on restart to
      * re-reserve host ports already held by surviving containers so the allocator does
      * not hand them out again.

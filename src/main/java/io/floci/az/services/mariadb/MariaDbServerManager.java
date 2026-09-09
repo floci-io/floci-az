@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -33,8 +34,14 @@ public class MariaDbServerManager {
     @Inject ContainerLifecycleManager containerManager;
     @Inject ContainerBuilder containerBuilder;
     @Inject ContainerDetector containerDetector;
+    @Inject PortAllocator portAllocator;
 
     private final ConcurrentHashMap<String, String> managedContainers = new ConcurrentHashMap<>();
+
+
+    /** containerId -> the fixed host port claimed for it, so the claim is released with the container. */
+
+    private final ConcurrentHashMap<String, Integer> claimedPorts = new ConcurrentHashMap<>();
 
     public MariaDbState.ServerEntry startServer(MariaDbState.ServerEntry entry) {
         EmulatorConfig.MariaDbServiceConfig mariaConfig = config.services().mariaDb();
@@ -45,9 +52,22 @@ public class MariaDbServerManager {
 
         LOG.infof("Starting MariaDB container: server=%s image=%s", entry.serverName(), image);
 
+        int configuredPort = mariaConfig.defaultPort();
+
+        int requestedHostPort = portAllocator.claimOrZero(configuredPort);
+
+        if (configuredPort > 0 && requestedHostPort == 0) {
+
+            LOG.warnf("Configured MariaDB default-port %d is unavailable (already claimed or in use) "
+
+                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
+
+        }
+
+
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
-            .withDynamicPort(MARIADB_CONTAINER_PORT)
+            .withPortBinding(MARIADB_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())
             .withEnv("MARIADB_ROOT_PASSWORD", entry.administratorLoginPassword())
             .withEnv("MARIADB_USER", entry.administratorLogin())
@@ -78,6 +98,16 @@ public class MariaDbServerManager {
             }
 
             managedContainers.put(containerId, containerName);
+
+            // Record the port we claimed, not the one Docker reported: only a claimed port is
+
+            // reserved in the allocator, and only that one may be released later.
+
+            if (requestedHostPort > 0) {
+
+                claimedPorts.put(containerId, requestedHostPort);
+
+            }
             LOG.infof("MariaDB container started: server=%s containerId=%s endpoint=%s:%d",
                 entry.serverName(), containerId, reachableHost, reachablePort);
 
@@ -90,6 +120,7 @@ public class MariaDbServerManager {
             // The caller rolls back state that never learned this containerId, so a failed
             // start must dispose of its own container or it leaks as a running orphan.
             managedContainers.remove(containerId);
+            releaseClaimedPort(containerId);
             try {
                 containerManager.stopAndRemove(containerId, null);
             } catch (Exception cleanup) {
@@ -100,12 +131,28 @@ public class MariaDbServerManager {
         }
     }
 
+    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
+
+    private void releaseClaimedPort(String containerId) {
+
+        Integer claimed = claimedPorts.remove(containerId);
+
+        if (claimed != null) {
+
+            portAllocator.release(claimed);
+
+        }
+
+    }
+
+
     public void stopServer(MariaDbState.ServerEntry entry) {
         if (entry.containerId() == null) return;
         LOG.infof("Stopping MariaDB container: server=%s containerId=%s",
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
+        releaseClaimedPort(entry.containerId());
     }
 
     /**
@@ -192,5 +239,7 @@ public class MariaDbServerManager {
             }
         }
         managedContainers.clear();
+        claimedPorts.values().forEach(portAllocator::release);
+        claimedPorts.clear();
     }
 }
