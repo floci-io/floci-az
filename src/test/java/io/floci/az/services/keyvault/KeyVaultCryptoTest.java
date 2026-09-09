@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.security.AlgorithmParameters;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PublicKey;
@@ -23,7 +24,10 @@ import java.security.spec.PSSParameterSpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.Arrays;
 import java.util.Base64;
-import java.security.AlgorithmParameters;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -85,6 +89,32 @@ class KeyVaultCryptoTest {
                 .when().post(kidPath(kid) + "/decrypt" + API)
                 .then().statusCode(200)
                 .body("value", equalTo(pt));
+    }
+
+    @Test
+    @DisplayName("RSA-OAEP-256 decrypt accepts ciphertext from an independent MGF1 SHA-256 encryptor")
+    void rsaOaep256InteropDecrypt() {
+        Response created = createKey("oaep256interop", "RSA", null, 2048);
+        String kid = created.jsonPath().getString("key.kid");
+        PublicKey pub = rsaPublicKey(created.jsonPath().getString("key.n"),
+                created.jsonPath().getString("key.e"));
+        byte[] plaintext = "interop-oaep256".getBytes(StandardCharsets.UTF_8);
+
+        String ct;
+        try {
+            Cipher enc = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+            enc.init(Cipher.ENCRYPT_MODE, pub,
+                    new OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT));
+            ct = URL.encodeToString(enc.doFinal(plaintext));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+
+        given().header("Authorization", AUTH).contentType(ContentType.JSON)
+                .body("{\"alg\":\"RSA-OAEP-256\",\"value\":\"" + ct + "\"}")
+                .when().post(kidPath(kid) + "/decrypt" + API)
+                .then().statusCode(200)
+                .body("value", equalTo(b64Url(plaintext)));
     }
 
     // ── AES-GCM ────────────────────────────────────────────────────────────────
