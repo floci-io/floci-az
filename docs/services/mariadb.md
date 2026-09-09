@@ -91,17 +91,24 @@ curl "http://localhost:4577/devstoreaccount1-mariadb/servers/my-server/connect"
   "server": "my-server",
   "host": "localhost",
   "port": 54322,
-  "jdbcUrl": "jdbc:mariadb://localhost:54322/?user=mariaadmin&password=Str0ng!Passw0rd&useSsl=false",
-  "uri": "mysql://mariaadmin:Str0ng!Passw0rd@localhost:54322",
-  "mysql": "mysql --host localhost --port 54322 --user mariaadmin --password=Str0ng!Passw0rd",
-  "dotNet": "Server=localhost;Port=54322;Uid=mariaadmin;Pwd=Str0ng!Passw0rd;SslMode=None;"
+  "jdbcUrl": "jdbc:mariadb://localhost:54322/floci?user=mariaadmin&password=Str0ng!Passw0rd&useSSL=false",
+  "uri": "mariadb://mariaadmin:Str0ng!Passw0rd@localhost:54322/floci",
+  "mysql": "mysql -h localhost -P 54322 -u mariaadmin -pStr0ng!Passw0rd floci",
+  "dotNet": "Server=localhost;Port=54322;Database=floci;Uid=mariaadmin;Pwd=Str0ng!Passw0rd;SslMode=none;"
 }
 ```
+
+Every generated string selects **`floci`**, a database the container creates at init
+(`MARIADB_DATABASE=floci`). It is ready to use immediately, unlike the `databases` ARM
+resources below, which are metadata only.
+
+In mocked mode `/connect` still answers, but the server was never started, so `port` is `0`
+and every string points at `localhost:0`.
 
 ### 3 — Connect via the mysql CLI
 
 ```bash
-mysql --host localhost --port 54322 --user mariaadmin --password=Str0ng!Passw0rd
+mysql -h localhost -P 54322 -u mariaadmin -pStr0ng!Passw0rd floci
 ```
 
 ---
@@ -111,7 +118,7 @@ mysql --host localhost --port 54322 --user mariaadmin --password=Str0ng!Passw0rd
 === "Java (JDBC)"
 
     ```java
-    String url = "jdbc:mariadb://localhost:54322/?useSsl=false";
+    String url = "jdbc:mariadb://localhost:54322/floci?useSSL=false";
     try (Connection c = DriverManager.getConnection(url, "mariaadmin", "Str0ng!Passw0rd")) {
         c.createStatement().execute("CREATE DATABASE IF NOT EXISTS appdb");
     }
@@ -134,7 +141,7 @@ mysql --host localhost --port 54322 --user mariaadmin --password=Str0ng!Passw0rd
 
     ```csharp
     await using var conn = new MySqlConnection(
-        "Server=localhost;Port=54322;Uid=mariaadmin;Pwd=Str0ng!Passw0rd;SslMode=None;");
+        "Server=localhost;Port=54322;Database=floci;Uid=mariaadmin;Pwd=Str0ng!Passw0rd;SslMode=none;");
     await conn.OpenAsync();
     ```
 
@@ -229,7 +236,7 @@ immediately to `userVisibleState=Ready`, with no live endpoint.
 | `FLOCI_AZ_SERVICES_MARIA_DB_MOCKED` | `false` | Skip Docker; management plane only |
 | `FLOCI_AZ_SERVICES_MARIA_DB_IMAGE` | `mariadb:10.11` | Container image per server |
 | `FLOCI_AZ_SERVICES_MARIA_DB_STARTUP_TIMEOUT_SECONDS` | `60` | Readiness wait per container |
-| `FLOCI_AZ_SERVICES_MARIA_DB_DEFAULT_PORT` | `0` | Host port; `0` lets the OS pick a free one |
+| `FLOCI_AZ_SERVICES_MARIA_DB_DEFAULT_PORT` | `0` | Preferred host port; `0` lets the OS pick a free one per server |
 
 ---
 
@@ -245,8 +252,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-> **Sidecar ports:** each server binds its own host port, chosen by the OS unless
-> `default-port` is set. Read the actual port from `/connect`.
+> **Sidecar ports:** each server binds its own host port, assigned by the OS. Read the
+> actual port from `/connect` — do not assume 3306.
 
 ---
 

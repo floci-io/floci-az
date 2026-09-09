@@ -264,9 +264,11 @@ evidence for these:
 | `Cosmos{Mongo,Postgres,Cassandra,Gremlin,Table,NoSql}EngineCompatibilityTest` | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_<ENGINE>_ENABLED` | `make test-cosmos-<engine>`, or `make test-cosmos-all` |
 | `SqlCompatibilityTest` | `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` and `FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER=managed` | `make test-sql` |
 
-Each needs a container per engine, which is why they are opt-in rather than part of the
-matrix. The consequence is that a regression in a Cosmos engine or in the SQL data plane
-merges green. When you change either, run the suite locally and say so in the PR.
+Four of the six Cosmos engines (`mongo`, `postgres`, `cassandra`, `gremlin`) need a container
+each, which is why the set is opt-in rather than part of the matrix; `table` and `nosql` are
+embedded and run in-process, so they need no Docker and are cheap to run locally. The
+consequence either way is that a regression in a Cosmos engine or in the SQL data plane merges
+green. When you change either, run the suite locally and say so in the PR.
 
 A suite reporting `Tests run: 0` is a self-skip, never a pass.
 

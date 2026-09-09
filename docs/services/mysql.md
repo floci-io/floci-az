@@ -26,9 +26,9 @@ and any client that speaks the MySQL protocol.
 
 Azure Database for MySQL Flexible Server **enforces TLS** in the cloud
 (`require_secure_transport=ON`, TLS 1.2+). The stock `mysql` image does **not** serve TLS by
-default, so connection strings returned by floci-az disable it (`useSSL=false` for JDBC,
-`sslmode=DISABLED` for the CLI). This is a deliberate local-only difference; your production
-connection string still uses TLS.
+default, so the JDBC string returned by floci-az disables it (`useSSL=false`) and the CLI
+string passes no SSL option at all. This is a deliberate local-only difference; your
+production connection string still uses TLS.
 
 ---
 
@@ -90,17 +90,29 @@ curl "http://localhost:4577/devstoreaccount1-mysql/flexibleServers/my-server/con
   "server": "my-server",
   "host": "localhost",
   "port": 54321,
-  "jdbcUrl": "jdbc:mysql://localhost:54321/?user=mysqladmin&password=Str0ng!Passw0rd&useSSL=false",
-  "uri": "mysql://mysqladmin:Str0ng!Passw0rd@localhost:54321",
-  "mysql": "mysql --host localhost --port 54321 --user mysqladmin --password=Str0ng!Passw0rd",
-  "dotNet": "Server=localhost;Port=54321;Uid=mysqladmin;Pwd=Str0ng!Passw0rd;SslMode=None;"
+  "jdbcUrl": "jdbc:mysql://localhost:54321/floci?user=mysqladmin&password=Str0ng!Passw0rd&useSSL=false&allowPublicKeyRetrieval=true",
+  "uri": "mysql://mysqladmin:Str0ng!Passw0rd@localhost:54321/floci",
+  "mysql": "mysql -h localhost -P 54321 -u mysqladmin -pStr0ng!Passw0rd floci",
+  "dotNet": "Server=localhost;Port=54321;Database=floci;Uid=mysqladmin;Pwd=Str0ng!Passw0rd;SslMode=none;"
 }
 ```
+
+Every generated string selects **`floci`**, a database the container creates at init
+(`MYSQL_DATABASE=floci`). It is ready to use immediately, unlike the `databases` ARM
+resources below, which are metadata only.
+
+`allowPublicKeyRetrieval=true` is not decoration: `mysql:8.0` authenticates with
+`caching_sha2_password`, which refuses to hand over its public key over a non-TLS socket
+unless the client opts in. Drop it and the connection fails with "Public Key Retrieval is
+not allowed".
+
+In mocked mode `/connect` still answers, but the server was never started, so `port` is `0`
+and every string points at `localhost:0`.
 
 ### 3 — Connect via the mysql CLI
 
 ```bash
-mysql --host localhost --port 54321 --user mysqladmin --password=Str0ng!Passw0rd
+mysql -h localhost -P 54321 -u mysqladmin -pStr0ng!Passw0rd floci
 ```
 
 ---
@@ -110,7 +122,7 @@ mysql --host localhost --port 54321 --user mysqladmin --password=Str0ng!Passw0rd
 === "Java (JDBC)"
 
     ```java
-    String url = "jdbc:mysql://localhost:54321/?useSSL=false";
+    String url = "jdbc:mysql://localhost:54321/floci?useSSL=false&allowPublicKeyRetrieval=true";
     try (Connection c = DriverManager.getConnection(url, "mysqladmin", "Str0ng!Passw0rd")) {
         c.createStatement().execute("CREATE DATABASE IF NOT EXISTS appdb");
     }
@@ -133,7 +145,7 @@ mysql --host localhost --port 54321 --user mysqladmin --password=Str0ng!Passw0rd
 
     ```csharp
     await using var conn = new MySqlConnection(
-        "Server=localhost;Port=54321;Uid=mysqladmin;Pwd=Str0ng!Passw0rd;SslMode=None;");
+        "Server=localhost;Port=54321;Database=floci;Uid=mysqladmin;Pwd=Str0ng!Passw0rd;SslMode=none;");
     await conn.OpenAsync();
     ```
 
@@ -225,7 +237,7 @@ immediately to `state=Ready`, with no live endpoint. Use it for fast CI runs and
 | `FLOCI_AZ_SERVICES_MYSQL_MOCKED` | `false` | Skip Docker; management plane only |
 | `FLOCI_AZ_SERVICES_MYSQL_IMAGE` | `mysql:8.0` | Container image per server |
 | `FLOCI_AZ_SERVICES_MYSQL_STARTUP_TIMEOUT_SECONDS` | `60` | Readiness wait per container |
-| `FLOCI_AZ_SERVICES_MYSQL_DEFAULT_PORT` | `0` | Host port; `0` lets the OS pick a free one |
+| `FLOCI_AZ_SERVICES_MYSQL_DEFAULT_PORT` | `0` | Preferred host port; `0` lets the OS pick a free one per server |
 
 ---
 
@@ -241,9 +253,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-> **Sidecar ports:** each server binds its own host port, chosen by the OS unless
-> `default-port` is set. Read the actual port from `/connect` or from the server's
-> `fullyQualifiedDomainName`.
+> **Sidecar ports:** each server binds its own host port, assigned by the OS. Read the
+> actual port from `/connect` or from the server's `fullyQualifiedDomainName` — do not
+> assume 3306.
 
 ---
 
