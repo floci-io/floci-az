@@ -258,7 +258,7 @@ public interface EmulatorConfig {
          * When {@code true}, no registry container is started; registries transition immediately to
          * "Succeeded" with a cosmetic {@code {name}.azurecr.io} loginServer. Useful for tests without Docker.
          */
-        @WithDefault("true")
+        @WithDefault("false")
         boolean mocked();
 
         /** Docker image backing each registry (standard Docker Registry V2). */
@@ -325,7 +325,7 @@ public interface EmulatorConfig {
          * When {@code true}, no Redis container is started; caches transition immediately to
          * "Succeeded" with {@code hostName=localhost}. Useful for tests without Docker.
          */
-        @WithDefault("true")
+        @WithDefault("false")
         boolean mocked();
 
         /** Docker image backing the cache. Valkey is a drop-in, RESP-compatible Redis fork. */
@@ -353,7 +353,7 @@ public interface EmulatorConfig {
          * When {@code true}, no k3s sidecar is started; clusters transition immediately to
          * "Succeeded" with a synthetic kubeconfig. Useful for tests without Docker.
          */
-        @WithDefault("true")
+        @WithDefault("false")
         boolean mocked();
 
         /** Docker image for the k3s container. */
@@ -399,7 +399,7 @@ public interface EmulatorConfig {
          * When {@code true}, no Artemis sidecar is started; service responds to management
          * calls but AMQP data-plane is unavailable. Useful for tests without Docker.
          */
-        @WithDefault("false")
+        @WithDefault("true")
         boolean mocked();
 
         /**
@@ -468,7 +468,7 @@ public interface EmulatorConfig {
         @WithDefault("9093")
         int kafkaPort();
 
-        @WithDefault("apache/activemq-artemis:latest")
+        @WithDefault("apache/activemq-artemis:2.44.0")
         String artemisImage();
 
         @WithDefault("redpandadata/redpanda:latest")

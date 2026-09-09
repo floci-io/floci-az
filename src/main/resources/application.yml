@@ -171,6 +171,18 @@ floci-az:
       image: "postgres:17-alpine"
       startup-timeout-seconds: 60
       default-port: 0        # 0 = OS picks a free port per server (recommended)
+    mysql:                  # Azure Database for MySQL (Flexible Server). No EULA (mysql image is GPL-licensed).
+      enabled: true
+      mocked: false         # false = back servers with a real mysql container. true = no Docker; servers are pure ARM state (no live endpoint)
+      image: "mysql:8.0"
+      startup-timeout-seconds: 60
+      default-port: 0        # 0 = OS picks a free port per server (recommended)
+    maria-db:               # Azure Database for MariaDB (single server). No EULA (mariadb image is GPL-licensed).
+      enabled: true
+      mocked: false         # false = back servers with a real mariadb container. true = no Docker; servers are pure ARM state (no live endpoint)
+      image: "mariadb:10.11"
+      startup-timeout-seconds: 60
+      default-port: 0        # 0 = OS picks a free port per server (recommended)
     service-bus:
       enabled: true
       # Keep the broker opt-in because each namespace owns an Artemis sidecar.

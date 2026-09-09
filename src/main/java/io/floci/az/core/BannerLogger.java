@@ -84,6 +84,21 @@ public class BannerLogger {
             sb.append(String.format("   %-9s [%s]  data-plane: %-8s storage: %s\n",
                 "sql", "enabled ", provider, getStorageMode("sql")));
         }
+        if (config.services().postgres().enabled()) {
+            sb.append(serviceStatusDocker("postgres", true, config.services().postgres().mocked()
+                    ? "mocked  (no docker)"
+                    : "image:" + config.services().postgres().image()));
+        }
+        if (config.services().mysql().enabled()) {
+            sb.append(serviceStatusDocker("mysql", true, config.services().mysql().mocked()
+                    ? "mocked  (no docker)"
+                    : "image:" + config.services().mysql().image()));
+        }
+        if (config.services().mariaDb().enabled()) {
+            sb.append(serviceStatusDocker("mariadb", true, config.services().mariaDb().mocked()
+                    ? "mocked  (no docker)"
+                    : "image:" + config.services().mariaDb().image()));
+        }
         if (config.services().eventHub().enabled()) {
             String amqpInfo = "amqp:" + config.services().eventHub().amqpPort()
                     + "  ns:" + config.services().eventHub().defaultNamespace();
@@ -158,6 +173,10 @@ public class BannerLogger {
         sb.append(String.format("   %-9s [%s]  %s\n", "managedid",
                 config.services().managedIdentity().enabled() ? "enabled " : "disabled",
                 "Microsoft.ManagedIdentity (user-assigned identities + IMDS token endpoint)"));
+        if (config.services().apim().enabled()) {
+            sb.append(String.format("   %-9s [%s]  %s\n", "apim", "enabled ",
+                    "Microsoft.ApiManagement (services, apis, products, subscriptions) + /{account}-apim/ gateway"));
+        }
         if (config.services().eventGrid().enabled()) {
             sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
         }
