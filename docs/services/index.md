@@ -16,6 +16,9 @@ Floci-AZ provides emulation for several core Azure services.
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
 | **Service Bus** | `/{account}-servicebus/` + AMQP `:5673` | ✅ Queues, topics, subscriptions (dynamic); AMQP 1.0 via Artemis sidecar or mocked |
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; ARM-only by default, managed SQL Server opt-in |
+| **Azure Database for PostgreSQL** | ARM path (`Microsoft.DBforPostgreSQL`) + `/{account}-postgres/` | ✅ Flexible servers, databases, firewall rules, configurations; Docker-backed `postgres` containers or mocked |
+| **Azure Database for MySQL** | ARM path (`Microsoft.DBforMySQL`) + `/{account}-mysql/` | ✅ Flexible servers, databases, firewall rules, configurations; Docker-backed `mysql` containers or mocked |
+| **Azure Database for MariaDB** | ARM path (`Microsoft.DBforMariaDB`) + `/{account}-mariadb/` | ✅ Servers (single-server model), databases, firewall rules, configurations; Docker-backed `mariadb` containers or mocked |
 | **Azure Kubernetes Service** | ARM path (`Microsoft.ContainerService`) | ✅ Clusters, agent pools, credentials; real k3s containers or mocked |
 | **Azure Container Apps** | ARM path (`Microsoft.App`) + FQDN ingress | ✅ Managed environments, apps, revisions, ingress, secrets, min/max replicas; Docker-backed or mocked |
 | **API Management** | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/` | ✅ APIs, operations, products, subscriptions, named values, backends, OpenAPI import; gateway routing + policy subset |
@@ -45,6 +48,9 @@ The following services spin up Docker containers on demand and require the Docke
 | **Azure SQL Database** | `mcr.microsoft.com/mssql/server:2025-latest` | Optional managed mode; TDS direct to container port |
 | **Cosmos DB engines** | Various (mongo, postgres, cassandra, …) | Protocol direct to container port |
 | **Azure Kubernetes Service** | `rancher/k3s:latest` | kubectl direct to k3s API server port |
+| **Azure Database for PostgreSQL** | `postgres:17-alpine` | PostgreSQL wire protocol direct to container port |
+| **Azure Database for MySQL** | `mysql:8.0` | MySQL wire protocol direct to container port |
+| **Azure Database for MariaDB** | `mariadb:10.11` | MySQL wire protocol direct to container port |
 | **Azure Container Apps** | User-provided images | HTTP ingress proxied through port 4577 |
 
 > These services **must** have access to the Docker daemon (`/var/run/docker.sock` mount in Docker Compose).

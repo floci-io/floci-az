@@ -52,7 +52,7 @@ Floci uses a **tag-driven release model**. Docker images are never published on 
 | Branch | Purpose | Docker published? |
 |---|---|---|
 | `main` | Integration branch: all PRs merge here. Treated as unstable/nightly. | No (CI tests only) |
-| `X.Y.Z` tag | Signals a production release. Triggers the full Docker publish pipeline. | Yes (`x.y.z`, `latest`, `x.y.z-jvm`, `latest-jvm`) |
+| `X.Y.Z` tag | Signals a production release. Triggers the full Docker publish pipeline. | Yes (`x.y.z`, `latest`, `x.y.z-compat`, `latest-compat`) |
 
 ## Commit Message Format
 

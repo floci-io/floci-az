@@ -83,6 +83,8 @@ nav:
     - Cosmos DB: services/cosmos.md
     - Azure SQL Database: services/sql.md
     - Azure Database for PostgreSQL: services/postgresql.md
+    - Azure Database for MySQL: services/mysql.md
+    - Azure Database for MariaDB: services/mariadb.md
     - Azure Kubernetes Service: services/aks.md
     - Azure Container Apps: services/container-apps.md
     - API Management: services/apim.md

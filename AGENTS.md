@@ -253,6 +253,23 @@ Guidelines:
 - Use `make test-<service>` to run a specific suite
 - Use `make compat-docker` to run all suites against a running container
 
+### Suites that do not run in CI
+
+Seven classes in `sdk-test-java` skip themselves unless an environment variable enables the
+thing they test, and **no workflow sets any of them**, so a green `sdk-test-java` is not
+evidence for these:
+
+| Class | Gated on | Run it locally with |
+|---|---|---|
+| `Cosmos{Mongo,Postgres,Cassandra,Gremlin,Table,NoSql}EngineCompatibilityTest` | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_<ENGINE>_ENABLED` | `make test-cosmos-<engine>`, or `make test-cosmos-all` |
+| `SqlCompatibilityTest` | `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA` and `FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER=managed` | `make test-sql` |
+
+Each needs a container per engine, which is why they are opt-in rather than part of the
+matrix. The consequence is that a regression in a Cosmos engine or in the SQL data plane
+merges green. When you change either, run the suite locally and say so in the PR.
+
+A suite reporting `Tests run: 0` is a self-skip, never a pass.
+
 ### Keeping the Makefile and CI in sync
 
 The Makefile and the CI matrix (`.github/workflows/compatibility.yml`) both run the SDK test containers against floci-az and must pass the same environment variables per suite.
