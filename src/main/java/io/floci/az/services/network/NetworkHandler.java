@@ -34,6 +34,10 @@ public class NetworkHandler implements Resettable {
         return service.listResources(sub, rg);
     }
 
+    public List<Map<String, Object>> listResources(String sub) {
+        return service.listResources(sub);
+    }
+
     @Override
     public void clear() {
         service.clear();

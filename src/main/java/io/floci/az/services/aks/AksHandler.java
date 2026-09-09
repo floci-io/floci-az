@@ -16,6 +16,8 @@ import io.floci.az.services.aks.AksModels.AgentPoolProfile;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -56,13 +58,15 @@ import java.util.concurrent.TimeUnit;
  * Clusters transition immediately to "Succeeded" with a synthetic kubeconfig pointing at localhost.</p>
  */
 @ApplicationScoped
-public class AksHandler implements AzureServiceHandler, Resettable {
+public class AksHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(AksHandler.class);
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    private static final String TYPE = "Microsoft.ContainerService/managedClusters";
 
     private final EmulatorConfig config;
     private final AksClusterManager clusterManager;
@@ -514,7 +518,7 @@ public class AksHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", cluster.armId());
         out.put("name", cluster.getName());
-        out.put("type", "Microsoft.ContainerService/managedClusters");
+        out.put("type", TYPE);
         out.put("location", cluster.getLocation());
         if (cluster.getTags() != null && !cluster.getTags().isEmpty()) {
             out.put("tags", cluster.getTags());
@@ -639,5 +643,30 @@ public class AksHandler implements AzureServiceHandler, Resettable {
     /** Wipes all AKS data — used by {@code POST /_admin/reset}. */
     public void clear() {
         storage.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().aks().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries((sub + "/").toLowerCase());
+    }
+
+    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
+        return scanAll().stream()
+                .filter(cluster -> cluster.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+                .map(cluster -> ArmResources.indexEntry(cluster.armId(), cluster.getName(), TYPE,
+                        cluster.getLocation(), cluster.getTags()))
+                .toList();
     }
 }

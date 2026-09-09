@@ -92,6 +92,13 @@ public class NetworkService {
                 .toList();
     }
 
+    public List<Map<String, Object>> listResources(String sub) {
+        return resources.values().stream()
+                .filter(r -> sub.equals(r.get("_sub")))
+                .map(NetworkService::stripInternal)
+                .toList();
+    }
+
     public List<Map<String, Object>> listResources(String sub, String rg, String type) {
         return resources.values().stream()
                 .filter(r -> sub.equals(r.get("_sub")) && rg.equals(r.get("_rg")) && type.equals(r.get("type")))

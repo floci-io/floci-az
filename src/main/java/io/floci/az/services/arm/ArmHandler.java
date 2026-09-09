@@ -209,16 +209,8 @@ public class ArmHandler implements AzureServiceHandler {
         }
 
         // ── Subscription-level resource listing ──────────────────────────────
-        // azurerm provider calls this to populate its Key Vault cache so it can
-        // look up a vault by its vaultUri. Return all key vaults for the subscription.
         if (path.matches("subscriptions/[^/?]+/resources([?].*)?")) {
-            String sub = extractSub(path);
-            List<Map<String, Object>> resources = new ArrayList<>(keyVaults.values().stream()
-                    .filter(v -> sub.equals(v.get("_sub")))
-                    .map(ArmHandler::stripInternal)
-                    .toList());
-            resources.addAll(apiManagementHandler.listSubscriptionServices(sub));
-            return Response.ok(Map.of("value", resources)).build();
+            return Response.ok(Map.of("value", indexedResources(extractSub(path), null))).build();
         }
 
         // ── Resource Groups ───────────────────────────────────────────────────
@@ -255,33 +247,7 @@ public class ArmHandler implements AzureServiceHandler {
         // subscriptions/{sub}/resourceGroups/{rg}/resources  (list resources in RG)
         // azurerm provider calls this before deleting a resource group to verify it is empty.
         if (lc.matches("subscriptions/[^/]+/resourcegroups/[^/]+/resources([?].*)?")) {
-            String rg = extractRg(path);
-            List<Map<String, Object>> resources = new ArrayList<>();
-            storageAccounts.values().stream()
-                    .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .forEach(resources::add);
-            keyVaults.values().stream()
-                    .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .forEach(resources::add);
-            webApps.values().stream()
-                    .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .forEach(resources::add);
-            if (config.services().network().enabled()) {
-                resources.addAll(networkHandler.listResources(sub, rg));
-            }
-            resources.addAll(apiManagementHandler.listServices(sub, rg));
-            if (config.services().managedIdentity().enabled()) {
-                resources.addAll(managedIdentityHandler.listResources(sub, rg));
-            }
-            for (ResourceIndexContributor contributor : resourceIndexContributors) {
-                if (contributor.indexEnabled()) {
-                    resources.addAll(contributor.listRgResources(sub, rg));
-                }
-            }
-            return Response.ok(Map.of("value", resources)).build();
+            return Response.ok(Map.of("value", indexedResources(sub, extractRg(path)))).build();
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}/providers/...
@@ -290,6 +256,55 @@ public class ArmHandler implements AzureServiceHandler {
         }
 
         return armNotFound(path);
+    }
+
+    /**
+     * The generic resource index for a scope: the whole subscription when {@code rg} is null, one
+     * resource group otherwise. Both ARM listings answer from this one assembly so they cannot
+     * disagree about what the estate holds.
+     *
+     * <p>ArmHandler's own Storage / Key Vault / Web state contributes the full stored body rather
+     * than the trimmed {@code ArmResources.indexEntry} shape: the azurerm provider reads this
+     * listing to populate its Key Vault cache and looks vaults up by {@code properties.vaultUri},
+     * which a properties-free entry would not carry. A deliberate deviation from Azure, which
+     * returns properties only under {@code $expand}.</p>
+     */
+    private List<Map<String, Object>> indexedResources(String sub, String rg) {
+        List<Map<String, Object>> resources = new ArrayList<>();
+        collectOwn(storageAccounts, sub, rg, resources);
+        collectOwn(keyVaults, sub, rg, resources);
+        collectOwn(webApps, sub, rg, resources);
+        if (config.services().network().enabled()) {
+            resources.addAll(rg == null
+                    ? networkHandler.listResources(sub)
+                    : networkHandler.listResources(sub, rg));
+        }
+        resources.addAll(rg == null
+                ? apiManagementHandler.listSubscriptionServices(sub)
+                : apiManagementHandler.listServices(sub, rg));
+        if (config.services().managedIdentity().enabled()) {
+            resources.addAll(rg == null
+                    ? managedIdentityHandler.listResources(sub)
+                    : managedIdentityHandler.listResources(sub, rg));
+        }
+        for (ResourceIndexContributor contributor : resourceIndexContributors) {
+            if (contributor.indexEnabled()) {
+                resources.addAll(rg == null
+                        ? contributor.listSubscriptionResources(sub)
+                        : contributor.listRgResources(sub, rg));
+            }
+        }
+        return resources;
+    }
+
+    /** ArmHandler's own ARM state for a scope, stripped of the internal routing keys. */
+    private static void collectOwn(Map<String, Map<String, Object>> state, String sub, String rg,
+                                   List<Map<String, Object>> out) {
+        state.values().stream()
+                .filter(r -> sub.equals(r.get(ArmResources.SUB_KEY))
+                        && (rg == null || rg.equals(r.get(ArmResources.RG_KEY))))
+                .map(ArmHandler::stripInternal)
+                .forEach(out::add);
     }
 
     // ── Provider-level routing ────────────────────────────────────────────────

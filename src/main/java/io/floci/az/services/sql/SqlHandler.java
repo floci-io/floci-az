@@ -9,6 +9,8 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -47,9 +49,10 @@ import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
  * </ul>
  */
 @ApplicationScoped
-public class SqlHandler implements AzureServiceHandler, Resettable {
+public class SqlHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(SqlHandler.class);
+    private static final String TYPE = "Microsoft.Sql/servers";
 
     private final EmulatorConfig config;
     private final SqlState state;
@@ -563,7 +566,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("id", s.armId());
         resp.put("name", s.serverName());
-        resp.put("type", "Microsoft.Sql/servers");
+        resp.put("type", TYPE);
         resp.put("location", s.location());
         resp.put("kind", "v12.0");
         if (!s.tags().isEmpty()) resp.put("tags", s.tags());
@@ -734,5 +737,29 @@ public class SqlHandler implements AzureServiceHandler, Resettable {
             }
         });
         state.clear();
+    }
+
+    // ── ResourceIndexContributor ────────────────────────────────────────────────
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().sql().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries(state.listServersByResourceGroup(sub, rg));
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries(state.listServersBySubscription(sub));
+    }
+
+    private static List<Map<String, Object>> indexEntries(List<SqlState.SqlServerEntry> servers) {
+        return servers.stream()
+                .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
+                        server.location(), server.tags()))
+                .toList();
     }
 }

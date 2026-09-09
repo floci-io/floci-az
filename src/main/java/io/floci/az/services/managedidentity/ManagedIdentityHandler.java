@@ -149,6 +149,16 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         return result;
     }
 
+    public List<Map<String, Object>> listResources(String sub) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> resource : store.listIdentities()) {
+            if (sub.equalsIgnoreCase(String.valueOf(resource.get("_sub")))) {
+                result.add(ArmResources.stripInternal(resource));
+            }
+        }
+        return result;
+    }
+
     // ── ARM: userAssignedIdentities ─────────────────────────────────────────────
 
     private Response handleIdentity(AzureRequest req, String path, String method) {
