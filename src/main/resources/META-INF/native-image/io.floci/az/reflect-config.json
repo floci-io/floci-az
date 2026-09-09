@@ -38,12 +38,6 @@
   "allDeclaredFields": true
  },
  {
-  "name": "com.github.dockerjava.core.command.AbstrSyncDockerCmd",
-  "allDeclaredConstructors": true,
-  "allDeclaredMethods": true,
-  "allDeclaredFields": true
- },
- {
   "name": "com.github.dockerjava.api.command.CreateContainerCmd",
   "allDeclaredMethods": true
  },
@@ -80,13 +74,13 @@
  },
 
  {
-  "name": "com.github.dockerjava.api.model.RootFS",
+  "name": "com.github.dockerjava.api.command.RootFS",
   "allDeclaredConstructors": true,
   "allDeclaredMethods": true,
   "allDeclaredFields": true
  },
  {
-  "name": "com.github.dockerjava.api.model.GraphDriver",
+  "name": "com.github.dockerjava.api.command.GraphDriver",
   "allDeclaredConstructors": true,
   "allDeclaredMethods": true,
   "allDeclaredFields": true

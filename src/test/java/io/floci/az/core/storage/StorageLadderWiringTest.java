@@ -12,13 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * Guards the storage ladder for services whose backend comes from {@link StorageFactory}.
+ * Covers email's default-configuration behaviour: the accessor exists, the factory hands back a
+ * backend, and repeat calls reuse it.
  *
- * <p>A service that calls {@code create(name)} without a matching case in
- * {@code StorageFactory.serviceConfig} still gets a backend, so nothing fails visibly: it
- * silently ignores {@code floci-az.storage.services.<name>.mode} and always follows the global
- * mode. That is the failure this test exists to catch, because it looks identical to a working
- * override until someone sets one.
+ * <p>These assertions deliberately do <em>not</em> prove the per-service override is wired up.
+ * Under the shipped configuration the global mode and the email mode are the same, so an unwired
+ * service is indistinguishable from a wired one here. {@link StorageLadderOverrideTest} is the
+ * test that pins that, by setting an email mode that differs from the global one.
  */
 @QuarkusTest
 @DisplayName("StorageFactory — per-service ladder wiring")
