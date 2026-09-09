@@ -103,6 +103,17 @@ public class ContainerLifecycleManager {
      * @param spec the container specification
      * @return the container ID
      */
+    /**
+     * Ensures an image is present locally, pulling it once if not.
+     *
+     * <p>{@link #create} does this anyway; callers use it directly when they need the pull to
+     * happen at a specific point, for example before reserving a host port so a slow pull does
+     * not hold the reservation.
+     */
+    public void ensureImageAvailable(String image) {
+        imageCacheService.ensureImageExists(image);
+    }
+
     public String create(ContainerSpec spec) {
         LOG.debugv("Creating container: image={0}, name={1}", spec.image(), spec.name());
 
