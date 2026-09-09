@@ -9,8 +9,8 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
-import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.email.EmailModels.CapturedEmail;
 import io.floci.az.services.email.EmailModels.EmailSendRequest;
 import io.floci.az.services.email.EmailModels.EmailSendResult;
@@ -64,8 +64,10 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     private static final String OPERATION_ID_HEADER = "Operation-Id";
     private static final String RETRY_AFTER_SECONDS = "3";
 
-    // In-memory stores — no persistence needed for email capture
-    private final StorageBackend<String, StoredObject> emailStorage = new InMemoryStorage<>();
+    // Captured messages go through StorageFactory like every other service, so the backend
+    // honours floci-az.storage.mode and joins the load/flush/reset lifecycle. The ARM-plane maps
+    // below stay in memory: they are control-plane records that /_admin/reset clears.
+    private final StorageBackend<String, StoredObject> emailStorage;
     private final Map<String, Map<String, Object>> communicationServices = new LinkedHashMap<>();
     private final Map<String, Map<String, Object>> emailServices = new LinkedHashMap<>();
     private final Map<String, Map<String, Object>> emailDomains = new LinkedHashMap<>();
@@ -73,8 +75,9 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
 
     @Inject
-    public EmailHandler(EmulatorConfig config) {
+    public EmailHandler(EmulatorConfig config, StorageFactory storageFactory) {
         this.config = config;
+        this.emailStorage = storageFactory.create("email");
     }
 
     @Override

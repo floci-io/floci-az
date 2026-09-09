@@ -76,6 +76,8 @@ floci-az:
         flush-interval-ms: 5000
       container-apps:
         flush-interval-ms: 5000
+      email:
+        flush-interval-ms: 5000
 
   dns:
     # When floci-az runs inside Docker, an embedded DNS server is started on port 53

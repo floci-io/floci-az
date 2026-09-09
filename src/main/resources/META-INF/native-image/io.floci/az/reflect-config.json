@@ -61,6 +61,18 @@
   "allDeclaredFields": true
  },
  {
+  "name": "com.github.dockerjava.core.DefaultDockerClientConfig",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "com.github.dockerjava.core.DockerConfigFile",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
   "name": "com.github.dockerjava.api.model.ExposedPort",
   "allDeclaredConstructors": true,
   "allDeclaredMethods": true,

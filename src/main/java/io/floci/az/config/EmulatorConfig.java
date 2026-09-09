@@ -87,6 +87,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig sql();
         ServiceStorageConfig monitor();
         ServiceStorageConfig containerApps();
+        ServiceStorageConfig email();
     }
 
     interface ServiceStorageConfig {

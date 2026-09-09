@@ -165,7 +165,7 @@ public class BannerLogger {
             sb.append(serviceStatus("monitor", true, getStorageMode("monitor")));
         }
         if (config.services().email().enabled()) {
-            sb.append(String.format("   %-9s [%s]  %s\n", "email", "enabled ", "ACS Email (captured in-memory; no delivery)"));
+            sb.append(serviceStatus("email", true, getStorageMode("email")));
         }
         LOGGER.info(sb.toString());
         LOGGER.info("=== Local Azure Emulator Ready ===");
@@ -182,6 +182,8 @@ public class BannerLogger {
             case "servicebus" -> config.storage().services().serviceBus().mode().orElse(config.storage().mode());
             case "sql"       -> config.storage().services().sql().mode().orElse(config.storage().mode());
             case "containerapps" -> config.storage().services().containerApps().mode().orElse(config.storage().mode());
+            case "monitor"   -> config.storage().services().monitor().mode().orElse(config.storage().mode());
+            case "email"     -> config.storage().services().email().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }
