@@ -56,6 +56,22 @@ class PortAllocatorTest {
     }
 
     @Test
+    @DisplayName("a claim released after a failed start is immediately reclaimable")
+    void claimReleasedOnFailureIsReusable() {
+        PortAllocator allocator = new PortAllocator();
+        int port = allocator.allocateAny();
+        allocator.release(port);
+
+        // What a manager does when the container fails to start: it claimed the port, never got
+        // as far as recording the container, and must still hand the port back.
+        assertEquals(port, allocator.claimOrZero(port));
+        allocator.release(port);
+
+        assertEquals(port, allocator.claimOrZero(port),
+            "a start that fails before the container is registered must not strand the claim");
+    }
+
+    @Test
     @DisplayName("a claim does not get handed out again by range allocation")
     void claimIsVisibleToRangeAllocation() {
         PortAllocator allocator = new PortAllocator();

@@ -7,25 +7,37 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /**
  * Setting {@code default-port} must not make mocked mode start claiming host ports.
  *
  * <p>Mocked mode exists so that {@code plan}/CI runs need no Docker; a configured port there
- * describes a container that is never created, so nothing should be reserved and nothing should
- * be bound. This runs everywhere, with or without a Docker daemon.
+ * describes a container that is never created, so nothing should be reserved and nothing bound.
+ *
+ * <p>The port is chosen at class-init time from an ephemeral bind rather than hardcoded, because
+ * a fixed number would make this test fail on any machine already using it.
  */
 @QuarkusTest
 @TestProfile(MySqlDefaultPortMockedTest.FixedPortMockedProfile.class)
 @DisplayName("MySqlHandler — default-port is inert in mocked mode")
 class MySqlDefaultPortMockedTest {
 
-    private static final int CONFIGURED_PORT = 15306;
+    private static final int CONFIGURED_PORT = findFreePort();
+
+    private static int findFreePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not find a free port for the test profile", e);
+        }
+    }
 
     public static class FixedPortMockedProfile implements QuarkusTestProfile {
         @Override
@@ -41,7 +53,7 @@ class MySqlDefaultPortMockedTest {
 
     @Test
     @DisplayName("a mocked server is created without claiming the configured port")
-    void mockedServerDoesNotClaimTheConfiguredPort() throws IOException {
+    void mockedServerDoesNotClaimTheConfiguredPort() {
         given()
             .contentType("application/json")
             .body("""
@@ -60,8 +72,10 @@ class MySqlDefaultPortMockedTest {
             .body("properties.state", equalTo("Ready"));
 
         // Nothing was started, so the port must still be bindable by anyone else.
-        try (ServerSocket probe = new ServerSocket(CONFIGURED_PORT)) {
-            assert probe.isBound();
-        }
+        assertDoesNotThrow(() -> {
+            try (ServerSocket probe = new ServerSocket(CONFIGURED_PORT)) {
+                probe.getLocalPort();
+            }
+        }, "mocked mode must not bind or reserve the configured port");
     }
 }

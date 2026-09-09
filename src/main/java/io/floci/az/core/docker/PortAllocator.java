@@ -52,6 +52,10 @@ public class PortAllocator {
      * already the repo-wide "let the OS pick" sentinel, so the result can be handed straight to
      * {@code withPortBinding}.
      *
+     * <p>Availability is judged when the claim is made. A port that another process takes between
+     * that check and the container's bind is not caught here: Docker fails the bind and the create
+     * fails like any other port conflict, the same window {@link #allocate(int, int)} already has.
+     *
      * @param port the configured host port; {@code 0} or negative means no preference
      * @return {@code port} if it was claimed (release it with {@link #release(int)}), else {@code 0}
      */

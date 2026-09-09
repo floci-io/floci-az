@@ -53,17 +53,11 @@ public class MariaDbServerManager {
         LOG.infof("Starting MariaDB container: server=%s image=%s", entry.serverName(), image);
 
         int configuredPort = mariaConfig.defaultPort();
-
         int requestedHostPort = portAllocator.claimOrZero(configuredPort);
-
         if (configuredPort > 0 && requestedHostPort == 0) {
-
-            LOG.warnf("Configured MariaDB default-port %d is unavailable (already claimed or in use) "
-
-                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
-
+            LOG.warnf("Configured MariaDB default-port %d is already claimed or in use - falling back "
+                + "to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
         }
-
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
@@ -76,7 +70,13 @@ public class MariaDbServerManager {
             .withLogRotation()
             .build();
 
-        String containerId = containerManager.create(spec);
+        String containerId;
+        try {
+            containerId = containerManager.create(spec);
+        } catch (RuntimeException e) {
+            releaseClaimedPort(requestedHostPort);
+            throw e;
+        }
         try {
             containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
                 "/docker-entrypoint-initdb.d/10-grant-admin.sql");
@@ -120,7 +120,8 @@ public class MariaDbServerManager {
             // The caller rolls back state that never learned this containerId, so a failed
             // start must dispose of its own container or it leaks as a running orphan.
             managedContainers.remove(containerId);
-            releaseClaimedPort(containerId);
+            claimedPorts.remove(containerId);
+            releaseClaimedPort(requestedHostPort);
             try {
                 containerManager.stopAndRemove(containerId, null);
             } catch (Exception cleanup) {
@@ -131,20 +132,25 @@ public class MariaDbServerManager {
         }
     }
 
-    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
+    /**
 
-    private void releaseClaimedPort(String containerId) {
+     * Gives a claimed fixed port back so a later create can have it again. Takes the port
 
-        Integer claimed = claimedPorts.remove(containerId);
+     * rather than the containerId on purpose: a start that fails before the container is
 
-        if (claimed != null) {
+     * registered has nothing in the map, and looking it up there would leak the claim.
 
-            portAllocator.release(claimed);
+     */
+
+    private void releaseClaimedPort(int claimedPort) {
+
+        if (claimedPort > 0) {
+
+            portAllocator.release(claimedPort);
 
         }
 
     }
-
 
     public void stopServer(MariaDbState.ServerEntry entry) {
         if (entry.containerId() == null) return;
@@ -152,7 +158,10 @@ public class MariaDbServerManager {
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
-        releaseClaimedPort(entry.containerId());
+        Integer claimed = claimedPorts.remove(entry.containerId());
+        if (claimed != null) {
+            releaseClaimedPort(claimed);
+        }
     }
 
     /**

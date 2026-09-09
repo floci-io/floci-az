@@ -70,17 +70,11 @@ public class PostgresServerManager {
         LOG.infof("Starting PostgreSQL container: server=%s image=%s", entry.serverName(), image);
 
         int configuredPort = pgConfig.defaultPort();
-
         int requestedHostPort = portAllocator.claimOrZero(configuredPort);
-
         if (configuredPort > 0 && requestedHostPort == 0) {
-
-            LOG.warnf("Configured PostgreSQL default-port %d is unavailable (already claimed or in use) "
-
-                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
-
+            LOG.warnf("Configured PostgreSQL default-port %d is already claimed or in use - falling back "
+                + "to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
         }
-
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
@@ -98,9 +92,7 @@ public class PostgresServerManager {
         } catch (RuntimeException e) {
             // No container exists to clean up here, but the port claim must not outlive the
             // attempt or the next create for this server cannot have its configured port.
-            if (requestedHostPort > 0) {
-                portAllocator.release(requestedHostPort);
-            }
+            releaseClaimedPort(requestedHostPort);
             throw e;
         }
         String containerId = info.containerId();
@@ -147,11 +139,14 @@ public class PostgresServerManager {
     /**
      * Stops and removes the container associated with the given server entry.
      */
-    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
-    private void releaseClaimedPort(String containerId) {
-        Integer claimed = claimedPorts.remove(containerId);
-        if (claimed != null) {
-            portAllocator.release(claimed);
+    /**
+     * Gives a claimed fixed port back so a later create can have it again. Takes the port
+     * rather than the containerId on purpose: a start that fails before the container is
+     * registered has nothing in the map, and looking it up there would leak the claim.
+     */
+    private void releaseClaimedPort(int claimedPort) {
+        if (claimedPort > 0) {
+            portAllocator.release(claimedPort);
         }
     }
 
@@ -161,7 +156,10 @@ public class PostgresServerManager {
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
-        releaseClaimedPort(entry.containerId());
+        Integer claimed = claimedPorts.remove(entry.containerId());
+        if (claimed != null) {
+            releaseClaimedPort(claimed);
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

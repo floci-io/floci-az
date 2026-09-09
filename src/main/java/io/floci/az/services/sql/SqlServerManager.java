@@ -84,17 +84,11 @@ public class SqlServerManager {
         LOG.infof("Starting SQL Server container: server=%s image=%s", entry.serverName(), image);
 
         int configuredPort = sqlConfig.defaultPort();
-
         int requestedHostPort = portAllocator.claimOrZero(configuredPort);
-
         if (configuredPort > 0 && requestedHostPort == 0) {
-
-            LOG.warnf("Configured SQL Server default-port %d is unavailable (already claimed or in use) "
-
-                + "- falling back to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
-
+            LOG.warnf("Configured SQL Server default-port %d is already claimed or in use - falling back "
+                + "to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
         }
-
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
@@ -144,7 +138,8 @@ public class SqlServerManager {
             waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
         } catch (RuntimeException startupFailure) {
             managedContainers.remove(containerId);
-            releaseClaimedPort(containerId);
+            claimedPorts.remove(containerId);
+            releaseClaimedPort(requestedHostPort);
             try {
                 containerManager.stopAndRemove(containerId, null);
             } catch (RuntimeException cleanupFailure) {
@@ -162,11 +157,14 @@ public class SqlServerManager {
     /**
      * Stops and removes the container associated with the given server entry.
      */
-    /** Gives a claimed fixed port back, so deleting and recreating a server keeps it. */
-    private void releaseClaimedPort(String containerId) {
-        Integer claimed = claimedPorts.remove(containerId);
-        if (claimed != null) {
-            portAllocator.release(claimed);
+    /**
+     * Gives a claimed fixed port back so a later create can have it again. Takes the port
+     * rather than the containerId on purpose: a start that fails before the container is
+     * registered has nothing in the map, and looking it up there would leak the claim.
+     */
+    private void releaseClaimedPort(int claimedPort) {
+        if (claimedPort > 0) {
+            portAllocator.release(claimedPort);
         }
     }
 
@@ -176,7 +174,10 @@ public class SqlServerManager {
             entry.serverName(), entry.containerId());
         containerManager.stopAndRemove(entry.containerId(), null);
         managedContainers.remove(entry.containerId());
-        releaseClaimedPort(entry.containerId());
+        Integer claimed = claimedPorts.remove(entry.containerId());
+        if (claimed != null) {
+            releaseClaimedPort(claimed);
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
