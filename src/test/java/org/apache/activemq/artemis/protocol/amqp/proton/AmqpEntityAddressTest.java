@@ -6,9 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
-import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,10 +22,7 @@ class AmqpEntityAddressTest {
 
     @BeforeAll
     static void loadFromPatchJar() throws Exception {
-        Path patchJar = Path.of("target", "classes", "artemis",
-                "artemis-amqp-protocol-2.44.0-floci-az-artemis-amqp-patch.jar");
-        loader = new URLClassLoader(new URL[]{patchJar.toUri().toURL()},
-                AmqpEntityAddressTest.class.getClassLoader());
+        loader = PatchJarLoader.open();
         toEntityPath = Class.forName(
                         "org.apache.activemq.artemis.protocol.amqp.proton.AmqpEntityAddress",
                         true, loader)
