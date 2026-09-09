@@ -16,6 +16,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.ServerSocket;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,19 +48,47 @@ import static org.mockito.Mockito.when;
 @DisplayName("Server managers — a failed start releases the claimed host port")
 class PortClaimReleaseTest {
 
-    private static final int PG_PORT = 15433;
-    private static final int SQL_PORT = 14434;
+    // Ephemeral, not hardcoded: a port another process already owns would make claimOrZero return
+    // 0, and these tests would fail for reasons that have nothing to do with claim cleanup.
+    //
+    // The value goes through a system property because Quarkus loads the profile and the test in
+    // different classloaders: a plain static field is initialised twice and the config the emulator
+    // booted with would not be the constant the assertions check.
+    private static final String PG_PORT_PROPERTY = "flociaz.test.portclaim.pg";
+    private static final String SQL_PORT_PROPERTY = "flociaz.test.portclaim.sql";
+
+    private static int reserveTestPort(String property) {
+        String existing = System.getProperty(property);
+        if (existing != null) {
+            return Integer.parseInt(existing);
+        }
+        try (ServerSocket socket = new ServerSocket(0)) {
+            int port = socket.getLocalPort();
+            System.setProperty(property, String.valueOf(port));
+            return port;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not find a free port for the test profile", e);
+        }
+    }
+
+    private static int pgPort() {
+        return reserveTestPort(PG_PORT_PROPERTY);
+    }
+
+    private static int sqlPort() {
+        return reserveTestPort(SQL_PORT_PROPERTY);
+    }
 
     public static class FixedPortProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                 "floci-az.services.postgres.mocked", "false",
-                "floci-az.services.postgres.default-port", String.valueOf(PG_PORT),
+                "floci-az.services.postgres.default-port", String.valueOf(pgPort()),
                 "floci-az.services.postgres.startup-timeout-seconds", "1",
                 "floci-az.services.sql.mocked", "false",
                 "floci-az.services.sql.accept-eula", "Y",
-                "floci-az.services.sql.default-port", String.valueOf(SQL_PORT));
+                "floci-az.services.sql.default-port", String.valueOf(sqlPort()));
         }
     }
 
@@ -81,10 +112,10 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> postgresManager.startServer(postgresEntry()));
 
-        assertClaimWasMade(PG_PORT, 5432);
-        assertEquals(PG_PORT, portAllocator.claimOrZero(PG_PORT),
+        assertClaimWasMade(pgPort(), 5432);
+        assertEquals(pgPort(), portAllocator.claimOrZero(pgPort()),
             "the configured port must be claimable again, or default-port silently stops working");
-        portAllocator.release(PG_PORT);
+        portAllocator.release(pgPort());
     }
 
     @Test
@@ -95,10 +126,10 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> sqlManager.startServer(sqlEntry()));
 
-        assertClaimWasMade(SQL_PORT, 1433);
-        assertEquals(SQL_PORT, portAllocator.claimOrZero(SQL_PORT),
+        assertClaimWasMade(sqlPort(), 1433);
+        assertEquals(sqlPort(), portAllocator.claimOrZero(sqlPort()),
             "the configured port must be claimable again, or default-port silently stops working");
-        portAllocator.release(SQL_PORT);
+        portAllocator.release(sqlPort());
     }
 
     @Test
@@ -111,21 +142,21 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> postgresManager.startServer(postgresEntry()));
 
-        assertClaimWasMade(PG_PORT, 5432);
-        assertEquals(PG_PORT, portAllocator.claimOrZero(PG_PORT),
+        assertClaimWasMade(pgPort(), 5432);
+        assertEquals(pgPort(), portAllocator.claimOrZero(pgPort()),
             "a failed port readback must not strand the claim");
-        portAllocator.release(PG_PORT);
+        portAllocator.release(pgPort());
     }
 
     @Test
     @DisplayName("stopServer releases the claim even when the container teardown throws")
     void stopServerReleasesClaimWhenTeardownFails() {
-        var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", PG_PORT);
+        var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", pgPort());
         when(containerManager.createAndStart(any(ContainerSpec.class)))
             .thenReturn(new ContainerLifecycleManager.ContainerInfo("pg-running", Map.of(5432, endpoint)));
 
         PostgresState.ServerEntry started = postgresManager.startServer(postgresEntry());
-        assertEquals(0, portAllocator.claimOrZero(PG_PORT), "the running server should still hold its port");
+        assertEquals(0, portAllocator.claimOrZero(pgPort()), "the running server should still hold its port");
 
         // A daemon hiccup on teardown. Every caller of stopServer swallows this, and the delete
         // path has already dropped the server from state, so nothing would ever retry the release.
@@ -134,9 +165,9 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> postgresManager.stopServer(started));
 
-        assertEquals(PG_PORT, portAllocator.claimOrZero(PG_PORT),
+        assertEquals(pgPort(), portAllocator.claimOrZero(pgPort()),
             "a failed teardown must not strand the claim: the port is unreachable for every later create");
-        portAllocator.release(PG_PORT);
+        portAllocator.release(pgPort());
     }
 
     /**

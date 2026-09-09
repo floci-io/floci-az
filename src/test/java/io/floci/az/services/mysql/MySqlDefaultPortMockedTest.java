@@ -29,11 +29,20 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 @DisplayName("MySqlHandler — default-port is inert in mocked mode")
 class MySqlDefaultPortMockedTest {
 
-    private static final int CONFIGURED_PORT = findFreePort();
+    // Shared through a system property, not a static field: Quarkus loads the profile and the test
+    // in different classloaders, so a plain static is initialised twice and the assertion below
+    // would probe a port the emulator was never configured with.
+    private static final String PORT_PROPERTY = "flociaz.test.mysqlport.mocked";
 
-    private static int findFreePort() {
+    private static int configuredPort() {
+        String existing = System.getProperty(PORT_PROPERTY);
+        if (existing != null) {
+            return Integer.parseInt(existing);
+        }
         try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
+            int port = socket.getLocalPort();
+            System.setProperty(PORT_PROPERTY, String.valueOf(port));
+            return port;
         } catch (IOException e) {
             throw new UncheckedIOException("Could not find a free port for the test profile", e);
         }
@@ -44,7 +53,7 @@ class MySqlDefaultPortMockedTest {
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                 "floci-az.services.mysql.mocked", "true",
-                "floci-az.services.mysql.default-port", String.valueOf(CONFIGURED_PORT));
+                "floci-az.services.mysql.default-port", String.valueOf(configuredPort()));
         }
     }
 
@@ -73,7 +82,7 @@ class MySqlDefaultPortMockedTest {
 
         // Nothing was started, so the port must still be bindable by anyone else.
         assertDoesNotThrow(() -> {
-            try (ServerSocket probe = new ServerSocket(CONFIGURED_PORT)) {
+            try (ServerSocket probe = new ServerSocket(configuredPort())) {
                 probe.getLocalPort();
             }
         }, "mocked mode must not bind or reserve the configured port");
