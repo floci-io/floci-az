@@ -3,6 +3,8 @@ package io.floci.az.services.keyvault;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigInteger;
 import java.security.AlgorithmParameters;
@@ -24,6 +26,7 @@ import java.security.spec.ECParameterSpec;
 import java.security.spec.ECPoint;
 import java.security.spec.ECPrivateKeySpec;
 import java.security.spec.ECPublicKeySpec;
+import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
@@ -45,6 +48,13 @@ final class KeyVaultCrypto {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Base64.Encoder URL = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder URL_DECODER = Base64.getUrlDecoder();
+
+    // SunJCE's OAEPWithSHA-256AndMGF1Padding uses MGF1 SHA-1 unless an explicit OAEPParameterSpec
+    // pins both the digest and the MGF. Clients (Python/Node/az) use MGF1 SHA-256, so we must too.
+    private static final OAEPParameterSpec OAEP_SHA1 =
+            new OAEPParameterSpec("SHA-1", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT);
+    private static final OAEPParameterSpec OAEP_SHA256 =
+            new OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT);
 
     private KeyVaultCrypto() {
     }
@@ -390,15 +400,15 @@ final class KeyVaultCrypto {
         return switch (alg) {
             case "RSA1_5" -> {
                 requireRsa(base, alg);
-                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/PKCS1Padding", Cipher.ENCRYPT_MODE, value), null, null);
+                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/PKCS1Padding", Cipher.ENCRYPT_MODE, value, null), null, null);
             }
             case "RSA-OAEP" -> {
                 requireRsa(base, alg);
-                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-1AndMGF1Padding", Cipher.ENCRYPT_MODE, value), null, null);
+                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-1AndMGF1Padding", Cipher.ENCRYPT_MODE, value, OAEP_SHA1), null, null);
             }
             case "RSA-OAEP-256" -> {
                 requireRsa(base, alg);
-                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", Cipher.ENCRYPT_MODE, value), null, null);
+                yield new CipherResult(rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", Cipher.ENCRYPT_MODE, value, OAEP_SHA256), null, null);
             }
             case "A128GCM", "A192GCM", "A256GCM" -> {
                 requireOct(base, alg);
@@ -414,15 +424,15 @@ final class KeyVaultCrypto {
         return switch (alg) {
             case "RSA1_5" -> {
                 requireRsa(base, alg);
-                yield rsaCrypt(jwk, "RSA/ECB/PKCS1Padding", Cipher.DECRYPT_MODE, value);
+                yield rsaCrypt(jwk, "RSA/ECB/PKCS1Padding", Cipher.DECRYPT_MODE, value, null);
             }
             case "RSA-OAEP" -> {
                 requireRsa(base, alg);
-                yield rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-1AndMGF1Padding", Cipher.DECRYPT_MODE, value);
+                yield rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-1AndMGF1Padding", Cipher.DECRYPT_MODE, value, OAEP_SHA1);
             }
             case "RSA-OAEP-256" -> {
                 requireRsa(base, alg);
-                yield rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", Cipher.DECRYPT_MODE, value);
+                yield rsaCrypt(jwk, "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", Cipher.DECRYPT_MODE, value, OAEP_SHA256);
             }
             case "A128GCM", "A192GCM", "A256GCM" -> {
                 requireOct(base, alg);
@@ -433,10 +443,15 @@ final class KeyVaultCrypto {
         };
     }
 
-    private static byte[] rsaCrypt(Map<String, Object> jwk, String transform, int mode, byte[] input) {
+    private static byte[] rsaCrypt(Map<String, Object> jwk, String transform, int mode, byte[] input,
+            OAEPParameterSpec oaep) {
         try {
             Cipher cipher = Cipher.getInstance(transform);
-            cipher.init(mode, mode == Cipher.ENCRYPT_MODE ? reconstructRsaPublic(jwk) : reconstructRsaPrivate(jwk));
+            if (oaep != null) {
+                cipher.init(mode, mode == Cipher.ENCRYPT_MODE ? reconstructRsaPublic(jwk) : reconstructRsaPrivate(jwk), oaep);
+            } else {
+                cipher.init(mode, mode == Cipher.ENCRYPT_MODE ? reconstructRsaPublic(jwk) : reconstructRsaPrivate(jwk));
+            }
             return cipher.doFinal(input);
         } catch (CryptoException e) {
             throw e;
