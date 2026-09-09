@@ -130,7 +130,11 @@ public class HybridStorage<K, V> implements StorageBackend<K, V> {
     @Override
     public void clear() {
         store.clear();
-        dirty.set(true);
+        // Write through rather than waiting for the scheduler, as persistent and wal do. A caller
+        // that clears is usually resetting between test runs and may stop the emulator straight
+        // after; a deferred write would let the next load restore the state the reset removed.
+        // persistToDisk() re-marks dirty if the write fails, so the scheduler still retries.
+        persistToDisk();
     }
 
     public void shutdown() {
