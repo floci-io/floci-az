@@ -10,6 +10,13 @@ const VAULT_URL = BASE.replace("http://", "https://") + `/${ACCOUNT}-keyvault`;
 
 const MHSM_URL = BASE.replace("http://", "https://") + `/${ACCOUNT}-managedhsm`;
 
+// The cryptography client parses a key id with parseKeyVaultKeyIdentifier, which
+// only accepts the real Azure shape https://<vault>.vault.azure.net/keys/<n>/<v>.
+// We build a host-based kid and rewrite the request back onto the emulator's
+// path-based route: https://<vault>.vault.azure.net/... becomes
+// {endpoint}/devstoreaccount1-keyvault/....
+const VAULT_HOST = "devstoreaccount1.vault.azure.net";
+
 const fakeCredential: TokenCredential = {
   getToken: async () => ({
     token: "fake-token-for-local-emulator",
@@ -33,13 +40,25 @@ function keyClient(url: string = VAULT_URL): KeyClient {
   });
 }
 
+const cryptoHttpPolicy: PipelinePolicy = {
+  name: "ForceEmulatorRoutePolicy",
+  sendRequest(request, next) {
+    request.url = request.url.replace(
+      `https://${VAULT_HOST}/`,
+      `${BASE}/${ACCOUNT}-keyvault/`,
+    );
+    request.allowInsecureConnection = true;
+    return next(request);
+  },
+};
+
 // CRITICAL: build the crypto kid ourselves — the emulator returns ids with host
 // devstoreaccount1.vault.azure.net which does NOT route back to the emulator.
 function cryptoClient(keyName: string, keyVersion: string): CryptographyClient {
-  const kid = `${VAULT_URL}/keys/${keyName}/${keyVersion}`;
+  const kid = `https://${VAULT_HOST}/keys/${keyName}/${keyVersion}`;
   return new CryptographyClient(kid, fakeCredential, {
     disableChallengeResourceVerification: true,
-    additionalPolicies: [{ policy: forceHttpPolicy, position: "perCall" }],
+    additionalPolicies: [{ policy: cryptoHttpPolicy, position: "perCall" }],
   });
 }
 
