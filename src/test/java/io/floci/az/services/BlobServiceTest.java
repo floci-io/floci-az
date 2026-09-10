@@ -602,6 +602,251 @@ public class BlobServiceTest {
     }
 
     @Test
+    void snapshotScopedSasCanReadOnlyItsSnapshot() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String snapshot = given()
+            .when().put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("changed")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String snapshotSas = snapshotSas("r", CONTAINER, BLOB, snapshot);
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB, snapshotSas)
+            .then()
+            .statusCode(200)
+            .body(equalTo("original"));
+
+        given()
+            .when().get("/{account}/{container}/{blob}?{sas}", ACCOUNT, CONTAINER, BLOB,
+                    snapshotSas.replace("snapshot=" + snapshot + "&", ""))
+            .then()
+            .statusCode(403)
+            .header("x-ms-error-code", "AuthenticationFailed");
+    }
+
+    @Test
+    void snapshotHonorsConditionsAndSuppliedLeaseId() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("ETag");
+
+        given()
+            .header("If-Match", "not-the-blob-etag")
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "ConditionNotMet");
+
+        String leaseId = given()
+            .header("x-ms-lease-action", "acquire")
+            .header("x-ms-lease-duration", "-1")
+            .put("/{account}/{container}/{blob}?comp=lease", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-lease-id");
+
+        given()
+            .header("If-Match", etag)
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-lease-id", "00000000-0000-0000-0000-000000000000")
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "LeaseIdMismatchWithBlobOperation");
+
+        given()
+            .header("x-ms-lease-id", leaseId)
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201);
+    }
+
+    @Test
+    void deletingBaseBlobRequiresSnapshotDisposition() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        String firstSnapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "SnapshotsPresent");
+
+        given()
+            .header("x-ms-delete-snapshots", "only")
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo("original"));
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}", ACCOUNT, CONTAINER, BLOB, firstSnapshot)
+            .then()
+            .statusCode(404);
+
+        String secondSnapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .header("x-ms-delete-snapshots", "include")
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(404);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}", ACCOUNT, CONTAINER, BLOB, secondSnapshot)
+            .then()
+            .statusCode(404);
+    }
+
+    @Test
+    void snapshotDeletionDoesNotMatchColonNamedSiblingBlobs() {
+        String siblingBlob = BLOB + ":sibling";
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("base")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("sibling")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, siblingBlob);
+
+        String siblingSnapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, siblingBlob)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, siblingBlob, siblingSnapshot)
+            .then()
+            .statusCode(200)
+            .body(equalTo("sibling"));
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("base")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-delete-snapshots", "only")
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, siblingBlob, siblingSnapshot)
+            .then()
+            .statusCode(200)
+            .body(equalTo("sibling"));
+    }
+
+    @Test
+    void deletingContainerRemovesSnapshots() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String snapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .delete("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}", ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then()
+            .statusCode(404);
+    }
+
+    @Test
+    void snapshotCannotBeTargetedForSnapshotCreation() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("original")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String snapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .put("/{account}/{container}/{blob}?comp=snapshot&snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "SnapshotOperationNotSupported");
+    }
+
+    @Test
     void createOnlySasCanCreateButCannotOverwriteBlob() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         String createOnlySas = sas("c", "b", CONTAINER, BLOB);
@@ -2569,6 +2814,31 @@ public class BlobServiceTest {
         OffsetDateTime keyStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
         OffsetDateTime keyExpiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
         return sasSignedWith(base64Key, permissions, resource, container, blobName, keyStart, keyExpiry);
+    }
+
+    private String snapshotSas(String permissions, String container, String blobName, String snapshot) {
+        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
+        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        String version = "2024-11-04";
+        String key = keyMaterial.signingKeyForAccount(ACCOUNT);
+        String stringToSign = String.join("\n",
+                permissions, start.toString(), expiry.toString(), canonicalName(container, blobName),
+                UserDelegationKeyMaterial.SIGNED_OBJECT_ID, UserDelegationKeyMaterial.SIGNED_TENANT_ID,
+                start.toString(), expiry.toString(), "b", version,
+                "", "", "", "", "", version, "bs", snapshot, "", "", "", "", "", "");
+        return "sv=" + version
+                + "&st=" + start
+                + "&se=" + expiry
+                + "&skoid=" + UserDelegationKeyMaterial.SIGNED_OBJECT_ID
+                + "&sktid=" + UserDelegationKeyMaterial.SIGNED_TENANT_ID
+                + "&skt=" + start
+                + "&ske=" + expiry
+                + "&sks=b"
+                + "&skv=" + version
+                + "&sr=bs"
+                + "&snapshot=" + snapshot
+                + "&sp=" + permissions
+                + "&sig=" + hmac(key, stringToSign);
     }
 
     private static String sasSignedWith(

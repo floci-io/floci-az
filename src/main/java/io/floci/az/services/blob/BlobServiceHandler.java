@@ -42,6 +42,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final String NS_PREFIX  = "__ns__:";
     private static final String BLK_PREFIX = "__blk__:";
+    private static final String SNAPSHOT_PREFIX = "__snapshot__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final String CREATION_TIME_KEY = "CreationTime";
     private static final String DATALAKE_APPEND_PREFIX = "__abfs_append__:";
@@ -258,6 +259,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = dataLakeNotImplemented();
                 } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
                     response = leaseBlob(request, containerName, blobName);
+                } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
+                        && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
+                    response = snapshotIsImmutable();
+                } else if ("PUT".equalsIgnoreCase(method) && "snapshot".equals(comp)) {
+                    response = snapshotBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
@@ -449,9 +455,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             store.delete(nsKey(request.accountName(), containerName));
             String objPrefix = request.accountName() + "/" + containerName + "/";
             String blkPrefix = BLK_PREFIX + objPrefix;
+            String snapshotPrefix = SNAPSHOT_PREFIX + objPrefix;
             String appendPrefix = DATALAKE_APPEND_PREFIX + objPrefix;
             store.keys().stream()
-                    .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix) || k.startsWith(appendPrefix))
+                    .filter(k -> k.startsWith(objPrefix) || k.startsWith(blkPrefix)
+                            || k.startsWith(snapshotPrefix) || k.startsWith(appendPrefix))
                     .toList()
                     .forEach(store::delete);
             leaseService.onContainerDeleted(objPrefix);
@@ -1851,7 +1859,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        Optional<StoredObject> object = findBlob(request, containerName, blobName);
 
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
@@ -2100,7 +2108,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
         return leaseService.exclusively(() -> {
-            Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+            boolean deletingSnapshot = request.queryParams().containsKey("snapshot");
+            String deleteSnapshots = request.headers().getHeaderString("x-ms-delete-snapshots");
+            if (deletingSnapshot && deleteSnapshots != null) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The x-ms-delete-snapshots header is not supported when deleting a blob snapshot.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            Optional<StoredObject> object = findBlob(request, containerName, blobName);
             if (object.isEmpty()) {
                 return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -2109,15 +2124,85 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (conditionFailure != null) {
                 return conditionFailure;
             }
-            Response leaseFailure = leaseService.validateWrite(request,
-                    objKey(request.accountName(), containerName, blobName));
+            String key = blobKey(request, containerName, blobName);
+            Response leaseFailure = leaseService.validateWrite(request, key);
             if (leaseFailure != null) {
                 return leaseFailure;
             }
-            store.delete(objKey(request.accountName(), containerName, blobName));
-            leaseService.onBlobDeleted(objKey(request.accountName(), containerName, blobName));
+
+            if (!deletingSnapshot) {
+                List<String> snapshots = snapshotKeys(request.accountName(), containerName, blobName);
+                if (!snapshots.isEmpty() && deleteSnapshots == null) {
+                    return new AzureErrorResponse("SnapshotsPresent",
+                            "The blob has snapshots and cannot be deleted without specifying x-ms-delete-snapshots.")
+                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+                if (deleteSnapshots != null && !"include".equalsIgnoreCase(deleteSnapshots)
+                        && !"only".equalsIgnoreCase(deleteSnapshots)) {
+                    return new AzureErrorResponse("InvalidHeaderValue",
+                            "The value for one of the HTTP headers is not in the correct format.")
+                            .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                }
+                if ("include".equalsIgnoreCase(deleteSnapshots) || "only".equalsIgnoreCase(deleteSnapshots)) {
+                    snapshots.forEach(store::delete);
+                }
+                if ("only".equalsIgnoreCase(deleteSnapshots)) {
+                    return Response.status(Response.Status.ACCEPTED).build();
+                }
+            }
+            store.delete(key);
+            leaseService.onBlobDeleted(key);
             return Response.status(Response.Status.ACCEPTED).build();
         });
+    }
+
+    private Response snapshotBlob(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeCreate(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            String key = objKey(request.accountName(), containerName, blobName);
+            Optional<StoredObject> existing = store.get(key);
+            if (existing.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response conditionFailure = validateBlobConditions(request, existing);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateSnapshot(request, key);
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+            String snapshot = Instant.now().toString();
+            StoredObject blob = existing.get();
+            store.put(snapshotKey(request.accountName(), containerName, blobName, snapshot),
+                    new StoredObject(blob.key(), Arrays.copyOf(blob.data(), blob.data().length),
+                            new HashMap<>(blob.metadata()), blob.lastModified(), blob.etag()));
+            return Response.status(Response.Status.CREATED)
+                    .header("x-ms-snapshot", snapshot)
+                    .header("ETag", blob.etag())
+                    .build();
+        });
+    }
+
+    private static Response snapshotIsImmutable() {
+        return new AzureErrorResponse("SnapshotOperationNotSupported",
+                "This operation is not supported on a blob snapshot.")
+                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+    }
+
+    private Optional<StoredObject> findBlob(AzureRequest request, String containerName, String blobName) {
+        return store.get(blobKey(request, containerName, blobName));
+    }
+
+    private static String blobKey(AzureRequest request, String containerName, String blobName) {
+        String snapshot = request.queryParams().get("snapshot");
+        return snapshot == null
+                ? objKey(request.accountName(), containerName, blobName)
+                : snapshotKey(request.accountName(), containerName, blobName, snapshot);
     }
 
     private Response getBlobMetadata(AzureRequest request, String containerName, String blobName) {
@@ -2125,7 +2210,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+        Optional<StoredObject> object = findBlob(request, containerName, blobName);
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -2546,7 +2631,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         List<BlobModels.BlockItem> uncommitted = new ArrayList<>();
 
         if ("committed".equals(listType) || "all".equals(listType)) {
-            store.get(objKey(request.accountName(), containerName, blobName))
+            findBlob(request, containerName, blobName)
                  .ifPresent(blob -> {
                      String meta = blob.metadata().getOrDefault("CommittedBlocks", "");
                      if (!meta.isBlank()) {
@@ -2564,7 +2649,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                  });
         }
 
-        if ("uncommitted".equals(listType) || "all".equals(listType)) {
+        if (("uncommitted".equals(listType) || "all".equals(listType))
+                && !request.queryParams().containsKey("snapshot")) {
             String stagePrefix = blockStagingPrefix(request.accountName(), containerName, blobName);
             store.scan(k -> k.startsWith(stagePrefix)).stream()
                  .map(so -> new BlobModels.BlockItem(so.key(), (long) so.data().length))
@@ -2713,6 +2799,22 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private static String objKey(String accountName, String containerName, String blobName) {
         return accountName + "/" + containerName + "/" + blobName;
+    }
+
+    private static String snapshotKey(String accountName, String containerName, String blobName, String snapshot) {
+        return snapshotPrefix(accountName, containerName, blobName) + snapshot;
+    }
+
+    private static String snapshotPrefix(String accountName, String containerName, String blobName) {
+        return SNAPSHOT_PREFIX + objKey(accountName, containerName, blobName) + ":";
+    }
+
+    private List<String> snapshotKeys(String accountName, String containerName, String blobName) {
+        String containerPrefix = SNAPSHOT_PREFIX + accountName + "/" + containerName + "/";
+        return store.keys().stream()
+                .filter(key -> key.startsWith(containerPrefix))
+                .filter(key -> store.get(key).map(StoredObject::key).filter(blobName::equals).isPresent())
+                .toList();
     }
 
     private static Map<String, String> readUserMetadata(AzureRequest request) {
