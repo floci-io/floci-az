@@ -1276,9 +1276,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             String pkEnc = encodeKey(pk);
             String exact = docKey(req.accountName(), dbId, collId, pkEnc, docId);
             Optional<StoredObject> found = liveDoc(store.get(exact), defaultTtl);
-            if (found.isPresent()) return found.get();
+            if (found.isPresent() || req.headers().getHeaderString("x-ms-documentdb-partitionkey") != null) {
+                return found.orElse(null);
+            }
         }
-        // Fallback: scan (handles missing PK header or cross-partition reads)
+        // Only requests without a partition header may use the legacy unscoped lookup.
         String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
         return liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
                 .stream().findFirst(), defaultTtl).orElse(null);
