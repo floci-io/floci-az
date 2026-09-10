@@ -20,6 +20,31 @@ import static org.mockito.Mockito.*;
 
 class ServiceBusMessageLockSupportTest {
     @Test
+    void failedCancellationClosesConnectionAndRejectsStaleSettlement() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            var message = fixture.reference.getMessage();
+            doThrow(new RuntimeException("temporary broker failure"))
+                    .when(fixture.session).cancel(fixture.consumer, message, true);
+            fixture.track(false);
+            fixture.expiry.get().run();
+            assertFalse(fixture.settle());
+            verify(fixture.connection).close(any(org.apache.qpid.proton.amqp.transport.ErrorCondition.class));
+            verify(fixture.connection).destroy();
+        }
+    }
+
+    @Test
+    void intermediateReceivedStateDoesNotCancelExpiry() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            var message = fixture.reference.getMessage();
+            fixture.track(false);
+            when(fixture.delivery.getRemoteState()).thenReturn(new org.apache.qpid.proton.amqp.messaging.Received());
+            assertTrue(fixture.settle());
+            fixture.expiry.get().run();
+            verify(fixture.session).cancel(fixture.consumer, message, true);
+        }
+    }
+    @Test
     void expiryReleasesMessageAndRejectsStaleSettlement() throws Exception {
         try (Fixture fixture = new Fixture()) {
             fixture.track(false);

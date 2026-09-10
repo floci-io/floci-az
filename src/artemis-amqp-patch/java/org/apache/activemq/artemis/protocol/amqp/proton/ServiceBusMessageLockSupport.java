@@ -15,6 +15,7 @@ import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.UnsignedInteger;
 import org.apache.qpid.proton.amqp.messaging.Header;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
+import org.apache.qpid.proton.amqp.messaging.Outcome;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Delivery;
@@ -78,7 +79,7 @@ public final class ServiceBusMessageLockSupport {
          rejectExpired(delivery);
          return false;
       }
-      if (delivery.getRemoteState() != null) {
+      if (delivery.getRemoteState() instanceof Outcome) {
          locks.remove(delivery);
          lock.timer.cancel(false);
       }
@@ -94,12 +95,19 @@ public final class ServiceBusMessageLockSupport {
          return;
       }
       try {
-         session.cancel(lock.consumer, lock.reference.getMessage(), true);
          // Retain the AMQP delivery until the peer settles it, so a late disposition gets
          // MessageLockLost instead of falling back to an unsupported management request.
          delivery.setContext(EXPIRED);
+         session.cancel(lock.consumer, lock.reference.getMessage(), true);
       } catch (Exception e) {
          LOGGER.error("Could not release an expired Service Bus message lock", e);
+         // Cancellation may have partially succeeded. Retrying by message ID could cancel
+         // a newer delivery to this consumer. Connection teardown releases its remaining references.
+         locks.keySet().forEach(pending -> pending.setContext(EXPIRED));
+         close();
+         connection.close(new ErrorCondition(org.apache.qpid.proton.amqp.transport.AmqpError.INTERNAL_ERROR,
+            "Could not release an expired message lock"));
+         connection.destroy();
       }
    }
 
