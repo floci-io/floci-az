@@ -45,6 +45,16 @@ public sealed class CosmosBracketPropertyCompatibilityTests
                 ids.AddRange(page.Select(item => item.Value<string>("id")!));
             }
             await Assert.That(ids).IsEquivalentTo(["declined"]);
+            await container.CreateItemAsync(new JObject
+            {
+                ["id"] = "quoted", ["pk"] = "event-c", ["a\"b"] = 7, ["a.b"] = 8
+            }, new PartitionKey("event-c"), cancellationToken: cancellationToken);
+            using FeedIterator<JObject> quoted = container.GetItemQueryIterator<JObject>(new QueryDefinition(
+                "SELECT c[\"a\\\"b\"], c[\"a.b\"] FROM c WHERE c.id = @id")
+                .WithParameter("@id", "quoted"));
+            FeedResponse<JObject> quotedPage = await quoted.ReadNextAsync(cancellationToken);
+            await Assert.That(quotedPage.Single().Value<int>("a\"b")).IsEqualTo(7);
+            await Assert.That(quotedPage.Single().Value<int>("a.b")).IsEqualTo(8);
         }
         finally
         {

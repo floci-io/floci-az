@@ -12,6 +12,33 @@ class CosmosBracketPropertyTest {
     private final CosmosQueryEngine engine = new CosmosQueryEngine();
 
     @Test
+    void escapedKeyQueriesPreserveBackslashesInParameters() {
+        String value = "C:\\folder\\";
+        var document = Map.<String, Object>of("a\"b", 7, "path", value);
+        assertEquals(List.of(7), engine.execute(
+                "SELECT VALUE c[\"a\\\"b\"] FROM c WHERE c.path = @path ORDER BY c.path",
+                List.of(Map.of("name", "@path", "value", value)), List.of(document)).items());
+    }
+
+    @Test
+    void bracketProjectionUsesTheDecodedPropertyName() {
+        var document = Map.<String, Object>of("a.b", 7, "map", Map.of("user-id", 8));
+        assertEquals(List.of(Map.of("a.b", 7, "user-id", 8)), engine.execute(
+                "SELECT c[\"a.b\"], c.map[\"user-id\"] FROM c", List.of(), List.of(document)).items());
+    }
+
+    @Test
+    void escapedBracketKeysSurviveFullQueryScanning() {
+        var document = Map.<String, Object>of("a\"b", 7, "id", "item");
+        assertEquals(List.of(7), engine.execute(
+                "SELECT VALUE c[\"a\\\"b\"] FROM c WHERE c.id = @id",
+                List.of(Map.of("name", "@id", "value", "item")), List.of(document)).items());
+        assertEquals(List.of(Map.of("value", 7, "id", "item")), engine.execute(
+                "SELECT c[\"a\\\"b\"] AS value, c.id AS id FROM c WHERE c.id = 'item'",
+                List.of(), List.of(document)).items());
+    }
+
+    @Test
     void correlatedAliasLongerThanTenCharactersKeepsItsBinding() {
         var documents = List.of(Map.<String, Object>of("actions", List.of(Map.of("type", "rsvp"))));
         assertEquals(documents, engine.execute(

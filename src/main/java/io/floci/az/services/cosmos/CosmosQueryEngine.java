@@ -39,6 +39,7 @@ import java.util.stream.*;
 public class CosmosQueryEngine {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String QUOTED_STRING = "'(?:\\\\.|''|[^'\\\\])*'|\"(?:\\\\.|\"\"|[^\"\\\\])*\"";
 
     public record OrderByField(String path, boolean asc) {}
 
@@ -585,6 +586,11 @@ public class CosmosQueryEngine {
                 alias = field.substring(asIdx + 2).trim();
             } else {
                 expr = field;
+                List<String> members = propertyNames(expr);
+                if (expr.contains("[") && !members.isEmpty()) {
+                    result.put(members.getLast(), resolveExpr(doc, expr));
+                    continue;
+                }
                 if (expr.contains("(")) {
                     Matcher fm = Pattern.compile("(?i)(\\w+)\\s*\\(").matcher(expr);
                     alias = fm.find() ? fm.group(1).toLowerCase() : expr;
@@ -687,7 +693,7 @@ public class CosmosQueryEngine {
             }
         }
         // Match complete parameter tokens, never text within literals or replacement values.
-        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|@[A-Za-z_][A-Za-z0-9_]*")
+        Matcher tokens = Pattern.compile(QUOTED_STRING + "|@[A-Za-z_][A-Za-z0-9_]*")
                 .matcher(sql);
         return tokens.replaceAll(match -> Matcher.quoteReplacement(
                 literals.getOrDefault(match.group(), match.group())));
@@ -709,7 +715,7 @@ public class CosmosQueryEngine {
         // re-enter string mode), so keyword detection — ORDER BY, AND/OR, IN —
         // is not swallowed by a value such as "Alice's".  A backslash escape
         // ('\'') would leave the scanners stuck inside a phantom string.
-        if (value instanceof String s) return "'" + s.replace("'", "''") + "'";
+        if (value instanceof String s) return "'" + s.replace("\\", "\\\\").replace("'", "''") + "'";
         if (value instanceof Boolean b) return b.toString();
         return String.valueOf(value);
     }
@@ -735,14 +741,27 @@ public class CosmosQueryEngine {
         if (s == null || s.length() < 2) return s;
         char f = s.charAt(0), l = s.charAt(s.length() - 1);
         if ((f == '\'' && l == '\'') || (f == '"' && l == '"')) {
-            return s.substring(1, s.length() - 1)
-                    .replace("''", "'").replace("\\'", "'").replace("\\\"", "\"");
+            StringBuilder decoded = new StringBuilder();
+            for (int i = 1; i < s.length() - 1; i++) {
+                char current = s.charAt(i);
+                if (i + 1 < s.length() - 1) {
+                    char next = s.charAt(i + 1);
+                    if ((current == f && next == f)
+                            || (current == '\\' && (next == '\\' || next == '\'' || next == '"'))) {
+                        decoded.append(next);
+                        i++;
+                        continue;
+                    }
+                }
+                decoded.append(current);
+            }
+            return decoded.toString();
         }
         return s;
     }
 
     private String normalizeWhitespace(String s) {
-        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|\\s+").matcher(s.trim());
+        Matcher tokens = Pattern.compile(QUOTED_STRING + "|\\s+").matcher(s.trim());
         return tokens.replaceAll(match -> Matcher.quoteReplacement(
                 Character.isWhitespace(match.group().charAt(0)) ? " " : match.group()));
     }
@@ -760,7 +779,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < expr.length(); i++) {
             char c = expr.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
                 continue;
             }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
@@ -785,7 +804,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < upperSql.length(); i++) {
             char c = upperSql.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
                 continue;
             }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
@@ -821,7 +840,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
             } else if (c == '\'' || c == '"') {
                 inStr = true; strCh = c;
             } else if (c == '(') { parenthesisDepth++;
@@ -896,7 +915,7 @@ public class CosmosQueryEngine {
         char strCh = 0;
         for (int i = 0; i < expr.length(); i++) {
             char c = expr.charAt(i);
-            if (inStr) { if (c == strCh) inStr = false; continue; }
+            if (inStr) { if (c == '\\') { i++; } else if (c == strCh) { inStr = false; } continue; }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
             if (c == '(') { parenIdx = i; break; }
         }
