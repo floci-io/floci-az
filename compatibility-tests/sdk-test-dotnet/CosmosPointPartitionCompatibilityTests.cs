@@ -47,6 +47,14 @@ public sealed class CosmosPointPartitionCompatibilityTests
             using ResponseMessage alice = await container.ReadItemStreamAsync("same-id", new PartitionKey("alice"),
                 cancellationToken: cancellationToken);
             await Assert.That(alice.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            await container.CreateItemAsync(new { id = "empty", pk = "" }, new PartitionKey(""),
+                cancellationToken: cancellationToken);
+            using ResponseMessage nullRead = await container.ReadItemStreamAsync("empty", PartitionKey.Null,
+                cancellationToken: cancellationToken);
+            await Assert.That(nullRead.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+            using ResponseMessage nullDelete = await container.DeleteItemStreamAsync("empty", PartitionKey.Null,
+                cancellationToken: cancellationToken);
+            await Assert.That(nullDelete.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         }
         finally
         {

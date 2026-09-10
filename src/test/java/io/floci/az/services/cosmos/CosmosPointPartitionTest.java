@@ -61,6 +61,30 @@ class CosmosPointPartitionTest {
                 .post(DOCS).then().statusCode(201);
     }
 
+    @Test
+    void typedPartitionValuesCannotReadOrDeleteStringPartitions() {
+        create("");
+        create("42");
+        for (String partition : new String[] {"[null]", "[42]"}) {
+            given().header("x-ms-documentdb-partitionkey", partition)
+                    .get(DOCS + "/same-id").then().statusCode(404);
+            given().header("x-ms-documentdb-partitionkey", partition)
+                    .delete(DOCS + "/same-id").then().statusCode(404);
+        }
+        given().header("x-ms-documentdb-partitionkey", "[\"\"]")
+                .get(DOCS + "/same-id").then().statusCode(200);
+        given().header("x-ms-documentdb-partitionkey", "[\"42\"]")
+                .get(DOCS + "/same-id").then().statusCode(200);
+    }
+
+    @Test
+    void equivalentNumericPartitionRepresentationsStillMatch() {
+        given().contentType("application/json").body(Map.of("id", "numeric", "pk", 42))
+                .post(DOCS).then().statusCode(201);
+        given().header("x-ms-documentdb-partitionkey", "[42.0]")
+                .get(DOCS + "/numeric").then().statusCode(200);
+    }
+
     private void assertAliceExists() {
         given().header("x-ms-documentdb-partitionkey", "[\"alice\"]")
                 .get(DOCS + "/same-id").then().statusCode(200).body("pk", is("alice"));
