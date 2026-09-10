@@ -747,6 +747,59 @@ public class BlobServiceTest {
     }
 
     @Test
+    void snapshotDeletionDoesNotMatchColonNamedSiblingBlobs() {
+        String siblingBlob = BLOB + ":sibling";
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("base")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("sibling")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, siblingBlob);
+
+        String siblingSnapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, siblingBlob)
+            .then()
+            .statusCode(201)
+            .extract()
+            .header("x-ms-snapshot");
+
+        given()
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, siblingBlob, siblingSnapshot)
+            .then()
+            .statusCode(200)
+            .body(equalTo("sibling"));
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("base")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-delete-snapshots", "only")
+            .delete("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(202);
+
+        given()
+            .get("/{account}/{container}/{blob}?snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, siblingBlob, siblingSnapshot)
+            .then()
+            .statusCode(200)
+            .body(equalTo("sibling"));
+    }
+
+    @Test
     void deletingContainerRemovesSnapshots() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

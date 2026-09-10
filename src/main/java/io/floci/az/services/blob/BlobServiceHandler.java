@@ -2131,10 +2131,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             if (!deletingSnapshot) {
-                String snapshotPrefix = snapshotPrefix(request.accountName(), containerName, blobName);
-                List<String> snapshots = store.keys().stream()
-                        .filter(snapshotKey -> snapshotKey.startsWith(snapshotPrefix))
-                        .toList();
+                List<String> snapshots = snapshotKeys(request.accountName(), containerName, blobName);
                 if (!snapshots.isEmpty() && deleteSnapshots == null) {
                     return new AzureErrorResponse("SnapshotsPresent",
                             "The blob has snapshots and cannot be deleted without specifying x-ms-delete-snapshots.")
@@ -2810,6 +2807,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private static String snapshotPrefix(String accountName, String containerName, String blobName) {
         return SNAPSHOT_PREFIX + objKey(accountName, containerName, blobName) + ":";
+    }
+
+    private List<String> snapshotKeys(String accountName, String containerName, String blobName) {
+        String containerPrefix = SNAPSHOT_PREFIX + accountName + "/" + containerName + "/";
+        return store.keys().stream()
+                .filter(key -> key.startsWith(containerPrefix))
+                .filter(key -> store.get(key).map(StoredObject::key).filter(blobName::equals).isPresent())
+                .toList();
     }
 
     private static Map<String, String> readUserMetadata(AzureRequest request) {
