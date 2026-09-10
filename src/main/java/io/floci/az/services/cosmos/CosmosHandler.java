@@ -1288,7 +1288,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                 // numbers may have equivalent encodings, while null and strings remain distinct.
                 String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
                 return store.scan(key -> key.startsWith(prefix) && key.endsWith("|" + docId)).stream()
-                        .filter(object -> partition.test(parseData(object)))
+                        .filter(object -> {
+                            Map<String, Object> document = parseData(object);
+                            return docId.equals(document.get("id")) && partition.test(document);
+                        })
                         .map(object -> liveDoc(Optional.of(object), defaultTtl))
                         .flatMap(Optional::stream).findFirst().orElse(null);
             } catch (IllegalArgumentException e) {

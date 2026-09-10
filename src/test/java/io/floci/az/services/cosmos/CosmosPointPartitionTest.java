@@ -85,6 +85,16 @@ class CosmosPointPartitionTest {
                 .get(DOCS + "/numeric").then().statusCode(200);
     }
 
+    @Test
+    void scopedFallbackRequiresTheWholeDocumentId() {
+        given().contentType("application/json").body(Map.of("id", "prefix|missing", "pk", "alice"))
+                .post(DOCS).then().statusCode(201);
+        given().header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .get(DOCS + "/missing").then().statusCode(404);
+        given().header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .delete(DOCS + "/missing").then().statusCode(404);
+    }
+
     private void assertAliceExists() {
         given().header("x-ms-documentdb-partitionkey", "[\"alice\"]")
                 .get(DOCS + "/same-id").then().statusCode(200).body("pk", is("alice"));
