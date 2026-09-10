@@ -493,41 +493,49 @@ public class CosmosQueryEngine {
     // Field resolution
     // -----------------------------------------------------------------------
 
-    /**
-     * Strip the FROM-alias prefix from a dotted path: {@code "c.field"} → {@code "field"}.
-     * Shared with the composite-index ORDER BY matcher so validation and
-     * execution always agree on what a property path is.
-     */
+    private static final Pattern PROPERTY_ALIAS = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]{0,9}(?=[.\\[])");
+    private static final Pattern PROPERTY_MEMBER = Pattern.compile(
+            "(?:^|\\.)([a-zA-Z_][a-zA-Z0-9_]*)|\\[\\s*(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|''|[^'\\\\])*')\\s*]");
+
+    /** Strips the FROM alias, preserving quoted member names for property resolution. */
     static String stripAlias(String path) {
-        if (path.contains(".")) {
-            String[] parts = path.split("\\.", 2);
-            if (parts[0].matches("[a-zA-Z_][a-zA-Z0-9_]{0,9}")) {
-                return parts[1];
-            }
+        Matcher alias = PROPERTY_ALIAS.matcher(path);
+        if (alias.find()) {
+            int end = alias.end();
+            return path.substring(path.charAt(end) == '.' ? end + 1 : end);
         }
         return path;
     }
 
     Object resolve(Map<String, Object> doc, String path) {
-        String[] segments = path.split("\\.");
-        Object current;
-        int startIndex;
-        if (doc instanceof QueryScope scope && scope.hasBinding(segments[0])) {
-            current = scope.binding(segments[0]);
-            startIndex = 1;
-        } else {
-            segments = stripAlias(path).split("\\.");
-            current = doc;
-            startIndex = 0;
+        if (doc instanceof QueryScope scope && scope.hasBinding(path)) {
+            return scope.binding(path);
         }
-        for (int i = startIndex; i < segments.length; i++) {
-            if (current instanceof Map<?, ?> map) {
-                current = map.get(segments[i]);
-            } else {
+        Matcher alias = PROPERTY_ALIAS.matcher(path);
+        Object current = doc;
+        if (alias.find() && doc instanceof QueryScope scope && scope.hasBinding(alias.group())) {
+            current = scope.binding(alias.group());
+        }
+        String members = stripAlias(path);
+        Matcher member = PROPERTY_MEMBER.matcher(members);
+        int end = 0;
+        while (member.find()) {
+            if (member.start() != end || !(current instanceof Map<?, ?> map)) {
                 return null;
             }
+            String key = member.group(1);
+            if (key == null) {
+                String literal = member.group(2);
+                try {
+                    key = literal.startsWith("\"") ? MAPPER.readValue(literal, String.class) : stripQuotes(literal);
+                } catch (JsonProcessingException e) {
+                    return null;
+                }
+            }
+            current = map.get(key);
+            end = member.end();
         }
-        return current;
+        return end == members.length() && end > 0 ? current : null;
     }
 
     private static final class QueryScope extends LinkedHashMap<String, Object> {
