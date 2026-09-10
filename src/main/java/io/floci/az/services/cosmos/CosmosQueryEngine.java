@@ -493,9 +493,9 @@ public class CosmosQueryEngine {
     // Field resolution
     // -----------------------------------------------------------------------
 
-    private static final Pattern PROPERTY_ALIAS = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]{0,9}(?=[.\\[])");
+    private static final Pattern PROPERTY_ALIAS = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*(?=[.\\[])");
     private static final Pattern PROPERTY_MEMBER = Pattern.compile(
-            "(?:^|\\.)([a-zA-Z_][a-zA-Z0-9_]*)|\\[\\s*(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|''|[^'\\\\])*')\\s*]");
+            "(?:^|\\.)([a-zA-Z_][a-zA-Z0-9_-]*)|\\[\\s*(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|''|[^'\\\\])*')\\s*]");
 
     /** Strips the FROM alias, preserving quoted member names for property resolution. */
     static String stripAlias(String path) {
@@ -516,12 +516,25 @@ public class CosmosQueryEngine {
         if (alias.find() && doc instanceof QueryScope scope && scope.hasBinding(alias.group())) {
             current = scope.binding(alias.group());
         }
+        List<String> names = propertyNames(path);
+        for (String name : names) {
+            if (!(current instanceof Map<?, ?> map)) {
+                return null;
+            }
+            current = map.get(name);
+        }
+        return names.isEmpty() ? null : current;
+    }
+
+    /** Shared by evaluation and composite-index validation so quoted dots stay within a member. */
+    static List<String> propertyNames(String path) {
         String members = stripAlias(path);
         Matcher member = PROPERTY_MEMBER.matcher(members);
+        List<String> names = new ArrayList<>();
         int end = 0;
         while (member.find()) {
-            if (member.start() != end || !(current instanceof Map<?, ?> map)) {
-                return null;
+            if (member.start() != end) {
+                return List.of();
             }
             String key = member.group(1);
             if (key == null) {
@@ -529,13 +542,13 @@ public class CosmosQueryEngine {
                 try {
                     key = literal.startsWith("\"") ? MAPPER.readValue(literal, String.class) : stripQuotes(literal);
                 } catch (JsonProcessingException e) {
-                    return null;
+                    return List.of();
                 }
             }
-            current = map.get(key);
+            names.add(key);
             end = member.end();
         }
-        return end == members.length() && end > 0 ? current : null;
+        return end == members.length() ? names : List.of();
     }
 
     private static final class QueryScope extends LinkedHashMap<String, Object> {
@@ -718,7 +731,7 @@ public class CosmosQueryEngine {
      * escapes ({@code \'}, {@code \"}) for hand-written SQL.  Inverse of the
      * escaping in {@link #toLiteral}.
      */
-    private String stripQuotes(String s) {
+    private static String stripQuotes(String s) {
         if (s == null || s.length() < 2) return s;
         char f = s.charAt(0), l = s.charAt(s.length() - 1);
         if ((f == '\'' && l == '\'') || (f == '"' && l == '"')) {

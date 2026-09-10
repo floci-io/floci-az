@@ -12,6 +12,20 @@ class CosmosBracketPropertyTest {
     private final CosmosQueryEngine engine = new CosmosQueryEngine();
 
     @Test
+    void correlatedAliasLongerThanTenCharactersKeepsItsBinding() {
+        var documents = List.of(Map.<String, Object>of("actions", List.of(Map.of("type", "rsvp"))));
+        assertEquals(documents, engine.execute(
+                "SELECT * FROM c WHERE EXISTS(SELECT VALUE actionEntry FROM actionEntry IN c.actions "
+                        + "WHERE actionEntry[\"type\"] = 'rsvp')", List.of(), documents).items());
+    }
+
+    @Test
+    void orderByIndexPathsPreserveQuotedDots() {
+        assertEquals("/a.b", CosmosIndexingPolicy.normalizeOrderByPath("c[\"a.b\"]"));
+        assertEquals("/map/a.b/value", CosmosIndexingPolicy.normalizeOrderByPath("c.map['a.b'].value"));
+    }
+
+    @Test
     void erasureQueryFindsUsersPresentOnlyInTheRsvpVersionMap() {
         String userId = "eec725e5-b24c-48c1-b336-e599da1e6711";
         var documents = List.of(
