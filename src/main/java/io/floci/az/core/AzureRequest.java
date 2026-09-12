@@ -18,7 +18,8 @@ public record AzureRequest(
     boolean secure,          // true when the request arrived over HTTPS
     String host,             // host captured before async/blocking dispatch; may be null for direct/internal requests
     String remoteAddress,    // transport peer address; never derived from forwarded headers
-    String rawPath           // original encoded request path, without a leading slash
+    String rawPath,          // original encoded request path, without a leading slash
+    String rawQuery          // original encoded query string, without the leading "?"; null when absent
 ) {
 
     public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
@@ -26,7 +27,7 @@ public record AzureRequest(
                         Map<String, List<String>> queryParamsMulti, AuthContext authContext,
                         boolean secure) {
         this(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, queryParamsMulti, authContext, secure, null, null, resourcePath);
+             queryParams, queryParamsMulti, authContext, secure, null, null, resourcePath, null);
     }
 
     /**
@@ -38,7 +39,7 @@ public record AzureRequest(
                         HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
                         AuthContext authContext, boolean secure) {
         this(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, Map.of(), authContext, secure, null, null, resourcePath);
+             queryParams, Map.of(), authContext, secure, null, null, resourcePath, null);
     }
 
     /**
@@ -49,14 +50,14 @@ public record AzureRequest(
                         Map<String, List<String>> queryParamsMulti, AuthContext authContext, boolean secure,
                         String host) {
         this(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, queryParamsMulti, authContext, secure, host, null, resourcePath);
+             queryParams, queryParamsMulti, authContext, secure, host, null, resourcePath, null);
     }
 
     public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
                         HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
                         AuthContext authContext, boolean secure, String remoteAddress) {
         this(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, Map.of(), authContext, secure, null, remoteAddress, resourcePath);
+             queryParams, Map.of(), authContext, secure, null, remoteAddress, resourcePath, null);
     }
 
     /**
@@ -66,6 +67,6 @@ public record AzureRequest(
      */
     public AzureRequest withAuthContext(AuthContext resolved) {
         return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath);
+             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery);
     }
 }

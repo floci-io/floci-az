@@ -18,12 +18,14 @@ import java.net.URI;
 /**
  * Manages the lifecycle of the single shared {@code registry:2} container that backs every emulated
  * Azure Container Registry. There is one container per floci-az instance, started lazily on first use
- * and reused across all registries — mirroring the AWS ECR design in the sibling emulator.
+ * and reused across all registries, mirroring the AWS ECR design in the sibling emulator.
  *
  * <p>Registries are isolated within the shared registry by an internal repository prefix
- * ({@code {registryName}/{repo}}), so {@code loginServer} carries the registry name as a path segment:
- * {@code localhost:{port}/{registryName}}. The backing registry runs <b>anonymous</b> — admin
- * credentials are returned by the management plane but not enforced at the data plane.</p>
+ * ({@code {registryName}/{repo}}), which {@link AcrRegistryProxy} applies when it forwards requests
+ * from {@code {name}.azurecr.io}. The container's own port stays published, so
+ * {@code localhost:{port}/{registryName}/{repo}} keeps addressing the same storage directly. The
+ * backing registry runs <b>anonymous</b>: admin credentials are returned by the management plane
+ * but not enforced at the data plane.</p>
  */
 @ApplicationScoped
 public class AcrRegistryManager {
@@ -41,9 +43,9 @@ public class AcrRegistryManager {
     private final EmulatorConfig config;
 
     private volatile boolean started;
-    private volatile int hostPort;
     private volatile String containerId;
     private volatile String internalEndpoint;
+    private volatile int publishedPort;
 
     @Inject
     public AcrRegistryManager(ContainerBuilder containerBuilder,
@@ -88,7 +90,7 @@ public class AcrRegistryManager {
 
             ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
             this.containerId = info.containerId();
-            this.hostPort = chosenPort;
+            this.publishedPort = chosenPort;
 
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REGISTRY_PORT);
             if (containerDetector.isRunningInContainer()) {
@@ -103,12 +105,22 @@ public class AcrRegistryManager {
         }
     }
 
-    /** The path-prefixed {@code loginServer} for a registry (host[:port]/{registryName}). */
-    public String loginServer(String registryName) {
-        String host = containerDetector.isRunningInContainer()
-                ? sharedName() + ":" + REGISTRY_PORT
-                : "localhost:" + hostPort;
-        return host + "/" + registryName;
+    /**
+     * The shared registry's {@code host:port} as reachable from floci-az itself, or {@code null}
+     * before it has started. This is what the {@code /v2/} proxy forwards to.
+     */
+    public String dataPlaneEndpoint() {
+        return started ? internalEndpoint : null;
+    }
+
+    /**
+     * The host port the shared container publishes {@code registry:5000} on, or {@code 0} before it
+     * has started. Reported to clients as the registry resource's {@code localPort}, the way
+     * PostgreSQL and MySQL report theirs: {@code loginServer} names the Azure host, so it is the only
+     * thing that says which port serves the same storage anonymously.
+     */
+    public int publishedPort() {
+        return started ? publishedPort : 0;
     }
 
     /** Polls the shared registry's V2 base endpoint to detect readiness. */
@@ -127,10 +139,6 @@ public class AcrRegistryManager {
         } catch (IOException e) {
             return false;
         }
-    }
-
-    public boolean isStarted() {
-        return started;
     }
 
     /** Stops and removes the shared registry container (emulator shutdown). */

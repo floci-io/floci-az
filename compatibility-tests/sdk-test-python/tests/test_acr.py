@@ -1,13 +1,15 @@
 """Azure Container Registry compatibility test.
 
 Provisions a registry through the ARM management plane, then (when the backing
-``registry:2`` sidecar is reachable) pushes a minimal image through the standard
-Docker Registry HTTP API V2 and reads it back.
+``registry:2`` sidecar is reachable) pushes a minimal image anonymously through the
+container's own published port and reads it back.
 
-The data-plane assertions are skipped when the registry never becomes connectable
-(e.g. the emulator runs in mocked mode where ``loginServer`` is the cosmetic
-``{name}.azurecr.io``). Run floci-az with ``floci-az.services.acr.mocked=false``
-to exercise them.
+``loginServer`` is ``{name}.azurecr.io``, which needs name resolution and TLS, so
+Azure-native clients are covered by the Azure CLI suite. What this asserts is the
+convenience path: the shared container stays published and anonymous, the registry
+name is the repository prefix there, and ``properties.localPort`` reports the port it
+was published on. The data-plane assertions are skipped when the container is not
+reachable (mocked mode, or no Docker).
 """
 import hashlib
 import json
@@ -22,6 +24,12 @@ SUB = os.environ.get("FLOCI_AZ_SUBSCRIPTION", "00000000-0000-0000-0000-000000000
 RG = "sdk-test-rg-acr"
 ACR = "sdktestacr"
 API = "2025-11-01"
+
+# Hosts the shared registry container may answer on. The port comes from the registry
+# resource's localPort, so only the host has to be guessed: the container name on the compat
+# Docker network, or the loopback address for a local run. ACR_REGISTRY_ENDPOINT overrides the
+# whole host:port when neither applies.
+REGISTRY_HOSTS = ["floci-az-acr-registry", "localhost"]
 
 ARM_BASE = (
     f"{EMULATOR_BASE}/subscriptions/{SUB}/resourceGroups/{RG}"
@@ -64,7 +72,7 @@ def provisioned_registry():
 
 def test_arm_response_shape(provisioned_registry):
     props = provisioned_registry
-    assert props["loginServer"]
+    assert props["loginServer"] == f"{ACR}.azurecr.io"
     assert props["adminUserEnabled"] is True
     assert props["username"] == ACR
     assert props["password"]
@@ -84,27 +92,51 @@ def test_check_name_availability():
     assert "nameAvailable" in taken
 
 
-def _registry_reachable(host):
+def _reachable(endpoint):
     try:
-        r = requests.get(f"http://{host}/v2/", timeout=3)
-        return r.status_code in (200, 401)
+        return requests.get(f"http://{endpoint}/v2/", timeout=3).status_code in (200, 401)
     except requests.RequestException:
         return False
 
 
-def test_push_and_pull_via_registry_v2(provisioned_registry):
-    props = provisioned_registry
-    login = props["loginServer"]
-    # Shared registry: loginServer is host:port/{registryName}; the V2 API is at the host root and
-    # the registry name is the repo prefix. In mocked mode loginServer is {name}.azurecr.io (no path).
-    if "/" not in login:
-        pytest.skip("registry runs in mocked mode (no data plane)")
-    host, prefix = login.split("/", 1)
-    if not _registry_reachable(host):
+def _published_registry(props):
+    """The shared container's published endpoint, or None when it is not running.
+
+    loginServer is the Azure host name, so it does not carry the port. properties.localPort
+    does, the same way a PostgreSQL or MySQL server reports the port its container published.
+    """
+    override = os.environ.get("ACR_REGISTRY_ENDPOINT")
+    if override:
+        return override if _reachable(override) else None
+
+    port = props.get("localPort")
+    if not port:
+        return None
+    for host in REGISTRY_HOSTS:
+        endpoint = f"{host}:{port}"
+        if _reachable(endpoint):
+            return endpoint
+    return None
+
+
+def test_arm_response_reports_the_published_port(provisioned_registry):
+    """localPort is how a client finds the anonymous port, now that loginServer cannot say."""
+    port = provisioned_registry.get("localPort")
+    if port is None:
+        pytest.skip("registry sidecar not running (mocked mode or no Docker)")
+    assert isinstance(port, int) and port > 0
+
+
+def test_push_and_pull_anonymously_via_the_published_port(provisioned_registry):
+    """The published port keeps working without authenticating, over plain HTTP."""
+    host = _published_registry(provisioned_registry)
+    if host is None:
         pytest.skip("registry sidecar not reachable (mocked mode or no Docker)")
 
     base = f"http://{host}/v2"
-    repo = f"{prefix}/sdk/minimal"
+    # On the published port the registry name is the repository prefix, the same storage
+    # {ACR}.azurecr.io/v2/sdk/minimal/... addresses through the emulator.
+    repo = f"{ACR}/sdk/minimal"
 
     # Push a config blob, then a manifest referencing it (a minimal but valid image).
     config = b"{}"

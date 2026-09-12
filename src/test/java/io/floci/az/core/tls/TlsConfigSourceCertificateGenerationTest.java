@@ -86,8 +86,10 @@ class TlsConfigSourceCertificateGenerationTest {
         assertTrue(sans.contains("0.0.0.0"));
         assertTrue(sans.contains("host.docker.internal"),
             "SANs should include 'host.docker.internal' so function containers can reach floci-az on the host");
-        assertEquals(8, sans.size(),
-            "Default cert should have exactly 8 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, host.docker.internal)");
+        assertTrue(sans.contains("*.azurecr.io"),
+            "SANs should include '*.azurecr.io' so clients reach a registry on its Azure login server");
+        assertEquals(9, sans.size(),
+            "Default cert should have exactly 9 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, *.azurecr.io, host.docker.internal)");
     }
 
     @Test

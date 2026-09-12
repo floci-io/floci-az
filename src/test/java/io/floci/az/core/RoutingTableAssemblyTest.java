@@ -41,7 +41,8 @@ class RoutingTableAssemblyTest {
         Map.entry(".queue.core.windows.net", "queue"),
         Map.entry(".table.core.windows.net", "table"),
         Map.entry(".servicebus.windows.net", "servicebus"),
-        Map.entry(".azurecontainerapps.io", "containerapps")
+        Map.entry(".azurecontainerapps.io", "containerapps"),
+        Map.entry(".azurecr.io", "acr")
     );
 
     /** A4's ACCOUNT_SUFFIX_ROUTES, verbatim (pre-sort). */

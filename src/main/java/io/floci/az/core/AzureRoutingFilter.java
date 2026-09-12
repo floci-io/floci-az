@@ -95,6 +95,7 @@ public class AzureRoutingFilter {
         ContainerRequestContext requestContext,
         String path,
         String rawPath,
+        String rawQuery,
         HttpHeaders headers,
         String host,
         boolean secure,
@@ -327,6 +328,9 @@ public class AzureRoutingFilter {
         // Capture context before switching threads
         String path0 = requestContext.getUriInfo().getPath();
         String rawPath0 = serverRequest.path();
+        // The query exactly as the client sent it. Proxying handlers forward it verbatim rather
+        // than re-encoding the decoded parameters, which would not round-trip opaque values.
+        String rawQuery0 = serverRequest.query();
         HttpHeaders headers = httpHeaders;
         // Capture the request authority/host now (JAX-RS request scope may not propagate to the
         // blocking thread). Under HTTP/2 the wire protocol uses :authority instead of a Host
@@ -345,13 +349,14 @@ public class AzureRoutingFilter {
 
         return Uni.createFrom().completionStage(
             vertx.executeBlocking(() -> doFilter(
-                    requestContext, path0, rawPath0, headers, capturedHost, remoteAddress))
+                    requestContext, path0, rawPath0, rawQuery0, headers, capturedHost, remoteAddress))
                  .toCompletionStage()
         );
     }
 
     private Response doFilter(ContainerRequestContext requestContext, String decodedPath, String rawPath,
-                              HttpHeaders headers, String capturedHost, String remoteAddress) {
+                              String rawQuery, HttpHeaders headers, String capturedHost,
+                              String remoteAddress) {
         String path = trimLeadingSlash(decodedPath);
         String encodedPath = trimLeadingSlash(rawPath);
 
@@ -361,7 +366,7 @@ public class AzureRoutingFilter {
 
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
-        RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, headers,
+        RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, rawQuery, headers,
             hostWithoutPort(capturedHost), requestContext.getSecurityContext().isSecure(), remoteAddress);
 
         for (Function<RoutingContext, Outcome> stage : stages) {
@@ -743,7 +748,7 @@ public class AzureRoutingFilter {
         }
         AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
             ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
-            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath());
+            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery());
         LOGGER.infof("Dispatching %s request to %s: %s %s", label,
             handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
         return new Handled(handler.get().handle(request));
@@ -760,7 +765,7 @@ public class AzureRoutingFilter {
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
             ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(),
-            ctx.host(), ctx.remoteAddress(), ctx.rawPath());
+            ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery());
         return request.withAuthContext(authPipeline.resolve(request));
     }
 

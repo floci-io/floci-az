@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.FormBody;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.services.entra.EntraModels.AppRegistration;
 import io.floci.az.services.entra.EntraModels.AuthorizationCode;
@@ -14,9 +15,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -25,7 +24,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -361,27 +359,7 @@ public class EntraServiceHandler implements AzureServiceHandler {
     }
 
     private Map<String, String> parseForm(AzureRequest request) {
-        Map<String, String> result = new HashMap<>();
-        byte[] bytes;
-        try {
-            bytes = request.bodyStream() == null ? new byte[0] : request.bodyStream().readAllBytes();
-        } catch (IOException e) {
-            return result;
-        }
-        String body = new String(bytes, StandardCharsets.UTF_8);
-        if (body.isBlank()) {
-            return result;
-        }
-        for (String pair : body.split("&")) {
-            int eq = pair.indexOf('=');
-            if (eq < 0) {
-                continue;
-            }
-            String key = URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8);
-            String value = URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
-            result.put(key, value);
-        }
-        return result;
+        return FormBody.parse(request.bodyStream());
     }
 
     /** First path segment is the tenant; defaults to {@code common} for safety. */
