@@ -39,6 +39,7 @@ import java.util.stream.*;
 public class CosmosQueryEngine {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String QUOTED_STRING = "'(?:\\\\.|''|[^'\\\\])*'|\"(?:\\\\.|\"\"|[^\"\\\\])*\"";
 
     public record OrderByField(String path, boolean asc) {}
 
@@ -493,41 +494,62 @@ public class CosmosQueryEngine {
     // Field resolution
     // -----------------------------------------------------------------------
 
-    /**
-     * Strip the FROM-alias prefix from a dotted path: {@code "c.field"} → {@code "field"}.
-     * Shared with the composite-index ORDER BY matcher so validation and
-     * execution always agree on what a property path is.
-     */
+    private static final Pattern PROPERTY_ALIAS = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*(?=[.\\[])");
+    private static final Pattern PROPERTY_MEMBER = Pattern.compile(
+            "(?:^|\\.)([a-zA-Z_][a-zA-Z0-9_-]*)|\\[\\s*(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|''|[^'\\\\])*')\\s*]");
+
+    /** Strips the FROM alias, preserving quoted member names for property resolution. */
     static String stripAlias(String path) {
-        if (path.contains(".")) {
-            String[] parts = path.split("\\.", 2);
-            if (parts[0].matches("[a-zA-Z_][a-zA-Z0-9_]{0,9}")) {
-                return parts[1];
-            }
+        Matcher alias = PROPERTY_ALIAS.matcher(path);
+        if (alias.find()) {
+            int end = alias.end();
+            return path.substring(path.charAt(end) == '.' ? end + 1 : end);
         }
         return path;
     }
 
     Object resolve(Map<String, Object> doc, String path) {
-        String[] segments = path.split("\\.");
-        Object current;
-        int startIndex;
-        if (doc instanceof QueryScope scope && scope.hasBinding(segments[0])) {
-            current = scope.binding(segments[0]);
-            startIndex = 1;
-        } else {
-            segments = stripAlias(path).split("\\.");
-            current = doc;
-            startIndex = 0;
+        if (doc instanceof QueryScope scope && scope.hasBinding(path)) {
+            return scope.binding(path);
         }
-        for (int i = startIndex; i < segments.length; i++) {
-            if (current instanceof Map<?, ?> map) {
-                current = map.get(segments[i]);
-            } else {
+        Matcher alias = PROPERTY_ALIAS.matcher(path);
+        Object current = doc;
+        if (alias.find() && doc instanceof QueryScope scope && scope.hasBinding(alias.group())) {
+            current = scope.binding(alias.group());
+        }
+        List<String> names = propertyNames(path);
+        for (String name : names) {
+            if (!(current instanceof Map<?, ?> map)) {
                 return null;
             }
+            current = map.get(name);
         }
-        return current;
+        return names.isEmpty() ? null : current;
+    }
+
+    /** Shared by evaluation and composite-index validation so quoted dots stay within a member. */
+    static List<String> propertyNames(String path) {
+        String members = stripAlias(path);
+        Matcher member = PROPERTY_MEMBER.matcher(members);
+        List<String> names = new ArrayList<>();
+        int end = 0;
+        while (member.find()) {
+            if (member.start() != end) {
+                return List.of();
+            }
+            String key = member.group(1);
+            if (key == null) {
+                String literal = member.group(2);
+                try {
+                    key = literal.startsWith("\"") ? MAPPER.readValue(literal, String.class) : stripQuotes(literal);
+                } catch (JsonProcessingException e) {
+                    return List.of();
+                }
+            }
+            names.add(key);
+            end = member.end();
+        }
+        return end == members.length() ? names : List.of();
     }
 
     private static final class QueryScope extends LinkedHashMap<String, Object> {
@@ -564,6 +586,11 @@ public class CosmosQueryEngine {
                 alias = field.substring(asIdx + 2).trim();
             } else {
                 expr = field;
+                List<String> members = propertyNames(expr);
+                if (expr.contains("[") && !members.isEmpty()) {
+                    result.put(members.getLast(), resolveExpr(doc, expr));
+                    continue;
+                }
                 if (expr.contains("(")) {
                     Matcher fm = Pattern.compile("(?i)(\\w+)\\s*\\(").matcher(expr);
                     alias = fm.find() ? fm.group(1).toLowerCase() : expr;
@@ -666,7 +693,7 @@ public class CosmosQueryEngine {
             }
         }
         // Match complete parameter tokens, never text within literals or replacement values.
-        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|@[A-Za-z_][A-Za-z0-9_]*")
+        Matcher tokens = Pattern.compile(QUOTED_STRING + "|@[A-Za-z_][A-Za-z0-9_]*")
                 .matcher(sql);
         return tokens.replaceAll(match -> Matcher.quoteReplacement(
                 literals.getOrDefault(match.group(), match.group())));
@@ -688,7 +715,7 @@ public class CosmosQueryEngine {
         // re-enter string mode), so keyword detection — ORDER BY, AND/OR, IN —
         // is not swallowed by a value such as "Alice's".  A backslash escape
         // ('\'') would leave the scanners stuck inside a phantom string.
-        if (value instanceof String s) return "'" + s.replace("'", "''") + "'";
+        if (value instanceof String s) return "'" + s.replace("\\", "\\\\").replace("'", "''") + "'";
         if (value instanceof Boolean b) return b.toString();
         return String.valueOf(value);
     }
@@ -710,18 +737,31 @@ public class CosmosQueryEngine {
      * escapes ({@code \'}, {@code \"}) for hand-written SQL.  Inverse of the
      * escaping in {@link #toLiteral}.
      */
-    private String stripQuotes(String s) {
+    private static String stripQuotes(String s) {
         if (s == null || s.length() < 2) return s;
         char f = s.charAt(0), l = s.charAt(s.length() - 1);
         if ((f == '\'' && l == '\'') || (f == '"' && l == '"')) {
-            return s.substring(1, s.length() - 1)
-                    .replace("''", "'").replace("\\'", "'").replace("\\\"", "\"");
+            StringBuilder decoded = new StringBuilder();
+            for (int i = 1; i < s.length() - 1; i++) {
+                char current = s.charAt(i);
+                if (i + 1 < s.length() - 1) {
+                    char next = s.charAt(i + 1);
+                    if ((current == f && next == f)
+                            || (current == '\\' && (next == '\\' || next == '\'' || next == '"'))) {
+                        decoded.append(next);
+                        i++;
+                        continue;
+                    }
+                }
+                decoded.append(current);
+            }
+            return decoded.toString();
         }
         return s;
     }
 
     private String normalizeWhitespace(String s) {
-        Matcher tokens = Pattern.compile("'(?:(?:'')|[^'])*'|\"(?:(?:\"\")|[^\"])*\"|\\s+").matcher(s.trim());
+        Matcher tokens = Pattern.compile(QUOTED_STRING + "|\\s+").matcher(s.trim());
         return tokens.replaceAll(match -> Matcher.quoteReplacement(
                 Character.isWhitespace(match.group().charAt(0)) ? " " : match.group()));
     }
@@ -739,7 +779,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < expr.length(); i++) {
             char c = expr.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
                 continue;
             }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
@@ -764,7 +804,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < upperSql.length(); i++) {
             char c = upperSql.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
                 continue;
             }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
@@ -800,7 +840,7 @@ public class CosmosQueryEngine {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             if (inStr) {
-                if (c == strCh) inStr = false;
+                if (c == '\\') { i++; } else if (c == strCh) { inStr = false; }
             } else if (c == '\'' || c == '"') {
                 inStr = true; strCh = c;
             } else if (c == '(') { parenthesisDepth++;
@@ -875,7 +915,7 @@ public class CosmosQueryEngine {
         char strCh = 0;
         for (int i = 0; i < expr.length(); i++) {
             char c = expr.charAt(i);
-            if (inStr) { if (c == strCh) inStr = false; continue; }
+            if (inStr) { if (c == '\\') { i++; } else if (c == strCh) { inStr = false; } continue; }
             if (c == '\'' || c == '"') { inStr = true; strCh = c; continue; }
             if (c == '(') { parenIdx = i; break; }
         }
