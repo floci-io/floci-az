@@ -42,6 +42,7 @@ public class TlsConfigSource implements ConfigSource {
     private static final Logger LOG = Logger.getLogger(TlsConfigSource.class);
 
     private static final String SELF_SIGNED_CERT_NAME     = "floci-az-selfsigned.crt";
+    private static final String SELF_SIGNED_CA_NAME       = "floci-az-selfsigned-ca.crt";
     private static final String SELF_SIGNED_KEY_NAME      = "floci-az-selfsigned.key";
     private static final String SELF_SIGNED_METADATA_NAME = "floci-az-selfsigned.metadata.json";
     private static final String TLS_DIR = "tls";
@@ -74,30 +75,37 @@ public class TlsConfigSource implements ConfigSource {
         String selfSigned     = resolveProperty("floci-az.tls.self-signed", "true");
         String persistentPath = resolveProperty("floci-az.storage.persistent-path", "./data");
 
+        // The PEM served at GET /_floci/tls-cert (the client trust anchor): the generated CA in
+        // self-signed mode, or the user-provided cert file itself.
+        String anchorPath = null;
+
         if (!certPath.isBlank() && !keyPath.isBlank()) {
             validateFileExists(certPath, "TLS certificate");
             validateFileExists(keyPath, "TLS private key");
+            anchorPath = certPath;
             LOG.infov("TLS: using user-provided certificate: {0}", certPath);
         } else if ("true".equalsIgnoreCase(selfSigned)) {
             Path tlsDir   = Path.of(persistentPath, TLS_DIR);
             Path certFile = tlsDir.resolve(SELF_SIGNED_CERT_NAME);
+            Path caFile   = tlsDir.resolve(SELF_SIGNED_CA_NAME);
             Path keyFile  = tlsDir.resolve(SELF_SIGNED_KEY_NAME);
 
             List<String> customHostnames = extractCustomHostnames();
             List<String> allSans = buildSanList(customHostnames);
 
-            if (Files.exists(certFile) && Files.exists(keyFile)) {
+            if (Files.exists(certFile) && Files.exists(keyFile) && Files.exists(caFile)) {
                 if (hostnameConfigChanged(tlsDir, allSans)) {
-                    generateSelfSignedCert(tlsDir, certFile, keyFile, allSans);
+                    generateSelfSignedCert(tlsDir, certFile, caFile, keyFile, allSans);
                 } else {
                     LOG.infov("TLS: reusing existing self-signed certificate: {0}", certFile);
                 }
             } else {
-                generateSelfSignedCert(tlsDir, certFile, keyFile, allSans);
+                generateSelfSignedCert(tlsDir, certFile, caFile, keyFile, allSans);
             }
 
             certPath = certFile.toAbsolutePath().toString();
             keyPath  = keyFile.toAbsolutePath().toString();
+            anchorPath = caFile.toAbsolutePath().toString();
         } else {
             throw new IllegalStateException(
                     "TLS enabled but no certificate provided and self-signed generation disabled. "
@@ -114,7 +122,7 @@ public class TlsConfigSource implements ConfigSource {
         properties.put("quarkus.http.ssl-port", String.valueOf(HTTPS_INTERNAL_PORT));
 
         try {
-            currentCertPem = Files.readString(Path.of(certPath));
+            currentCertPem = Files.readString(Path.of(anchorPath));
         } catch (IOException e) {
             LOG.warnv("TLS: could not read cert PEM for /_floci/tls-cert endpoint: {0}", e.getMessage());
         }
@@ -187,7 +195,7 @@ public class TlsConfigSource implements ConfigSource {
         // (not in a container).
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
-                "*.vault.azure.net", "host.docker.internal"));
+                "*.vault.azure.net", "*.managedhsm.azure.net", "host.docker.internal"));
         all.addAll(customHostnames);
         return all;
     }
@@ -232,7 +240,7 @@ public class TlsConfigSource implements ConfigSource {
         }
     }
 
-    private void generateSelfSignedCert(Path tlsDir, Path certFile, Path keyFile, List<String> sans) {
+    private void generateSelfSignedCert(Path tlsDir, Path certFile, Path caFile, Path keyFile, List<String> sans) {
         try {
             Files.createDirectories(tlsDir);
             ensureBouncyCastleRegistered();
@@ -240,7 +248,9 @@ public class TlsConfigSource implements ConfigSource {
             CertificateGenerator.GeneratedCertificate generated =
                     new CertificateGenerator().generateCertificate(sans);
 
-            Files.writeString(certFile, generated.certificatePem());
+            // certFile holds the leaf+CA chain (same filename as before); caFile holds the CA alone.
+            Files.writeString(certFile, generated.chainPem());
+            Files.writeString(caFile, generated.caPem());
             Files.writeString(keyFile, generated.privateKeyPem());
 
             LOG.infov("TLS: generated self-signed certificate: {0}", certFile);

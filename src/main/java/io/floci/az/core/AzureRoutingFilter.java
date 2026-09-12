@@ -137,7 +137,7 @@ public class AzureRoutingFilter {
 
     /** Well-known Key Vault data-plane path prefixes, as sent to the ARM base URL by azurerm v3. */
     private static final Set<String> KEY_VAULT_COLLECTIONS = Set.of(
-        "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys"
+        "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys", "rng"
     );
 
     /**
@@ -352,6 +352,13 @@ public class AzureRoutingFilter {
 
     private Response doFilter(ContainerRequestContext requestContext, String decodedPath, String rawPath,
                               HttpHeaders headers, String capturedHost, String remoteAddress) {
+        // Never trust a client-supplied account-suffix header: only dispatchByAccountSuffix may set it.
+        // Header names are case-insensitive on the wire, so match keys case-insensitively.
+        for (String header : new ArrayList<>(requestContext.getHeaders().keySet())) {
+            if ("x-floci-account-suffix".equalsIgnoreCase(header)) {
+                requestContext.getHeaders().remove(header);
+            }
+        }
         String path = trimLeadingSlash(decodedPath);
         String encodedPath = trimLeadingSlash(rawPath);
 
@@ -650,6 +657,7 @@ public class AzureRoutingFilter {
         if (route != null) {
             serviceType = route.serviceType();
             accountName = stripSuffix(accountName, route);
+            ctx.requestContext().getHeaders().putSingle("x-floci-account-suffix", route.suffix());
         } else {
             serviceType = resolveStorageServiceType(ctx.requestContext(), resourcePath);
         }
