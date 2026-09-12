@@ -86,6 +86,7 @@ public class ServiceBusNamespaceManager {
     private static final String TOPIC_ADDRESS_SUFFIX = "/$Topic";
     private static final String TOPIC_DIVERT_SUFFIX = "/$TopicDivert";
     private static final String SESSION_METADATA_PREFIX = "floci-az:servicebus-session:";
+    private static final String PEEK_LOCK_METADATA_PREFIX = "floci-az:servicebus-peeklock:";
     private static final String SERVICE_LABEL = "servicebus";
     private static final String OWNER_CONTAINER_LABEL = "floci_owner_container";
     private static final String DUPLICATE_DETECTION_MBEAN =
@@ -404,18 +405,19 @@ public class ServiceBusNamespaceManager {
                     "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(queueName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(queueName, "ANYCAST", queueName, "", true, -1, false, false));
+                    "createQueue(java.lang.String)",
+                    jsonArr(messageQueueConfiguration(queueName, requiresSession)));
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(deadLetterQueue, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+                    "createQueue(java.lang.String)",
+                    jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
-            applySessionMetadata(http, baseUrl, auth, mbean, queueName,
+            applyLockMetadata(http, baseUrl, auth, mbean, queueName,
                     requiresSession, lockDurationSeconds);
+            applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
@@ -552,18 +554,19 @@ public class ServiceBusNamespaceManager {
                     "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(queueName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(queueName, "ANYCAST", queueName, "", true, -1, false, false));
+                    "createQueue(java.lang.String)",
+                    jsonArr(messageQueueConfiguration(queueName, requiresSession)));
             jolokiaExec(http, baseUrl, auth, mbean,
                     "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(deadLetterQueue, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
-                    jsonArr(deadLetterQueue, "ANYCAST", deadLetterQueue, "", true, -1, false, false));
+                    "createQueue(java.lang.String)",
+                    jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
-            applySessionMetadata(http, baseUrl, auth, mbean, queueName,
+            applyLockMetadata(http, baseUrl, auth, mbean, queueName,
                     requiresSession, lockDurationSeconds);
+            applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
                     "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
@@ -694,16 +697,19 @@ public class ServiceBusNamespaceManager {
                         exclusive, filter, null));
     }
 
-    private void applySessionMetadata(HttpClient http, String baseUrl, String auth,
+    static String messageQueueConfiguration(String queueName, boolean requiresSession) {
+        // SessionId survives dead-lettering, but a DLQ must not pin that message to one consumer.
+        return "{\"name\":" + jsonString(queueName) + ",\"address\":" + jsonString(queueName)
+                + ",\"routing-type\":\"ANYCAST\",\"durable\":true,\"group-buckets\":"
+                + (requiresSession ? -1 : 0) + "}";
+    }
+
+    private void applyLockMetadata(HttpClient http, String baseUrl, String auth,
                                       String mbean, String queueName,
                                       boolean requiresSession, long lockDurationSeconds) {
-        if (!requiresSession) {
-            return;
-        }
-
         // Artemis security is disabled in this sidecar, so QueueConfiguration.user can carry
         // internal metadata that the patched AMQP protocol handler reads during link attach.
-        String metadata = SESSION_METADATA_PREFIX + lockDurationSeconds;
+        String metadata = (requiresSession ? SESSION_METADATA_PREFIX : PEEK_LOCK_METADATA_PREFIX) + lockDurationSeconds;
         String queueConfiguration = "{\"name\":" + jsonString(queueName)
                 + ",\"user\":" + jsonString(metadata) + "}";
         jolokiaExec(http, baseUrl, auth, mbean,

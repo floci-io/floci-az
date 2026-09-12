@@ -249,15 +249,16 @@ floci-az:
 Queues and subscriptions honor `MaxDeliveryCount` (1–2000) and `LockDuration`
 (up to `PT5M`) from the entity-create payload, matching Azure. A message is
 dead-lettered once its delivery count exceeds the entity's `MaxDeliveryCount`.
-`LockDuration` is enforced for session-enabled entities (session locks expire
-and can be reacquired after the configured duration); non-session peek-lock
-expiry is not enforced by the broker. Entities that omit either property fall
+`LockDuration` is enforced for session locks and individual non-session
+peek-lock deliveries, including dead-letter queues. Expired messages become
+available to other receivers while the original receiver remains open; late
+settlement returns `MessageLockLost`. Entities that omit either property fall
 back to the configured defaults above.
 
 ## Out of scope (future work)
 
 - Session state and explicit session-lock renewal
-- Non-session peek-lock expiry enforcement
+- Explicit message-lock renewal
 - Deferred messages and auto-forwarding
 - Message transactions
 - Geo-disaster recovery and partitioned entities
