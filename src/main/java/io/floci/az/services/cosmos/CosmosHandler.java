@@ -1270,6 +1270,34 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private StoredObject findDoc(AzureRequest req, String dbId, String collId, String docId) {
         Optional<StoredObject> collFound = store.get(collKey(req.accountName(), dbId, collId));
         Object defaultTtl = containerDefaultTtl(collFound);
+        String partitionHeader = req.headers().getHeaderString("x-ms-documentdb-partitionkey");
+        if (partitionHeader != null) {
+            if (collFound.isEmpty()) {
+                return null;
+            }
+            try {
+                var partition = CosmosQueryPartition.parse(partitionHeader, parseData(collFound.get()));
+                String exact = docKey(req.accountName(), dbId, collId,
+                        encodeKey(extractPartitionKeyValue(req)), docId);
+                Optional<StoredObject> found = liveDoc(store.get(exact), defaultTtl)
+                        .filter(object -> partition.test(parseData(object)));
+                if (found.isPresent()) {
+                    return found.get();
+                }
+                // Legacy storage keys stringify partition values. Compare logical values too:
+                // numbers may have equivalent encodings, while null and strings remain distinct.
+                String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
+                return store.scan(key -> key.startsWith(prefix) && key.endsWith("|" + docId)).stream()
+                        .filter(object -> {
+                            Map<String, Object> document = parseData(object);
+                            return docId.equals(document.get("id")) && partition.test(document);
+                        })
+                        .map(object -> liveDoc(Optional.of(object), defaultTtl))
+                        .flatMap(Optional::stream).findFirst().orElse(null);
+            } catch (IllegalArgumentException e) {
+                throw new jakarta.ws.rs.WebApplicationException(errorResponse(400, "BadRequest", e.getMessage()));
+            }
+        }
         // Fast path: construct exact key using partition key from header
         if (collFound.isPresent()) {
             String pk    = extractPartitionKeyValue(req);
@@ -1278,7 +1306,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
             Optional<StoredObject> found = liveDoc(store.get(exact), defaultTtl);
             if (found.isPresent()) return found.get();
         }
-        // Fallback: scan (handles missing PK header or cross-partition reads)
+        // Only requests without a partition header may use the legacy unscoped lookup.
         String prefix = req.accountName() + K_DOC + dbId + "|" + collId + "|";
         return liveDoc(store.scan(k -> k.startsWith(prefix) && k.endsWith("|" + docId))
                 .stream().findFirst(), defaultTtl).orElse(null);
