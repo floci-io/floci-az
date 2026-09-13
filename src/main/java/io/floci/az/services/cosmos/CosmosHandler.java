@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -1248,15 +1249,36 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         String partitionHeader = req.headers().getHeaderString("x-ms-documentdb-partitionkey");
         try {
             Object partition = partitionHeader == null || partitionHeader.isBlank()
-                    ? null : MAPPER.readTree(partitionHeader);
-            byte[] context = MAPPER.writeValueAsBytes(Arrays.asList(
-                    req.accountName(), dbId, collId, container.get("_rid"), sql, params, partition));
+                    ? null : MAPPER.readValue(partitionHeader, Object.class);
+            Map<String, Object> namedParameters = new TreeMap<>();
+            for (Map<String, Object> parameter : params) {
+                if (parameter.get("name") instanceof String name) {
+                    namedParameters.put(name, parameter.get("value"));
+                }
+            }
+            byte[] context = MAPPER.writeValueAsBytes(normalizeContinuationValue(Arrays.asList(
+                    req.accountName(), dbId, collId, container.get("_rid"), sql, namedParameters, partition)));
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(context));
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid query continuation scope", e);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
+    }
+
+    private Object normalizeContinuationValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            map.forEach((key, item) -> sorted.put((String) key, normalizeContinuationValue(item)));
+            return sorted;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::normalizeContinuationValue).toList();
+        }
+        if (value instanceof Number number) {
+            return new BigDecimal(number.toString()).stripTrailingZeros();
+        }
+        return value;
     }
 
     private CosmosQueryEngine.QueryContinuation decodeContinuationToken(String token, String scope) {

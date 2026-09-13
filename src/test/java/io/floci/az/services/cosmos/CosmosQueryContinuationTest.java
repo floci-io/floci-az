@@ -10,6 +10,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -203,6 +205,78 @@ class CosmosQueryContinuationTest {
         given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
                 .header("x-ms-continuation", token)
                 .body(Map.of("query", sql, "parameters", List.of(Map.of("name", "@min", "value", 1))))
+                .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
+    }
+
+    @Test
+    void acceptsEquivalentParameterOrderingAcrossPages() {
+        String sql = "SELECT c.id FROM c WHERE c.rank >= @min AND c.tenant = @tenant";
+        List<Map<String, Object>> initial = List.of(
+                Map.of("name", "@min", "value", 0), Map.of("name", "@tenant", "value", "alice"));
+        var reorderedTenant = new LinkedHashMap<String, Object>();
+        reorderedTenant.put("value", "alice");
+        reorderedTenant.put("name", "@tenant");
+        var reorderedMin = new LinkedHashMap<String, Object>();
+        reorderedMin.put("value", 0);
+        reorderedMin.put("name", "@min");
+        Response first = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-max-item-count", 2)
+                .body(Map.of("query", sql, "parameters", initial))
+                .post(DOCS).then().statusCode(200).extract().response();
+        String token = first.header("x-ms-continuation");
+        assertNotNull(token);
+        Response second = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-continuation", token)
+                .body(Map.of("query", sql, "parameters", List.of(reorderedTenant, reorderedMin)))
+                .post(DOCS).then().statusCode(200).extract().response();
+        List<String> visited = new ArrayList<>(ids(first));
+        visited.addAll(ids(second));
+        assertEquals(5, visited.size());
+        assertEquals(5, new HashSet<>(visited).size());
+    }
+
+    @Test
+    void acceptsEquivalentNumericPartitionAndParameterValues() {
+        for (int i = 0; i < 4; i++) {
+            given().contentType("application/json").body(Map.of("id", "numeric-" + i, "tenant", 7, "rank", i))
+                    .post(DOCS).then().statusCode(201);
+        }
+        String sql = "SELECT c.id FROM c WHERE c.rank >= @min ORDER BY c.rank";
+        Response first = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-max-item-count", 2)
+                .header("x-ms-documentdb-partitionkey", "[7]")
+                .body(Map.of("query", sql, "parameters", List.of(Map.of("name", "@min", "value", 0))))
+                .post(DOCS).then().statusCode(200).extract().response();
+        assertEquals(List.of("numeric-0", "numeric-1"), ids(first));
+        String token = first.header("x-ms-continuation");
+        assertNotNull(token);
+        Response second = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-continuation", token)
+                .header("x-ms-documentdb-partitionkey", "[7.0]")
+                .body(Map.of("query", sql, "parameters", List.of(Map.of("name", "@min", "value", 0.0))))
+                .post(DOCS).then().statusCode(200).extract().response();
+        assertEquals(List.of("numeric-2", "numeric-3"), ids(second));
+        assertNull(second.header("x-ms-continuation"));
+    }
+
+    @Test
+    void normalizesNestedParameterObjectsWithoutReorderingArrays() {
+        String sql = "SELECT c.id FROM c";
+        String initial = "[{\"name\":\"@shape\",\"value\":{\"a\":1,\"b\":[true,null]}}]";
+        String equivalent = "[{\"value\":{\"b\":[true,null],\"a\":1.0},\"name\":\"@shape\"}]";
+        String changed = "[{\"name\":\"@shape\",\"value\":{\"a\":1,\"b\":[null,true]}}]";
+        String token = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-max-item-count", 2)
+                .body("{\"query\":\"" + sql + "\",\"parameters\":" + initial + "}")
+                .post(DOCS).then().statusCode(200).extract().header("x-ms-continuation");
+        assertNotNull(token);
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-continuation", token)
+                .body("{\"query\":\"" + sql + "\",\"parameters\":" + equivalent + "}")
+                .post(DOCS).then().statusCode(200).body("_count", is(12));
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-continuation", token)
+                .body("{\"query\":\"" + sql + "\",\"parameters\":" + changed + "}")
                 .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
     }
 

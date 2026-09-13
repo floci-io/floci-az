@@ -34,6 +34,8 @@ that omit the sort fields or return scalar values. `TOP` and `OFFSET ... LIMIT` 
 query limits across pages. Tokens are stateless; no server-side query session is required.
 New tokens are bound to their query text, parameters, account, container identity, and partition
 scope. Reusing them with a different query or scope returns `400 BadRequest`.
+Parameter order, JSON object member order, and equivalent numeric representations do not change
+the scope. Array element order remains significant.
 
 Pagination does not provide snapshot isolation for concurrent inserts or changes to sort values.
 Aggregate, `GROUP BY`, and `DISTINCT` queries retain the emulator's existing result-offset pagination;

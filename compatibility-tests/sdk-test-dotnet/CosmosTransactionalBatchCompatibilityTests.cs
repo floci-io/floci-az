@@ -90,6 +90,59 @@ public sealed class CosmosTransactionalBatchCompatibilityTests
 
     [Test]
     [Timeout(60_000)]
+    [Arguments("SELECT TOP 5 VALUE c.id FROM c ORDER BY c.rank", "item-0,item-1,item-2,item-3,item-4")]
+    [Arguments("SELECT VALUE c.id FROM c ORDER BY c.rank OFFSET 1 LIMIT 5", "item-1,item-2,item-3,item-4,item-5")]
+    public async Task QueryLimitsSurvivePageDeletionAndIteratorRecreation(
+        string sql, string expectedIds, CancellationToken cancellationToken)
+    {
+        using CosmosClient client = CreateClient($"dotnetlimits{Guid.NewGuid():N}");
+        Database database = await client.CreateDatabaseAsync(
+            $"db-{Guid.NewGuid():N}", cancellationToken: cancellationToken);
+        try
+        {
+            Container container = await database.CreateContainerAsync(
+                new ContainerProperties("items", "/tenant"), cancellationToken: cancellationToken);
+            for (int i = 0; i < 7; i++)
+            {
+                await container.CreateItemAsync(new { id = $"item-{i}", tenant = "target", rank = i },
+                    new PartitionKey("target"), cancellationToken: cancellationToken);
+            }
+            var visited = new List<string>();
+            string? continuation = null;
+            int pages = 0;
+            do
+            {
+                using FeedIterator<string> iterator = container.GetItemQueryIterator<string>(sql, continuation,
+                    new QueryRequestOptions { PartitionKey = new PartitionKey("target"), MaxItemCount = 2 });
+                FeedResponse<string> page = await iterator.ReadNextAsync(cancellationToken);
+                if (++pages > 5)
+                {
+                    throw new InvalidOperationException("Query continuation did not terminate");
+                }
+                await Assert.That(page.Count <= 2).IsTrue();
+                if (page.Count > 0)
+                {
+                    TransactionalBatch batch = container.CreateTransactionalBatch(new PartitionKey("target"));
+                    foreach (string id in page)
+                    {
+                        visited.Add(id);
+                        batch.DeleteItem(id);
+                    }
+                    using TransactionalBatchResponse deleted = await batch.ExecuteAsync(cancellationToken);
+                    await Assert.That(deleted.IsSuccessStatusCode).IsTrue();
+                }
+                continuation = page.ContinuationToken;
+            } while (continuation != null);
+            await Assert.That(string.Join(',', visited)).IsEqualTo(expectedIds);
+        }
+        finally
+        {
+            await database.DeleteAsync(cancellationToken: cancellationToken);
+        }
+    }
+
+    [Test]
+    [Timeout(60_000)]
     public async Task DotnetSdkExecutesTransactionalBatches(CancellationToken cancellationToken)
     {
         string account = $"dotnetbatch{Guid.NewGuid():N}";
