@@ -108,7 +108,7 @@ class CosmosQueryContinuationTest {
 
     @Test
     void resumesLegacyOffsetTokens() {
-        String sql = "SELECT c.id FROM c ORDER BY c.rank";
+        String sql = "SELECT c.id FROM c ORDER BY c.rank, c.id DESC";
         List<String> expected = ids(query(sql, null, -1));
         String token = Base64.getEncoder().encodeToString("{\"skip\":2}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         Response page = query(sql, token, 2);

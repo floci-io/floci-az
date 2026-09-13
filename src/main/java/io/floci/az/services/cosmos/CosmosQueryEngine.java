@@ -132,7 +132,9 @@ public class CosmosQueryEngine {
     QueryPage executePage(ParsedQuery q, List<Map<String, Object>> documents,
                           QueryContinuation continuation, int maxItemCount) {
         int consumed = continuation == null ? 0 : continuation.consumed();
-        if (q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
+        // Legacy tokens must keep their original ordering, including ties, until the query completes.
+        boolean legacyOffset = continuation != null && continuation.rid() == null;
+        if (legacyOffset || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
             List<Object> items = execute(q, documents).items();
             int start = Math.min(consumed, items.size());
             int size = pageSize(items.size() - start, maxItemCount);
@@ -151,8 +153,7 @@ public class CosmosQueryEngine {
         if (continuation != null && continuation.rid() != null) {
             remaining = remaining.filter(doc -> compareContinuation(q, doc, continuation) > 0);
         } else {
-            // Older emulator tokens contain only an offset. Upgrade them on the next page.
-            remaining = remaining.skip((long) q.offset() + consumed);
+            remaining = remaining.skip(q.offset());
         }
         long available = q.top() < 0 ? Long.MAX_VALUE : Math.max(0L, (long) q.top() - q.offset());
         if (q.limit() >= 0) {

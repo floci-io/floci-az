@@ -36,6 +36,8 @@ query limits across pages. Tokens are stateless; no server-side query session is
 Pagination does not provide snapshot isolation for concurrent inserts or changes to sort values.
 Aggregate, `GROUP BY`, and `DISTINCT` queries retain the emulator's existing result-offset pagination;
 the document bookmark guarantee applies to queries without aggregation or deduplication.
+Tokens issued by older emulator versions also retain their original offset pagination until
+completion. Start a new query to use document bookmarks after upgrading.
 
 ### .NET query planner configuration
 
