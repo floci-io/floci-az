@@ -40,9 +40,13 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-keyvault`
 
 When TLS is enabled, host-based routing also works: `https://{vault}.vault.azure.net` and
 `https://{vault}.managedhsm.azure.net` route to the matching Key Vault / Managed HSM when DNS
-resolves those names to floci-az. The self-signed certificate already carries the
-`*.vault.azure.net` and `*.managedhsm.azure.net` SANs, so clients only need to trust the
-generated CA at `{persistent-path}/tls/floci-az-selfsigned-ca.crt`.
+resolves those names to floci-az. These portless URLs target port 443, so publish or forward
+port 443 as well as 4577 in Docker deployments: the emulator tries to bind 443 by default but
+treats a bind failure as non-fatal. Clients that support an explicit endpoint port can instead
+use `https://{vault}.vault.azure.net:4577` and `https://{vault}.managedhsm.azure.net:4577`. The
+self-signed certificate already carries the `*.vault.azure.net` and `*.managedhsm.azure.net`
+SANs, so clients only need to trust the generated CA at
+`{persistent-path}/tls/floci-az-selfsigned-ca.crt`.
 
 ## Connection String
 

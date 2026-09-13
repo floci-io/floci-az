@@ -107,7 +107,7 @@ class TlsConfigSourceConfigPathTest {
 
     @Test
     void tlsDisabledLeavesHostValidationUntouched() {
-        System.clearProperty("floci-az.tls.enabled");
+        System.setProperty("floci-az.tls.enabled", "false");
         TlsConfigSource source = new TlsConfigSource();
 
         assertNull(source.getValue("quarkus.http.host-validation.require-localhost"));
