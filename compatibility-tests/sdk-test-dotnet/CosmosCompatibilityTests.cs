@@ -141,6 +141,71 @@ public sealed class CosmosCompatibilityTests
         }
     }
 
+    [Test]
+    [Arguments("NOT IS_DEFINED(c.isDeleted) OR c.isDeleted = false", "absent,available,inactive,claimed")]
+    [Arguments("NOT IS_DEFINED(c.isDeleted) AND c.isActive = true", "absent")]
+    [Arguments("((NOT IS_DEFINED(c.isDeleted)) OR c.isDeleted = false)", "absent,available,inactive,claimed")]
+    [Arguments("NOT (IS_DEFINED(c.isDeleted) OR c.isActive = true)", "")]
+    [Arguments("((NOT IS_DEFINED(c.isDeleted) OR c.isDeleted = false) AND c.isActive = true)", "absent,available,claimed")]
+    [Arguments("NOT IS_DEFINED(c.claimedUntil) OR IS_NULL(c.claimedUntil)", "absent,available,deleted,inactive")]
+    [Arguments("NOT c.score BETWEEN 1 AND 2", "absent,inactive,claimed")]
+    [Arguments("NOT (c.score BETWEEN 1 AND 2) AND c.isActive = true", "absent,claimed")]
+    [Arguments("(c.score BETWEEN 1 AND 2) OR NOT c.isActive = true", "available,deleted,inactive")]
+    [Timeout(60_000)]
+    public async Task DotnetSdkRespectsNotPrecedence(
+        string predicate, string expectedIds, CancellationToken cancellationToken)
+    {
+        using var client = new CosmosClient(
+            $"{EmulatorEndpoint}/devstoreaccount1-cosmos/",
+            CosmosKey,
+            new CosmosClientOptions
+            {
+                ConnectionMode = ConnectionMode.Gateway,
+                LimitToEndpoint = true
+            });
+        Database database = await client.CreateDatabaseAsync(
+            $"dotnet-not-{Guid.NewGuid():N}", cancellationToken: cancellationToken);
+
+        try
+        {
+            Container container = await database.CreateContainerAsync(
+                new ContainerProperties("items", "/userId"), cancellationToken: cancellationToken);
+            Dictionary<string, object?>[] documents =
+            [
+                new() { ["id"] = "absent", ["userId"] = "user-1", ["isActive"] = true },
+                new() { ["id"] = "available", ["userId"] = "user-1", ["isActive"] = true,
+                    ["isDeleted"] = false, ["claimedUntil"] = null },
+                new() { ["id"] = "deleted", ["userId"] = "user-1", ["isActive"] = true,
+                    ["isDeleted"] = true, ["claimedUntil"] = null },
+                new() { ["id"] = "inactive", ["userId"] = "user-1", ["isActive"] = false,
+                    ["isDeleted"] = false, ["claimedUntil"] = null },
+                new() { ["id"] = "claimed", ["userId"] = "user-1", ["isActive"] = true,
+                    ["isDeleted"] = false, ["claimedUntil"] = "2026-09-12T12:00:00Z" }
+            ];
+            for (int i = 0; i < documents.Length; i++)
+            {
+                var document = documents[i];
+                document["score"] = i;
+                await container.CreateItemAsync(document, new PartitionKey("user-1"),
+                    cancellationToken: cancellationToken);
+            }
+
+            List<string> ids = await ReadAll(container.GetItemQueryIterator<string>(
+                $"SELECT VALUE c.id FROM c WHERE ({predicate})",
+                requestOptions: new QueryRequestOptions
+                {
+                    PartitionKey = new PartitionKey("user-1"),
+                    MaxItemCount = 1
+                }), cancellationToken);
+            await Assert.That(ids).IsEquivalentTo(
+                expectedIds.Split(',', StringSplitOptions.RemoveEmptyEntries));
+        }
+        finally
+        {
+            await database.DeleteAsync(cancellationToken: cancellationToken);
+        }
+    }
+
     private static async Task<List<T>> ReadAll<T>(
         FeedIterator<T> iterator,
         CancellationToken cancellationToken)
