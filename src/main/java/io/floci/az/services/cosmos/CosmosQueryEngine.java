@@ -65,7 +65,7 @@ public class CosmosQueryEngine {
 
     public record QueryResult(List<Object> items, int count) {}
 
-    record QueryContinuation(int consumed, String rid, List<Object> orderValues) {}
+    record QueryContinuation(long consumed, String rid, List<Object> orderValues) {}
 
     record QueryPage(QueryResult result, QueryContinuation continuation) {}
 
@@ -131,12 +131,12 @@ public class CosmosQueryEngine {
 
     QueryPage executePage(ParsedQuery q, List<Map<String, Object>> documents,
                           QueryContinuation continuation, int maxItemCount) {
-        int consumed = continuation == null ? 0 : continuation.consumed();
+        long consumed = continuation == null ? 0 : continuation.consumed();
         // Legacy tokens must keep their original ordering, including ties, until the query completes.
         boolean legacyOffset = continuation != null && continuation.rid() == null;
         if (legacyOffset || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
             List<Object> items = execute(q, documents).items();
-            int start = Math.min(consumed, items.size());
+            int start = (int) Math.min(consumed, items.size());
             int size = pageSize(items.size() - start, maxItemCount);
             List<Object> page = items.subList(start, start + size);
             QueryContinuation next = start + size < items.size()
@@ -145,6 +145,8 @@ public class CosmosQueryEngine {
         }
 
         // Keep source identities and sort values until after pagination, even for scalar projections.
+        documents.forEach(doc -> Objects.requireNonNull(doc.get("_rid"),
+                "Stored Cosmos document is missing _rid required for query continuation"));
         Comparator<Map<String, Object>> comparator = buildComparator(q.orderBy())
                 .thenComparing(doc -> (String) doc.get("_rid"));
         Stream<Map<String, Object>> remaining = documents.stream()

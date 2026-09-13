@@ -40,7 +40,7 @@ public sealed class CosmosTransactionalBatchCompatibilityTests
             while (iterator.HasMoreResults)
             {
                 FeedResponse<JObject> page = await iterator.ReadNextAsync(cancellationToken);
-                if (++pages > 7)
+                if (++pages > 5)
                 {
                     throw new InvalidOperationException("Query continuation did not terminate");
                 }

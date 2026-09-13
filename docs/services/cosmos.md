@@ -32,6 +32,8 @@ a stable identity to distinguish equal sort values. Deleting an already consumed
 through transactional batches, does not skip remaining documents. This also applies to projections
 that omit the sort fields or return scalar values. `TOP` and `OFFSET ... LIMIT` retain their total
 query limits across pages. Tokens are stateless; no server-side query session is required.
+New tokens are bound to their query text, parameters, account, container identity, and partition
+scope. Reusing them with a different query or scope returns `400 BadRequest`.
 
 Pagination does not provide snapshot isolation for concurrent inserts or changes to sort values.
 Aggregate, `GROUP BY`, and `DISTINCT` queries retain the emulator's existing result-offset pagination;

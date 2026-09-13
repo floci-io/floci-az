@@ -2,6 +2,7 @@ package io.floci.az.services.cosmos;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
@@ -19,6 +20,8 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -1188,8 +1191,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
         int maxItemCount = parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count"));
         final CosmosQueryEngine.QueryContinuation continuation;
+        final String scope;
         try {
-            continuation = decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"));
+            scope = continuationScope(req, dbId, collId, parseData(collFound.get()), sql, params);
+            continuation = decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"), scope);
             if (continuation != null && continuation.rid() != null
                     && continuation.orderValues().size() != parsed.orderBy().size()) {
                 throw new IllegalArgumentException("Continuation does not match query ordering");
@@ -1200,7 +1205,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         CosmosQueryEngine.QueryPage page = queryEngine.executePage(parsed, scopedDocs, continuation, maxItemCount);
         return queryResponse(page.result(),
                 collRid(req.accountName(), dbId, collId),
-                encodeContinuationToken(page.continuation()));
+                encodeContinuationToken(page.continuation(), scope));
     }
 
     private Response queryResponse(CosmosQueryEngine.QueryResult result, String rid) {
@@ -1238,41 +1243,63 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         catch (NumberFormatException e) { return -1; }
     }
 
-    private CosmosQueryEngine.QueryContinuation decodeContinuationToken(String token) {
+    private String continuationScope(AzureRequest req, String dbId, String collId,
+                                     Map<String, Object> container, String sql, List<Map<String, Object>> params) {
+        String partitionHeader = req.headers().getHeaderString("x-ms-documentdb-partitionkey");
+        try {
+            Object partition = partitionHeader == null || partitionHeader.isBlank()
+                    ? null : MAPPER.readTree(partitionHeader);
+            byte[] context = MAPPER.writeValueAsBytes(Arrays.asList(
+                    req.accountName(), dbId, collId, container.get("_rid"), sql, params, partition));
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(context));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid query continuation scope", e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
+    private CosmosQueryEngine.QueryContinuation decodeContinuationToken(String token, String scope) {
         if (token == null || token.isBlank()) {
             return null;
         }
         try {
             String json = new String(Base64.getDecoder().decode(token), StandardCharsets.UTF_8);
-            Map<?, ?> map = MAPPER.readValue(json, Map.class);
-            if (map == null) {
+            JsonNode map = MAPPER.readTree(json);
+            if (map == null || !map.isObject()) {
                 throw new IllegalArgumentException("Invalid continuation bookmark");
             }
-            Object skip = map.get("skip");
-            if (!(skip instanceof Integer consumed) || consumed < 0) {
+            JsonNode skip = map.path("skip");
+            if (!skip.isIntegralNumber() || !skip.canConvertToLong() || skip.longValue() < 0) {
                 throw new IllegalArgumentException("Invalid continuation offset");
             }
-            Object rid = map.get("rid");
-            if (rid == null) {
+            long consumed = skip.longValue();
+            JsonNode rid = map.path("rid");
+            if ((map.has("scope") || !rid.isMissingNode() && !rid.isNull())
+                    && !scope.equals(map.path("scope").asText())) {
+                throw new IllegalArgumentException("Continuation does not match query or resource scope");
+            }
+            if (rid.isMissingNode() || rid.isNull()) {
                 return new CosmosQueryEngine.QueryContinuation(consumed, null, List.of());
             }
-            if (!(rid instanceof String identity) || identity.isBlank()
-                    || !(map.get("orderValues") instanceof List<?> values)) {
+            if (!rid.isTextual() || rid.textValue().isBlank() || !map.path("orderValues").isArray()) {
                 throw new IllegalArgumentException("Invalid continuation bookmark");
             }
-            return new CosmosQueryEngine.QueryContinuation(consumed, identity, new ArrayList<>(values));
+            List<Object> values = MAPPER.convertValue(map.get("orderValues"), new TypeReference<>() {});
+            return new CosmosQueryEngine.QueryContinuation(consumed, rid.textValue(), values);
         } catch (IOException | IllegalArgumentException e) {
             throw new IllegalArgumentException("Invalid query continuation token", e);
         }
     }
 
-    private String encodeContinuationToken(CosmosQueryEngine.QueryContinuation continuation) {
+    private String encodeContinuationToken(CosmosQueryEngine.QueryContinuation continuation, String scope) {
         if (continuation == null) {
             return null;
         }
         try {
             Map<String, Object> bookmark = new LinkedHashMap<>();
             bookmark.put("skip", continuation.consumed());
+            bookmark.put("scope", scope);
             if (continuation.rid() != null) {
                 bookmark.put("rid", continuation.rid());
                 bookmark.put("orderValues", continuation.orderValues());

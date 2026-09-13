@@ -118,12 +118,91 @@ class CosmosQueryContinuationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"null", "{}", "[]", "{\"skip\":-1}", "{\"skip\":1.5}",
+            "{\"skip\":9223372036854775808}", "{\"skip\":\"2\"}",
             "{\"skip\":2,\"rid\":\"bookmark\",\"orderValues\":[]}"})
     void rejectsInvalidContinuationWithoutRestartingQuery(String json) {
         String token = Base64.getEncoder().encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
                 .header("x-ms-continuation", token)
                 .body(Map.of("query", "SELECT c.id FROM c ORDER BY c.rank"))
+                .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {2147483648L, 4294967296L, Long.MAX_VALUE})
+    void acceptsLongLegacyOffsetsWithoutWrapping(long offset) {
+        String token = Base64.getEncoder().encodeToString(
+                ("{\"skip\":" + offset + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        query("SELECT c.id FROM c", token, 2).then().body("_count", is(0))
+                .header("x-ms-continuation", nullValue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SELECT c.id FROM c ORDER BY c.rank DESC",
+            "SELECT c.id FROM c ORDER BY c.id", "SELECT VALUE c.id FROM c ORDER BY c.rank",
+            "SELECT c.id FROM c WHERE c.rank = 1 ORDER BY c.rank",
+            "SELECT TOP 3 c.id FROM c ORDER BY c.rank"})
+    void rejectsBookmarkForDifferentQuery(String sql) {
+        String token = query("SELECT c.id FROM c ORDER BY c.rank", null, 2).header("x-ms-continuation");
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .header("x-ms-continuation", token).body(Map.of("query", sql))
+                .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
+    }
+
+    @Test
+    void bindsBookmarkToPartitionButIgnoresHeaderWhitespace() {
+        String sql = "SELECT c.id FROM c";
+        String token = query(sql, null, 2).header("x-ms-continuation");
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-documentdb-partitionkey", "[\"bob\"]")
+                .header("x-ms-continuation", token).body(Map.of("query", sql))
+                .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-continuation", token).body(Map.of("query", sql))
+                .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-documentdb-partitionkey", "[ \"alice\" ]")
+                .header("x-ms-continuation", token).body(Map.of("query", sql))
+                .post(DOCS).then().statusCode(200).body("_count", is(5));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/otheracct-cosmos/dbs/pagination/colls/items",
+            "/continuationacct-cosmos/dbs/otherdb/colls/items",
+            DB + "/colls/otheritems", DB + "/colls/items"})
+    void rejectsBookmarkForDifferentOrRecreatedContainer(String containerPath) {
+        String sql = "SELECT c.id FROM c";
+        String token = query(sql, null, 2).header("x-ms-continuation");
+        if (containerPath.equals(DB + "/colls/items")) {
+            given().delete(containerPath).then().statusCode(204);
+        } else if (!containerPath.startsWith(DB + "/colls/")) {
+            int dbStart = containerPath.indexOf("/dbs/");
+            String dbId = containerPath.substring(dbStart + 5, containerPath.indexOf("/colls/"));
+            given().contentType("application/json").body(Map.of("id", dbId))
+                    .post(containerPath.substring(0, dbStart) + "/dbs").then().statusCode(201);
+        }
+        String collectionId = containerPath.substring(containerPath.lastIndexOf('/') + 1);
+        given().contentType("application/json").body(Map.of("id", collectionId,
+                        "partitionKey", Map.of("paths", List.of("/tenant"), "kind", "Hash")))
+                .post(containerPath.substring(0, containerPath.lastIndexOf('/'))).then().statusCode(201);
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-documentdb-partitionkey", "[\"alice\"]")
+                .header("x-ms-continuation", token).body(Map.of("query", sql))
+                .post(containerPath + "/docs").then().statusCode(400).body("code", is("BadRequest"));
+    }
+
+    @Test
+    void rejectsBookmarkForDifferentParameterValues() {
+        String sql = "SELECT c.id FROM c WHERE c.rank >= @min";
+        String token = given().contentType("application/query+json")
+                .header("x-ms-documentdb-isquery", "true").header("x-ms-max-item-count", 2)
+                .body(Map.of("query", sql, "parameters", List.of(Map.of("name", "@min", "value", 0))))
+                .post(DOCS).then().statusCode(200).extract().header("x-ms-continuation");
+        assertNotNull(token);
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-continuation", token)
+                .body(Map.of("query", sql, "parameters", List.of(Map.of("name", "@min", "value", 1))))
                 .post(DOCS).then().statusCode(400).body("code", is("BadRequest"));
     }
 
