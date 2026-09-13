@@ -12,6 +12,7 @@
     "@azure/data-tables": "^13.3.0",
     "@azure/identity": "^4.5.0",
     "@azure/keyvault-secrets": "^4.8.0",
+    "@azure/keyvault-keys": "^4.9.0",
     "@azure/msal-node": "^5.4.2",
     "@azure/service-bus": "7.9.5",
     "@azure/storage-blob": "^12.23.0",

@@ -13,6 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ServiceBusNamespaceManagerTest {
 
     @Test
+    void brokerQueueConfigurationDisablesGroupingForNonSessionEntities() {
+        for (boolean requiresSession : List.of(false, true)) {
+            var configuration = org.apache.activemq.artemis.api.core.QueueConfiguration.fromJSON(
+                    ServiceBusNamespaceManager.messageQueueConfiguration("orders", requiresSession));
+            assertEquals(org.apache.activemq.artemis.api.core.RoutingType.ANYCAST, configuration.getRoutingType());
+            assertEquals(requiresSession ? -1 : 0, configuration.getGroupBuckets());
+        }
+    }
+
+    @Test
     void parsesNumericAndTextJolokiaMessageCounts() throws IOException {
         assertEquals(7, ServiceBusNamespaceManager.parseJolokiaMessageCount(
                 "{\"status\":200,\"value\":7}"));

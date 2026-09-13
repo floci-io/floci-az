@@ -57,6 +57,7 @@ public class ArmHandler implements AzureServiceHandler {
     private final Map<String, Map<String, Object>> resourceGroups   = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> keyVaults        = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> managedHsms      = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> webApps          = new ConcurrentHashMap<>();
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
@@ -201,6 +202,16 @@ public class ArmHandler implements AzureServiceHandler {
             return Response.ok(Map.of("value", vaults)).build();
         }
 
+        // ── Cross-subscription managed HSM listing ─────────────────────────────
+        if (path.matches("subscriptions/[^/?]+/providers/Microsoft\\.KeyVault/managedHSMs([?].*)?")) {
+            String sub = extractSub(path);
+            List<Map<String, Object>> hsms = managedHsms.values().stream()
+                    .filter(h -> sub.equals(h.get("_sub")))
+                    .map(ArmHandler::stripInternal)
+                    .toList();
+            return Response.ok(Map.of("value", hsms)).build();
+        }
+
         // ── Provider registration check (skip_provider_registration=true still calls this) ──
         // Only matches /subscriptions/{sub}/providers or /subscriptions/{sub}/providers/{namespace}
         // (no resource type segment), so the more-specific handlers above take precedence.
@@ -215,6 +226,10 @@ public class ArmHandler implements AzureServiceHandler {
             String sub = extractSub(path);
             List<Map<String, Object>> resources = new ArrayList<>(keyVaults.values().stream()
                     .filter(v -> sub.equals(v.get("_sub")))
+                    .map(ArmHandler::stripInternal)
+                    .toList());
+            resources.addAll(managedHsms.values().stream()
+                    .filter(h -> sub.equals(h.get("_sub")))
                     .map(ArmHandler::stripInternal)
                     .toList());
             resources.addAll(apiManagementHandler.listSubscriptionServices(sub));
@@ -263,6 +278,10 @@ public class ArmHandler implements AzureServiceHandler {
                     .forEach(resources::add);
             keyVaults.values().stream()
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
+                    .map(ArmHandler::stripInternal)
+                    .forEach(resources::add);
+            managedHsms.values().stream()
+                    .filter(h -> sub.equals(h.get("_sub")) && rg.equals(h.get("_rg")))
                     .map(ArmHandler::stripInternal)
                     .forEach(resources::add);
             webApps.values().stream()
@@ -641,6 +660,26 @@ public class ArmHandler implements AzureServiceHandler {
             };
         }
 
+        // Managed HSM list
+        if (path.matches(".*/providers/Microsoft\\.KeyVault/managedHSMs([?].*)?")) {
+            List<Map<String, Object>> hsms = managedHsms.values().stream()
+                    .filter(h -> sub.equals(h.get("_sub")) && rg.equals(h.get("_rg")))
+                    .map(ArmHandler::stripInternal)
+                    .toList();
+            return Response.ok(Map.of("value", hsms)).build();
+        }
+
+        // Single managed HSM
+        if (path.contains("/managedHSMs/")) {
+            String hsmName = extractResourceName(path, "managedHSMs");
+            return switch (method) {
+                case "PUT"    -> createOrUpdateManagedHsm(req, sub, rg, hsmName);
+                case "GET"    -> getManagedHsm(sub, rg, hsmName);
+                case "DELETE" -> { managedHsms.remove(hsmKey(sub, rg, hsmName)); yield Response.ok().build(); }
+                default       -> Response.status(405).build();
+            };
+        }
+
         return armNotFound(path);
     }
 
@@ -680,6 +719,56 @@ public class ArmHandler implements AzureServiceHandler {
         Map<String, Object> resource = keyVaults.get(kvKey(sub, rg, vaultName));
         if (resource == null) {
             return armNotFound("vaults/" + vaultName);
+        }
+        return Response.ok(stripInternal(resource)).build();
+    }
+
+    private Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
+        Map<String, Object> body     = parseBody(req);
+        String location              = bodyString(body, "location", "eastus");
+        String hsmUri                = "https://" + hsmName + ".managedhsm.azure.net/";
+        Map<String, Object> bodyProps = body.containsKey("properties")
+                ? cast(body.get("properties")) : Map.of();
+        String tenantId = bodyString(bodyProps, "tenantId", TENANT_ID);
+        @SuppressWarnings("unchecked")
+        List<String> initialAdminObjectIds = bodyProps.get("initialAdminObjectIds") instanceof List<?> l
+                ? (List<String>) l : List.of();
+
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("tenantId", tenantId);
+        properties.put("initialAdminObjectIds", initialAdminObjectIds);
+        properties.put("enableSoftDelete", true);
+        properties.put("softDeleteRetentionInDays", 90);
+        properties.put("enablePurgeProtection", true);
+        properties.put("hsmUri", hsmUri);
+        properties.put("provisioningState", "Succeeded");
+
+        Map<String, Object> sku = body.get("sku") instanceof Map<?, ?> m
+                ? cast(m) : Map.of();
+        Map<String, Object> skuOut = Map.of(
+                "family", bodyString(sku, "family", "B"),
+                "name",   bodyString(sku, "name", "Standard_B1"));
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("_sub",  sub);
+        resource.put("_rg",   rg);
+        resource.put("id",    "/subscriptions/" + sub + "/resourceGroups/" + rg
+                + "/providers/Microsoft.KeyVault/managedHSMs/" + hsmName);
+        resource.put("name",     hsmName);
+        resource.put("type",     "Microsoft.KeyVault/managedHSMs");
+        resource.put("location", location);
+        resource.put("sku",       skuOut);
+        resource.put("properties", properties);
+
+        managedHsms.put(hsmKey(sub, rg, hsmName), resource);
+        LOG.infof("ARM: created managed HSM %s (hsmUri=%s)", hsmName, hsmUri);
+        return Response.ok(stripInternal(resource)).build();
+    }
+
+    private Response getManagedHsm(String sub, String rg, String hsmName) {
+        Map<String, Object> resource = managedHsms.get(hsmKey(sub, rg, hsmName));
+        if (resource == null) {
+            return armNotFound("managedHSMs/" + hsmName);
         }
         return Response.ok(stripInternal(resource)).build();
     }
@@ -747,6 +836,7 @@ public class ArmHandler implements AzureServiceHandler {
     private static String rgKey(String sub, String rg)               { return sub + "/" + rg; }
     private static String saKey(String sub, String rg, String name)  { return sub + "/" + rg + "/" + name; }
     private static String kvKey(String sub, String rg, String name)  { return sub + "/" + rg + "/kv/" + name; }
+    private static String hsmKey(String sub, String rg, String name) { return sub + "/" + rg + "/hsm/" + name; }
     private static String webAppKey(String sub, String rg, String name) { return sub + "/" + rg + "/web/" + name; }
 
     private static Map<String, Object> cast(Object o) {

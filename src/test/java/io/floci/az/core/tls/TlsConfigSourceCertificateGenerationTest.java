@@ -8,8 +8,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -86,8 +88,53 @@ class TlsConfigSourceCertificateGenerationTest {
         assertTrue(sans.contains("0.0.0.0"));
         assertTrue(sans.contains("host.docker.internal"),
             "SANs should include 'host.docker.internal' so function containers can reach floci-az on the host");
-        assertEquals(8, sans.size(),
-            "Default cert should have exactly 8 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, host.docker.internal)");
+        assertTrue(sans.contains("*.managedhsm.azure.net"),
+            "SANs should include '*.managedhsm.azure.net' for Managed-HSM-flavored vault URLs");
+        assertEquals(9, sans.size(),
+            "Default cert should have exactly 9 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, *.managedhsm.azure.net, host.docker.internal)");
+    }
+
+    @Test
+    void certificateChainHasNonCaLeafSignedByCa() throws Exception {
+        new TlsConfigSource();
+
+        Path certFile = tempDir.resolve("tls/floci-az-selfsigned.crt");
+        Path caFile   = tempDir.resolve("tls/floci-az-selfsigned-ca.crt");
+
+        // The .crt file is a 2-certificate chain (leaf immediately followed by CA), so parse it
+        // with generateCertificates (plural), not generateCertificate.
+        String pem = Files.readString(certFile);
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        Collection<? extends Certificate> parsed = cf.generateCertificates(
+                new ByteArrayInputStream(pem.getBytes()));
+        List<X509Certificate> certs = new ArrayList<>();
+        for (Certificate c : parsed) {
+            certs.add((X509Certificate) c);
+        }
+        assertEquals(2, certs.size(), "Cert file should contain a leaf+CA chain (2 certificates)");
+
+        X509Certificate leaf = certs.get(0);
+        X509Certificate ca   = certs.get(1);
+
+        // Leaf must be a genuine end-entity certificate: strict path validators (e.g.
+        // rustls-platform-verifier's CaUsedAsEndEntity check) reject a CA-flagged cert in the
+        // leaf position.
+        assertEquals(-1, leaf.getBasicConstraints(), "Leaf must not be a CA");
+        assertNotEquals(leaf.getIssuerX500Principal(), leaf.getSubjectX500Principal(),
+                "Leaf must not be self-signed (issuer != subject)");
+
+        // Second certificate is the signing CA.
+        assertTrue(ca.getBasicConstraints() >= 0, "CA must be a CA (getBasicConstraints() >= 0)");
+        assertEquals(ca.getSubjectX500Principal(), leaf.getIssuerX500Principal(),
+                "Leaf issuer should be the CA's subject");
+
+        // The leaf really is signed by the CA's key.
+        leaf.verify(ca.getPublicKey());
+
+        // The standalone CA file matches what GET /_floci/tls-cert serves as the trust anchor.
+        assertTrue(Files.exists(caFile), "Standalone CA file should be written alongside the chain");
+        assertEquals(Files.readString(caFile), TlsConfigSource.currentCertPem,
+                "GET /_floci/tls-cert should serve the CA certificate, not the leaf");
     }
 
     @Test
