@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
-import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.UnsignedInteger;
@@ -122,18 +121,6 @@ public final class ServiceBusMessageLockSupport {
    public void close() {
       locks.values().forEach(lock -> lock.timer.cancel(false));
       locks.clear();
-   }
-
-   /** Keep lock timestamps specific to a delivery, without mutating the shared stored message. */
-   public static AMQPMessage forDelivery(AMQPMessage message, MessageReference reference) {
-      Deadline deadline = reference.getProtocolData(Deadline.class);
-      if (deadline == null) {
-         return message;
-      }
-      AMQPMessage copy = (AMQPMessage) message.copy();
-      copy.setAnnotation(LOCKED_UNTIL, new Date(deadline.until()));
-      copy.reencode();
-      return copy;
    }
 
    public static boolean hasDeadline(MessageReference reference) {

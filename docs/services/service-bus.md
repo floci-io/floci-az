@@ -255,6 +255,17 @@ available to other receivers while the original receiver remains open; late
 settlement returns `MessageLockLost`. Entities that omit either property fall
 back to the configured defaults above.
 
+## Received message metadata
+
+Received messages expose broker-assigned `SequenceNumber` and `EnqueuedTime`, matching peek
+for the same message in the same entity. This includes session receivers, dead-letter queues,
+`ReceiveAndDelete`, and streamed large messages. Abandon and lock-expiry redelivery preserve
+both values; dead-lettering preserves the original enqueue timestamp.
+
+Sequence numbers use Artemis broker message IDs, as peek already does. They may contain gaps,
+and moving a message to a dead-letter queue may assign a new ID. Azure's gap-free per-entity
+sequence allocation is not emulated.
+
 ## Out of scope (future work)
 
 - Session state and explicit session-lock renewal

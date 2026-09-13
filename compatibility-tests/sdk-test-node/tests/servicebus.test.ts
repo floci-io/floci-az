@@ -100,6 +100,11 @@ test("queue peek is bounded, repeatable, and non-destructive", async () => {
 
     const received = await receiver.receiveMessages(3, { maxWaitTimeInMs: 5_000 });
     expect(received.map((message) => message.body)).toEqual(["first", "second", "third"]);
+    expect(new Set(received.map((message) => message.sequenceNumber?.toString())).size).toBe(3);
+    for (let i = 0; i < firstPeek.length; i++) {
+      expect(received[i].sequenceNumber?.toString()).toBe(firstPeek[i].sequenceNumber?.toString());
+      expect(received[i].enqueuedTimeUtc?.getTime()).toBe(firstPeek[i].enqueuedTimeUtc?.getTime());
+    }
     await Promise.all(received.map((message) => receiver.completeMessage(message)));
     expect(await receiver.peekMessages(1)).toEqual([]);
   } finally {
@@ -128,6 +133,8 @@ test("subscription peek leaves message available for receive", async () => {
     const received = await receiver.receiveMessages(1, { maxWaitTimeInMs: 5_000 });
     expect(received).toHaveLength(1);
     expect(received[0].body).toBe("subscription-body");
+    expect(received[0].sequenceNumber?.toString()).toBe(peeked[0].sequenceNumber?.toString());
+    expect(received[0].enqueuedTimeUtc?.getTime()).toBe(peeked[0].enqueuedTimeUtc?.getTime());
     await receiver.completeMessage(received[0]);
   } finally {
     await receiver.close();

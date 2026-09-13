@@ -68,6 +68,9 @@ public sealed class ServiceBusPeekLockCompatibilityTests
             ServiceBusReceivedMessage redelivered = (await competitor.ReceiveMessageAsync(TimeSpan.FromSeconds(5), cancellationToken))!;
             await Assert.That(redelivered).IsNotNull();
             await Assert.That(redelivered.MessageId).IsEqualTo(first.MessageId);
+            await Assert.That(first.SequenceNumber > 0).IsTrue();
+            await Assert.That(redelivered.SequenceNumber).IsEqualTo(first.SequenceNumber);
+            await Assert.That(redelivered.EnqueuedTime).IsEqualTo(first.EnqueuedTime);
             await Assert.That(redelivered.Body.ToString()).IsEqualTo(body);
             await Assert.That(redelivered.DeliveryCount).IsEqualTo(first.DeliveryCount + 1);
             await Assert.That(redelivered.LockedUntil > DateTimeOffset.UtcNow).IsTrue();

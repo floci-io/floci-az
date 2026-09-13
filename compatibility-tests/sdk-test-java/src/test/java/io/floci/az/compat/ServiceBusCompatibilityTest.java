@@ -44,6 +44,36 @@ class ServiceBusCompatibilityTest {
 
     // ── Queue tests ───────────────────────────────────────────────────────────
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @DisplayName("received broker metadata matches peek for standard and large messages")
+    void receivedMetadataMatchesPeek(boolean large) throws Exception {
+        String queue = uniqueQueue();
+        OffsetDateTime beforeSend = OffsetDateTime.now().minusSeconds(5);
+        String body = large ? "x".repeat(200_000) : "metadata";
+        send(queue, body + "1");
+        send(queue, body + "2");
+        OffsetDateTime afterSend = OffsetDateTime.now().plusSeconds(5);
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            List<ServiceBusReceivedMessage> peeked = receiver.peekMessages(2).stream().toList();
+            List<ServiceBusReceivedMessage> received = receiver.receiveMessages(2, RECV_TIMEOUT).stream().toList();
+            assertEquals(2, peeked.size());
+            assertEquals(2, received.size());
+            assertNotEquals(received.get(0).getSequenceNumber(), received.get(1).getSequenceNumber());
+            for (int i = 0; i < 2; i++) {
+                ServiceBusReceivedMessage message = received.get(i);
+                assertTrue(message.getSequenceNumber() > 0);
+                assertEquals(peeked.get(i).getSequenceNumber(), message.getSequenceNumber());
+                assertEquals(peeked.get(i).getEnqueuedTime(), message.getEnqueuedTime());
+                assertFalse(message.getEnqueuedTime().isBefore(beforeSend));
+                assertFalse(message.getEnqueuedTime().isAfter(afterSend));
+                assertEquals(body + (i + 1), message.getBody().toString());
+                receiver.complete(message);
+            }
+        }
+    }
+
     @Test
     @DisplayName("send and complete removes message from queue")
     void sendAndComplete() throws Exception {
