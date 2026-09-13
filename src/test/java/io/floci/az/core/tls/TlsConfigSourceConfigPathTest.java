@@ -94,4 +94,22 @@ class TlsConfigSourceConfigPathTest {
         assertTrue(Files.exists(Path.of(certFiles)));
         assertTrue(Files.exists(Path.of(keyFiles)));
     }
+
+    // --- emitted quarkus.http.host-validation property ---
+
+    @Test
+    void tlsEnabledDisablesQuarkusLocalhostHostValidation() {
+        TlsConfigSource source = new TlsConfigSource();
+
+        assertEquals("false",
+                source.getValue("quarkus.http.host-validation.require-localhost"));
+    }
+
+    @Test
+    void tlsDisabledLeavesHostValidationUntouched() {
+        System.setProperty("floci-az.tls.enabled", "false");
+        TlsConfigSource source = new TlsConfigSource();
+
+        assertNull(source.getValue("quarkus.http.host-validation.require-localhost"));
+    }
 }

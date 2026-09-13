@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Key Vault: management-plane via az/ARM; secret set/show via the *.vault.azure.net
-# data-plane tunnel (skipped gracefully if data-plane DNS interception isn't reachable).
+# Key Vault: management-plane via az/ARM; secret/key data-plane via the
+# *.vault.azure.net host-based route over HTTPS.
 
 setup_file() {
     load 'test_helper/common-setup'
@@ -25,9 +25,7 @@ setup() {
 @test "az keyvault: secret set + show round-trip (data-plane)" {
     run az keyvault secret set --vault-name "$KV_NAME" -n "$SECRET_NAME" \
         --value "hello-from-az-cli" -o none
-    if [ "$status" -ne 0 ]; then
-        skip "key vault data-plane not reachable: $output"
-    fi
+    assert_success
 
     run az_json keyvault secret show --vault-name "$KV_NAME" -n "$SECRET_NAME"
     assert_success
@@ -37,9 +35,7 @@ setup() {
 @test "az keyvault: key create/show/list/delete round-trip (data-plane)" {
     run az keyvault key create --vault-name "$KV_NAME" -n "$KEY_NAME" \
         --kty RSA --size 2048 -o none
-    if [ "$status" -ne 0 ]; then
-        skip "key vault data-plane not reachable: $output"
-    fi
+    assert_success
 
     run az_json keyvault key show --vault-name "$KV_NAME" -n "$KEY_NAME"
     assert_success
@@ -56,9 +52,7 @@ setup() {
 @test "az keyvault: key set-attributes + encrypt/decrypt + rotation-policy (data-plane)" {
     run az keyvault key create --vault-name "$KV_NAME" -n "$CRYPTO_KEY_NAME" \
         --kty RSA --size 2048 -o none
-    if [ "$status" -ne 0 ]; then
-        skip "key vault data-plane not reachable: $output"
-    fi
+    assert_success
 
     # set-attributes: disable the key and verify the flag is reflected on show.
     run az keyvault key set-attributes --vault-name "$KV_NAME" -n "$CRYPTO_KEY_NAME" \
@@ -103,9 +97,7 @@ setup() {
 @test "az keyvault: key soft-delete lifecycle (data-plane)" {
     run az keyvault key create --vault-name "$KV_NAME" -n "$LIFECYCLE_KEY_NAME" \
         --kty RSA --size 2048 -o none
-    if [ "$status" -ne 0 ]; then
-        skip "key vault data-plane not reachable: $output"
-    fi
+    assert_success
 
     run az keyvault key delete --vault-name "$KV_NAME" -n "$LIFECYCLE_KEY_NAME" -o none
     assert_success
