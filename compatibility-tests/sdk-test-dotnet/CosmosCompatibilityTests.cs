@@ -148,6 +148,9 @@ public sealed class CosmosCompatibilityTests
     [Arguments("NOT (IS_DEFINED(c.isDeleted) OR c.isActive = true)", "")]
     [Arguments("((NOT IS_DEFINED(c.isDeleted) OR c.isDeleted = false) AND c.isActive = true)", "absent,available,claimed")]
     [Arguments("NOT IS_DEFINED(c.claimedUntil) OR IS_NULL(c.claimedUntil)", "absent,available,deleted,inactive")]
+    [Arguments("NOT c.score BETWEEN 1 AND 2", "absent,inactive,claimed")]
+    [Arguments("NOT (c.score BETWEEN 1 AND 2) AND c.isActive = true", "absent,claimed")]
+    [Arguments("(c.score BETWEEN 1 AND 2) OR NOT c.isActive = true", "available,deleted,inactive")]
     [Timeout(60_000)]
     public async Task DotnetSdkRespectsNotPrecedence(
         string predicate, string expectedIds, CancellationToken cancellationToken)
@@ -179,8 +182,10 @@ public sealed class CosmosCompatibilityTests
                 new() { ["id"] = "claimed", ["userId"] = "user-1", ["isActive"] = true,
                     ["isDeleted"] = false, ["claimedUntil"] = "2026-09-12T12:00:00Z" }
             ];
-            foreach (var document in documents)
+            for (int i = 0; i < documents.Length; i++)
             {
+                var document = documents[i];
+                document["score"] = i;
                 await container.CreateItemAsync(document, new PartitionKey("user-1"),
                     cancellationToken: cancellationToken);
             }

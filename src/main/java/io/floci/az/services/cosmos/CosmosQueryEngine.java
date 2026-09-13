@@ -773,6 +773,7 @@ public class CosmosQueryEngine {
     int findTopLevelKeyword(String expr, String keyword) {
         int depth = 0;
         boolean inStr = false;
+        boolean betweenRange = false;
         char strCh = 0;
         String upper = expr.toUpperCase();
 
@@ -786,11 +787,26 @@ public class CosmosQueryEngine {
             if (c == '(') { depth++; continue; }
             if (c == ')') { depth--; continue; }
 
+            if (depth == 0 && keyword.equals("AND") && upper.regionMatches(i, "BETWEEN", 0, 7)
+                    && i > 0 && Character.isWhitespace(expr.charAt(i - 1))
+                    && i + 7 < expr.length() && Character.isWhitespace(expr.charAt(i + 7))) {
+                betweenRange = true;
+                i += 6;
+                continue;
+            }
             if (depth == 0 && upper.regionMatches(i, keyword, 0, keyword.length())) {
                 int end = i + keyword.length();
                 boolean beforeOk = i == 0 || !Character.isLetterOrDigit(expr.charAt(i - 1));
                 boolean afterOk  = end >= expr.length() || !Character.isLetterOrDigit(expr.charAt(end));
-                if (beforeOk && afterOk) return i;
+                if (beforeOk && afterOk) {
+                    // BETWEEN consumes one AND as a range separator, not a logical conjunction.
+                    if (betweenRange) {
+                        betweenRange = false;
+                        i = end - 1;
+                        continue;
+                    }
+                    return i;
+                }
             }
         }
         return -1;
