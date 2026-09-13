@@ -65,6 +65,10 @@ public class CosmosQueryEngine {
 
     public record QueryResult(List<Object> items, int count) {}
 
+    record QueryContinuation(long consumed, String rid, List<Object> orderValues) {}
+
+    record QueryPage(QueryResult result, QueryContinuation continuation) {}
+
     // -----------------------------------------------------------------------
     // Entry point
     // -----------------------------------------------------------------------
@@ -122,6 +126,68 @@ public class CosmosQueryEngine {
             filtered = stream.collect(Collectors.toCollection(ArrayList::new));
         }
 
+        return projectResults(q, filtered);
+    }
+
+    QueryPage executePage(ParsedQuery q, List<Map<String, Object>> documents,
+                          QueryContinuation continuation, int maxItemCount) {
+        long consumed = continuation == null ? 0 : continuation.consumed();
+        // Legacy tokens must keep their original ordering, including ties, until the query completes.
+        boolean legacyOffset = continuation != null && continuation.rid() == null;
+        if (legacyOffset || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
+            List<Object> items = execute(q, documents).items();
+            int start = (int) Math.min(consumed, items.size());
+            int size = pageSize(items.size() - start, maxItemCount);
+            List<Object> page = items.subList(start, start + size);
+            QueryContinuation next = start + size < items.size()
+                    ? new QueryContinuation(consumed + size, null, List.of()) : null;
+            return new QueryPage(new QueryResult(page, size), next);
+        }
+
+        // Keep source identities and sort values until after pagination, even for scalar projections.
+        documents.forEach(doc -> Objects.requireNonNull(doc.get("_rid"),
+                "Stored Cosmos document is missing _rid required for query continuation"));
+        Comparator<Map<String, Object>> comparator = buildComparator(q.orderBy())
+                .thenComparing(doc -> (String) doc.get("_rid"));
+        Stream<Map<String, Object>> remaining = documents.stream()
+                .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
+                .sorted(comparator);
+        if (continuation != null && continuation.rid() != null) {
+            remaining = remaining.filter(doc -> compareContinuation(q, doc, continuation) > 0);
+        } else {
+            remaining = remaining.skip(q.offset());
+        }
+        long available = q.top() < 0 ? Long.MAX_VALUE : Math.max(0L, (long) q.top() - q.offset());
+        if (q.limit() >= 0) {
+            available = Math.min(available, q.limit());
+        }
+        List<Map<String, Object>> rows = remaining.limit(Math.max(0L, available - consumed)).toList();
+        int size = pageSize(rows.size(), maxItemCount);
+        QueryContinuation next = null;
+        if (size < rows.size()) {
+            Map<String, Object> last = rows.get(size - 1);
+            List<Object> values = q.orderBy().stream().map(order -> resolve(last, order.path())).toList();
+            next = new QueryContinuation(consumed + size, (String) last.get("_rid"), values);
+        }
+        return new QueryPage(projectResults(q, rows.subList(0, size)), next);
+    }
+
+    private int pageSize(int available, int maxItemCount) {
+        return maxItemCount > 0 ? Math.min(available, maxItemCount) : available;
+    }
+
+    private int compareContinuation(ParsedQuery q, Map<String, Object> doc, QueryContinuation continuation) {
+        for (int i = 0; i < q.orderBy().size(); i++) {
+            OrderByField order = q.orderBy().get(i);
+            int comparison = compareSortValues(resolve(doc, order.path()), continuation.orderValues().get(i));
+            if (comparison != 0) {
+                return order.asc() ? comparison : -comparison;
+            }
+        }
+        return ((String) doc.get("_rid")).compareTo(continuation.rid());
+    }
+
+    private QueryResult projectResults(ParsedQuery q, List<Map<String, Object>> filtered) {
         List<Object> results;
         if (q.selectValue() && q.selectFields() != null && q.selectFields().size() == 1) {
             String path = q.selectFields().get(0);
@@ -668,15 +734,25 @@ public class CosmosQueryEngine {
             Comparator<Map<String, Object>> single = (a, b) -> {
                 Object va = resolve(a, path);
                 Object vb = resolve(b, path);
-                if (va == null && vb == null) return 0;
-                if (va == null) return -1;
-                if (vb == null) return 1;
-                return compareValues(va, vb);
+                return compareSortValues(va, vb);
             };
             if (!ob.asc()) single = single.reversed();
             comp = comp == null ? single : comp.thenComparing(single);
         }
         return comp != null ? comp : (a, b) -> 0;
+    }
+
+    private int compareSortValues(Object a, Object b) {
+        if (a == null && b == null) {
+            return 0;
+        }
+        if (a == null) {
+            return -1;
+        }
+        if (b == null) {
+            return 1;
+        }
+        return compareValues(a, b);
     }
 
     // -----------------------------------------------------------------------

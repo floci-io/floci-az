@@ -416,6 +416,49 @@ class CosmosNoSqlEngineCompatibilityTest {
     }
 
     @Test
+    @DisplayName("query continuation visits remaining documents after each page is deleted")
+    void paginationAfterDeletingConsumedPages() {
+        for (String sql : List.of("SELECT c.id FROM c", "SELECT c.id FROM c ORDER BY c.rank DESC")) {
+            String id = dbId();
+            cosmosClient.createDatabase(id);
+            CosmosDatabase db = cosmosClient.getDatabase(id);
+            try {
+                db.createContainer("items", "/category");
+                CosmosContainer container = db.getContainer("items");
+                Set<String> expected = new HashSet<>();
+                for (int i = 0; i < 7; i++) {
+                    String itemId = "item-" + i;
+                    expected.add(itemId);
+                    container.createItem(doc(itemId, "target", "rank", i / 3));
+                    container.createItem(doc(itemId, "other", "rank", i / 3));
+                }
+                CosmosQueryRequestOptions options = new CosmosQueryRequestOptions()
+                        .setPartitionKey(new PartitionKey("target"))
+                        .setMaxBufferedItemCount(0);
+                List<String> visited = new ArrayList<>();
+                int pages = 0;
+                for (var page : container.queryItems(sql, options, Map.class).iterableByPage(2)) {
+                    assertTrue(++pages <= 7, "Continuation must terminate");
+                    assertTrue(page.getResults().size() <= 2);
+                    for (Map item : page.getResults()) {
+                        String itemId = (String) item.get("id");
+                        visited.add(itemId);
+                        container.deleteItem(itemId, new PartitionKey("target"), new CosmosItemRequestOptions());
+                    }
+                }
+                assertEquals(7, visited.size());
+                assertEquals(expected, new HashSet<>(visited));
+                assertEquals(0, container.queryItems("SELECT c.id FROM c", options, Map.class).stream().count());
+                assertEquals(7, container.queryItems("SELECT c.id FROM c",
+                        new CosmosQueryRequestOptions().setPartitionKey(new PartitionKey("other")), Map.class)
+                        .stream().count());
+            } finally {
+                db.delete();
+            }
+        }
+    }
+
+    @Test
     @DisplayName("CONTAINS, STARTSWITH, ENDSWITH string predicates in WHERE")
     @SuppressWarnings("unchecked")
     void stringPredicates() {

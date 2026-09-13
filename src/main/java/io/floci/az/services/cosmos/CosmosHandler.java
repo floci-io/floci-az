@@ -2,6 +2,7 @@ package io.floci.az.services.cosmos;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
@@ -18,7 +19,10 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -1186,26 +1190,23 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         } catch (IllegalArgumentException e) {
             return errorResponse(400, "BadRequest", e.getMessage());
         }
-        CosmosQueryEngine.QueryResult result = queryEngine.execute(parsed, scopedDocs);
-
-        // ---- Pagination ----
         int maxItemCount = parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count"));
-        int skip         = decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"));
-
-        List<Object> allItems  = result.items();
-        List<Object> pageItems = skip > 0 ? allItems.subList(Math.min(skip, allItems.size()), allItems.size())
-                                          : new ArrayList<>(allItems);
-
-        String nextToken = null;
-        if (maxItemCount > 0 && pageItems.size() > maxItemCount) {
-            nextToken = encodeContinuationToken(skip + maxItemCount);
-            pageItems = pageItems.subList(0, maxItemCount);
+        final CosmosQueryEngine.QueryContinuation continuation;
+        final String scope;
+        try {
+            scope = continuationScope(req, dbId, collId, parseData(collFound.get()), sql, params);
+            continuation = decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"), scope);
+            if (continuation != null && continuation.rid() != null
+                    && continuation.orderValues().size() != parsed.orderBy().size()) {
+                throw new IllegalArgumentException("Continuation does not match query ordering");
+            }
+        } catch (IllegalArgumentException e) {
+            return errorResponse(400, "BadRequest", e.getMessage());
         }
-
-        return queryResponse(
-                new CosmosQueryEngine.QueryResult(pageItems, pageItems.size()),
+        CosmosQueryEngine.QueryPage page = queryEngine.executePage(parsed, scopedDocs, continuation, maxItemCount);
+        return queryResponse(page.result(),
                 collRid(req.accountName(), dbId, collId),
-                nextToken);
+                encodeContinuationToken(page.continuation(), scope));
     }
 
     private Response queryResponse(CosmosQueryEngine.QueryResult result, String rid) {
@@ -1243,23 +1244,92 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         catch (NumberFormatException e) { return -1; }
     }
 
-    private int decodeContinuationToken(String token) {
-        if (token == null || token.isBlank()) return 0;
+    private String continuationScope(AzureRequest req, String dbId, String collId,
+                                     Map<String, Object> container, String sql, List<Map<String, Object>> params) {
+        String partitionHeader = req.headers().getHeaderString("x-ms-documentdb-partitionkey");
         try {
-            String json = new String(Base64.getDecoder().decode(token), StandardCharsets.UTF_8);
-            Map<?, ?> map = MAPPER.readValue(json, Map.class);
-            return ((Number) map.get("skip")).intValue();
-        } catch (Exception e) {
-            return 0;
+            Object partition = partitionHeader == null || partitionHeader.isBlank()
+                    ? null : MAPPER.readValue(partitionHeader, Object.class);
+            Map<String, Object> namedParameters = new TreeMap<>();
+            for (Map<String, Object> parameter : params) {
+                if (parameter.get("name") instanceof String name) {
+                    namedParameters.put(name, parameter.get("value"));
+                }
+            }
+            byte[] context = MAPPER.writeValueAsBytes(normalizeContinuationValue(Arrays.asList(
+                    req.accountName(), dbId, collId, container.get("_rid"), sql, namedParameters, partition)));
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(context));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid query continuation scope", e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
         }
     }
 
-    private String encodeContinuationToken(int skip) {
-        try {
-            String json = MAPPER.writeValueAsString(Map.of("skip", skip));
-            return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception e) {
+    private Object normalizeContinuationValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            map.forEach((key, item) -> sorted.put((String) key, normalizeContinuationValue(item)));
+            return sorted;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::normalizeContinuationValue).toList();
+        }
+        if (value instanceof Number number) {
+            return new BigDecimal(number.toString()).stripTrailingZeros();
+        }
+        return value;
+    }
+
+    private CosmosQueryEngine.QueryContinuation decodeContinuationToken(String token, String scope) {
+        if (token == null || token.isBlank()) {
             return null;
+        }
+        try {
+            String json = new String(Base64.getDecoder().decode(token), StandardCharsets.UTF_8);
+            JsonNode map = MAPPER.readTree(json);
+            if (map == null || !map.isObject()) {
+                throw new IllegalArgumentException("Invalid continuation bookmark");
+            }
+            JsonNode skip = map.path("skip");
+            if (!skip.isIntegralNumber() || !skip.canConvertToLong() || skip.longValue() < 0) {
+                throw new IllegalArgumentException("Invalid continuation offset");
+            }
+            long consumed = skip.longValue();
+            JsonNode rid = map.path("rid");
+            if ((map.has("scope") || !rid.isMissingNode() && !rid.isNull())
+                    && !scope.equals(map.path("scope").asText())) {
+                throw new IllegalArgumentException("Continuation does not match query or resource scope");
+            }
+            if (rid.isMissingNode() || rid.isNull()) {
+                return new CosmosQueryEngine.QueryContinuation(consumed, null, List.of());
+            }
+            if (!rid.isTextual() || rid.textValue().isBlank() || !map.path("orderValues").isArray()) {
+                throw new IllegalArgumentException("Invalid continuation bookmark");
+            }
+            List<Object> values = MAPPER.convertValue(map.get("orderValues"), new TypeReference<>() {});
+            return new CosmosQueryEngine.QueryContinuation(consumed, rid.textValue(), values);
+        } catch (IOException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid query continuation token", e);
+        }
+    }
+
+    private String encodeContinuationToken(CosmosQueryEngine.QueryContinuation continuation, String scope) {
+        if (continuation == null) {
+            return null;
+        }
+        try {
+            Map<String, Object> bookmark = new LinkedHashMap<>();
+            bookmark.put("skip", continuation.consumed());
+            bookmark.put("scope", scope);
+            if (continuation.rid() != null) {
+                bookmark.put("rid", continuation.rid());
+                bookmark.put("orderValues", continuation.orderValues());
+            }
+            String json = MAPPER.writeValueAsString(bookmark);
+            return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot encode query continuation token", e);
         }
     }
 
