@@ -117,6 +117,33 @@ public final class ServiceBusSessionSupport {
       }
    }
 
+   static long renew(ActiveMQServer server, AMQPConnectionContext connection,
+                     String entity, String linkName, String sessionId) {
+      SessionKey key = new SessionKey(SimpleString.of(entity), sessionId);
+      SessionOwner owner = SESSION_OWNERS.get(key);
+      if (owner == null || owner.senderContext().connection != connection
+          || (linkName != null && !linkName.equals(owner.sender().getName()))) {
+         return 0;
+      }
+      synchronized (owner.queue()) {
+         if (System.currentTimeMillis() >= owner.lockedUntilMillis()) {
+            expire(key, owner);
+            return 0;
+         }
+         SessionMetadata metadata = sessionMetadata(owner.queue());
+         if (metadata == null) {
+            return 0;
+         }
+         SessionOwner renewed = new SessionOwner(owner.sender(), owner.senderContext(), owner.queue(),
+            System.currentTimeMillis() + metadata.lockMillis());
+         if (!SESSION_OWNERS.replace(key, owner, renewed)) {
+            return 0;
+         }
+         scheduleExpiration(server, key, renewed, metadata.lockMillis());
+         return renewed.lockedUntilMillis();
+      }
+   }
+
    public static String normalizeEntityPath(String entityPath) {
       if (entityPath == null) {
          return null;
@@ -221,7 +248,9 @@ public final class ServiceBusSessionSupport {
                                           SessionKey session,
                                           SessionOwner owner,
                                           long lockMillis) {
-      server.getScheduledPool().schedule(() -> expire(session, owner), lockMillis, TimeUnit.MILLISECONDS);
+      server.getScheduledPool().schedule(
+         () -> owner.senderContext().connection.runLater(() -> expire(session, owner)),
+         lockMillis, TimeUnit.MILLISECONDS);
    }
 
    private static void expire(SessionKey session, SessionOwner owner) {

@@ -118,7 +118,8 @@ receiver, or a session processor. The broker translates Azure's AMQP session fil
 Artemis `JMSXGroupID` selector, which keeps each session on one receiver and preserves FIFO order
 within that session. Attach responses include Azure's `com.microsoft:locked-until-utc` property.
 
-Session ownership lasts for the receiver link. Session state and explicit session-lock renewal are
+Session locks expire after the entity `LockDuration` unless renewed. Azure SDK explicit and automatic
+session-lock renewal extend the deadline; closing the receiver releases ownership. Session state is
 not currently emulated.
 
 Read a session-enabled entity's dead-letter subqueue with an ordinary receiver. Azure SDKs do not
@@ -268,8 +269,18 @@ sequence allocation is not emulated.
 
 ## Out of scope (future work)
 
-- Session state and explicit session-lock renewal
-- Explicit message-lock renewal
+- Session state
 - Deferred messages and auto-forwarding
 - Message transactions
 - Geo-disaster recovery and partitioned entities
+
+## Lock renewal
+
+Azure AMQP `com.microsoft:renew-lock` and `com.microsoft:renew-session-lock` extend active locks by
+the entity `LockDuration`. Renewal returns Azure timestamp values, including arrays for message locks.
+Expired, settled, closed, wrong-entity, and wrong-owner locks cannot be renewed. Message renewal is
+scoped to the receiving connection and associated link when supplied. Session renewal requires the
+owning connection and associated link when supplied. Renewal never resurrects an expired lock.
+
+Old expiry timers cannot expire renewed locks. Buffers for delivery tags are pooled, but token values
+are never reused within the broker process. Deferred messages remain unsupported.
