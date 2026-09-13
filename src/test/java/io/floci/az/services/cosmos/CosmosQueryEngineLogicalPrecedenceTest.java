@@ -15,6 +15,32 @@ class CosmosQueryEngineLogicalPrecedenceTest {
     private final CosmosQueryEngine engine = new CosmosQueryEngine();
 
     @ParameterizedTest
+    @CsvSource({"false,false,false", "false,false,true", "false,true,false", "false,true,true",
+            "true,false,false", "true,false,true", "true,true,false", "true,true,true"})
+    void respectsPrecedenceForThreeIndependentOperands(boolean first, boolean second, boolean third) {
+        Map<String, Object> document = Map.of("first", first, "second", second, "third", third);
+        assertEquals(!first && second || third,
+                engine.evalExpr(document, "NOT c.first = true AND c.second = true OR c.third = true"));
+        assertEquals(!first || second && third,
+                engine.evalExpr(document, "NOT c.first = true OR c.second = true AND c.third = true"));
+        assertEquals(!(first || second) && third,
+                engine.evalExpr(document, "NOT (c.first = true OR c.second = true) AND c.third = true"));
+        assertEquals(first || !second && !third,
+                engine.evalExpr(document, "c.first = true OR NOT c.second = true AND NOT c.third = true"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void preservesNotPrecedenceAroundCorrelatedExists(boolean hasMatch, boolean active) {
+        Map<String, Object> document = Map.of("id", "item", "active", active,
+                "items", List.of(Map.of("matching", hasMatch)));
+        List<Object> expected = !hasMatch || active ? List.of("item") : List.of();
+        assertEquals(expected, engine.execute("SELECT VALUE c.id FROM c WHERE "
+                        + "NOT EXISTS(SELECT VALUE x FROM x IN c.items WHERE x.matching = true) OR c.active = true",
+                List.of(), List.of(document)).items());
+    }
+
+    @ParameterizedTest
     @CsvSource({"0, false", "1, true", "2, true", "3, false"})
     void keepsBetweenRangeSeparateFromLogicalAnd(int score, boolean withinRange) {
         Map<String, Object> document = Map.of("score", score, "active", true);
