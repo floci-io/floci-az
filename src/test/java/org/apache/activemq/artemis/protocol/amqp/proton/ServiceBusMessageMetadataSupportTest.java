@@ -3,7 +3,11 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
+import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.Symbol;
+import org.apache.qpid.proton.amqp.messaging.AmqpValue;
+import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -11,6 +15,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.InvocationTargetException;
 import java.net.URLClassLoader;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
 
@@ -21,6 +26,56 @@ class ServiceBusMessageMetadataSupportTest {
     private static final long ENQUEUED_TIME = 1_789_200_000_000L;
     private static final Symbol SEQUENCE = Symbol.valueOf("x-opt-sequence-number");
     private static final Symbol ENQUEUED = Symbol.valueOf("x-opt-enqueued-time");
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void realEncodedDeliveryPreservesPayloadAndStoredMessage(boolean locked) throws Exception {
+        var original = Proton.message();
+        original.setMessageId("message-id");
+        original.setCorrelationId("correlation-id");
+        original.setContentType("text/plain");
+        original.setBody(new AmqpValue("payload"));
+        original.setApplicationProperties(new ApplicationProperties(
+                Map.of("custom-text", "preserved", "custom-number", 7)));
+        original.setMessageAnnotations(new MessageAnnotations(Map.of(
+                SEQUENCE, -1L, ENQUEUED, new Date(0), Symbol.valueOf("x-opt-ingress-time"), ENQUEUED_TIME)));
+        byte[] encoded = new byte[4096];
+        int size = original.encode(encoded, 0, encoded.length);
+        AMQPMessage stored = new AMQPStandardMessage(0, Arrays.copyOf(encoded, size), null);
+
+        try (Fixture fixture = new Fixture("peeklock")) {
+            if (locked) {
+                Class<?> deadlineType = Class.forName(
+                        "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusMessageLockSupport$Deadline",
+                        true, fixture.loader);
+                var constructor = deadlineType.getDeclaredConstructor(long.class);
+                constructor.setAccessible(true);
+                doReturn(constructor.newInstance(ENQUEUED_TIME + 60_000))
+                        .when(fixture.reference).getProtocolData(deadlineType);
+            }
+            AMQPMessage delivery = (AMQPMessage) fixture.type.getMethod(
+                    "forDelivery", AMQPMessage.class, MessageReference.class)
+                    .invoke(null, stored, fixture.reference);
+            var buffer = delivery.getSendBuffer(1, fixture.reference);
+            byte[] wire = new byte[buffer.remaining()];
+            buffer.get(wire);
+            var received = Proton.message();
+            received.decode(wire, 0, wire.length);
+            assertEquals("payload", ((AmqpValue) received.getBody()).getValue());
+            assertEquals("message-id", received.getMessageId());
+            assertEquals("correlation-id", received.getCorrelationId());
+            assertEquals("text/plain", received.getContentType());
+            assertEquals(original.getApplicationProperties().getValue(), received.getApplicationProperties().getValue());
+            assertEquals(42L, received.getMessageAnnotations().getValue().get(SEQUENCE));
+            assertEquals(new Date(ENQUEUED_TIME), received.getMessageAnnotations().getValue().get(ENQUEUED));
+            assertEquals(locked ? new Date(ENQUEUED_TIME + 60_000) : null,
+                    received.getMessageAnnotations().getValue().get(Symbol.valueOf("x-opt-locked-until")));
+            assertNotSame(stored, delivery);
+            assertEquals(-1L, stored.getMessageAnnotations().getValue().get(SEQUENCE));
+            assertEquals(new Date(0), stored.getMessageAnnotations().getValue().get(ENQUEUED));
+            assertFalse(stored.getMessageAnnotations().getValue().containsKey(Symbol.valueOf("x-opt-locked-until")));
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"peeklock", "session"})

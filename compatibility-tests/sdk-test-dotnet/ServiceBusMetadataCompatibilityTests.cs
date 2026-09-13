@@ -44,7 +44,9 @@ public sealed class ServiceBusMetadataCompatibilityTests
             {
                 await sender.SendMessageAsync(new ServiceBusMessage(body + i)
                 {
-                    MessageId = i.ToString(), SessionId = session ? "session" : null
+                    MessageId = i.ToString(), SessionId = session ? "session" : null,
+                    CorrelationId = "correlation-" + i, ContentType = "text/plain",
+                    ApplicationProperties = { ["custom-text"] = "preserved", ["custom-number"] = i }
                 }, cancellationToken);
             }
             DateTimeOffset afterSend = DateTimeOffset.UtcNow.AddSeconds(5);
@@ -58,6 +60,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
             {
                 ServiceBusReceivedMessage message = await Receive(receiver, cancellationToken);
                 await CheckMetadata(message, peeked[message.MessageId], beforeSend, afterSend);
+                await CheckUserProperties(message);
                 await Assert.That(message.Body.ToString()).IsEqualTo(body + message.MessageId);
                 received.Add(message);
             }
@@ -70,6 +73,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
             {
                 ServiceBusReceivedMessage message = await Receive(receiver, cancellationToken);
                 await CheckMetadata(message, peeked[message.MessageId], beforeSend, afterSend);
+                await CheckUserProperties(message);
                 await receiver.DeadLetterMessageAsync(message, "metadata-probe", "retention check", cancellationToken);
             }
 
@@ -84,6 +88,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
             {
                 ServiceBusReceivedMessage message = await Receive(dlq, cancellationToken);
                 await CheckMetadata(message, dlqPeeked[message.MessageId], beforeSend, afterSend);
+                await CheckUserProperties(message);
                 await Assert.That(message.EnqueuedTime).IsEqualTo(peeked[message.MessageId].EnqueuedTime);
                 await Assert.That(message.EnqueuedTime > DateTimeOffset.UtcNow.AddDays(-7)).IsTrue();
                 await Assert.That(inspected.Add(message.SequenceNumber)).IsTrue();
@@ -133,6 +138,14 @@ public sealed class ServiceBusMetadataCompatibilityTests
         {
             await admin.DeleteQueueAsync(queue, cancellationToken);
         }
+    }
+
+    private static async Task CheckUserProperties(ServiceBusReceivedMessage message)
+    {
+        await Assert.That(message.CorrelationId).IsEqualTo("correlation-" + message.MessageId);
+        await Assert.That(message.ContentType).IsEqualTo("text/plain");
+        await Assert.That(message.ApplicationProperties["custom-text"]).IsEqualTo("preserved");
+        await Assert.That(message.ApplicationProperties["custom-number"]).IsEqualTo(int.Parse(message.MessageId));
     }
 
     private static async Task CheckMetadata(ServiceBusReceivedMessage received, ServiceBusReceivedMessage peeked,
