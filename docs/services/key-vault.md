@@ -1,8 +1,10 @@
 # Key Vault
 
-Compatible with `azure-keyvault-secrets` SDKs (Python, Java, JavaScript, .NET).
+Compatible with the `azure-keyvault-secrets` and `azure-keyvault-keys` SDKs (Python, Java, JavaScript, .NET).
 
 ## Features
+
+### Secrets
 
 - **Secrets CRUD** — set, get, delete, list secrets
 - **Versioning** — each `set_secret` creates a new immutable version; latest pointer tracks the most recent
@@ -14,6 +16,18 @@ Compatible with `azure-keyvault-secrets` SDKs (Python, Java, JavaScript, .NET).
 - **Optional trailing slash** — fixed routes (`/secrets`, `/deletedsecrets`, `/certificates/contacts`) accept a trailing slash, including .NET `AddAzureKeyVault` configuration loading
 - **Backup** — backup a secret (base64-encoded blob)
 - **32-char hex version IDs** — matches Azure's version ID format
+
+### Keys & Cryptography
+
+- **Keys CRUD** — create/import RSA (`RSA`, `RSA-HSM`), EC (`EC`, `EC-HSM`, P-256/P-384/P-521), and
+  oct (`oct`, `oct-HSM`) keys; get/list/list-versions; PATCH attributes
+- **Soft-delete lifecycle** — delete → `deletedkeys` namespace → recover or purge
+- **Backup/restore** — `POST /keys/{name}/backup` and `POST /keys/restore` (see deviations below)
+- **Rotation** — `POST /keys/{name}/rotate` and rotation-policy management (`/keys/{name}/rotationpolicy`)
+- **Crypto ops** — `encrypt`/`decrypt` (RSA-OAEP, RSA-OAEP-256, RSA1_5; AES-GCM A128/A192/A256),
+  `sign`/`verify` (RS256/384/512, PS256/384/512, ES256/384/512), `wrapkey`/`unwrapkey`
+- **`/rng`** — random bytes for client-side key material (see deviations)
+- **Managed HSM** — the same data plane served under the `/{account}-managedhsm/` suffix
 
 ## Endpoint
 
@@ -241,6 +255,61 @@ All endpoints sit under `/{accountName}-keyvault/` with an `api-version` query p
 | `GET` | `/deletedsecrets/{name}` | Get a deleted secret |
 | `DELETE` | `/deletedsecrets/{name}` | Purge (permanently delete) |
 | `POST` | `/deletedsecrets/{name}/recover` | Recover a deleted secret |
+
+### Keys
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/keys/{name}/create` | Create a key (`kty`, `key_size`, `curve`, `key_ops`) |
+| `PUT` | `/keys/{name}` | Import a key (`key` JWK) |
+| `GET` | `/keys` | List keys |
+| `GET` | `/keys/{name}` | Get latest version |
+| `GET` | `/keys/{name}/{version}` | Get a specific version |
+| `PATCH` | `/keys/{name}/{version}` | Update key attributes (`enabled`, `nbf`, `exp`, `tags`) |
+| `DELETE` | `/keys/{name}` | Soft-delete a key |
+| `GET` | `/keys/{name}/versions` | List all versions |
+| `POST` | `/keys/{name}/backup` | Backup a key |
+| `POST` | `/keys/restore` | Restore a key from a backup blob |
+| `POST` | `/keys/{name}/rotate` | Rotate (regenerate) a key |
+| `GET`/`PUT` | `/keys/{name}/rotationpolicy` | Get/put the key rotation policy |
+
+### Deleted Keys
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/deletedkeys` | List deleted keys |
+| `GET` | `/deletedkeys/{name}` | Get a deleted key |
+| `DELETE` | `/deletedkeys/{name}` | Purge (permanently delete) |
+| `POST` | `/deletedkeys/{name}/recover` | Recover a deleted key |
+
+### Crypto Operations
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/keys/{name}[/{version}]/encrypt` | Encrypt (`RSA-OAEP`, `RSA-OAEP-256`, `RSA1_5`, `A128GCM`, `A192GCM`, `A256GCM`) |
+| `POST` | `/keys/{name}[/{version}]/decrypt` | Decrypt |
+| `POST` | `/keys/{name}[/{version}]/sign` | Sign (`RS256/384/512`, `PS256/384/512`, `ES256/384/512`) |
+| `POST` | `/keys/{name}[/{version}]/verify` | Verify a signature |
+| `POST` | `/keys/{name}[/{version}]/wrapkey` | Wrap a key (`RSA-OAEP-256` for RSA keys) |
+| `POST` | `/keys/{name}[/{version}]/unwrapkey` | Unwrap a key |
+| `POST` | `/rng` | Random bytes (`{"count": 1..128}`) |
+
+---
+
+## Intentional deviations
+
+These are deliberate differences from real Azure Key Vault. They are stable, documented behavior — not bugs:
+
+- **Backup blobs are unencrypted plaintext.** Real Azure returns HSM-encrypted opaque blobs that can only be
+  restored into the same vault. floci-az emits a readable JSON snapshot (JWK + metadata) so backups are
+  portable and inspectable. Do not treat backup blobs as secrets.
+- **`/rng` caps at 128 bytes per request.** This matches real Azure (which caps at 128). An earlier draft of the
+  plan stated 1024; that was incorrect.
+- **Key material is stored in the clear in the storage backend** (memory/persistent), not HSM-encrypted.
+- **`key_size` may appear in the returned public JWK** even though it is not part of Azure's `JsonWebKey`
+  schema. Azure SDKs tolerate unknown fields; kept for convenience.
+- **`nbf`/`exp` must be numeric Unix epoch timestamps.** Whitespace is tolerated and normalized; any other
+  form is rejected with `400 BadParameter` at create/import/PATCH/restore time.
 
 ---
 
