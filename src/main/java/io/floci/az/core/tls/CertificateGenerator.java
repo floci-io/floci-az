@@ -4,11 +4,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.KeyPurposeId;
 import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
@@ -39,14 +42,17 @@ public class CertificateGenerator {
             "^\\[?([0-9a-fA-F:]+)]?$|^(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})$"
     );
 
-    public record GeneratedCertificate(String certificatePem, String privateKeyPem) {}
+    /**
+     * @param chainPem      leaf followed by CA, in PEM (Quarkus "chain file" format)
+     * @param caPem         the CA certificate alone, in PEM (the client trust anchor)
+     * @param privateKeyPem the leaf's private key, in PEM
+     */
+    public record GeneratedCertificate(String chainPem, String caPem, String privateKeyPem) {}
 
     /**
-     * Generates a genuinely self-signed certificate (issuer == subject, marked as a CA) suitable
-     * for use as a <em>trust anchor</em>: a client that adds this certificate to its CA store can
-     * verify a TLS connection that presents it. Used for floci-az's own HTTPS server certificate
-     * so that containers making HTTPS calls back to floci-az can trust it once the certificate is
-     * installed in their CA bundle.
+     * Generates a CA → leaf chain: a self-signed CA (CN=floci-az-ca) signs a non-CA leaf
+     * (CN=floci-az) carrying the SANs and serverAuth EKU. The leaf must not be a CA, because strict
+     * validators (e.g. rustls) reject a CA-flagged certificate in the end-entity position.
      */
     public GeneratedCertificate generateCertificate(List<String> sans) {
         try {
@@ -55,39 +61,67 @@ public class CertificateGenerator {
             // certificate builder and signer which use BC's internal implementations.
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
             keyGen.initialize(2048, SECURE_RANDOM);
-            KeyPair keyPair = keyGen.generateKeyPair();
 
-            Instant now   = Instant.now();
-            X500Name name = new X500Name("CN=floci-az");
-            BigInteger serial = new BigInteger(128, SECURE_RANDOM);
+            JcaX509ExtensionUtils extensionUtils = new JcaX509ExtensionUtils();
+            Instant now = Instant.now();
 
-            var certBuilder = new JcaX509v3CertificateBuilder(
-                    name, serial,
+            // --- Self-signed CA certificate (the trust anchor) ---
+            KeyPair caKeyPair = keyGen.generateKeyPair();
+            X500Name caName = new X500Name("CN=floci-az-ca");
+            BigInteger caSerial = new BigInteger(128, SECURE_RANDOM);
+
+            var caBuilder = new JcaX509v3CertificateBuilder(
+                    caName, caSerial,
+                    Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
+                    caName, caKeyPair.getPublic());
+            caBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+            caBuilder.addExtension(Extension.keyUsage, true,
+                    new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
+            caBuilder.addExtension(Extension.subjectKeyIdentifier, false,
+                    extensionUtils.createSubjectKeyIdentifier(caKeyPair.getPublic()));
+
+            ContentSigner caSigner = new JcaContentSignerBuilder("SHA512WithRSA")
+                    .build(caKeyPair.getPrivate());
+            X509Certificate caCert = new JcaX509CertificateConverter()
+                    .getCertificate(caBuilder.build(caSigner));
+
+            // --- End-entity leaf certificate signed by the CA ---
+            KeyPair leafKeyPair = keyGen.generateKeyPair();
+            X500Name leafName = new X500Name("CN=floci-az");
+            BigInteger leafSerial = new BigInteger(128, SECURE_RANDOM);
+
+            var leafBuilder = new JcaX509v3CertificateBuilder(
+                    caName, leafSerial,
                     Date.from(now), Date.from(now.plus(365, ChronoUnit.DAYS)),
-                    name, keyPair.getPublic());
+                    leafName, leafKeyPair.getPublic());
 
             GeneralName[] sanEntries = sans.stream()
                     .map(CertificateGenerator::toGeneralName)
                     .filter(gn -> gn != null)
                     .toArray(GeneralName[]::new);
+            leafBuilder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(sanEntries));
+            leafBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+            leafBuilder.addExtension(Extension.keyUsage, true,
+                    new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
+            leafBuilder.addExtension(Extension.extendedKeyUsage, false,
+                    new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
+            leafBuilder.addExtension(Extension.authorityKeyIdentifier, false,
+                    extensionUtils.createAuthorityKeyIdentifier(caKeyPair.getPublic()));
+            leafBuilder.addExtension(Extension.subjectKeyIdentifier, false,
+                    extensionUtils.createSubjectKeyIdentifier(leafKeyPair.getPublic()));
 
-            certBuilder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(sanEntries));
-            // A trust anchor must be a CA so clients accept it as one, and it needs keyCertSign
-            // so it can act as its own issuer.
-            certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
-            certBuilder.addExtension(Extension.keyUsage, true,
-                    new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment | KeyUsage.keyCertSign));
+            ContentSigner leafSigner = new JcaContentSignerBuilder("SHA512WithRSA")
+                    .build(caKeyPair.getPrivate());
+            X509Certificate leafCert = new JcaX509CertificateConverter()
+                    .getCertificate(leafBuilder.build(leafSigner));
 
-            ContentSigner signer = new JcaContentSignerBuilder("SHA512WithRSA")
-                    .build(keyPair.getPrivate());
-
-            X509Certificate cert = new JcaX509CertificateConverter()
-                    .getCertificate(certBuilder.build(signer));
-
-            return new GeneratedCertificate(toPem(cert), toPem(keyPair.getPrivate()));
+            return new GeneratedCertificate(
+                    toPem(leafCert) + toPem(caCert),
+                    toPem(caCert),
+                    toPem(leafKeyPair.getPrivate()));
 
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to generate self-signed TLS certificate", e);
+            throw new IllegalStateException("Failed to generate TLS certificate chain", e);
         }
     }
 

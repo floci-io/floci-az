@@ -35,6 +35,7 @@ class RoutingTableAssemblyTest {
     /** A4's HOST_ROUTES plus routes introduced by later services. */
     private static final Set<Map.Entry<String, String>> GOLDEN_HOST_ROUTES = Set.of(
         Map.entry(".vault.azure.net", "keyvault"),
+        Map.entry(".managedhsm.azure.net", "keyvault"),
         Map.entry(".communication.azure.com", "email"),
         Map.entry(".blob.core.windows.net", "blob"),
         Map.entry(".dfs.core.windows.net", "blob"),
@@ -58,6 +59,7 @@ class RoutingTableAssemblyTest {
         Map.entry("-functions", "functions"),
         Map.entry("-appconfig", "appconfig"),
         Map.entry("-keyvault", "keyvault"),
+        Map.entry("-managedhsm", "keyvault"),
         Map.entry("-eventgrid", "eventgrid"),
         Map.entry("-eventhub", "eventhub"),
         Map.entry("-sql", "sql"),

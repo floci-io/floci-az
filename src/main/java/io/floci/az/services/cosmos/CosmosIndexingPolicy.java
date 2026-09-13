@@ -148,8 +148,7 @@ final class CosmosIndexingPolicy {
 
     /** {@code "c.a.b"} → {@code "/a/b"} — strip the FROM alias, dots become slashes. */
     static String normalizeOrderByPath(String expr) {
-        String path = CosmosQueryEngine.stripAlias(expr.trim());
-        return "/" + String.join("/", path.split("\\."));
+        return "/" + String.join("/", CosmosQueryEngine.propertyNames(expr.trim()));
     }
 
     /** {@code '/a/"b-c"/'} → {@code "/a/b-c"} — strip quote escapes and a trailing slash. */

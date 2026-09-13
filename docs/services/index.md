@@ -12,7 +12,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks, pagination, `$select`, tags filtering, `Accept-Datetime`, `Sync-Token` |
 | **Cosmos DB (SQL API)** | `/{account}-cosmos/` | ✅ Databases, containers, documents CRUD, SQL queries, partition keys |
 | **Cosmos DB multi-API** | _(engine sidecars)_ | ✅ MongoDB, PostgreSQL, Cassandra, Gremlin, Table, NoSQL (opt-in Docker engines) |
-| **Key Vault** | `/{account}-keyvault/` | ✅ Secrets CRUD, versioning, soft-delete, properties update |
+| **Key Vault** | `/{account}-keyvault/` | ✅ Secrets & keys CRUD, versioning, soft-delete, properties update, backup/restore, rotation, RSA/EC/oct crypto, `/rng`, Managed HSM |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | ✅ AMQP 1.0 (Artemis), Kafka-compatible (Redpanda, opt-in) |
 | **Service Bus** | `/{account}-servicebus/` + AMQP `:5673` | ✅ Queues, topics, subscriptions (dynamic); AMQP 1.0 via Artemis sidecar or mocked |
 | **Azure SQL Database** | ARM path + `/{account}-sql/` | ✅ Servers, databases, firewall rules; ARM-only by default, managed SQL Server opt-in |
