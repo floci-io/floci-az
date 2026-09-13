@@ -118,6 +118,10 @@ public class TlsConfigSource implements ConfigSource {
         // TlsProxyServer listens on the public floci-az port and routes by protocol.
         properties.put("quarkus.http.insecure-requests", "enabled");
         properties.put("quarkus.http.host", "127.0.0.1");
+        // The loopback bind above makes Quarkus auto-install HostValidationFilter, which
+        // 400s every Host header outside {localhost,127.0.0.1,[::1]} — including this
+        // emulator's own {account}.vault.azure.net host routing. Opt out explicitly.
+        properties.put("quarkus.http.host-validation.require-localhost", "false");
         properties.put("quarkus.http.port", String.valueOf(HTTP_INTERNAL_PORT));
         properties.put("quarkus.http.ssl-port", String.valueOf(HTTPS_INTERNAL_PORT));
 

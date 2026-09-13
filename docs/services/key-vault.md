@@ -38,6 +38,12 @@ http://localhost:4577/{accountName}-keyvault
 Default account: `devstoreaccount1`
 Default endpoint: `http://localhost:4577/devstoreaccount1-keyvault`
 
+When TLS is enabled, host-based routing also works: `https://{vault}.vault.azure.net` and
+`https://{vault}.managedhsm.azure.net` route to the matching Key Vault / Managed HSM when DNS
+resolves those names to floci-az. The self-signed certificate already carries the
+`*.vault.azure.net` and `*.managedhsm.azure.net` SANs, so clients only need to trust the
+generated CA at `{persistent-path}/tls/floci-az-selfsigned-ca.crt`.
+
 ## Connection String
 
 The Key Vault SDK enforces HTTPS and uses a challenge-based auth flow. Use the patterns below to connect to the local emulator:
