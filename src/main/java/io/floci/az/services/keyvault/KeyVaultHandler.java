@@ -34,12 +34,14 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     private final StorageBackend<String, StoredObject> store;
     private final EmulatorConfig config;
     private final KeyVaultKeys keys;
+    private final KeyVaultCertificates certificates;
 
     @Inject
     public KeyVaultHandler(StorageFactory factory, EmulatorConfig config) {
         this.store = factory.create("keyvault");
         this.config = config;
         this.keys = new KeyVaultKeys(store);
+        this.certificates = new KeyVaultCertificates(store);
     }
 
     @Override
@@ -148,6 +150,11 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
                 )).build();
             }
             return methodNotAllowed();
+        }
+
+        if (!hsm && (routePath.equals("certificates") || path.startsWith("certificates/")
+                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/"))) {
+            return certificates.handle(req);
         }
 
         return kvError(404, "KeyNotFound", "Resource not found: " + path);
