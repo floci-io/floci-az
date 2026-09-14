@@ -825,7 +825,7 @@ public class BlobServiceTest {
     }
 
     @Test
-    void snapshotCannotBeTargetedForSnapshotCreation() {
+    void snapshotMutationsReturnSnapshotsPresent() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
             .header("x-ms-blob-type", "BlockBlob")
@@ -842,8 +842,17 @@ public class BlobServiceTest {
             .put("/{account}/{container}/{blob}?comp=snapshot&snapshot={snapshot}",
                     ACCOUNT, CONTAINER, BLOB, snapshot)
             .then()
-            .statusCode(409)
-            .header("x-ms-error-code", "SnapshotOperationNotSupported");
+            .statusCode(400)
+            .header("x-ms-error-code", "SnapshotsPresent");
+
+        given()
+            .header("x-ms-lease-action", "acquire")
+            .header("x-ms-lease-duration", "-1")
+            .put("/{account}/{container}/{blob}?comp=lease&snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "SnapshotsPresent");
     }
 
     @Test

@@ -257,11 +257,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     // (create, rename, append/flush, properties, ACL). An unknown DFS PUT
                     // must fail closed rather than being mistaken for a Blob Put operation.
                     response = dataLakeNotImplemented();
-                } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
-                    response = leaseBlob(request, containerName, blobName);
                 } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
                         && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
                     response = snapshotIsImmutable();
+                } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
+                    response = leaseBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "snapshot".equals(comp)) {
                     response = snapshotBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
@@ -2189,9 +2189,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private static Response snapshotIsImmutable() {
-        return new AzureErrorResponse("SnapshotOperationNotSupported",
-                "This operation is not supported on a blob snapshot.")
-                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        return new AzureErrorResponse("SnapshotsPresent",
+                "This operation is not permitted on a blob snapshot.")
+                .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
     }
 
     private Optional<StoredObject> findBlob(AzureRequest request, String containerName, String blobName) {
