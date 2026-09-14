@@ -15,6 +15,40 @@ import static org.junit.jupiter.api.Assertions.*;
 @QuarkusTest
 class KeyVaultCertificatesTest {
     @Test
+    void protectsIndependentlyCreatedBackingObjects() {
+        String vault = "/cert" + UUID.randomUUID().toString().replace("-", "") + "-keyvault";
+        String policy = """
+                {"policy":{"issuer":{"name":"Self"},"x509_props":{"subject":"CN=test"}}}
+                """;
+        given().header("Authorization", "Bearer test").contentType("application/json").body("{\"value\":\"independent\"}")
+                .put(vault + "/secrets/standalone").then().statusCode(200);
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy)
+                .post(vault + "/certificates/standalone/create").then().statusCode(409);
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy)
+                .post(vault + "/certificates/test/create").then().statusCode(202);
+        given().header("Authorization", "Bearer test").contentType("application/json").body("{\"value\":\"independent\"}")
+                .put(vault + "/secrets/test").then().statusCode(200);
+        given().header("Authorization", "Bearer test").delete(vault + "/certificates/test").then().statusCode(409);
+        given().header("Authorization", "Bearer test").get(vault + "/secrets/test").then().body("value", equalTo("independent"));
+        given().header("Authorization", "Bearer test").get(vault + "/certificates/test").then().statusCode(200);
+    }
+
+    @Test
+    void refusesToReuseKeyWithDifferentCurve() {
+        String vault = "/cert" + UUID.randomUUID().toString().replace("-", "") + "-keyvault";
+        String policy = """
+                {"policy":{"issuer":{"name":"Self"},"key_props":{"kty":"EC","crv":"P-256","reuse_key":true},
+                "x509_props":{"subject":"CN=test"}}}
+                """;
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy)
+                .post(vault + "/certificates/test/create").then().statusCode(202);
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy.replace("P-256", "P-384"))
+                .post(vault + "/certificates/test/create").then().statusCode(400);
+        given().header("Authorization", "Bearer test").get(vault + "/certificates/test/versions")
+                .then().body("value.size()", equalTo(1));
+    }
+
+    @Test
     void rejectsUnsupportedIssuerAndInvalidKeySizeWithoutCreatingObjects() {
         String vault = "/cert" + UUID.randomUUID().toString().replace("-", "") + "-keyvault";
         given().header("Authorization", "Bearer test").contentType("application/json").body("null")

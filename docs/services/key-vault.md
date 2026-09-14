@@ -42,6 +42,8 @@ Self-signed certificate issuance also supports the Key Vault Certificates SDK.
 External issuers, import/merge, policy/property updates, scheduled renewal, UPN SANs, and certificate backup/restore are not implemented.
 Associated deleted key/secret objects are retained with the deleted certificate, rather than exposed through independent deleted-key/deleted-secret APIs.
 Certificate private keys use the configured Key Vault storage backend and are not HSM-protected.
+Issuance and deletion reject names containing independently created key/secret versions or key policies
+with `409 Conflict`, preserving those objects. Certificate lifecycle changes use atomic storage batches.
 
 For example, with an already configured .NET `CertificateClient` and `SecretClient`:
 

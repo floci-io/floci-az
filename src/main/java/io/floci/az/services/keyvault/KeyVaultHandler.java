@@ -74,6 +74,13 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public Response handle(AzureRequest req) {
+        // Certificate ownership checks and mutation must exclude independent key/secret writes.
+        synchronized (store) {
+            return handleStoredRequest(req);
+        }
+    }
+
+    private Response handleStoredRequest(AzureRequest req) {
         String path = req.resourcePath();
         // Normalize fixed-route comparisons only; preserve the original path for resource parsing.
         String routePath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;

@@ -92,6 +92,9 @@ final class KeyVaultCertificates {
             return error(409, "Conflict", "Recover or purge the deleted certificate, key, or secret first");
         }
         Map<String, Object> body;
+        if (hasIndependentBackingObjects(account, name)) {
+            return error(409, "Conflict", "An independently created key or secret uses this certificate name");
+        }
         try {
             body = JSON.readValue(request.bodyStream(), new TypeReference<>() {});
             if (body == null) {
@@ -139,6 +142,14 @@ final class KeyVaultCertificates {
             jwk = read(previousKey.get());
             if (!type.equals(jwk.get("kty"))) {
                 throw new IllegalArgumentException("Cannot reuse a key of a different type");
+            }
+            if ("RSA".equals(type) && keyPolicy.containsKey("key_size")
+                    && ((java.security.interfaces.RSAPublicKey) KeyVaultCrypto.reconstructRsaPublic(jwk)).getModulus().bitLength()
+                    != integer(keyPolicy.get("key_size"), "key_size")) {
+                throw new IllegalArgumentException("Cannot reuse an RSA key with a different size");
+            }
+            if ("EC".equals(type) && keyPolicy.containsKey("crv") && !keyPolicy.get("crv").equals(jwk.get("crv"))) {
+                throw new IllegalArgumentException("Cannot reuse an EC key with a different curve");
             }
         } else {
             jwk = KeyVaultCrypto.generateJwk(type, integer(keyPolicy.getOrDefault("key_size", 2048), "key_size"),
@@ -195,9 +206,11 @@ final class KeyVaultCertificates {
         jwk.put("tags", tags);
         String secret = "application/x-pkcs12".equals(contentType) ? Base64.getEncoder().encodeToString(secretBytes)
                 : new String(secretBytes, java.nio.charset.StandardCharsets.UTF_8);
-        persist(account, "keys", name, version, jwk, metadata);
-        persist(account, "secrets", name, version, Map.of("value", secret, "contentType", contentType, "tags", tags), metadata);
-        persist(account, "certificates", name, version, bundle, metadata);
+        Map<String, StoredObject> puts = new LinkedHashMap<>();
+        addVersion(puts, account, "keys", name, version, jwk, metadata);
+        addVersion(puts, account, "secrets", name, version, Map.of("value", secret, "contentType", contentType, "tags", tags), metadata);
+        addVersion(puts, account, "certificates", name, version, bundle, metadata);
+        store.applyBatch(puts, Set.of());
         return Response.status(202).entity(operation(account, name, bundle)).build();
     }
 
@@ -245,19 +258,26 @@ final class KeyVaultCertificates {
     }
 
     private Response delete(String account, String name, StoredObject current) throws Exception {
+        if (hasIndependentBackingObjects(account, name)) {
+            return error(409, "Conflict", "An independently created key or secret uses this certificate name");
+        }
         Map<String, Object> deleted = read(current);
         deleted.put("recoveryId", id(account, "deletedcertificates", name, ""));
         deleted.put("deletedDate", Instant.now().getEpochSecond());
         deleted.put("scheduledPurgeDate", Instant.now().plusSeconds(7 * 86400).getEpochSecond());
-        put(base(account, "deletedcertificates", name), deleted, current.metadata());
+        Map<String, StoredObject> puts = new LinkedHashMap<>();
+        Set<String> deletes = new HashSet<>();
+        String deletedKey = base(account, "deletedcertificates", name);
+        puts.put(deletedKey, stored(deletedKey, deleted, current.metadata()));
         for (String kind : List.of("certificates", "keys", "secrets")) {
             String root = base(account, kind, name);
             for (StoredObject object : store.scan(key -> key.equals(root) || key.startsWith(root + "/"))) {
                 String tombstone = base(account, "deletedcertificates", name) + "/objects/" + object.key();
-                store.put(tombstone, new StoredObject(tombstone, object.data(), object.metadata(), object.lastModified(), object.etag()));
-                store.delete(object.key());
+                puts.put(tombstone, new StoredObject(tombstone, object.data(), object.metadata(), object.lastModified(), object.etag()));
+                deletes.add(object.key());
             }
         }
+        store.applyBatch(puts, deletes);
         return ok(deleted);
     }
 
@@ -278,17 +298,20 @@ final class KeyVaultCertificates {
                 || store.get(base(account, "secrets", name)).isPresent())) {
             return error(409, "Conflict", "A key or secret with this name already exists");
         }
-        for (String key : new ArrayList<>(store.keys())) {
+        Map<String, StoredObject> puts = new LinkedHashMap<>();
+        Set<String> deletes = new HashSet<>();
+        for (String key : store.keys()) {
             if (key.startsWith(root + "/objects/")) {
                 if (recover) {
                     StoredObject object = store.get(key).orElseThrow();
                     String originalKey = key.substring((root + "/objects/").length());
-                    store.put(originalKey, new StoredObject(originalKey, object.data(), object.metadata(), object.lastModified(), object.etag()));
+                    puts.put(originalKey, new StoredObject(originalKey, object.data(), object.metadata(), object.lastModified(), object.etag()));
                 }
-                store.delete(key);
+                deletes.add(key);
             }
         }
-        store.delete(root);
+        deletes.add(root);
+        store.applyBatch(puts, deletes);
         return recover ? ok(read(store.get(base(account, "certificates", name)).orElseThrow())) : Response.noContent().build();
     }
 
@@ -311,13 +334,30 @@ final class KeyVaultCertificates {
                 "issuer", Map.of("name", "Self"), "cancellation_requested", false);
     }
 
-    private void persist(String account, String kind, String name, String version, Map<String, Object> body, Map<String, String> metadata) throws Exception {
-        put(base(account, kind, name) + "/versions/" + version, body, metadata);
-        put(base(account, kind, name), body, metadata);
+    private boolean hasIndependentBackingObjects(String account, String name) {
+        Set<String> ownedVersions = new HashSet<>();
+        versions(account, name).forEach(value -> ownedVersions.add(value.metadata().get("version")));
+        for (String kind : List.of("keys", "secrets")) {
+            String root = base(account, kind, name);
+            for (StoredObject object : store.scan(key -> key.equals(root) || key.startsWith(root + "/"))) {
+                String version = object.metadata().get("version");
+                if (!ownedVersions.contains(version) || !(object.key().equals(root) || object.key().equals(root + "/versions/" + version))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    private void put(String key, Map<String, Object> body, Map<String, String> metadata) throws Exception {
-        store.put(key, new StoredObject(key, JSON.writeValueAsBytes(body), metadata, Instant.now(), UUID.randomUUID().toString()));
+    private static void addVersion(Map<String, StoredObject> puts, String account, String kind, String name, String version,
+                                   Map<String, Object> body, Map<String, String> metadata) throws Exception {
+        String root = base(account, kind, name);
+        puts.put(root, stored(root, body, metadata));
+        puts.put(root + "/versions/" + version, stored(root + "/versions/" + version, body, metadata));
+    }
+
+    private static StoredObject stored(String key, Map<String, Object> body, Map<String, String> metadata) throws Exception {
+        return new StoredObject(key, JSON.writeValueAsBytes(body), metadata, Instant.now(), UUID.randomUUID().toString());
     }
 
     private static Map<String, Object> read(StoredObject object) {
