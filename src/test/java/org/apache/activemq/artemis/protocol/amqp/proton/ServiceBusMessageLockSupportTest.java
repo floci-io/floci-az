@@ -20,6 +20,36 @@ import static org.mockito.Mockito.*;
 
 class ServiceBusMessageLockSupportTest {
     @Test
+    void renewalReplacesDeadlineAndOldTimerCannotExpireIt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Runnable oldTimer = fixture.expiry.get();
+            long renewedUntil = (long) fixture.type.getMethod("renew", Delivery.class)
+                    .invoke(fixture.support, fixture.delivery);
+            assertTrue(renewedUntil > System.currentTimeMillis());
+            oldTimer.run();
+            verifyNoInteractions(fixture.session);
+            fixture.expiry.get().run();
+            verify(fixture.session).cancel(fixture.consumer, fixture.reference.getMessage(), true);
+            assertEquals(0L, fixture.type.getMethod("renew", Delivery.class)
+                    .invoke(fixture.support, fixture.delivery));
+        }
+    }
+
+    @Test
+    void completedOrUnknownDeliveryCannotBeRenewed() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            assertEquals(0L, fixture.type.getMethod("renew", Delivery.class)
+                    .invoke(fixture.support, fixture.delivery));
+            fixture.track(false);
+            when(fixture.delivery.getRemoteState()).thenReturn(Accepted.getInstance());
+            fixture.settle();
+            assertEquals(0L, fixture.type.getMethod("renew", Delivery.class)
+                    .invoke(fixture.support, fixture.delivery));
+        }
+    }
+
+    @Test
     void failedCancellationClosesConnectionAndRejectsStaleSettlement() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var message = fixture.reference.getMessage();

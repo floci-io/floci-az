@@ -3,6 +3,10 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.nio.ByteBuffer;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -28,6 +32,7 @@ public final class ServiceBusMessageLockSupport {
    private static final SimpleString LOCKED_UNTIL = SimpleString.of("x-opt-locked-until");
    private static final Symbol LOCK_LOST = Symbol.valueOf("com.microsoft:message-lock-lost");
    private static final Object EXPIRED = new Object();
+   private static final Set<ServiceBusMessageLockSupport> ACTIVE = ConcurrentHashMap.newKeySet();
 
    private final AMQPConnectionContext connection;
    private final AMQPSessionCallback session;
@@ -56,11 +61,60 @@ public final class ServiceBusMessageLockSupport {
          LOGGER.warn("Ignoring invalid Service Bus message lock metadata: " + metadata, e);
          return;
       }
-      MessageLock lock = new MessageLock(reference, consumer, System.currentTimeMillis() + duration);
+      MessageLock lock = new MessageLock(reference, consumer, System.currentTimeMillis() + duration, duration);
       reference.setProtocolData(Deadline.class, new Deadline(lock.until));
       locks.put(delivery, lock);
+      ACTIVE.add(this);
       lock.timer = connection.getProtocolManager().getServer().getScheduledPool().schedule(
          () -> connection.runLater(() -> expire(delivery, lock)), duration, TimeUnit.MILLISECONDS);
+   }
+
+   /** Called on the owning connection event loop, just like settlement and expiration. */
+   public long renew(Delivery delivery) {
+      MessageLock previous = locks.get(delivery);
+      if (previous == null) {
+         return 0;
+      }
+      if (System.currentTimeMillis() >= previous.until || delivery.isSettled()) {
+         expire(delivery, previous);
+         return 0;
+      }
+      MessageLock renewed = new MessageLock(previous.reference, previous.consumer,
+         System.currentTimeMillis() + previous.duration, previous.duration);
+      previous.timer.cancel(false);
+      locks.put(delivery, renewed);
+      renewed.timer = connection.getProtocolManager().getServer().getScheduledPool().schedule(
+         () -> connection.runLater(() -> expire(delivery, renewed)), renewed.duration, TimeUnit.MILLISECONDS);
+      return renewed.until;
+   }
+
+   static long renew(AMQPConnectionContext connection, String entity, String linkName, UUID token) {
+      for (ServiceBusMessageLockSupport support : ACTIVE) {
+         if (support.connection != connection) {
+            continue;
+         }
+         for (var entry : support.locks.entrySet()) {
+            Delivery delivery = entry.getKey();
+            byte[] tag = delivery.getTag();
+            if (tag == null || tag.length != 16
+                || !entity.equals(entry.getValue().consumer.getQueue().getName().toString())
+                || (linkName != null && !linkName.equals(delivery.getLink().getName()))) {
+               continue;
+            }
+            ByteBuffer bytes = ByteBuffer.wrap(tag);
+            if (token.equals(new UUID(bytes.getLong(), bytes.getLong()))) {
+               return support.renew(delivery);
+            }
+         }
+      }
+      return 0;
+   }
+
+   private void remove(Delivery delivery) {
+      locks.remove(delivery);
+      if (locks.isEmpty()) {
+         ACTIVE.remove(this);
+      }
    }
 
    /** Reject stale dispositions before Artemis can acknowledge a subsequently redelivered message. */
@@ -79,7 +133,7 @@ public final class ServiceBusMessageLockSupport {
          return false;
       }
       if (delivery.getRemoteState() instanceof Outcome) {
-         locks.remove(delivery);
+         remove(delivery);
          lock.timer.cancel(false);
       }
       return true;
@@ -88,6 +142,9 @@ public final class ServiceBusMessageLockSupport {
    private void expire(Delivery delivery, MessageLock lock) {
       if (!locks.remove(delivery, lock)) {
          return;
+      }
+      if (locks.isEmpty()) {
+         ACTIVE.remove(this);
       }
       lock.timer.cancel(false);
       if (delivery.isSettled()) {
@@ -121,6 +178,7 @@ public final class ServiceBusMessageLockSupport {
    public void close() {
       locks.values().forEach(lock -> lock.timer.cancel(false));
       locks.clear();
+      ACTIVE.remove(this);
    }
 
    public static boolean hasDeadline(MessageReference reference) {
@@ -154,12 +212,14 @@ public final class ServiceBusMessageLockSupport {
       private final MessageReference reference;
       private final ServerConsumer consumer;
       private final long until;
+      private final long duration;
       private ScheduledFuture<?> timer;
 
-      private MessageLock(MessageReference reference, ServerConsumer consumer, long until) {
+      private MessageLock(MessageReference reference, ServerConsumer consumer, long until, long duration) {
          this.reference = reference;
          this.consumer = consumer;
          this.until = until;
+         this.duration = duration;
       }
    }
 }

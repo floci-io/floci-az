@@ -8,6 +8,7 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Generates 16-byte delivery tags compatible with Azure Service Bus lock tokens.
@@ -16,9 +17,9 @@ public final class AmqpTransferTagGenerator {
 
    public static final int DEFAULT_TAG_POOL_SIZE = 1024;
    private static final int AZURE_LOCK_TOKEN_SIZE = 16;
+   private static final AtomicLong NEXT_TAG_ID = new AtomicLong(1);
 
    private final Deque<byte[]> tagPool;
-   private long nextTagId = 1;
    private int maxPoolSize = DEFAULT_TAG_POOL_SIZE;
 
    public AmqpTransferTagGenerator() {
@@ -33,10 +34,11 @@ public final class AmqpTransferTagGenerator {
       byte[] tagBytes = tagPool == null ? null : tagPool.pollFirst();
       if (tagBytes == null) {
          tagBytes = new byte[AZURE_LOCK_TOKEN_SIZE];
-         long tag = nextTagId++;
-         for (int i = 0; i < Long.BYTES; i++) {
-            tagBytes[AZURE_LOCK_TOKEN_SIZE - 1 - i] = (byte) (tag >>> (i * 8));
-         }
+      }
+      // Pool buffers, never lock-token identities: a stale renewal must not renew a new delivery.
+      long tag = NEXT_TAG_ID.getAndIncrement();
+      for (int i = 0; i < Long.BYTES; i++) {
+         tagBytes[AZURE_LOCK_TOKEN_SIZE - 1 - i] = (byte) (tag >>> (i * 8));
       }
       return tagBytes;
    }
