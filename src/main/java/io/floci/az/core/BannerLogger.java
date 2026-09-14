@@ -48,6 +48,9 @@ public class BannerLogger {
         if (config.services().appConfig().enabled()) {
             sb.append(serviceStatus("appconfig", true, getStorageMode("appconfig")));
         }
+        if (config.services().signalr().enabled()) {
+            sb.append(serviceStatus("signalr", true, "live WebSocket connections"));
+        }
         if (config.services().cosmos().enabled()) {
             sb.append(serviceStatus("cosmos", true, getStorageMode("cosmos")));
             // Cosmos engine sub-APIs — in mocked mode no engine containers are started.

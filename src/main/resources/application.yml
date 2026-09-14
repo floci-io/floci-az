@@ -103,6 +103,9 @@ floci-az:
     resource-namespace: ""
 
   services:
+    signalr:
+      enabled: true
+      access-key: bG9jYWwtc2lnbmFsci1kZXZlbG9wbWVudC1rZXk=
     blob:
       enabled: true
     queue:

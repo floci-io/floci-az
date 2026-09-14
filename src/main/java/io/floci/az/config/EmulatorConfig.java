@@ -119,6 +119,7 @@ public interface EmulatorConfig {
         TableServiceConfig     table();
         FunctionsConfig        functions();
         AppConfigServiceConfig appConfig();
+        SignalRConfig          signalr();
         CosmosServiceConfig    cosmos();
         KeyVaultConfig         keyVault();
         EventHubConfig         eventHub();
@@ -169,6 +170,15 @@ public interface EmulatorConfig {
     interface MonitorConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface SignalRConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Base64-encoded local development signing key, shared with the Azure SignalR SDK. */
+        @WithDefault("bG9jYWwtc2lnbmFsci1kZXZlbG9wbWVudC1rZXk=")
+        String accessKey();
     }
 
     /**

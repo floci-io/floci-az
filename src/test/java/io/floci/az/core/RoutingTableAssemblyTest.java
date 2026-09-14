@@ -42,6 +42,7 @@ class RoutingTableAssemblyTest {
         Map.entry(".queue.core.windows.net", "queue"),
         Map.entry(".table.core.windows.net", "table"),
         Map.entry(".servicebus.windows.net", "servicebus"),
+        Map.entry(".service.signalr.net", "signalr"),
         Map.entry(".azurecontainerapps.io", "containerapps"),
         Map.entry(".azurecr.io", "acr")
     );
@@ -68,6 +69,7 @@ class RoutingTableAssemblyTest {
         Map.entry("-mysql", "mysql"),
         Map.entry("-mariadb", "mariadb"),
         Map.entry("-servicebus", "servicebus"),
+        Map.entry("-signalr", "signalr"),
         Map.entry("-apim", "apim"),
         Map.entry("-email", "email")
     );
