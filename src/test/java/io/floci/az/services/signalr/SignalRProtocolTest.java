@@ -10,6 +10,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SignalRProtocolTest {
     @Test
+    void payloadLimitExcludesFramingAndAppliesToEachCoalescedMessage() throws Exception {
+        int limit = 1024 * 1024;
+        byte[] frame = SignalRProtocol.frame(6, "id", new byte[limit - 11], Map.of());
+        assertEquals(limit + 3, frame.length, "The three-byte length prefix is outside the payload limit");
+        byte[] combined = Arrays.copyOf(frame, frame.length * 2);
+        System.arraycopy(frame, 0, combined, frame.length, frame.length);
+        List<List<Object>> messages = new ArrayList<>();
+        new SignalRProtocol().accept(combined, messages::add);
+        assertEquals(2, messages.size());
+        assertEquals(limit - 11, ((byte[]) messages.getFirst().get(2)).length);
+    }
+
+    @Test
+    void rejectsPayloadAboveLimitEvenWhenFragmented() {
+        int limit = 1024 * 1024;
+        byte[] frame = SignalRProtocol.frame(6, "id", new byte[limit - 10], Map.of());
+        assertThrows(IOException.class, () -> new SignalRProtocol().accept(Arrays.copyOf(frame, 3), ignored -> fail()));
+    }
+
+    @Test
     void handlesFragmentedAndCoalescedFrames() throws Exception {
         byte[] first = SignalRProtocol.frame(6, "connection", new byte[512], Map.of());
         byte[] second = SignalRProtocol.frame(3, "status", "1");

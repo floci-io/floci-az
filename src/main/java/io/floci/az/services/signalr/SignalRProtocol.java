@@ -15,13 +15,11 @@ import java.util.function.Consumer;
 
 /** Azure service protocol: a base-128 length prefix followed by a MessagePack array. */
 final class SignalRProtocol {
-    private static final int MAX_FRAME = 1024 * 1024;
+    private static final int MAX_PAYLOAD = 1024 * 1024;
     private byte[] pending = new byte[0];
 
     void accept(byte[] bytes, Consumer<List<Object>> messages) throws IOException {
-        if (bytes.length > MAX_FRAME || pending.length + bytes.length > MAX_FRAME + 5) {
-            throw new IOException("Service message exceeds 1 MiB");
-        }
+        // A transport chunk can contain several frames; enforce the limit on each declared payload.
         byte[] input = Arrays.copyOf(pending, pending.length + bytes.length);
         System.arraycopy(bytes, 0, input, pending.length, bytes.length);
         int offset = 0;
@@ -42,7 +40,7 @@ final class SignalRProtocol {
                 }
                 shift += 7;
             }
-            if (length > MAX_FRAME) {
+            if (length > MAX_PAYLOAD) {
                 throw new IOException("Service message exceeds 1 MiB");
             }
             if (!complete || input.length - offset < length) {
