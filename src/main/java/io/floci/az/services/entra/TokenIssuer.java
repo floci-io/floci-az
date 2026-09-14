@@ -88,7 +88,11 @@ public class TokenIssuer {
         }
     }
 
-    private String issue(TokenSpec spec, Map<String, Object> extraClaims) {
+    /**
+     * Mints a token carrying {@code extraClaims} alongside the standard claim set. ACR's registry
+     * tokens use this for the {@code access} claim that clients decode to read their permissions.
+     */
+    public String issue(TokenSpec spec, Map<String, Object> extraClaims) {
         Instant now = Instant.now();
         long iat = now.getEpochSecond();
         long exp = iat + spec.lifetimeSeconds();

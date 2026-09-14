@@ -49,9 +49,13 @@ cat /tmp/floci-az.crt >> "$COMBINED_CA"
 export REQUESTS_CA_BUNDLE="$COMBINED_CA"
 export SSL_CERT_FILE="$COMBINED_CA"
 
-# *.vault.azure.net data-plane interception: map the test vault DNS to loopback and
-# forward 443 to floci-az, mirroring the terraform suite so `az keyvault secret` works.
+# *.vault.azure.net and *.azurecr.io data-plane interception: map the test vault and
+# registry DNS to loopback and forward 443 to floci-az, mirroring the terraform suite so
+# `az keyvault secret` and `az acr login` reach the emulator on the hostnames the clients
+# build from the service endpoints.
 echo "127.0.0.1 floci-test-kv.vault.azure.net" >> /etc/hosts
+# Keep this name in sync with ACR_NAME in test/test_helper/common-setup.bash.
+echo "127.0.0.1 flocitestacr.azurecr.io" >> /etc/hosts
 socat TCP-LISTEN:443,bind=127.0.0.1,fork,reuseaddr TCP:"${FLOCI_AZ_HOST}" &
 sleep 1
 
@@ -76,7 +80,8 @@ az cloud register -n floci-az \
     --endpoint-active-directory-resource-id       "${HTTPS_BASE}/" \
     --endpoint-active-directory-graph-resource-id "${HTTPS_BASE}/" \
     --suffix-storage-endpoint                     "core.windows.net" \
-    --suffix-keyvault-dns                         ".vault.azure.net"
+    --suffix-keyvault-dns                         ".vault.azure.net" \
+    --suffix-acr-login-server-endpoint            ".azurecr.io"
 
 az cloud set -n floci-az
 

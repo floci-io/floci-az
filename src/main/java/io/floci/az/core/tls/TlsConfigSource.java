@@ -199,7 +199,8 @@ public class TlsConfigSource implements ConfigSource {
         // (not in a container).
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
-                "*.vault.azure.net", "*.managedhsm.azure.net", "host.docker.internal"));
+                "*.vault.azure.net", "*.managedhsm.azure.net", "*.azurecr.io",
+                "host.docker.internal"));
         all.addAll(customHostnames);
         return all;
     }

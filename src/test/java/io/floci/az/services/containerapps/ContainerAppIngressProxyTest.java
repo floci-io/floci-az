@@ -38,7 +38,7 @@ class ContainerAppIngressProxyTest {
             when(headers.getRequestHeaders()).thenReturn(new MultivaluedHashMap<>());
             AzureRequest request = new AzureRequest("GET", "app", "containerapps", "items/a/b c",
                     headers, null, Map.of(), Map.of(), null, false, "app.azurecontainerapps.io", "127.0.0.1",
-                    "items/a%2Fb%20c%3Fvalue%23part").withAuthContext(null);
+                    "items/a%2Fb%20c%3Fvalue%23part", null).withAuthContext(null);
             assertEquals("app.azurecontainerapps.io", request.host());
             assertEquals("127.0.0.1", request.remoteAddress());
             var endpoint = new ContainerLifecycleManager.EndpointInfo(

@@ -90,8 +90,10 @@ class TlsConfigSourceCertificateGenerationTest {
             "SANs should include 'host.docker.internal' so function containers can reach floci-az on the host");
         assertTrue(sans.contains("*.managedhsm.azure.net"),
             "SANs should include '*.managedhsm.azure.net' for Managed-HSM-flavored vault URLs");
-        assertEquals(9, sans.size(),
-            "Default cert should have exactly 9 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, *.managedhsm.azure.net, host.docker.internal)");
+        assertTrue(sans.contains("*.azurecr.io"),
+            "SANs should include '*.azurecr.io' so registry clients trust {name}.azurecr.io");
+        assertEquals(10, sans.size(),
+            "Default cert should have exactly 10 SANs (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci-az.io, *.localhost.floci-az.io, *.vault.azure.net, *.managedhsm.azure.net, *.azurecr.io, host.docker.internal)");
     }
 
     @Test

@@ -29,7 +29,7 @@ public class AcrModels {
         private String password;           // primary admin password
         private String password2;          // secondary admin password
 
-        /** Path-prefixed registry endpoint: {@code localhost:{port}/{name}} (shared registry). */
+        /** The registry's Azure login server: {@code {name}.azurecr.io}. */
         private String loginServer;
 
         private String provisioningState;

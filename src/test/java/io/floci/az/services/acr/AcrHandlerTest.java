@@ -10,11 +10,14 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.endsWith;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Management-plane coverage for Azure Container Registry in mocked mode (no Docker):
@@ -70,10 +73,13 @@ public class AcrHandlerTest {
                 .body("sku.name", is("Basic"))
                 .body("properties.provisioningState", is("Succeeded"))
                 .body("properties.adminUserEnabled", is(true))
-                .body("properties.loginServer", endsWith(".azurecr.io"))
+                .body("properties.loginServer", is("acrcreate.azurecr.io"))
                 // Fields the azurerm provider dereferences without nil checks — must be present.
                 .body("properties.zoneRedundancy", is("Disabled"))
-                .body("properties.publicNetworkAccess", is("Enabled"));
+                .body("properties.publicNetworkAccess", is("Enabled"))
+                // localPort reports the shared container's published port. Mocked mode starts no
+                // container, so there is no port to report and the field is left out entirely.
+                .body("properties", not(hasKey("localPort")));
     }
 
     @Test
@@ -143,6 +149,22 @@ public class AcrHandlerTest {
         given().when().get(registry("acrrepl") + "/replications" + API)
                 .then().statusCode(200)
                 .body("value", hasSize(0));
+    }
+
+    @Test
+    void loginServerIsTheAzureHostnameForTheRegistry() {
+        assertEquals("myregistry.azurecr.io", AcrHandler.loginServer("myregistry"));
+        // Azure lowercases the login server even when the resource name is mixed case.
+        assertEquals("myregistry.azurecr.io", AcrHandler.loginServer("MyRegistry"));
+    }
+
+    @Test
+    void theRegistryIsResolvedFromTheRequestHost() {
+        assertEquals("myregistry", AcrHandler.registryFromHost("myregistry.azurecr.io"));
+        assertEquals("myregistry", AcrHandler.registryFromHost("MyRegistry.AzureCr.Io"));
+        assertNull(AcrHandler.registryFromHost("localhost"));
+        assertNull(AcrHandler.registryFromHost(".azurecr.io"));
+        assertNull(AcrHandler.registryFromHost(null));
     }
 
     @Test
