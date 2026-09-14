@@ -15,6 +15,25 @@ import static org.junit.jupiter.api.Assertions.*;
 @QuarkusTest
 class KeyVaultCertificatesTest {
     @Test
+    void certificateKeyRotationPolicySurvivesRenewalAndRecovery() {
+        String vault = "/cert" + UUID.randomUUID().toString().replace("-", "") + "-keyvault";
+        String policy = """
+                {"policy":{"issuer":{"name":"Self"},"key_props":{"kty":"EC"},"x509_props":{"subject":"CN=test"}}}
+                """;
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy)
+                .post(vault + "/certificates/test/create").then().statusCode(202);
+        given().header("Authorization", "Bearer test").contentType("application/json")
+                .body("{\"attributes\":{\"expiryTime\":\"P2Y\"}}")
+                .put(vault + "/keys/test/rotationpolicy").then().statusCode(200);
+        given().header("Authorization", "Bearer test").contentType("application/json").body(policy)
+                .post(vault + "/certificates/test/create").then().statusCode(202);
+        given().header("Authorization", "Bearer test").delete(vault + "/certificates/test").then().statusCode(200);
+        given().header("Authorization", "Bearer test").post(vault + "/deletedcertificates/test/recover").then().statusCode(200);
+        given().header("Authorization", "Bearer test").get(vault + "/keys/test/rotationpolicy")
+                .then().statusCode(200).body("attributes.expiryTime", equalTo("P2Y"));
+    }
+
+    @Test
     void protectsIndependentlyCreatedBackingObjects() {
         String vault = "/cert" + UUID.randomUUID().toString().replace("-", "") + "-keyvault";
         String policy = """

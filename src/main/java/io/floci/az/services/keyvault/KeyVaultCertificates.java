@@ -340,6 +340,9 @@ final class KeyVaultCertificates {
         for (String kind : List.of("keys", "secrets")) {
             String root = base(account, kind, name);
             for (StoredObject object : store.scan(key -> key.equals(root) || key.startsWith(root + "/"))) {
+                if (kind.equals("keys") && !ownedVersions.isEmpty() && object.key().equals(root + "/rotationpolicy")) {
+                    continue;
+                }
                 String version = object.metadata().get("version");
                 if (!ownedVersions.contains(version) || !(object.key().equals(root) || object.key().equals(root + "/versions/" + version))) {
                     return true;
