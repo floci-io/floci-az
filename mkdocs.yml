@@ -75,6 +75,7 @@ nav:
     - Table Storage: services/table.md
     - Azure Functions: services/functions.md
     - App Configuration: services/app-config.md
+    - Azure SignalR Service: services/signalr.md
     - Key Vault: services/key-vault.md
     - Microsoft Entra ID: services/entra.md
     - Microsoft Graph: services/graph.md
