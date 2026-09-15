@@ -129,7 +129,8 @@ class ServiceBusCompatibilityTest {
                     .stream().findFirst().orElse(null);
             assertNotNull(msg, "Expected a message");
             assertEquals(payload, msg.getBody().toString());
-            assertEquals(1, msg.getDeliveryCount());
+            // The Java SDK exposes the zero-based AMQP header directly; .NET adds one.
+            assertEquals(0, msg.getDeliveryCount());
             receiver.abandon(msg);
         }
 
@@ -139,8 +140,8 @@ class ServiceBusCompatibilityTest {
                     .stream().findFirst().orElse(null);
             assertNotNull(msg, "Message should be requeued after abandon");
             assertEquals(payload, msg.getBody().toString());
-            assertTrue(msg.getDeliveryCount() >= 2,
-                    "Delivery count should be at least 2 after abandon");
+            assertEquals(1, msg.getDeliveryCount(),
+                    "One abandon should increment the AMQP delivery count once");
             receiver.complete(msg);
         }
     }

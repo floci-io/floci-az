@@ -17,6 +17,14 @@ official Service Bus emulator's format — see [Declarative topology](#declarati
 > API responds, but the AMQP data plane is unavailable. Set `mocked: false` (and expose the AMQP
 > ports) to send and receive messages.
 
+## Delivery counts
+
+The AMQP header counts prior delivery attempts: it starts at `0` and increments after an
+abandon or lock expiry. The .NET SDK adds one when exposing `DeliveryCount`, so a first receive
+reports `1` and the receive after one abandon reports `2`. The Java and JavaScript SDKs expose
+the raw AMQP count, reporting `0` and `1` for those same receives. Peek and session-lock renewal
+do not count as additional delivery attempts.
+
 ## Management plane
 
 Entity CRUD is served over HTTP at `/{account}-servicebus/`:

@@ -15,8 +15,6 @@ import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.Symbol;
-import org.apache.qpid.proton.amqp.UnsignedInteger;
-import org.apache.qpid.proton.amqp.messaging.Header;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.apache.qpid.proton.amqp.messaging.Outcome;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
@@ -181,10 +179,6 @@ public final class ServiceBusMessageLockSupport {
       ACTIVE.remove(this);
    }
 
-   public static boolean hasDeadline(MessageReference reference) {
-      return reference.getProtocolData(Deadline.class) != null;
-   }
-
    /** Large messages stream their body from disk, so replace only their outgoing metadata. */
    public static MessageAnnotations annotationsForDelivery(MessageAnnotations original, MessageReference reference) {
       Deadline deadline = reference.getProtocolData(Deadline.class);
@@ -194,15 +188,6 @@ public final class ServiceBusMessageLockSupport {
       Map<Symbol, Object> annotations = original == null ? new HashMap<>() : new HashMap<>(original.getValue());
       annotations.put(Symbol.valueOf(LOCKED_UNTIL.toString()), new Date(deadline.until()));
       return new MessageAnnotations(annotations);
-   }
-
-   public static Header headerForDelivery(Header original, MessageReference reference) {
-      if (!hasDeadline(reference)) {
-         return original;
-      }
-      Header header = original == null ? new Header() : new Header(original);
-      header.setDeliveryCount(UnsignedInteger.valueOf(Math.max(0, reference.getDeliveryCount() - 1)));
-      return header;
    }
 
    private record Deadline(long until) {
