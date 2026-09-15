@@ -269,6 +269,15 @@ public class BlobLeaseService {
         return null;
     }
 
+    /**
+     * Snapshot Blob ignores an active lease unless the caller explicitly supplies a lease ID.
+     * When supplied, the ID must still identify the active lease. Call only inside
+     * {@link #exclusively}.
+     */
+    Response validateSnapshot(AzureRequest request, String blobKey) {
+        return header(request, "x-ms-lease-id") == null ? null : validateWrite(request, blobKey);
+    }
+
     /** Data Lake variant of {@link #validateWrite} using the DFS JSON error envelope. */
     Response validateDataLakeWrite(AzureRequest request, String blobKey) {
         String requestLeaseId = header(request, "x-ms-lease-id");
