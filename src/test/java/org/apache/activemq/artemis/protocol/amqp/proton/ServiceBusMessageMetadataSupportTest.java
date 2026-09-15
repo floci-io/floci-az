@@ -6,8 +6,10 @@ import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.Symbol;
+import org.apache.qpid.proton.amqp.UnsignedInteger;
 import org.apache.qpid.proton.amqp.messaging.AmqpValue;
 import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
+import org.apache.qpid.proton.amqp.messaging.Header;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +28,31 @@ class ServiceBusMessageMetadataSupportTest {
     private static final long ENQUEUED_TIME = 1_789_200_000_000L;
     private static final Symbol SEQUENCE = Symbol.valueOf("x-opt-sequence-number");
     private static final Symbol ENQUEUED = Symbol.valueOf("x-opt-enqueued-time");
+
+    @ParameterizedTest
+    @ValueSource(strings = {"peeklock", "session"})
+    void streamedDeliveryCountDoesNotRequireAnIndividualMessageLock(String kind) throws Exception {
+        try (Fixture fixture = new Fixture(kind)) {
+            Header original = new Header();
+            original.setDurable(true);
+            original.setTtl(UnsignedInteger.valueOf(60_000));
+            for (Header input : new Header[]{null, original}) {
+                when(fixture.reference.getDeliveryCount()).thenReturn(1);
+                Header first = fixture.header(input);
+                assertNotNull(first);
+                assertEquals(UnsignedInteger.ZERO, first.getDeliveryCount());
+                when(fixture.reference.getDeliveryCount()).thenReturn(2);
+                Header second = fixture.header(input);
+                assertEquals(UnsignedInteger.valueOf(1), second.getDeliveryCount());
+                if (input != null) {
+                    assertNotSame(input, second);
+                    assertEquals(input.getDurable(), second.getDurable());
+                    assertEquals(input.getTtl(), second.getTtl());
+                    assertNull(input.getDeliveryCount());
+                }
+            }
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -134,6 +161,9 @@ class ServiceBusMessageMetadataSupportTest {
             when(fixture.reference.getQueue().getUser()).thenReturn(null);
             MessageAnnotations original = new MessageAnnotations(Map.of(SEQUENCE, 99L));
             assertSame(original, fixture.annotations(original));
+            Header header = new Header();
+            assertSame(header, fixture.header(header));
+            assertNull(fixture.header(null));
             assertSame(fixture.message, fixture.type.getMethod("forDelivery", AMQPMessage.class, MessageReference.class)
                     .invoke(null, fixture.message, fixture.reference));
             verify(fixture.message, never()).copy();
@@ -157,6 +187,11 @@ class ServiceBusMessageMetadataSupportTest {
             return (MessageAnnotations) type.getMethod("annotationsForDelivery",
                     MessageAnnotations.class, AMQPMessage.class, MessageReference.class)
                     .invoke(null, original, message, reference);
+        }
+
+        Header header(Header original) throws Exception {
+            return (Header) type.getMethod("headerForDelivery", Header.class, MessageReference.class)
+                    .invoke(null, original, reference);
         }
 
         @Override
