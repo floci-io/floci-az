@@ -35,6 +35,25 @@ class ServiceBusCompatibilityTest {
 
     private static final Duration RECV_TIMEOUT = Duration.ofSeconds(10);
 
+    @Test
+    @Timeout(30)
+    @DisplayName("message renewal returns an expiration timestamp and extends settlement")
+    void renewMessageLockExtendsDeadline() throws Exception {
+        String queue = uniqueName("renew");
+        EmulatorConfig.ensureServiceBusQueue(queue, "<LockDuration>PT6S</LockDuration>");
+        send(queue, "renew-me");
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage message = receiver.receiveMessages(1, RECV_TIMEOUT).stream().findFirst().orElseThrow();
+            OffsetDateTime originalDeadline = message.getLockedUntil();
+            Thread.sleep(3000);
+            OffsetDateTime renewed = receiver.renewMessageLock(message);
+            assertNotNull(renewed, "The SDK must deserialize the expirations timestamp array");
+            assertTrue(renewed.isAfter(originalDeadline));
+            Thread.sleep(Math.max(0, Duration.between(OffsetDateTime.now(), originalDeadline).toMillis() + 500));
+            receiver.complete(message);
+        }
+    }
+
     @BeforeAll
     void ensureNamespace() throws Exception {
         EmulatorConfig.ensureServiceBusNamespace();

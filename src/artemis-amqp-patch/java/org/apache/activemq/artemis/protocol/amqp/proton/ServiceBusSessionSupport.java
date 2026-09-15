@@ -23,6 +23,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.activemq.artemis.api.core.ActiveMQExceptionType;
 import org.apache.activemq.artemis.api.core.SimpleString;
@@ -112,7 +114,9 @@ public final class ServiceBusSessionSupport {
       if (session != null) {
          SessionOwner owner = SESSION_OWNERS.get(session);
          if (owner != null && owner.sender() == protonSender) {
-            SESSION_OWNERS.remove(session, owner);
+            if (SESSION_OWNERS.remove(session, owner)) {
+               owner.cancelTimer();
+            }
          }
       }
    }
@@ -139,6 +143,7 @@ public final class ServiceBusSessionSupport {
          if (!SESSION_OWNERS.replace(key, owner, renewed)) {
             return 0;
          }
+         owner.cancelTimer();
          scheduleExpiration(server, key, renewed, metadata.lockMillis());
          return renewed.lockedUntilMillis();
       }
@@ -248,15 +253,16 @@ public final class ServiceBusSessionSupport {
                                           SessionKey session,
                                           SessionOwner owner,
                                           long lockMillis) {
-      server.getScheduledPool().schedule(
+      owner.timer().set(server.getScheduledPool().schedule(
          () -> owner.senderContext().connection.runLater(() -> expire(session, owner)),
-         lockMillis, TimeUnit.MILLISECONDS);
+         lockMillis, TimeUnit.MILLISECONDS));
    }
 
    private static void expire(SessionKey session, SessionOwner owner) {
       if (!SESSION_OWNERS.remove(session, owner)) {
          return;
       }
+      owner.cancelTimer();
 
       SENDER_SESSIONS.remove(owner.sender(), session);
       owner.queue().resetGroup(SimpleString.of(session.sessionId()));
@@ -314,7 +320,18 @@ public final class ServiceBusSessionSupport {
    private record SessionOwner(Sender sender,
                                ProtonServerSenderContext senderContext,
                                Queue queue,
-                               long lockedUntilMillis) {
+                               long lockedUntilMillis,
+                               AtomicReference<ScheduledFuture<?>> timer) {
+      SessionOwner(Sender sender, ProtonServerSenderContext senderContext, Queue queue, long lockedUntilMillis) {
+         this(sender, senderContext, queue, lockedUntilMillis, new AtomicReference<>());
+      }
+
+      void cancelTimer() {
+         ScheduledFuture<?> scheduled = timer.getAndSet(null);
+         if (scheduled != null) {
+            scheduled.cancel(false);
+         }
+      }
    }
 
    private record SessionReservation(String sessionId, SessionOwner owner) {
