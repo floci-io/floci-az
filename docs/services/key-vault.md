@@ -1,6 +1,7 @@
 # Key Vault
 
 Compatible with the `azure-keyvault-secrets` and `azure-keyvault-keys` SDKs (Python, Java, JavaScript, .NET).
+Self-signed certificate issuance also supports the Key Vault Certificates SDK.
 
 ## Features
 
@@ -28,6 +29,41 @@ Compatible with the `azure-keyvault-secrets` and `azure-keyvault-keys` SDKs (Pyt
   `sign`/`verify` (RS256/384/512, PS256/384/512, ES256/384/512), `wrapkey`/`unwrapkey`
 - **`/rng`** — random bytes for client-side key material (see deviations)
 - **Managed HSM** — the same data plane served under the `/{account}-managedhsm/` suffix
+
+### Certificates
+
+- Self-signed RSA and EC X.509 certificates with configurable subject, validity, key usage, EKUs, DNS and email SANs.
+- `POST /certificates/{name}/create` returns a completed issuance operation. The SDK can poll `/pending` and retrieve its target.
+- Get the current certificate or an immutable version, list certificates and versions, and read the issuance policy.
+- Each certificate has matching `kid` and `sid` versions, accessible through the existing Keys and Secrets SDKs.
+- Exportable certificates include the private key in a passwordless PKCS12 secret or PEM secret. Non-exportable certificates expose only the public certificate in the secret.
+- Delete, recover, and purge preserve the certificate's versions and associated key/secret objects together.
+
+External issuers, import/merge, policy/property updates, scheduled renewal, UPN SANs, and certificate backup/restore are not implemented.
+Associated deleted key/secret objects are retained with the deleted certificate, rather than exposed through independent deleted-key/deleted-secret APIs.
+Certificate private keys use the configured Key Vault storage backend and are not HSM-protected.
+Issuance and deletion reject names containing independently created key/secret versions with `409 Conflict`,
+preserving those objects. Rotation policies on certificate-owned keys are retained across renewal and recovery.
+Certificate lifecycle changes use atomic storage batches.
+
+For example, with an already configured .NET `CertificateClient` and `SecretClient`:
+
+```csharp
+var policy = new CertificatePolicy("Self", "CN=local-signing")
+{
+    KeyType = CertificateKeyType.Rsa,
+    KeySize = 2048,
+    Exportable = true,
+    ContentType = CertificateContentType.Pkcs12,
+    ValidityInMonths = 12
+};
+var operation = await certificates.StartCreateCertificateAsync("local-signing", policy);
+var issued = (await operation.WaitForCompletionAsync()).Value;
+var secret = await secrets.GetSecretAsync("local-signing", issued.Properties.Version);
+using var signingCertificate = X509CertificateLoader.LoadPkcs12(
+    Convert.FromBase64String(secret.Value.Value), "",
+    X509KeyStorageFlags.EphemeralKeySet);
+```
 
 ## Endpoint
 
