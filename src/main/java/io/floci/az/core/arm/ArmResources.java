@@ -16,11 +16,12 @@ public final class ArmResources {
     }
 
     /**
-     * Minimal ARM resource entry for the resource-group {@code /resources} index —
+     * Minimal ARM resource entry for the generic {@code /resources} listings, at either scope —
      * {@code id}, {@code name}, {@code type}, {@code location}, and {@code tags} when non-empty.
      *
-     * <p>Azure's generic resource listing returns identity fields only; {@code properties} arrives
-     * solely under {@code $expand}. Contributors project their resource onto this shape rather than
+     * <p>Azure's generic resource listing returns identity fields only and never {@code properties};
+     * its {@code $expand} adds only {@code createdTime}, {@code changedTime} and
+     * {@code provisioningState}. Contributors project their resource onto this shape rather than
      * echoing the body their {@code GET} returns.</p>
      */
     public static Map<String, Object> indexEntry(String id, String name, String type, String location,

@@ -14,6 +14,7 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ArmResourceFilter;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
@@ -25,6 +26,7 @@ import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * ARM management-plane handler for Azure Resource Manager paths that are not
@@ -221,7 +223,7 @@ public class ArmHandler implements AzureServiceHandler {
 
         // ── Subscription-level resource listing ──────────────────────────────
         if (path.matches("subscriptions/[^/?]+/resources([?].*)?")) {
-            return Response.ok(Map.of("value", indexedResources(extractSub(path), null))).build();
+            return listIndex(req, extractSub(path), null);
         }
 
         // ── Resource Groups ───────────────────────────────────────────────────
@@ -258,7 +260,7 @@ public class ArmHandler implements AzureServiceHandler {
         // subscriptions/{sub}/resourceGroups/{rg}/resources  (list resources in RG)
         // azurerm provider calls this before deleting a resource group to verify it is empty.
         if (lc.matches("subscriptions/[^/]+/resourcegroups/[^/]+/resources([?].*)?")) {
-            return Response.ok(Map.of("value", indexedResources(sub, extractRg(path)))).build();
+            return listIndex(req, sub, extractRg(path));
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}/providers/...
@@ -270,6 +272,24 @@ public class ArmHandler implements AzureServiceHandler {
     }
 
     /**
+     * Answers either generic listing, honouring {@code $filter}. The azurerm provider fills its
+     * Key Vault cache from {@code $filter=resourceType eq 'Microsoft.KeyVault/vaults'} and parses
+     * every returned id as a vault id, so a filter must narrow the listing — or be refused — never
+     * be ignored.
+     */
+    private Response listIndex(AzureRequest req, String sub, String rg) {
+        String filter = req.queryParams() == null ? null : req.queryParams().get("$filter");
+        Predicate<Map<String, Object>> matches;
+        try {
+            matches = ArmResourceFilter.parse(filter);
+        } catch (ArmResourceFilter.InvalidFilterException e) {
+            return ArmErrors.error(400, "InvalidFilter", e.getMessage());
+        }
+        return Response.ok(Map.of("value", indexedResources(sub, rg).stream().filter(matches).toList()))
+                .build();
+    }
+
+    /**
      * The generic resource index for a scope: the whole subscription when {@code rg} is null, one
      * resource group otherwise. Both ARM listings answer from this one assembly so they cannot
      * disagree about what the estate holds.
@@ -277,8 +297,9 @@ public class ArmHandler implements AzureServiceHandler {
      * <p>ArmHandler's own Storage / Key Vault / Web state contributes the full stored body rather
      * than the trimmed {@code ArmResources.indexEntry} shape: the azurerm provider reads this
      * listing to populate its Key Vault cache and looks vaults up by {@code properties.vaultUri},
-     * which a properties-free entry would not carry. A deliberate deviation from Azure, which
-     * returns properties only under {@code $expand}.</p>
+     * which a properties-free entry would not carry. A deliberate deviation from Azure, whose
+     * generic listing never carries {@code properties} — its {@code $expand} adds only
+     * {@code createdTime}, {@code changedTime} and {@code provisioningState}.</p>
      */
     private List<Map<String, Object>> indexedResources(String sub, String rg) {
         List<Map<String, Object>> resources = new ArrayList<>();

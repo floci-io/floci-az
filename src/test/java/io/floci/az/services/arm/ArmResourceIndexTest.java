@@ -140,4 +140,38 @@ class ArmResourceIndexTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'indexkv' }.properties.vaultUri", not(emptyOrNullString()));
     }
+
+    @Test
+    @DisplayName("azurerm's Key Vault cache query returns only vaults, whatever else the estate holds")
+    void keyVaultCacheFilterReturnsOnlyVaults() {
+        // populate_cache.go parses every returned id as a Key Vault id — a storage account in this
+        // listing fails terraform destroy outright, so the filter must narrow it.
+        given().queryParam("$filter", "resourceType eq 'Microsoft.KeyVault/vaults'")
+                .queryParam("api-version", "2021-04-01")
+                .when().get("/subscriptions/" + SUB + "/resources")
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].name", equalTo("indexkv"))
+                .body("value[0].properties.vaultUri", not(emptyOrNullString()));
+    }
+
+    @Test
+    @DisplayName("The resource-group listing honours the same filter")
+    void resourceGroupListingHonoursFilter() {
+        given().queryParam("$filter", "resourceType eq 'Microsoft.Compute/virtualMachines'")
+                .queryParam("api-version", "2021-04-01")
+                .when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG_A + "/resources")
+                .then().statusCode(200)
+                .body("value.name", contains("vm-a"));
+    }
+
+    @Test
+    @DisplayName("A filter the emulator does not implement is refused, not silently ignored")
+    void unsupportedFilterIsRefused() {
+        given().queryParam("$filter", "identity/principalId eq 'abc'")
+                .queryParam("api-version", "2021-04-01")
+                .when().get("/subscriptions/" + SUB + "/resources")
+                .then().statusCode(400)
+                .body("error.code", equalTo("InvalidFilter"));
+    }
 }
