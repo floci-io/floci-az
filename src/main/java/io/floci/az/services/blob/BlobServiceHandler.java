@@ -278,6 +278,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "blocklist".equals(comp)) {
                     response = getBlockList(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && comp == null
+                        && request.headers().getHeaderString("x-ms-copy-source") != null) {
+                    response = copyBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && isPutBlob(request, comp)) {
                     response = putBlob(request, containerName, blobName);
                 } else if (dataLakeRequest && "GET".equalsIgnoreCase(method)) {
@@ -553,6 +556,140 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
     }
 
+
+    /**
+     * PUT /{container}/{blob} with {@code x-ms-copy-source} — Copy Blob.
+     *
+     * <p>When {@code x-ms-requires-sync: true} is present the caller expects a synchronous
+     * copy (Copy Blob From URL) and the response is {@code 200 OK}. Otherwise this is
+     * the standard asynchronous Copy Blob; for a local emulator the copy always completes
+     * immediately, so we short-circuit to {@code success} and respond {@code 202 Accepted}.
+     *
+     * <p>Only intra-emulator copies (source URL resolvable to an account/container/blob
+     * managed by this handler) are supported. Cross-account copies within the emulator
+     * work as long as both accounts use the same handler instance.</p>
+     */
+    private Response copyBlob(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeWrite(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+
+        String copySource = request.headers().getHeaderString("x-ms-copy-source");
+        boolean syncCopy = "true".equalsIgnoreCase(
+                request.headers().getHeaderString("x-ms-requires-sync"));
+
+        // Parse the source URL to extract account/container/blob.
+        // Accepted shapes:
+        //   http(s)://host(:port)/{account}/{container}/{blob}(?query)
+        //   /{account}/{container}/{blob}(?query)
+        String sourcePath = copySource;
+        if (sourcePath.contains("://")) {
+            // Strip scheme + authority
+            int pathStart = sourcePath.indexOf('/', sourcePath.indexOf("://") + 3);
+            if (pathStart < 0) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            sourcePath = sourcePath.substring(pathStart);
+        }
+        // Strip query string (SAS tokens, snapshot, etc.)
+        int queryIdx = sourcePath.indexOf('?');
+        if (queryIdx >= 0) {
+            sourcePath = sourcePath.substring(0, queryIdx);
+        }
+        // Decode percent-encoded characters
+        sourcePath = URLDecoder.decode(sourcePath, StandardCharsets.UTF_8);
+        // Remove leading slash
+        if (sourcePath.startsWith("/")) {
+            sourcePath = sourcePath.substring(1);
+        }
+
+        // Expect at least account/container/blob
+        String[] sourceParts = sourcePath.split("/", 3);
+        if (sourceParts.length < 3 || sourceParts[2].isEmpty()) {
+            return new AzureErrorResponse("InvalidHeaderValue",
+                    "The value for one of the HTTP headers is not in the correct format.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        String sourceAccount = sourceParts[0];
+        String sourceContainer = sourceParts[1];
+        String sourceBlob = sourceParts[2];
+
+        return leaseService.exclusively(() -> {
+            // Validate destination container exists
+            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                return new AzureErrorResponse("ContainerNotFound",
+                        "The specified container does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            // Validate source blob exists
+            Optional<StoredObject> sourceObject = store.get(
+                    objKey(sourceAccount, sourceContainer, sourceBlob));
+            if (sourceObject.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound",
+                        "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            // Validate conditions on the destination
+            Optional<StoredObject> existing = store.get(
+                    objKey(request.accountName(), containerName, blobName));
+            Response conditionFailure = validateBlobConditions(request, existing);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+
+            StoredObject source = sourceObject.get();
+
+            // Build destination metadata: if the request carries x-ms-meta-* headers,
+            // use those; otherwise copy metadata from the source.
+            Map<String, String> destMeta = new HashMap<>();
+            // Carry over structural metadata from the source
+            source.metadata().forEach((key, value) -> {
+                if (!key.startsWith(USER_METADATA_PREFIX)) {
+                    destMeta.put(key, value);
+                }
+            });
+            Map<String, String> requestMeta = readUserMetadata(request);
+            if (requestMeta.isEmpty()) {
+                // No user metadata on request — copy from source
+                source.metadata().forEach((key, value) -> {
+                    if (key.startsWith(USER_METADATA_PREFIX)) {
+                        destMeta.put(key, value);
+                    }
+                });
+            } else {
+                destMeta.putAll(requestMeta);
+            }
+            destMeta.put("Name", blobName);
+            destMeta.put(CREATION_TIME_KEY, createdOn(existing).toString());
+
+            Instant now = Instant.now();
+            String etag = UUID.randomUUID().toString();
+            String copyId = UUID.randomUUID().toString();
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(blobName,
+                            Arrays.copyOf(source.data(), source.data().length),
+                            destMeta, now, etag));
+
+            Response.ResponseBuilder rb = Response.status(syncCopy ? 200 : 202)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .header("x-ms-copy-id", copyId)
+                    .header("x-ms-copy-status", "success")
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0);
+            return rb.build();
+        });
+    }
 
     // ── ADLS Gen2 filesystem/path compatibility for Hadoop ABFS 3.3.4 ───────
 
