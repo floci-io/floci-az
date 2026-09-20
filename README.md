@@ -305,7 +305,7 @@ flowchart LR
 | Service                 | Routing                      | Notable operations                                                                                                                                                                                                    |
 |-------------------------|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Blob Storage**        | `/{account}/`                | Create/delete containers, upload/download/delete blobs, list blobs; ADLS Gen2 DFS filesystem/path operations with Hadoop ABFS 3.3.4 compatibility; user delegation key/SAS |
-| **Azure SignalR Service** | `/server/` and `/client/` | Default mode over WebSockets; ASP.NET Core hubs, JSON/MessagePack, groups, users, and broadcasts |
+| **Azure SignalR Service** | `/server/`, `/client/`, `*.service.signalr.net` | Default mode over WebSockets; ASP.NET Core hubs, JSON/MessagePack, groups, users, and broadcasts. Per-account isolation through `{account}.service.signalr.net` hostnames |
 | **Queue Storage**       | `/{account}-queue/`          | Create/delete queues, send/receive/peek/delete messages, visibility timeout                                                                                                                                           |
 | **Table Storage**       | `/{account}-table/`          | Create/delete tables, insert/get/update/upsert/delete entities; OData `$filter` / `$select` / `$top`; server-side pagination (continuation tokens); ETag optimistic concurrency; Entity Group Transactions (`$batch`) |
 | **Azure Functions**     | `/{account}-functions/`      | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool                                                                                                                            |
@@ -647,15 +647,16 @@ networks:
 
 The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ across SDKs and tooling workflows. Each directory is one suite. App Configuration, Key Vault, Event Hubs, and Service Bus are exercised inside the SDK suites rather than as standalone modules.
 
-| Module              | Language / Tool | Coverage                                                                                                                       | Tests |
-|---------------------|-----------------|--------------------------------------------------------------------------------------------------------------------------------|------:|
-| `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis                                                            |   124 |
-| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, Container Apps, API Management, SQL, PostgreSQL (Flexible Server) | 253 |
-| `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table                                                            |    72 |
-| `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces                                                    |    10 |
-| `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR)                                     |    12 |
-| `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database)                                            |    14 |
-| `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login                                                                 |    13 |
+| Module              | Language / Tool | Coverage |
+|---------------------|-----------------|----------|
+| `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis, VM, Managed Identity |
+| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, Container Apps, API Management, SQL, PostgreSQL (Flexible Server), Managed Identity |
+| `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table, Service Bus, Entra ID, Managed Identity |
+| `sdk-test-dotnet`   | .NET            | Blob service SAS, Cosmos (+ bracket properties, point partition, transactional batch), Key Vault (+ certificates, timestamps), Service Bus (+ lock renewal, metadata, peek-lock), SignalR. The only suite covering SignalR |
+| `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces |
+| `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR) |
+| `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database) |
+| `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login |
 
 † Built from source via vcpkg, so the image takes ~6 min cold (seconds if warm).
 

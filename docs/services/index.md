@@ -7,7 +7,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Resource Manager** | `/subscriptions/...` + `/providers/...` | ✅ Subscriptions, resource groups, resource/provider listing; management-plane fallthrough for the `Microsoft.*` providers |
 | **Blob Storage** | `/{account}/` | ✅ Full CRUD; ADLS Gen2 DFS filesystem/path operations with Hadoop ABFS 3.3.4 compatibility; user delegation key/SAS |
 | **Queue Storage** | `/{account}-queue/` | ✅ Full CRUD |
-| **Azure SignalR Service** | `/server/` and `/client/` | Default mode over WebSockets; ASP.NET Core hubs, JSON/MessagePack, groups, users, and broadcasts |
+| **Azure SignalR Service** | `/server/`, `/client/`, `*.service.signalr.net` | ✅ Default mode over WebSockets; ASP.NET Core hubs, JSON/MessagePack, groups, users, and broadcasts. Per-account isolation through `{account}.service.signalr.net` hostnames |
 | **Table Storage** | `/{account}-table/` | ✅ Full CRUD |
 | **Azure Functions** | `/{account}-functions/` | ✅ HTTP Triggers, Docker runtimes |
 | **App Configuration** | `/{account}-appconfig/` | ✅ Key-values, labels, feature flags, snapshots, revisions, locks, pagination, `$select`, tags filtering, `Accept-Datetime`, `Sync-Token` |

@@ -42,8 +42,14 @@ Separate applications can set `options.ApplicationName` to isolate their hubs.
 
 The SDK uses `/server/?hub={hub}`, `/client/negotiate?hub={hub}`, and `/client/?hub={hub}` on port 4577.
 The local root endpoint uses the `default` account. Hostnames under `.service.signalr.net` identify
-separate accounts when those names resolve to the emulator. Normal service discovery also registers
-the `-signalr` account suffix.
+separate accounts when those names resolve to the emulator, and that is the way to reach a named
+account.
+
+The `-signalr` account suffix is also registered, because every service registers one, but it cannot
+carry an SDK connection. The SDK signs its access token with an audience built from the endpoint's
+scheme and host only, with no path segment, so a request to `/{account}-signalr/server` presents a
+token whose audience does not match the path it arrived on and is rejected with 401. Use the root
+endpoint or a `{account}.service.signalr.net` hostname instead.
 
 | Environment variable | Default | Description |
 |---|---|---|
