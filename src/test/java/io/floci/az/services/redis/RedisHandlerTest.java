@@ -194,4 +194,22 @@ class RedisHandlerTest {
             .then().statusCode(200)
             .body("tags.env", equalTo("test"));
     }
+
+    @Test
+    @DisplayName("Caches appear in the resource-group and subscription /resources indexes")
+    void cacheAppearsInResourceIndexes() {
+        given()
+            .contentType("application/json").body(CREATE_BODY)
+            .when().put(BASE + "/redis/redis-idx" + API)
+            .then().statusCode(201);
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                        + "/resources?api-version=2021-04-01")
+            .then().statusCode(200)
+            .body("value.find { it.name == 'redis-idx' }.type", equalTo("Microsoft.Cache/Redis"));
+
+        given().when().get("/subscriptions/" + SUB + "/resources?api-version=2021-04-01")
+                .then().statusCode(200)
+                .body("value.find { it.name == 'redis-idx' }.type", equalTo("Microsoft.Cache/Redis"));
+    }
 }
