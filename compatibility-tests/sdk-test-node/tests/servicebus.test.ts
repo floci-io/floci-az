@@ -133,9 +133,15 @@ test("subscription peek leaves message available for receive", async () => {
     const received = await receiver.receiveMessages(1, { maxWaitTimeInMs: 5_000 });
     expect(received).toHaveLength(1);
     expect(received[0].body).toBe("subscription-body");
+    expect(received[0].deliveryCount).toBe(0);
     expect(received[0].sequenceNumber?.toString()).toBe(peeked[0].sequenceNumber?.toString());
     expect(received[0].enqueuedTimeUtc?.getTime()).toBe(peeked[0].enqueuedTimeUtc?.getTime());
-    await receiver.completeMessage(received[0]);
+    await receiver.abandonMessage(received[0]);
+    const redelivered = await receiver.receiveMessages(1, { maxWaitTimeInMs: 5_000 });
+    expect(redelivered).toHaveLength(1);
+    expect(redelivered[0].messageId).toBe(received[0].messageId);
+    expect(redelivered[0].deliveryCount).toBe(1);
+    await receiver.completeMessage(redelivered[0]);
   } finally {
     await receiver.close();
     await sender.close();

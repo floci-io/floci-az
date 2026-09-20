@@ -8,6 +8,8 @@ import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.qpid.proton.amqp.Symbol;
+import org.apache.qpid.proton.amqp.UnsignedInteger;
+import org.apache.qpid.proton.amqp.messaging.Header;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 
 /** Projects broker metadata onto outgoing Service Bus messages, independently of message locks. */
@@ -48,6 +50,16 @@ public final class ServiceBusMessageMetadataSupport {
       annotations.put(SEQUENCE_NUMBER, reference.getMessageID());
       annotations.put(ENQUEUED_TIME, new Date(enqueuedTime(message)));
       return ServiceBusMessageLockSupport.annotationsForDelivery(new MessageAnnotations(annotations), reference);
+   }
+
+   /** Every Service Bus delivery needs a count, including sessions and ReceiveAndDelete. */
+   public static Header headerForDelivery(Header original, MessageReference reference) {
+      if (!isServiceBus(reference)) {
+         return original;
+      }
+      Header header = original == null ? new Header() : new Header(original);
+      header.setDeliveryCount(UnsignedInteger.valueOf(Math.max(0, reference.getDeliveryCount() - 1)));
+      return header;
    }
 
    private static long enqueuedTime(AMQPMessage message) {

@@ -272,15 +272,12 @@
                         </goals>
                         <configuration>
                             <target>
+                                <!-- Azure SDKs require an explicit header on the first delivery.
+                                     Keep Artemis's zero-based conversion (deliveryCount - 1). -->
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
                                     token="deliveryCount &gt; 1"
                                     value="deliveryCount &gt; 0"
-                                    failOnNoReplacements="true" />
-                                <replace
-                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
-                                    token="final int amqpDeliveryCount = deliveryCount - 1;"
-                                    value="final int amqpDeliveryCount = deliveryCount;"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java"
@@ -437,7 +434,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/AMQPLargeMessageWriter.java"
                                     token="Header header = AMQPMessageBrokerAccessor.getCurrentHeader(message);"
-                                    value="Header header = ServiceBusMessageLockSupport.headerForDelivery(AMQPMessageBrokerAccessor.getCurrentHeader(message), reference);"
+                                    value="Header header = ServiceBusMessageMetadataSupport.headerForDelivery(AMQPMessageBrokerAccessor.getCurrentHeader(message), reference);"
                                     failOnNoReplacements="true" />
                             </target>
                         </configuration>

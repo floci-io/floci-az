@@ -59,6 +59,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
             for (int i = 0; i < 2; i++)
             {
                 ServiceBusReceivedMessage message = await Receive(receiver, cancellationToken);
+                await Assert.That(message.DeliveryCount).IsEqualTo(1);
                 await CheckMetadata(message, peeked[message.MessageId], beforeSend, afterSend);
                 await CheckUserProperties(message);
                 await Assert.That(message.Body.ToString()).IsEqualTo(body + message.MessageId);
@@ -72,6 +73,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
             for (int i = 0; i < 2; i++)
             {
                 ServiceBusReceivedMessage message = await Receive(receiver, cancellationToken);
+                await Assert.That(message.DeliveryCount).IsEqualTo(2);
                 await CheckMetadata(message, peeked[message.MessageId], beforeSend, afterSend);
                 await CheckUserProperties(message);
                 await receiver.DeadLetterMessageAsync(message, "metadata-probe", "retention check", cancellationToken);
@@ -130,6 +132,7 @@ public sealed class ServiceBusMetadataCompatibilityTests
                 new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.ReceiveAndDelete });
             ServiceBusReceivedMessage peeked = await receiver.PeekMessageAsync(cancellationToken: cancellationToken);
             ServiceBusReceivedMessage received = await Receive(receiver, cancellationToken);
+            await Assert.That(received.DeliveryCount).IsEqualTo(1);
             await CheckMetadata(received, peeked, beforeSend, DateTimeOffset.UtcNow.AddSeconds(5));
             await Assert.That(received.Body.ToString()).IsEqualTo(body);
             await Assert.That(await receiver.ReceiveMessageAsync(TimeSpan.FromMilliseconds(200), cancellationToken)).IsNull();
@@ -146,6 +149,49 @@ public sealed class ServiceBusMetadataCompatibilityTests
         await Assert.That(message.ContentType).IsEqualTo("text/plain");
         await Assert.That(message.ApplicationProperties["custom-text"]).IsEqualTo("preserved");
         await Assert.That(message.ApplicationProperties["custom-number"]).IsEqualTo(int.Parse(message.MessageId));
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    [Timeout(60_000)]
+    public async Task FirstSessionDeliveryAndImmediateDeadLetterStartAtOne(
+        bool peekBeforeReceive, CancellationToken cancellationToken)
+    {
+        var admin = new ServiceBusAdministrationClient(ConnectionString(administration: true));
+        await using var client = new ServiceBusClient(ConnectionString());
+        string topic = $"delivery-count-{Guid.NewGuid():N}";
+        await admin.CreateTopicAsync(topic, cancellationToken);
+        try
+        {
+            await admin.CreateSubscriptionAsync(new CreateSubscriptionOptions(topic, "consumer")
+            {
+                RequiresSession = true
+            }, cancellationToken);
+            await using ServiceBusSender sender = client.CreateSender(topic);
+            await sender.SendMessageAsync(new ServiceBusMessage("poison") { SessionId = "session" }, cancellationToken);
+            await using ServiceBusSessionReceiver receiver = await client.AcceptSessionAsync(
+                topic, "consumer", "session", cancellationToken: cancellationToken);
+            await receiver.RenewSessionLockAsync(cancellationToken);
+            if (peekBeforeReceive)
+            {
+                await Assert.That(await receiver.PeekMessageAsync(cancellationToken: cancellationToken)).IsNotNull();
+            }
+            ServiceBusReceivedMessage first = await Receive(receiver, cancellationToken);
+            await Assert.That(first.DeliveryCount).IsEqualTo(1);
+            await receiver.DeadLetterMessageAsync(first, "poison", cancellationToken: cancellationToken);
+
+            await using ServiceBusReceiver dlq = client.CreateReceiver(topic, "consumer",
+                new ServiceBusReceiverOptions { SubQueue = SubQueue.DeadLetter });
+            ServiceBusReceivedMessage deadLetter = await Receive(dlq, cancellationToken);
+            await Assert.That(deadLetter.DeliveryCount).IsEqualTo(1);
+            await Assert.That(deadLetter.DeadLetterReason).IsEqualTo("poison");
+            await dlq.CompleteMessageAsync(deadLetter, cancellationToken);
+        }
+        finally
+        {
+            await admin.DeleteTopicAsync(topic, cancellationToken);
+        }
     }
 
     private static async Task CheckMetadata(ServiceBusReceivedMessage received, ServiceBusReceivedMessage peeked,
