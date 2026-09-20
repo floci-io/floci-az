@@ -56,8 +56,11 @@ floci-az follows a layered design:
 ### Core Infrastructure
 
 - `EmulatorConfig`: SmallRye `@ConfigMapping`; prefix `floci-az`
-- `AzureRoutingFilter`: path-based routing (suffix detection: `-queue`, `-table`, `-functions`, `-appconfig`, `-keyvault`, `-eventhub`)
-- `AzureServiceRegistry`: handler discovery + `isEnabled()` per service type
+- `AzureRoutingFilter`: assembles its host, account-suffix and ARM-provider dispatch tables at
+  `@PostConstruct` from every handler's `routes()`; no per-service suffix list lives in the filter
+- `ServiceRoutes`: the routing declaration a handler returns from `routes()` (account suffixes such as
+  `-queue`, host suffixes such as `.blob.core.windows.net`, ARM providers such as `Microsoft.App`)
+- `AzureServiceRegistry`: handler discovery + `isEnabled()`, which delegates to `handler.enabled(serviceType)`
 - `BannerLogger`: startup banner listing all enabled services
 - `StorageBackend` + `StorageFactory`: pluggable storage
 - `XmlBuilder`: fluent XML builder with attribute support (`startAttr`, `selfClose`)
@@ -240,6 +243,10 @@ compatibility-tests/
                           managed identity
   sdk-test-node/        : Azure SDK for JS (jest): blob, queue, table, cosmos, appconfig,
                           keyvault, eventhub, servicebus, managed identity
+  sdk-test-dotnet/      : Azure SDK for .NET (TUnit): blob service SAS, cosmos (+ bracket properties,
+                          point partition, transactional batch), keyvault (+ certificates, timestamps),
+                          servicebus (+ lock renewal, metadata, peek-lock), signalr. The only suite
+                          covering SignalR
   sdk-test-cpp/         : Azure SDK for C++ (GoogleTest via vcpkg): blob, queue. Built from source, so ~6 min cold
   compat-terraform/     : hashicorp/azurerm Terraform provider (BATS)
   compat-opentofu/      : OpenTofu with the azurerm provider (BATS)
@@ -276,14 +283,21 @@ A suite reporting `Tests run: 0` is a self-skip, never a pass.
 
 The Makefile and the CI matrix (`.github/workflows/compatibility.yml`) both run the SDK test containers against floci-az and must pass the same environment variables per suite.
 
-**Rule: a suite's env vars must be identical across every `docker run` for that suite in the Makefile and the corresponding matrix `extra_env` entry in `.github/workflows/compatibility.yml`. Define them once (a shared variable), never inline per call site.**
+**Rule: a suite's env vars must be identical across every `docker run` for that suite in the Makefile and the corresponding matrix entry in `.github/workflows/compatibility.yml`, on both the suite-container axis (`SUITE_ENV_*` ↔ `extra_env`) and the emulator-container axis (the 6th `COMPAT_SESSION` argument ↔ `emulator_env`). Define them once (a shared variable), never inline per call site.**
 
 Suite-internal defaults (`FLOCI_AZ_ENDPOINT`, `EVENTHUB_*`, `JEST_JUNIT_*`) are baked as `ENV` in each suite's Dockerfile with the compat-network values. They do NOT belong in the Makefile or `extra_env`. Only network-topology overrides (sidecar hostnames/ports, emulator-endpoint redirects) go there.
 
-Current per-suite env vars that must stay in sync:
+There are **two axes**, and both must stay in sync. The suite container's env comes from
+`SUITE_ENV_<SUITE>` in the Makefile and `extra_env` in the matrix. The **emulator** container's env comes
+from the 6th `COMPAT_SESSION` argument in the Makefile and `emulator_env` in the matrix; it is easy to
+miss, because a var set only there does not appear in any `SUITE_ENV_*` variable.
+
+Suite container (`SUITE_ENV_*` ↔ `extra_env`):
 
 | Suite | Makefile | CI (`compatibility.yml` `extra_env`) |
 |---|---|---|
+| `sdk-test-java` | `--add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1` | ✓ |
+| `sdk-test-java` | `-e FLOCI_AZ_ABFS_LOOPBACK=true` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_AMQPS_PORT=5671` | ✓ |
 | `sdk-test-java` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
@@ -296,6 +310,15 @@ Current per-suite env vars that must stay in sync:
 | `sdk-test-node` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
 | `sdk-test-cpp` | none, only the shared `FLOCI_AZ_ENDPOINT` | ✓ (no `extra_env`) |
+
+Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
+
+| Suite | Makefile | CI (`compatibility.yml` `emulator_env`) |
+|---|---|---|
+| `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`JAVA_SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` | ✓ |
+| `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.
 
@@ -335,8 +358,14 @@ When adding a new HTTP-based service:
 
 1. Create `services/<svc>/` package
 2. Add `*Handler.java` implementing `AzureServiceHandler`
-3. Add suffix detection in `AzureRoutingFilter` (strip suffix, set `serviceType`)
-4. Add `case "<svc>" -> config.services().<svc>().enabled();` in `AzureServiceRegistry.isEnabled()`
+3. Declare the service's routes on the handler: return a `ServiceRoutes` from `routes()` naming its
+   account suffix, host suffixes and ARM providers, and add the same literals to the golden
+   `RoutingTableAssemblyTest`. Do not edit `AzureRoutingFilter`; it builds its tables from `routes()`.
+   The one exception is `LITERAL_ROUTE_SERVICE_TYPES`, the set of service types a filter stage
+   dispatches directly rather than through a handler's routing table
+4. Implement `enabled(String serviceType)` on the handler, reading
+   `config.services().<svc>().enabled()`; `AzureServiceRegistry.isEnabled()` delegates to it, so there
+   is no central switch to edit
 5. Add config interface to `EmulatorConfig.ServicesConfig`
 6. Add YAML block to `application.yml`
 7. Add storage wiring if needed
@@ -381,7 +410,10 @@ When adding a sidecar-based service, additionally:
 
 ## Logging
 
-- Use JBoss Logging (`Logger.getLogger(MyClass.class)`)
+- Use JBoss Logging (`Logger.getLogger(MyClass.class)`) in `src/main/java`
+- Code under `src/artemis-patch/`, `src/artemis-amqp-patch/` and `src/artemis-plugin/` is compiled into
+  the Artemis sidecar, not into the emulator JVM, and uses slf4j because that is the facade on the
+  broker's classpath; JBoss Logging is not available there
 - Use `LOG.infov(...)` / `LOG.debugv(...)` for parameterised messages
 - Keep logs structured; avoid noisy logs in hot paths
 - Sidecar startup/stop should always log at INFO level
