@@ -126,13 +126,18 @@ floci-az:
   the permissive Shared Key `Authorization` header behavior above.
   Shared-key service SAS supports directory scope (`sr=d`). Directory service SAS requires
   `sdd` and version 2020-02-10 or later. SDK-generated user delegation SAS tokens
-  for container (`sr=c`), blob (`sr=b`), and ADLS directory (`sr=d`) resources are validated.
+  for container (`sr=c`), blob (`sr=b`), Blob snapshot (`sr=bs`), and ADLS directory (`sr=d`)
+  resources are validated.
   Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
   are not fully modeled. User delegation keys are protected by a process-local secret, so SAS
   tokens issued by a previous emulator process are invalid after restart.
-- **Snapshots, versioning, and tiering are not modeled.** Blob leases and ADLS Path leases share
-  the emulator's in-memory lease state and support acquire/renew/change/release/break. Lease state is
-  intentionally process-local and is lost when the emulator restarts.
+- **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
+  and deletion. Deleting a base blob with snapshots requires `x-ms-delete-snapshots: include` or
+  `only`; mutations other than deletion directed at a snapshot return `SnapshotsPresent`. Blob
+  versioning and tiering are not modeled.
+- **Blob leases and ADLS Path leases** share the emulator's in-memory lease state and support
+  acquire/renew/change/release/break. Lease state is intentionally process-local and is lost when
+  the emulator restarts.
 - **`x-ms-server-encrypted: true` is reported although no encryption is performed** — blob data is
   stored as-is by the configured storage backend. The header mirrors the
   `x-ms-request-server-encrypted` already returned on upload and exists for SDK compatibility.
