@@ -4,6 +4,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -12,12 +13,51 @@ import static org.junit.jupiter.api.Assertions.*;
 class CosmosQueryEngineContinuationTest {
     private final CosmosQueryEngine engine = new CosmosQueryEngine();
 
+    /** A document written by an older build, or stripped by a patch, carries no {@code _rid}. */
+    private static final List<Map<String, Object>> WITH_ONE_RIDLESS = List.of(
+            Map.of("id", "first", "_rid", "z", "rank", 1),
+            Map.of("id", "ridless", "rank", 2),
+            Map.of("id", "third", "_rid", "x", "rank", 3));
+
     @Test
-    void missingStoredIdentityHasClearDiagnostic() {
-        var query = engine.prepare("SELECT c.id FROM c", List.of());
-        NullPointerException error = assertThrows(NullPointerException.class,
-                () -> engine.executePage(query, List.of(Map.of("id", "missing")), null, 1));
-        assertEquals("Stored Cosmos document is missing _rid required for query continuation", error.getMessage());
+    void documentsWithoutStoredIdentityFallBackToOffsetPaging() {
+        var query = engine.prepare("SELECT VALUE c.id FROM c", List.of());
+
+        List<Object> seen = new ArrayList<>();
+        CosmosQueryEngine.QueryContinuation token = null;
+        for (int page = 0; page < 3; page++) {
+            var result = engine.executePage(query, WITH_ONE_RIDLESS, token, 1);
+            seen.addAll(result.result().items());
+            token = result.continuation();
+            if (page < 2) {
+                assertNotNull(token, "a page boundary must still produce a continuation");
+                assertNull(token.rid(), "a rid bookmark cannot address a document without _rid");
+            }
+        }
+        assertNull(token, "the last page ends the query");
+        assertEquals(List.of("first", "ridless", "third"), seen);
+    }
+
+    @Test
+    void onePoisonedDocumentDoesNotBreakAFilteredQuery() {
+        // The identity check used to run over every scoped document before the WHERE filter, so a single
+        // document without _rid broke every query in the container, even one that excluded it.
+        var query = engine.prepare("SELECT VALUE c.id FROM c WHERE c.rank > 2", List.of());
+
+        var page = engine.executePage(query, WITH_ONE_RIDLESS, null, 10);
+
+        assertEquals(List.of("third"), page.result().items());
+        assertNull(page.continuation());
+    }
+
+    @Test
+    void aRidTokenResumesSafelyAfterADocumentLosesItsRid() {
+        var query = engine.prepare("SELECT VALUE c.id FROM c", List.of());
+        var ridToken = new CosmosQueryEngine.QueryContinuation(1, "z", List.of());
+
+        var page = assertDoesNotThrow(() -> engine.executePage(query, WITH_ONE_RIDLESS, ridToken, 10));
+
+        assertNull(page.continuation(), "paging terminates rather than looping");
     }
 
     @ParameterizedTest
