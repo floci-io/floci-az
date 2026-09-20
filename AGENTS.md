@@ -292,6 +292,14 @@ There are **two axes**, and both must stay in sync. The suite container's env co
 from the 6th `COMPAT_SESSION` argument in the Makefile and `emulator_env` in the matrix; it is easy to
 miss, because a var set only there does not appear in any `SUITE_ENV_*` variable.
 
+**One exception on the emulator axis: `compat-docker`.** It starts a single shared emulator with
+`JAVA_SERVICEBUS_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5`)
+and runs every suite against it. The node and dotnet suites therefore see a longer lock duration there
+than under their own `test-*-compat` targets or in CI, where they get `SERVICEBUS_EMULATOR_ENV` alone.
+The table below is the per-suite contract that CI and the individual targets honour; `compat-docker` is
+a convenience runner that deliberately shares one emulator, so a Service Bus timing behaviour that only
+reproduces under it is worth suspecting there first.
+
 Suite container (`SUITE_ENV_*` ↔ `extra_env`):
 
 | Suite | Makefile | CI (`compatibility.yml` `extra_env`) |
@@ -360,9 +368,12 @@ When adding a new HTTP-based service:
 2. Add `*Handler.java` implementing `AzureServiceHandler`
 3. Declare the service's routes on the handler: return a `ServiceRoutes` from `routes()` naming its
    account suffix, host suffixes and ARM providers, and add the same literals to the golden
-   `RoutingTableAssemblyTest`. Do not edit `AzureRoutingFilter`; it builds its tables from `routes()`.
-   The one exception is `LITERAL_ROUTE_SERVICE_TYPES`, the set of service types a filter stage
-   dispatches directly rather than through a handler's routing table
+   `RoutingTableAssemblyTest`. A service routed by any of those three needs no `AzureRoutingFilter`
+   edit at all; the filter builds its tables from `routes()`.
+   A service whose URLs fit none of the three (IMDS, Entra, Graph, the Cosmos root) needs a **stage**:
+   a method added to the `stages` list in `AzureRoutingFilter` and ordered against its neighbours,
+   plus its service type in `LITERAL_ROUTE_SERVICE_TYPES`. That set is a declaration for the
+   routing-drift test, not a dispatch mechanism: adding to it alone routes nothing
 4. Implement `enabled(String serviceType)` on the handler, reading
    `config.services().<svc>().enabled()`; `AzureServiceRegistry.isEnabled()` delegates to it, so there
    is no central switch to edit
@@ -412,8 +423,9 @@ When adding a sidecar-based service, additionally:
 
 - Use JBoss Logging (`Logger.getLogger(MyClass.class)`) in `src/main/java`
 - Code under `src/artemis-patch/`, `src/artemis-amqp-patch/` and `src/artemis-plugin/` is compiled into
-  the Artemis sidecar, not into the emulator JVM, and uses slf4j because that is the facade on the
-  broker's classpath; JBoss Logging is not available there
+  the Artemis sidecar, not into the emulator JVM, so JBoss Logging is not on its classpath. Follow the
+  tree you are editing: `src/artemis-amqp-patch/` uses slf4j, `src/artemis-plugin/` uses
+  `System.Logger`, and `src/artemis-patch/` logs nothing today
 - Use `LOG.infov(...)` / `LOG.debugv(...)` for parameterised messages
 - Keep logs structured; avoid noisy logs in hot paths
 - Sidecar startup/stop should always log at INFO level
