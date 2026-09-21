@@ -117,6 +117,14 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return Response.ok(java.util.Map.of("type", probeType, "id", probeId)).build();
         }
 
+        // Managed HSM serves Keys, Administration and SecurityDomain only. Secrets and certificates
+        // are vault-only surfaces, and the storage keys behind them carry no flavor, so without this
+        // guard {account}-managedhsm/secrets/x and {account}-keyvault/secrets/x are one object.
+        if (hsm && isVaultOnlySurface(routePath, path)) {
+            return kvError(404, "NotFound",
+                    "Managed HSM does not support this resource type: " + routePath.split("/")[0]);
+        }
+
         if ("secrets".equals(routePath)) {
             return "GET".equals(method) ? listSecrets(account) : methodNotAllowed();
         }
@@ -159,12 +167,24 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return methodNotAllowed();
         }
 
-        if (!hsm && (routePath.equals("certificates") || path.startsWith("certificates/")
-                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/"))) {
+        if (routePath.equals("certificates") || path.startsWith("certificates/")
+                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/")) {
             return certificates.handle(req);
         }
 
         return kvError(404, "KeyNotFound", "Resource not found: " + path);
+    }
+
+    /**
+     * Secrets and certificates are served by a key vault, never by a Managed HSM, whose data plane is
+     * Keys, Administration and SecurityDomain. The two flavors share one account name and one set of
+     * unflavored secret storage keys, so the HSM route has to be refused rather than namespaced.
+     */
+    private static boolean isVaultOnlySurface(String routePath, String path) {
+        return routePath.equals("secrets") || path.startsWith("secrets/")
+                || routePath.equals("deletedsecrets") || path.startsWith("deletedsecrets/")
+                || routePath.equals("certificates") || path.startsWith("certificates/")
+                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/");
     }
 
     // -------------------------------------------------------------------------
