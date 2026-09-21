@@ -132,9 +132,10 @@ floci-az:
   are not fully modeled. User delegation keys are protected by a process-local secret, so SAS
   tokens issued by a previous emulator process are invalid after restart.
 - **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
-  and deletion. Deleting a base blob with snapshots requires `x-ms-delete-snapshots: include` or
-  `only`; mutations other than deletion directed at a snapshot return `SnapshotsPresent`. Blob
-  versioning and tiering are not modeled.
+  and deletion. Listing snapshots with `include=snapshots` on List Blobs is not modeled. Deleting a
+  base blob with snapshots requires `x-ms-delete-snapshots: include` or `only`; mutations other than
+  deletion directed at a snapshot return `SnapshotsPresent`. Blob versioning and tiering are not
+  modeled.
 - **Blob leases and ADLS Path leases** share the emulator's in-memory lease state and support
   acquire/renew/change/release/break. Lease state is intentionally process-local and is lost when
   the emulator restarts.
