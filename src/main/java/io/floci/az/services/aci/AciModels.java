@@ -32,9 +32,9 @@ public class AciModels {
         private Instant timeCreated;
         private Map<String, String> tags;
         private Map<String, Object> properties;
-        /** container name → Docker container id, populated in non-mocked mode (PR 2). */
+        /** container name → Docker container id, populated in non-mocked mode. */
         private Map<String, String> containerIds;
-        /** Host ports allocated for the group's published ports (PR 2). */
+        /** Host ports allocated for the group's published ports. */
         private List<Integer> allocatedHostPorts;
 
         public String getSubscriptionId() { return subscriptionId; }

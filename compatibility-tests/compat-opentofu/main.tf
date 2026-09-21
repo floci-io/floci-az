@@ -378,3 +378,38 @@ output "nsg_id" {
 output "application_gateway_id" {
   value = azurerm_application_gateway.agw.id
 }
+
+# ── Azure Container Instances ────────────────────────────────────────────────
+
+resource "azurerm_container_group" "aci" {
+  name                = "floci-test-cg"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  os_type             = "Linux"
+  ip_address_type     = "Public"
+  restart_policy      = "Always"
+
+  container {
+    name   = "web"
+    image  = "hashicorp/http-echo:latest"
+    cpu    = "0.5"
+    memory = "0.5"
+
+    ports {
+      port     = 5678
+      protocol = "TCP"
+    }
+
+    environment_variables = {
+      PLAIN = "visible"
+    }
+
+    secure_environment_variables = {
+      SECRET = "hunter2"
+    }
+  }
+}
+
+output "aci_ip" {
+  value = azurerm_container_group.aci.ip_address
+}

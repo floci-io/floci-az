@@ -7,21 +7,30 @@ Compatible with the `azure-mgmt-containerinstance` SDK, the `az container` CLI, 
 > control-plane resources: they provision instantly with a synthetic IP and report a `Running`
 > instance view.
 >
-> **Container-backed mode** (planned, PR 2) will back each container group with real Docker
-> containers — group members share a network namespace (`localhost` between containers, like
-> real ACI), published ports are mapped onto the host, and `logs` returns the real container
-> output. Until it lands, `FLOCI_AZ_SERVICES_ACI_MOCKED=false` is accepted but logs a startup
-> warning and behaves exactly like mocked mode.
+> **Container-backed mode:** set `FLOCI_AZ_SERVICES_ACI_MOCKED=false` to back each container
+> group with real Docker containers. Group members share a network namespace (`localhost`
+> between containers, like real ACI), published ports are mapped onto the host (preferring the
+> container port itself, falling back to the configured range), `logs` returns the real
+> container output (honoring `tail` and `timestamps`), and `instanceView` reports the real
+> Docker state (`Running` / `Terminated` with exit code / `Waiting`). Groups provision
+> asynchronously (`Creating` → `Succeeded` once every container runs, or an honest `Failed`
+> when Docker cannot start them).
 
 ---
 
 ## Features
 
 - **Lifecycle** — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
-- **Actions** — `start`, `stop`, `restart` with the spec's exact LRO shapes (`Location`-header polling)
-- **Container logs** — `GET .../containers/{name}/logs` (empty in mocked mode)
+- **Actions** — `start`, `stop`, `restart` with the spec's exact LRO shapes (`Location`-header
+  polling); in container-backed mode they map onto the backing containers (the netns-owning
+  primary restarts first, then the secondaries)
+- **Container logs** — `GET .../containers/{name}/logs?tail=&timestamps=` (real Docker logs in
+  container-backed mode, empty in mocked mode)
+- **Pod semantics** — multi-container groups share one network namespace: the first container
+  owns the network and the published ports; the rest join it and reach each other on `localhost`
+- **Volumes** — `emptyDir` (named Docker volume) and `secret` (files injected before start)
 - **instanceView** — group state plus per-container `currentState`/`restartCount` on single GETs
-  (list responses omit it, matching the spec's list model)
+  (list responses omit it, matching the spec's list model); real Docker state when unmocked
 - **Terraform-safe read-backs** — container `ports` and `resources.requests` are always present
   (server defaults `cpu: 1.0`, `memoryInGB: 1.5` when omitted, matching the `az` CLI's behaviour),
   and enum casing is normalized to canonical Azure values (`Linux`, `Always`, `TCP`, `Public`)
@@ -107,7 +116,7 @@ floci-az:
   services:
     aci:
       enabled: true
-      mocked: true              # true = no Docker, pure ARM state. false = container-backed (PR 2)
+      mocked: true              # true = no Docker, pure ARM state. false = container-backed
       base-port: 7500           # host-port range for published group ports
       max-port: 7599
 ```
@@ -115,7 +124,7 @@ floci-az:
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_ACI_ENABLED` | `true` | Enable/disable the service |
-| `FLOCI_AZ_SERVICES_ACI_MOCKED` | `true` | Mocked mode (no Docker). `false` is reserved for container-backed mode (PR 2) and currently behaves as `true` with a startup warning |
+| `FLOCI_AZ_SERVICES_ACI_MOCKED` | `true` | Mocked mode (no Docker); `false` backs each group with real Docker containers |
 | `FLOCI_AZ_SERVICES_ACI_BASE_PORT` | `7500` | Start of the host port range for published ports (container-backed mode only) |
 | `FLOCI_AZ_SERVICES_ACI_MAX_PORT` | `7599` | End of the host port range (container-backed mode only) |
 
@@ -128,8 +137,17 @@ floci-az:
 - `azureFile` and `gitRepo` volumes are rejected with a **400**; `emptyDir` and `secret` volumes
   are supported.
 - Liveness/readiness probes, `identity`, `diagnostics`, `dnsConfig`, `subnetIds`, GPU resources,
-  and confidential/spot SKUs are stored and echoed but not enforced.
+  and confidential/spot SKUs are stored and echoed but not enforced. CPU requests are stored but
+  not enforced as a Docker limit (memory requests are).
+- `restartPolicy` is stored and echoed but not mapped onto Docker restart policies — an exited
+  container stays `Terminated` in the instance view.
 - `containerGroupProfiles` and `ngroups` (2025-09-01 additions) are not implemented.
 - The `ipAddress.fqdn` is cosmetic — nothing resolves `*.azurecontainer.io` locally.
-- Mocked mode reports every container as `Running` without running anything; switch to
-  container-backed mode (PR 2) for real state.
+- Secondary (non-first) containers cannot resolve emulated hostnames: Docker rejects DNS options
+  in the shared-netns mode they use, so floci-az's embedded DNS is only injected into the primary.
+- `command` replaces the image's entrypoint (real ACI semantics), not just its CMD.
+- When floci-az itself runs inside Docker, images referencing the emulated ACR's `loginServer`
+  (`floci-az-acr-registry:5000/...`) cannot be pulled by the host daemon — pull from the
+  emulated ACR works natively only.
+- Mocked mode reports every container as `Running` without running anything; use
+  container-backed mode for real state.

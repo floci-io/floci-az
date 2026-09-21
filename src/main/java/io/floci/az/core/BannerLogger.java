@@ -126,7 +126,8 @@ public class BannerLogger {
         if (config.services().aci().enabled()) {
             String aciInfo = config.services().aci().mocked()
                     ? "mocked  (no docker)"
-                    : "mocked  (container-backed mode not yet available)";
+                    : "containers  ports:" + config.services().aci().basePort()
+                            + "-" + config.services().aci().maxPort();
             sb.append(serviceStatusDocker("aci", true, aciInfo));
         }
         if (config.services().containerApps().enabled()) {
