@@ -63,6 +63,16 @@ class KeyVaultManagedHsmSurfaceTest {
     }
 
     @Test
+    void hostMarkerFormIsAlsoTreatedAsManagedHsm() {
+        // {account}.managedhsm.{emulator-host} routes to Key Vault through the host service marker,
+        // which does not set the account-suffix header. The flavor must still be recognised.
+        given().header("Authorization", AUTH)
+                .header("Host", "hsmsurface.managedhsm.localhost:4577")
+                .get("/secrets/s1?api-version=7.4")
+                .then().statusCode(404).body("error.code", is("NotFound"));
+    }
+
+    @Test
     void vaultSecretsAreUnaffectedAndNotReachableThroughTheHsmRoute() {
         given().header("Authorization", AUTH)
                 .contentType("application/json")

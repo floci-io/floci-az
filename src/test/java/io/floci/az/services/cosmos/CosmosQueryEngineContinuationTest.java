@@ -20,6 +20,18 @@ class CosmosQueryEngineContinuationTest {
         assertEquals("Stored Cosmos document is missing _rid required for query continuation", error.getMessage());
     }
 
+    @Test
+    void aRidTokenIsNotReinterpretedAsAnOffset() {
+        // Pages 1..n were produced in rid order. If a document later loses its _rid, resuming the
+        // rid bookmark as a plain offset indexes a differently ordered list, which skips or repeats
+        // documents. Surface that rather than return a silently wrong page.
+        var query = engine.prepare("SELECT VALUE c.id FROM c", List.of());
+        var ridToken = new CosmosQueryEngine.QueryContinuation(1, "z", List.of());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.executePage(query, WITH_ONE_RIDLESS, ridToken, 10));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"SELECT VALUE c.id FROM c", "SELECT VALUE c.id FROM c ORDER BY c.rank"})
     void legacyTokensPreserveOriginalOrderUntilCompletion(String sql) {

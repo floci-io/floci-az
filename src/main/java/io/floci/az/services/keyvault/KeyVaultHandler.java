@@ -94,7 +94,12 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         String hostWithoutPort = host != null
                 ? (host.contains(":") ? host.substring(0, host.indexOf(':')) : host) : null;
         String accountSuffix = req.headers().getHeaderString("x-floci-account-suffix");
-        boolean hsm = (hostWithoutPort != null && hostWithoutPort.endsWith(".managedhsm.azure.net"))
+        // Two host forms reach this handler: the Azure one, {account}.managedhsm.azure.net, and the
+        // emulator's host-service-marker form, {account}.managedhsm.{whatever-resolves-here}. The
+        // marker route does not set the account-suffix header, so matching the marker label itself is
+        // what makes both forms carry the flavor.
+        boolean hsm = (hostWithoutPort != null && hostWithoutPort.contains(".managedhsm."))
+                || (hostWithoutPort != null && hostWithoutPort.endsWith(".managedhsm"))
                 || "-managedhsm".equals(accountSuffix);
 
         // The Azure SDK challenge_auth_policy sends a bodiless probe to elicit a challenge, then
