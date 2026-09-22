@@ -1241,6 +1241,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         final CosmosQueryEngine.QueryPage page;
         try {
             page = queryEngine.executePage(parsed, scopedDocs, continuation, maxItemCount);
+        } catch (IllegalArgumentException e) {
+            // A continuation that cannot address this document set, same shape as a malformed token.
+            return errorResponse(400, "BadRequest", e.getMessage());
         } catch (RuntimeException e) {
             // Defence in depth: a query must fail in the Cosmos envelope, never as a framework 500.
             LOG.errorf(e, "Query execution failed for %s/%s: %s", dbId, collId, sql);

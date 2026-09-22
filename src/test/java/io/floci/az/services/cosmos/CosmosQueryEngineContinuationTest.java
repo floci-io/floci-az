@@ -50,14 +50,17 @@ class CosmosQueryEngineContinuationTest {
         assertNull(page.continuation());
     }
 
+
     @Test
-    void aRidTokenResumesSafelyAfterADocumentLosesItsRid() {
+    void aRidTokenIsNotReinterpretedAsAnOffset() {
+        // Pages 1..n were produced in rid order. If a document later loses its _rid, resuming that
+        // bookmark as a plain offset indexes a differently ordered list, which skips or repeats
+        // documents. Surface it instead of returning a silently wrong page.
         var query = engine.prepare("SELECT VALUE c.id FROM c", List.of());
         var ridToken = new CosmosQueryEngine.QueryContinuation(1, "z", List.of());
 
-        var page = assertDoesNotThrow(() -> engine.executePage(query, WITH_ONE_RIDLESS, ridToken, 10));
-
-        assertNull(page.continuation(), "paging terminates rather than looping");
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.executePage(query, WITH_ONE_RIDLESS, ridToken, 10));
     }
 
     @ParameterizedTest

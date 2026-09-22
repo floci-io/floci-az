@@ -143,6 +143,13 @@ public class CosmosQueryEngine {
             LOG.warnf("%d of %d documents have no _rid; paging this query by offset instead of a bookmark",
                     ridless, documents.size());
         }
+        if (ridless > 0 && continuation != null && continuation.rid() != null) {
+            // The earlier pages were ordered with an _rid tiebreak that this document set can no
+            // longer reproduce. Falling back to offset paging here would index a differently ordered
+            // list and silently skip or repeat documents, so the token is refused instead.
+            throw new IllegalArgumentException(
+                    "Continuation cannot be resumed: " + ridless + " document(s) have no _rid");
+        }
         if (legacyOffset || ridless > 0
                 || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
             List<Object> items = execute(q, documents).items();
