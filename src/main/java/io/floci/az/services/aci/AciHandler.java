@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -118,7 +119,41 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     @PostConstruct
     public void init() {
         if (!mocked()) {
+            reconcilePersistedGroups();
             startReadinessPoller();
+        }
+    }
+
+    /**
+     * Reattaches persisted groups to real containers at startup. With a persistent storage mode the
+     * ARM records outlive the process, but {@link #shutdown()} removed the containers they name, so
+     * without this the records point at container ids that no longer exist: the group reports
+     * Stopped and never recovers.
+     *
+     * <p>Groups whose containers survived are adopted untouched. Groups that were provisioned and
+     * lost theirs are relaunched. A group left Failed is not resurrected. Startup failures stay
+     * non-fatal per the sidecar rules, so a Docker problem here marks the group and moves on.</p>
+     */
+    private void reconcilePersistedGroups() {
+        for (ContainerGroup group : scanAll()) {
+            if (containerManager.containersStillExist(group)) {
+                continue;
+            }
+            if (!"Succeeded".equals(group.getProvisioningState())
+                    && !"Creating".equals(group.getProvisioningState())) {
+                continue;
+            }
+            group.setContainerIds(null);
+            group.setAllocatedHostPorts(null);
+            try {
+                group.setProvisioningState("Creating");
+                containerManager.startGroup(group);
+                LOG.infov("Container group {0}: relaunched after restart", group.getName());
+            } catch (Exception e) {
+                LOG.errorf(e, "Could not relaunch container group %s after restart", group.getName());
+                group.setProvisioningState("Failed");
+            }
+            putGroup(group.storageKey(), group);
         }
     }
 
@@ -249,6 +284,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             boolean isNew = existing.isEmpty();
 
             ContainerGroup group = existing.orElseGet(ContainerGroup::new);
+            Map<String, Object> previousProperties = isNew ? null : group.getProperties();
             if (isNew) {
                 group.setSubscriptionId(sub);
                 group.setResourceGroup(rg);
@@ -275,10 +311,24 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                     LOG.errorf(e, "Failed to start containers for group %s; provisioningState=Failed", name);
                     group.setProvisioningState("Failed");
                 }
-            } else {
-                // Real-mode update: keep the existing containers (azurerm forces replacement for
-                // anything but tags/identity anyway).
+            } else if (Objects.equals(previousProperties, properties)) {
+                // Nothing that shapes the containers changed, so leave them running. A tags-only
+                // PUT lands here: tags and location are fields of their own, not properties.
                 group.setProvisioningState("Succeeded");
+            } else {
+                // The spec changed. Keeping the old containers would make the ARM read-back
+                // describe an image, command, environment or port set that nothing is running,
+                // and report Succeeded while doing it. azurerm never reaches this branch (its
+                // container block is ForceNew, so it destroys and recreates), but a direct PUT
+                // from an SDK, the CLI or raw REST does.
+                group.setProvisioningState("Creating");
+                try {
+                    containerManager.removeGroup(group);
+                    containerManager.startGroup(group);
+                } catch (Exception e) {
+                    LOG.errorf(e, "Failed to replace containers for group %s; provisioningState=Failed", name);
+                    group.setProvisioningState("Failed");
+                }
             }
 
             putGroup(key, group);
@@ -371,6 +421,8 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 LOG.warnv("Action {0} on container group {1} did not reach its expected state",
                         action, group.getName());
             }
+            // start may have recreated the containers, giving the group new ids and host ports.
+            putGroup(group.storageKey(), group);
         }
         return switch (action) {
             // The spec's only synchronous action: bare 204, no LRO headers.

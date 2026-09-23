@@ -251,6 +251,17 @@ public class AciContainerGroupManager {
                 && ids.values().stream().allMatch(lifecycleManager::isContainerRunning);
     }
 
+    /**
+     * Every container this group records still exists in Docker, so the group can be adopted as it
+     * stands. False when any is gone, which is what a restart leaves behind: shutdown removes the
+     * containers while the ARM record survives in a persistent storage mode.
+     */
+    public boolean containersStillExist(ContainerGroup group) {
+        Map<String, String> ids = group.getContainerIds();
+        return ids != null && !ids.isEmpty()
+                && ids.values().stream().allMatch(id -> lifecycleManager.containerState(id).isPresent());
+    }
+
     /** Live state of every backing container, empty when the group has none. */
     public List<ContainerStateInfo> containerStates(ContainerGroup group) {
         Map<String, String> ids = group.getContainerIds();
@@ -317,7 +328,27 @@ public class AciContainerGroupManager {
      * @return true when every container reached the expected state
      */
     public boolean startGroupContainers(ContainerGroup group) {
-        forEachContainerId(group, false, lifecycleManager::start);
+        // The recorded ids may be stale rather than absent: containers removed out of band, or by a
+        // shutdown whose ARM record outlived them, leave ids pointing at nothing. Starting those
+        // ids silently does nothing, so recreate instead. Starting a group that has no containers
+        // means creating them in Azure. Volumes are deliberately left in place; only the ports are
+        // released, since startGroup allocates a fresh set.
+        if (!containersStillExist(group)) {
+            if (group.getAllocatedHostPorts() != null) {
+                group.getAllocatedHostPorts().forEach(portAllocator::release);
+            }
+            group.setContainerIds(null);
+            group.setAllocatedHostPorts(null);
+            try {
+                startGroup(group);
+            } catch (Exception e) {
+                LOG.warnv("Could not recreate containers for group {0} on start: {1}",
+                        group.getName(), e.getMessage());
+                return false;
+            }
+        } else {
+            forEachContainerId(group, false, lifecycleManager::start);
+        }
         return isRunning(group);
     }
 

@@ -234,6 +234,144 @@ class AciDockerTest {
         }
     }
 
+    @Test
+    @Order(8)
+    @DisplayName("A PUT that changes the image replaces the running containers")
+    void replacementPutReconcilesTheWorkload() throws InterruptedException {
+        String name = "docker-test-replace";
+        String path = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ContainerInstance/containerGroups/" + name;
+        String body = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "containers": [
+                      {
+                        "name": "only",
+                        "properties": {
+                          "image": "busybox:stable",
+                          "command": ["sh", "-c", "echo %s; sleep 300"],
+                          "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
+                        }
+                      }
+                    ],
+                    "osType": "Linux",
+                    "restartPolicy": "Always"
+                  }
+                }
+                """;
+        given().contentType("application/json").body(body.formatted("first-spec"))
+                .when().put(path + API).then().statusCode(201);
+        try {
+            assertEquals("Succeeded", pollState(path, "Creating", 90_000),
+                    "the initial group never provisioned");
+            assertEquals(true, logsOf(path, "only").contains("first-spec"),
+                    "the first spec's container never ran");
+
+            // The replacement PUT: same group, different command. Keeping the old container would
+            // report Succeeded and read back the new spec while the old one kept running.
+            given().contentType("application/json").body(body.formatted("second-spec"))
+                    .when().put(path + API).then().statusCode(200);
+            assertEquals("Succeeded", pollState(path, "Creating", 90_000),
+                    "the replacement never provisioned");
+
+            String logs = logsOf(path, "only");
+            assertEquals(true, logs.contains("second-spec"),
+                    "the replacement container is not running the new spec; logs: " + logs);
+            assertEquals(false, logs.contains("first-spec"),
+                    "the old container is still the one running; logs: " + logs);
+        } finally {
+            given().delete(path + API);
+        }
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("start recreates containers that no longer exist")
+    void startRecreatesMissingContainers() throws InterruptedException {
+        String name = "docker-test-recreate";
+        String path = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ContainerInstance/containerGroups/" + name;
+        String body = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "containers": [
+                      {
+                        "name": "only",
+                        "properties": {
+                          "image": "busybox:stable",
+                          "command": ["sh", "-c", "sleep 300"],
+                          "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
+                        }
+                      }
+                    ],
+                    "osType": "Linux"
+                  }
+                }
+                """;
+        given().contentType("application/json").body(body).when().put(path + API)
+                .then().statusCode(201);
+        try {
+            assertEquals("Succeeded", pollState(path, "Creating", 90_000), "group never provisioned");
+
+            // Delete the backing container behind the emulator's back, which is the state an
+            // emulator restart leaves: the ARM record survives, its containers do not.
+            String container = given().when().get(path + API)
+                    .path("properties.containers[0].properties.instanceView.currentState.state");
+            assertEquals("Running", container, "precondition: the container should be running");
+            removeBackingContainersOf(SUB + "/" + RG + "/" + name);
+
+            given().when().post(path + "/start" + API).then().statusCode(202);
+            long deadline = System.currentTimeMillis() + 60_000;
+            String state = "Stopped";
+            while (!"Running".equals(state) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(2_000);
+                state = given().when().get(path + API).path("properties.instanceView.state");
+            }
+            assertEquals("Running", state, "start did not recreate the missing containers");
+        } finally {
+            given().delete(path + API);
+        }
+    }
+
+    /**
+     * Removes the group's Docker containers directly, bypassing the emulator, matching on the label
+     * the manager stamps rather than the container name, which is a slug of it. Asserts that
+     * something was actually removed: a filter that matches nothing would make the caller pass
+     * without ever reaching the state it exists to test.
+     */
+    private void removeBackingContainersOf(String storageKey) {
+        try {
+            Process p = new ProcessBuilder("sh", "-c",
+                    "docker ps -aq --filter label=floci_az_aci_group=" + storageKey
+                            + " | tee /dev/stderr | xargs -r docker rm -f")
+                    .redirectErrorStream(true).start();
+            String output = new String(p.getInputStream().readAllBytes()).strip();
+            p.waitFor();
+            assertEquals(false, output.isEmpty(),
+                    "no container carried label floci_az_aci_group=" + storageKey
+                            + "; the test would pass without removing anything");
+        } catch (Exception e) {
+            throw new IllegalStateException("could not remove backing containers", e);
+        }
+    }
+
+    private String logsOf(String path, String container) {
+        return given().when().get(path + "/containers/" + container + "/logs" + API)
+                .then().statusCode(200).extract().path("content");
+    }
+
+    private String pollState(String path, String whileState, long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        String state = whileState;
+        while (whileState.equals(state) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(2_000);
+            state = given().when().get(path + API).path("properties.provisioningState");
+        }
+        return state;
+    }
+
     private String pollProvisioningState(long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         String state = "Creating";
