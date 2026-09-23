@@ -720,6 +720,11 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                 && queryEngine.execute("SELECT * " + patch.condition(), List.of(), List.of(doc)).count() == 0) {
             return errorResponse(412, "PreconditionFailed", "The patch filter predicate was not satisfied.");
         }
+        String systemPath = systemPathViolation(patch.operations());
+        if (systemPath != null) {
+            return errorResponse(400, "BadRequest",
+                    "The system property '" + systemPath + "' cannot be changed by a patch.");
+        }
         applyPatchOperations(doc, patch.operations());
         if (!CosmosQueryPartition.samePartition(parseData(obj), doc, collMeta)) {
             return errorResponse(400, "BadRequest", "The partition key cannot be changed by a patch.");
@@ -733,6 +738,33 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         store.put(obj.key(), stored(obj.key(), doc, now, etag));
         return cosmosResponse(doc, Response.Status.OK, etag,
                 "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    /**
+     * Root segments Cosmos owns and a patch may not touch. Removing {@code _rid} in particular strands
+     * the document: it is the query engine's sort tiebreak and continuation bookmark.
+     */
+    private static final Set<String> IMMUTABLE_PATCH_ROOTS =
+            Set.of("_rid", "_self", "_etag", "_ts", "_attachments", "id");
+
+    /**
+     * The first system property an operation targets, or {@code null} when every operation stays on user
+     * data. Checked before any operation runs so a rejected patch leaves the document untouched.
+     */
+    private String systemPathViolation(List<Map<String, Object>> operations) {
+        for (Map<String, Object> op : operations) {
+            String path = op.get("path") instanceof String value ? value : null;
+            String root = path == null ? null : patchPathParts(path)[0];
+            if (root != null && IMMUTABLE_PATCH_ROOTS.contains(root)) {
+                return root;
+            }
+            String from = op.get("from") instanceof String value ? value : null;
+            String fromRoot = from == null ? null : patchPathParts(from)[0];
+            if (fromRoot != null && IMMUTABLE_PATCH_ROOTS.contains(fromRoot)) {
+                return fromRoot;
+            }
+        }
+        return null;
     }
 
     private void applyPatchOperations(Map<String, Object> doc, List<Map<String, Object>> operations) {
@@ -1073,6 +1105,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                 && queryEngine.execute("SELECT * " + filterPredicate, List.of(), List.of(document)).count() == 0) {
             return batchResultError(412);
         }
+        if (systemPathViolation(operations) != null) {
+            return batchResultError(400);
+        }
         applyPatchOperations(document, operations);
 
         Instant now = Instant.now();
@@ -1203,7 +1238,17 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         } catch (IllegalArgumentException e) {
             return errorResponse(400, "BadRequest", e.getMessage());
         }
-        CosmosQueryEngine.QueryPage page = queryEngine.executePage(parsed, scopedDocs, continuation, maxItemCount);
+        final CosmosQueryEngine.QueryPage page;
+        try {
+            page = queryEngine.executePage(parsed, scopedDocs, continuation, maxItemCount);
+        } catch (IllegalArgumentException e) {
+            // A continuation that cannot address this document set, same shape as a malformed token.
+            return errorResponse(400, "BadRequest", e.getMessage());
+        } catch (RuntimeException e) {
+            // Defence in depth: a query must fail in the Cosmos envelope, never as a framework 500.
+            LOG.errorf(e, "Query execution failed for %s/%s: %s", dbId, collId, sql);
+            return errorResponse(500, "InternalServerError", "The query could not be executed.");
+        }
         return queryResponse(page.result(),
                 collRid(req.accountName(), dbId, collId),
                 encodeContinuationToken(page.continuation(), scope));

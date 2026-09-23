@@ -2,6 +2,7 @@ package io.floci.az.services.cosmos;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.regex.*;
@@ -38,6 +39,7 @@ import java.util.stream.*;
  */
 public class CosmosQueryEngine {
 
+    private static final Logger LOG = Logger.getLogger(CosmosQueryEngine.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String QUOTED_STRING = "'(?:\\\\.|''|[^'\\\\])*'|\"(?:\\\\.|\"\"|[^\"\\\\])*\"";
 
@@ -134,7 +136,27 @@ public class CosmosQueryEngine {
         long consumed = continuation == null ? 0 : continuation.consumed();
         // Legacy tokens must keep their original ordering, including ties, until the query completes.
         boolean legacyOffset = continuation != null && continuation.rid() == null;
-        if (legacyOffset || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
+        // Documents written by an older build, or stripped by a patch, may carry no _rid. Rid bookmarks
+        // cannot address those, so the whole query falls back to offset paging rather than failing.
+        // Only the documents the predicate keeps can reach the comparator, so only those are counted:
+        // a poisoned document elsewhere in the container never influenced this query's order.
+        List<Map<String, Object>> matching = documents.stream()
+                .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
+                .toList();
+        long ridless = matching.stream().filter(doc -> ridOf(doc).isEmpty()).count();
+        if (ridless > 0) {
+            LOG.warnf("%d of %d matching documents have no _rid; paging this query by offset instead of a bookmark",
+                    ridless, matching.size());
+        }
+        if (ridless > 0 && continuation != null && continuation.rid() != null) {
+            // The earlier pages were ordered with an _rid tiebreak that this document set can no
+            // longer reproduce. Falling back to offset paging here would index a differently ordered
+            // list and silently skip or repeat documents, so the token is refused instead.
+            throw new IllegalArgumentException(
+                    "Continuation cannot be resumed: " + ridless + " document(s) have no _rid");
+        }
+        if (legacyOffset || ridless > 0
+                || q.countQuery() || q.aggregateType() != null || !q.groupBy().isEmpty() || q.distinct()) {
             List<Object> items = execute(q, documents).items();
             int start = (int) Math.min(consumed, items.size());
             int size = pageSize(items.size() - start, maxItemCount);
@@ -145,13 +167,9 @@ public class CosmosQueryEngine {
         }
 
         // Keep source identities and sort values until after pagination, even for scalar projections.
-        documents.forEach(doc -> Objects.requireNonNull(doc.get("_rid"),
-                "Stored Cosmos document is missing _rid required for query continuation"));
         Comparator<Map<String, Object>> comparator = buildComparator(q.orderBy())
-                .thenComparing(doc -> (String) doc.get("_rid"));
-        Stream<Map<String, Object>> remaining = documents.stream()
-                .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
-                .sorted(comparator);
+                .thenComparing(CosmosQueryEngine::ridOf);
+        Stream<Map<String, Object>> remaining = matching.stream().sorted(comparator);
         if (continuation != null && continuation.rid() != null) {
             remaining = remaining.filter(doc -> compareContinuation(q, doc, continuation) > 0);
         } else {
@@ -167,7 +185,7 @@ public class CosmosQueryEngine {
         if (size < rows.size()) {
             Map<String, Object> last = rows.get(size - 1);
             List<Object> values = q.orderBy().stream().map(order -> resolve(last, order.path())).toList();
-            next = new QueryContinuation(consumed + size, (String) last.get("_rid"), values);
+            next = new QueryContinuation(consumed + size, ridOf(last), values);
         }
         return new QueryPage(projectResults(q, rows.subList(0, size)), next);
     }
@@ -184,7 +202,12 @@ public class CosmosQueryEngine {
                 return order.asc() ? comparison : -comparison;
             }
         }
-        return ((String) doc.get("_rid")).compareTo(continuation.rid());
+        return ridOf(doc).compareTo(continuation.rid());
+    }
+
+    /** The document's {@code _rid}, or an empty string when it carries none. */
+    private static String ridOf(Map<String, Object> doc) {
+        return doc.get("_rid") instanceof String rid ? rid : "";
     }
 
     private QueryResult projectResults(ParsedQuery q, List<Map<String, Object>> filtered) {
