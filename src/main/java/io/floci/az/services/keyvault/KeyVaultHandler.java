@@ -94,7 +94,12 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         String hostWithoutPort = host != null
                 ? (host.contains(":") ? host.substring(0, host.indexOf(':')) : host) : null;
         String accountSuffix = req.headers().getHeaderString("x-floci-account-suffix");
-        boolean hsm = (hostWithoutPort != null && hostWithoutPort.endsWith(".managedhsm.azure.net"))
+        // Two host forms reach this handler: the Azure one, {account}.managedhsm.azure.net, and the
+        // emulator's host-service-marker form, {account}.managedhsm.{whatever-resolves-here}. The
+        // marker route does not set the account-suffix header, so matching the marker label itself is
+        // what makes both forms carry the flavor.
+        boolean hsm = (hostWithoutPort != null && hostWithoutPort.contains(".managedhsm."))
+                || (hostWithoutPort != null && hostWithoutPort.endsWith(".managedhsm"))
                 || "-managedhsm".equals(accountSuffix);
 
         // The Azure SDK challenge_auth_policy sends a bodiless probe to elicit a challenge, then
@@ -115,6 +120,14 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             String probeType = hsm ? "Microsoft.KeyVault/managedHSMs" : "Microsoft.KeyVault/vaults";
             String probeId = "https://" + account + (hsm ? ".managedhsm.azure.net/" : ".vault.azure.net/");
             return Response.ok(java.util.Map.of("type", probeType, "id", probeId)).build();
+        }
+
+        // Managed HSM serves Keys, Administration and SecurityDomain only. Secrets and certificates
+        // are vault-only surfaces, and the storage keys behind them carry no flavor, so without this
+        // guard {account}-managedhsm/secrets/x and {account}-keyvault/secrets/x are one object.
+        if (hsm && isVaultOnlySurface(routePath, path)) {
+            return kvError(404, "NotFound",
+                    "Managed HSM does not support this resource type: " + routePath.split("/")[0]);
         }
 
         if ("secrets".equals(routePath)) {
@@ -159,12 +172,24 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return methodNotAllowed();
         }
 
-        if (!hsm && (routePath.equals("certificates") || path.startsWith("certificates/")
-                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/"))) {
+        if (routePath.equals("certificates") || path.startsWith("certificates/")
+                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/")) {
             return certificates.handle(req);
         }
 
         return kvError(404, "KeyNotFound", "Resource not found: " + path);
+    }
+
+    /**
+     * Secrets and certificates are served by a key vault, never by a Managed HSM, whose data plane is
+     * Keys, Administration and SecurityDomain. The two flavors share one account name and one set of
+     * unflavored secret storage keys, so the HSM route has to be refused rather than namespaced.
+     */
+    private static boolean isVaultOnlySurface(String routePath, String path) {
+        return routePath.equals("secrets") || path.startsWith("secrets/")
+                || routePath.equals("deletedsecrets") || path.startsWith("deletedsecrets/")
+                || routePath.equals("certificates") || path.startsWith("certificates/")
+                || routePath.equals("deletedcertificates") || path.startsWith("deletedcertificates/");
     }
 
     // -------------------------------------------------------------------------
