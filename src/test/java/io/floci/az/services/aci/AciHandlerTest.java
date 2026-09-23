@@ -302,6 +302,19 @@ class AciHandlerTest {
     }
 
     @Test
+    @DisplayName("The operation Location follows a forwarded proto")
+    void actionLocationFollowsAForwardedProto() {
+        // A TLS-terminating proxy in front of the emulator: the caller reached it over https, even
+        // though this hop is plaintext. An http:// operation URL is one the az CLI refuses to poll,
+        // which is the failure this Location header was changed to avoid in the first place.
+        createGroup("cg-proto");
+        given().header("X-Forwarded-Proto", "https")
+                .when().post(BASE + "/containerGroups/cg-proto/start" + API)
+                .then().statusCode(202)
+                .header("Location", startsWith("https://"));
+    }
+
+    @Test
     @DisplayName("Actions on an unknown group return 404")
     void actionOnUnknownGroup404() {
         given().when().post(BASE + "/containerGroups/nope/start" + API)

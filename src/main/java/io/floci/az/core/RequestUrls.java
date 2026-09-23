@@ -29,13 +29,17 @@ public final class RequestUrls {
         return request.secure() ? "https" : "http";
     }
 
-    /** Base URL as seen by the caller — Host header when present, configured base URL otherwise. */
+    /**
+     * Base URL as seen by the caller: Host header when present, configured base URL otherwise.
+     * The scheme comes from {@link #resolveScheme}, so a URL generated behind a TLS-terminating
+     * proxy keeps the client's https rather than the plaintext proxy-to-emulator hop. Clients that
+     * refuse to send credentials over http, the az CLI among them, cannot follow a downgraded URL.
+     */
     public static String resolveBaseUrl(AzureRequest request, EmulatorConfig config) {
         String host = request.headers() == null ? null : request.headers().getHeaderString("Host");
         if (host == null || host.isBlank()) {
             return config.effectiveBaseUrl();
         }
-        String scheme = request.secure() ? "https" : "http";
-        return scheme + "://" + host;
+        return resolveScheme(request) + "://" + host;
     }
 }
