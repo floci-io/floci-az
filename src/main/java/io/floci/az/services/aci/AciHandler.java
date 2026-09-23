@@ -89,7 +89,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static final double DEFAULT_CPU = 1.0;
     private static final double DEFAULT_MEMORY_GB = 1.5;
     private static final String MOCKED_IP = "10.0.0.4";
-    private static final int MAX_TRACKED_OPERATIONS = 256;
+    private static final int MAX_TRACKED_OPERATIONS = 1024;
 
     private final Map<String, String> operationOutcomes = new LinkedHashMap<>() {
         @Override
@@ -168,11 +168,13 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         // ── LRO operation status ───────────────────────────────────────────────
         // Terminal immediately: every action this handler issues has already run by the time the
-        // Location header is returned. Operations it issued report their real outcome; anything
-        // else (a create LRO, a replayed id) keeps the optimistic Succeeded.
+        // Location header is returned, so its outcome is known. handleAction is the only thing that
+        // issues an operation URL here (PUT returns a body with no LRO header, DELETE is
+        // synchronous), so an id this handler does not know is one it never issued: 404, not a
+        // guess. Answering an unknown id Succeeded would turn an evicted failure back into a
+        // success, which is the whole point of recording outcomes.
         if (tail.matches("locations/[^/]+/operations/[^/?]+.*")) {
-            return Response.ok(Map.of("status", operationStatus(segment(tail, 3))))
-                    .type("application/json").build();
+            return operationStatusResponse(segment(tail, 3));
         }
 
         // ── Location-scoped catalogs probed by the CLI/portal ───────────────────
@@ -678,9 +680,9 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     /**
-     * Outcomes of the action LROs this handler has issued, newest {@value #MAX_TRACKED_OPERATIONS}
-     * kept. Clients poll an operation once and immediately, so an id evicted by a later action is
-     * one nobody is waiting on; the cap keeps a long-running emulator from growing without bound.
+     * Records the outcome of an action LRO, keeping the newest {@value #MAX_TRACKED_OPERATIONS}.
+     * The cap bounds memory in a long-running emulator; it is not a correctness knob, because an
+     * evicted id is answered 404 rather than assumed to have succeeded.
      */
     private void recordOperation(String operationId, boolean succeeded) {
         synchronized (operationOutcomes) {
@@ -688,10 +690,16 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         }
     }
 
-    private String operationStatus(String operationId) {
+    /** 200 with the recorded status, or 404 for an id this handler never issued or has evicted. */
+    private Response operationStatusResponse(String operationId) {
+        String status;
         synchronized (operationOutcomes) {
-            return operationOutcomes.getOrDefault(operationId, "Succeeded");
+            status = operationOutcomes.get(operationId);
         }
+        if (status == null) {
+            return ArmErrors.notFound("The operation '" + operationId + "' was not found.");
+        }
+        return Response.ok(Map.of("status", status)).type("application/json").build();
     }
 
     private Response groupNotFound(String rg, String name) {
