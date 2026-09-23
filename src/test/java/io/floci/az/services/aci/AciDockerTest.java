@@ -185,6 +185,55 @@ class AciDockerTest {
         given().when().delete(GROUP_PATH + API).then().statusCode(204);
     }
 
+    @Test
+    @Order(7)
+    @DisplayName("A group whose container exits reaches a terminal state instead of waiting in Creating")
+    void shortLivedContainersReachATerminalState() throws InterruptedException {
+        String name = "docker-test-shortlived";
+        String path = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ContainerInstance/containerGroups/" + name;
+        String body = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "containers": [
+                      {
+                        "name": "oneshot",
+                        "properties": {
+                          "image": "busybox:stable",
+                          "command": ["sh", "-c", "echo done"],
+                          "resources": {"requests": {"cpu": 0.25, "memoryInGB": 0.125}}
+                        }
+                      }
+                    ],
+                    "osType": "Linux",
+                    "restartPolicy": "Never"
+                  }
+                }
+                """;
+        given().contentType("application/json").body(body).when().put(path + API)
+                .then().statusCode(201);
+        try {
+            // Readiness used to require every container to be running at the same moment, which a
+            // one-shot command never satisfies: the group sat in Creating and ARM clients polled a
+            // state that could never change.
+            long deadline = System.currentTimeMillis() + 90_000;
+            String state = "Creating";
+            while ("Creating".equals(state) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(2_000);
+                state = given().when().get(path + API).path("properties.provisioningState");
+            }
+            assertEquals("Succeeded", state,
+                    "a group whose container exits must leave Creating; last state=" + state);
+
+            // restartPolicy Never plus a clean exit is a group that succeeded, not one that stopped.
+            given().when().get(path + API).then().statusCode(200)
+                    .body("properties.instanceView.state", equalTo("Succeeded"));
+        } finally {
+            given().delete(path + API);
+        }
+    }
+
     private String pollProvisioningState(long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         String state = "Creating";

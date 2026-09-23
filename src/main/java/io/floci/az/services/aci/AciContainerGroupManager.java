@@ -16,11 +16,13 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Manages the Docker lifecycle of the containers backing a container group in non-mocked mode
@@ -249,6 +251,34 @@ public class AciContainerGroupManager {
                 && ids.values().stream().allMatch(lifecycleManager::isContainerRunning);
     }
 
+    /** Live state of every backing container, empty when the group has none. */
+    public List<ContainerStateInfo> containerStates(ContainerGroup group) {
+        Map<String, String> ids = group.getContainerIds();
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.values().stream()
+                .map(lifecycleManager::containerState)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    /**
+     * Every container has been created and has either run or terminated. A container that exits is
+     * routine, not a failure: a short-lived command, or a Never/OnFailure restart policy, ends that
+     * way by design. It has still started, so the deployment is done and the group must leave
+     * Creating rather than wait for a simultaneity that will never come.
+     */
+    public boolean allContainersStarted(ContainerGroup group) {
+        Map<String, String> ids = group.getContainerIds();
+        if (ids == null || ids.isEmpty()) {
+            return false;
+        }
+        List<ContainerStateInfo> states = containerStates(group);
+        return states.size() == ids.size()
+                && states.stream().allMatch(info -> info.isRunning() || info.exitCode() != null);
+    }
+
     /** Per-container runtime state for instanceView; empty for unknown containers. */
     public Optional<ContainerStateInfo> containerState(ContainerGroup group, String containerName) {
         String containerId = containerId(group, containerName);
@@ -279,21 +309,38 @@ public class AciContainerGroupManager {
     }
 
     /** start action: primary first so the shared netns exists before joiners come up. */
-    public void startGroupContainers(ContainerGroup group) {
+    /**
+     * The shared lifecycle helpers log and swallow Docker errors, so the only honest signal an
+     * action succeeded is the state the containers actually reached. Each action reports that
+     * observed post-condition rather than the absence of an exception.
+     *
+     * @return true when every container reached the expected state
+     */
+    public boolean startGroupContainers(ContainerGroup group) {
         forEachContainerId(group, false, lifecycleManager::start);
+        return isRunning(group);
     }
 
     /** stop action: secondaries first, the netns owner last. */
-    public void stopGroupContainers(ContainerGroup group) {
+    public boolean stopGroupContainers(ContainerGroup group) {
         forEachContainerId(group, true, id -> lifecycleManager.stop(id, STOP_TIMEOUT_SECONDS));
+        return noneRunning(group);
     }
 
     /**
      * restart action: the primary restarts first (tearing down the shared netns), then each
      * secondary bounces so it rejoins the fresh namespace.
      */
-    public void restartGroupContainers(ContainerGroup group) {
+    public boolean restartGroupContainers(ContainerGroup group) {
         forEachContainerId(group, false, id -> lifecycleManager.restart(id, STOP_TIMEOUT_SECONDS));
+        return isRunning(group);
+    }
+
+    /** No container of the group is running: the post-condition of a successful stop. */
+    private boolean noneRunning(ContainerGroup group) {
+        Map<String, String> ids = group.getContainerIds();
+        return ids == null || ids.isEmpty()
+                || ids.values().stream().noneMatch(lifecycleManager::isContainerRunning);
     }
 
     /** Delete: remove containers (secondaries first), volumes, and release published ports. */
@@ -311,14 +358,14 @@ public class AciContainerGroupManager {
     }
 
     private void forEachContainerId(ContainerGroup group, boolean reversed,
-                                    java.util.function.Consumer<String> action) {
+                                    Consumer<String> action) {
         Map<String, String> ids = group.getContainerIds();
         if (ids == null || ids.isEmpty()) {
             return;
         }
         List<String> ordered = new ArrayList<>(ids.values());
         if (reversed) {
-            java.util.Collections.reverse(ordered);
+            Collections.reverse(ordered);
         }
         ordered.forEach(action);
     }

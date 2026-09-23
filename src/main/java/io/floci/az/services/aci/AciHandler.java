@@ -89,6 +89,14 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static final double DEFAULT_CPU = 1.0;
     private static final double DEFAULT_MEMORY_GB = 1.5;
     private static final String MOCKED_IP = "10.0.0.4";
+    private static final int MAX_TRACKED_OPERATIONS = 256;
+
+    private final Map<String, String> operationOutcomes = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > MAX_TRACKED_OPERATIONS;
+        }
+    };
 
     private final EmulatorConfig config;
     private final AciContainerGroupManager containerManager;
@@ -158,9 +166,13 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         LOG.debugf("AciHandler: %s %s (tail=%s)", method, fullPath, tail);
 
-        // ── LRO operation status (returns terminal Succeeded immediately) ──────
+        // ── LRO operation status ───────────────────────────────────────────────
+        // Terminal immediately: every action this handler issues has already run by the time the
+        // Location header is returned. Operations it issued report their real outcome; anything
+        // else (a create LRO, a replayed id) keeps the optimistic Succeeded.
         if (tail.matches("locations/[^/]+/operations/[^/?]+.*")) {
-            return Response.ok(Map.of("status", "Succeeded")).type("application/json").build();
+            return Response.ok(Map.of("status", operationStatus(segment(tail, 3))))
+                    .type("application/json").build();
         }
 
         // ── Location-scoped catalogs probed by the CLI/portal ───────────────────
@@ -343,13 +355,19 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             return groupNotFound(rg, name);
         }
         ContainerGroup group = found.get();
+        boolean succeeded = true;
         if (!mocked()) {
-            // Map the action onto the backing containers. Failures are non-fatal: the shared
-            // lifecycle helpers log and continue, and instanceView reports the honest state.
-            switch (action) {
+            // Map the action onto the backing containers. The shared lifecycle helpers log and
+            // swallow Docker errors, so each call reports the state the containers actually
+            // reached; that outcome is what the operation status below must tell the client.
+            succeeded = switch (action) {
                 case "stop"    -> containerManager.stopGroupContainers(group);
                 case "restart" -> containerManager.restartGroupContainers(group);
                 default        -> containerManager.startGroupContainers(group);
+            };
+            if (!succeeded) {
+                LOG.warnv("Action {0} on container group {1} did not reach its expected state",
+                        action, group.getName());
             }
         }
         return switch (action) {
@@ -357,8 +375,8 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             case "stop"    -> Response.status(204).build();
             // Async per spec, final-state-via: location. start → 202, restart → 204 (the spec
             // signals restart's LRO on a 204 — unusual but per ContainerGroup.tsp).
-            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation());
-            default        -> asyncActionResponse(req, 204, sub, group.getLocation());
+            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation(), succeeded);
+            default        -> asyncActionResponse(req, 204, sub, group.getLocation(), succeeded);
         };
     }
 
@@ -515,7 +533,25 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         if ("Failed".equals(group.getProvisioningState())) {
             return "Failed";
         }
-        return containerManager.isRunning(group) ? "Running" : "Stopped";
+        if (containerManager.isRunning(group)) {
+            return "Running";
+        }
+        // Containers that have all terminated under Never or OnFailure ended the way the policy
+        // intends, so the group succeeded or failed on their exit codes rather than being "Stopped".
+        // Under Always an exit is a restart the emulator does not perform, so Stopped stays honest.
+        List<ContainerStateInfo> states = containerManager.containerStates(group);
+        boolean allTerminated = !states.isEmpty()
+                && states.stream().allMatch(info -> !info.isRunning() && info.exitCode() != null);
+        if (allTerminated && !"Always".equals(restartPolicy(group))) {
+            return states.stream().allMatch(info -> info.exitCode() == 0) ? "Succeeded" : "Failed";
+        }
+        return "Stopped";
+    }
+
+    /** The group's restartPolicy, defaulting to the Azure default of Always when unset. */
+    private String restartPolicy(ContainerGroup group) {
+        Object policy = group.getProperties() == null ? null : group.getProperties().get("restartPolicy");
+        return policy == null || String.valueOf(policy).isBlank() ? "Always" : String.valueOf(policy);
     }
 
     private Map<String, Object> containerInstanceView(ContainerGroup group, String containerName) {
@@ -569,10 +605,15 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         poller.scheduleAtFixedRate(() -> {
             try {
                 scanAll().forEach(group -> {
-                    if ("Creating".equals(group.getProvisioningState()) && containerManager.isRunning(group)) {
+                    // Every container has started, whether or not they are all running right now:
+                    // the deployment is what provisioningState describes. Requiring simultaneous
+                    // running left short-lived commands, and Never/OnFailure policies, in Creating
+                    // for ever while ARM clients polled a state that could never change.
+                    if ("Creating".equals(group.getProvisioningState())
+                            && containerManager.allContainersStarted(group)) {
                         group.setProvisioningState("Succeeded");
                         putGroup(group.storageKey(), group);
-                        LOG.infov("Container group {0} is running; provisioningState=Succeeded", group.getName());
+                        LOG.infov("Container group {0} has started; provisioningState=Succeeded", group.getName());
                     }
                 });
             } catch (Exception e) {
@@ -619,18 +660,38 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return MAPPER.convertValue(MAPPER.valueToTree(source), Map.class);
     }
 
-    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location) {
+    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location,
+                                         boolean succeeded) {
         String loc = (location == null || location.isBlank()) ? "eastus" : location;
+        String operationId = UUID.randomUUID().toString();
+        recordOperation(operationId, succeeded);
         // Built from the caller's own scheme and host, not the configured base URL: the az CLI
         // refuses to send credentials to a non-HTTPS URL, so an http:// operation URL handed to a
         // client that reached us over TLS fails the poll with an authentication error.
         String url = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
                 + "/providers/Microsoft.ContainerInstance/locations/" + loc
-                + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION;
+                + "/operations/" + operationId + "?api-version=" + API_VERSION;
         return Response.status(status)
                 .header("Location", url)
                 .header("Retry-After", "1")
                 .build();
+    }
+
+    /**
+     * Outcomes of the action LROs this handler has issued, newest {@value #MAX_TRACKED_OPERATIONS}
+     * kept. Clients poll an operation once and immediately, so an id evicted by a later action is
+     * one nobody is waiting on; the cap keeps a long-running emulator from growing without bound.
+     */
+    private void recordOperation(String operationId, boolean succeeded) {
+        synchronized (operationOutcomes) {
+            operationOutcomes.put(operationId, succeeded ? "Succeeded" : "Failed");
+        }
+    }
+
+    private String operationStatus(String operationId) {
+        synchronized (operationOutcomes) {
+            return operationOutcomes.getOrDefault(operationId, "Succeeded");
+        }
     }
 
     private Response groupNotFound(String rg, String name) {
