@@ -51,6 +51,26 @@ class CosmosQueryEngineContinuationTest {
     }
 
 
+    /** The document without {@code _rid} is the one the predicate below excludes. */
+    private static final List<Map<String, Object>> POISON_EXCLUDED_BY_FILTER = List.of(
+            Map.of("id", "keep-1", "_rid", "z", "rank", 3),
+            Map.of("id", "poison", "rank", 1),
+            Map.of("id", "keep-2", "_rid", "x", "rank", 5));
+
+    @Test
+    void aRidTokenResumesWhenTheFilterExcludesThePoisonedDocument() {
+        // A document the WHERE clause removes never reaches the comparator, so it cannot have
+        // influenced the order the bookmark was issued against. Refusing the token because such a
+        // document exists somewhere in the container restarts a query that was never at risk.
+        var query = engine.prepare("SELECT VALUE c.id FROM c WHERE c.rank > 2", List.of());
+        var ridToken = new CosmosQueryEngine.QueryContinuation(1, "x", List.of());
+
+        var page = engine.executePage(query, POISON_EXCLUDED_BY_FILTER, ridToken, 10);
+
+        assertEquals(List.of("keep-1"), page.result().items());
+        assertNull(page.continuation());
+    }
+
     @Test
     void aRidTokenIsNotReinterpretedAsAnOffset() {
         // Pages 1..n were produced in rid order. If a document later loses its _rid, resuming that

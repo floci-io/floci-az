@@ -138,10 +138,15 @@ public class CosmosQueryEngine {
         boolean legacyOffset = continuation != null && continuation.rid() == null;
         // Documents written by an older build, or stripped by a patch, may carry no _rid. Rid bookmarks
         // cannot address those, so the whole query falls back to offset paging rather than failing.
-        long ridless = documents.stream().filter(doc -> ridOf(doc).isEmpty()).count();
+        // Only the documents the predicate keeps can reach the comparator, so only those are counted:
+        // a poisoned document elsewhere in the container never influenced this query's order.
+        List<Map<String, Object>> matching = documents.stream()
+                .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
+                .toList();
+        long ridless = matching.stream().filter(doc -> ridOf(doc).isEmpty()).count();
         if (ridless > 0) {
-            LOG.warnf("%d of %d documents have no _rid; paging this query by offset instead of a bookmark",
-                    ridless, documents.size());
+            LOG.warnf("%d of %d matching documents have no _rid; paging this query by offset instead of a bookmark",
+                    ridless, matching.size());
         }
         if (ridless > 0 && continuation != null && continuation.rid() != null) {
             // The earlier pages were ordered with an _rid tiebreak that this document set can no
@@ -164,9 +169,7 @@ public class CosmosQueryEngine {
         // Keep source identities and sort values until after pagination, even for scalar projections.
         Comparator<Map<String, Object>> comparator = buildComparator(q.orderBy())
                 .thenComparing(CosmosQueryEngine::ridOf);
-        Stream<Map<String, Object>> remaining = documents.stream()
-                .filter(doc -> q.whereClause() == null || evalExpr(doc, q.whereClause()))
-                .sorted(comparator);
+        Stream<Map<String, Object>> remaining = matching.stream().sorted(comparator);
         if (continuation != null && continuation.rid() != null) {
             remaining = remaining.filter(doc -> compareContinuation(q, doc, continuation) > 0);
         } else {
