@@ -127,7 +127,9 @@ public class ContainerLifecycleManager {
         if (spec.name() != null) createCmd.withName(spec.name());
         if (spec.user() != null && !spec.user().isBlank()) createCmd.withUser(spec.user());
         if (spec.env() != null && !spec.env().isEmpty()) createCmd.withEnv(spec.env());
-        if (spec.cmd() != null && !spec.cmd().isEmpty()) createCmd.withCmd(spec.cmd());
+        // An empty list is meaningful: it clears the image's own CMD, which a caller that sets
+        // only an entrypoint needs (Docker appends the inherited CMD as arguments otherwise).
+        if (spec.cmd() != null) createCmd.withCmd(spec.cmd());
         if (spec.entrypoint() != null && !spec.entrypoint().isEmpty())
             createCmd.withEntrypoint(spec.entrypoint());
         if (spec.workingDir() != null && !spec.workingDir().isBlank())

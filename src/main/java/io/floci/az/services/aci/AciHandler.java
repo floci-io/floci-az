@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
@@ -198,7 +199,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         // ── Actions ────────────────────────────────────────────────────────────
         if (tail.matches("containerGroups/[^/]+/(start|stop|restart)(?:[?].*)?") && "POST".equals(method)) {
-            return handleAction(sub, rg, segment(tail, 1), segment(tail, 2));
+            return handleAction(req, sub, rg, segment(tail, 1), segment(tail, 2));
         }
 
         // ── Single group CRUD ──────────────────────────────────────────────────
@@ -336,7 +337,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
-    private Response handleAction(String sub, String rg, String name, String action) {
+    private Response handleAction(AzureRequest req, String sub, String rg, String name, String action) {
         Optional<ContainerGroup> found = getGroup(storageKey(sub, rg, name));
         if (found.isEmpty()) {
             return groupNotFound(rg, name);
@@ -356,8 +357,8 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             case "stop"    -> Response.status(204).build();
             // Async per spec, final-state-via: location. start → 202, restart → 204 (the spec
             // signals restart's LRO on a 204 — unusual but per ContainerGroup.tsp).
-            case "start"   -> asyncActionResponse(202, sub, group.getLocation());
-            default        -> asyncActionResponse(204, sub, group.getLocation());
+            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation());
+            default        -> asyncActionResponse(req, 204, sub, group.getLocation());
         };
     }
 
@@ -618,9 +619,12 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return MAPPER.convertValue(MAPPER.valueToTree(source), Map.class);
     }
 
-    private Response asyncActionResponse(int status, String sub, String location) {
+    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location) {
         String loc = (location == null || location.isBlank()) ? "eastus" : location;
-        String url = config.effectiveBaseUrl() + "/subscriptions/" + sub
+        // Built from the caller's own scheme and host, not the configured base URL: the az CLI
+        // refuses to send credentials to a non-HTTPS URL, so an http:// operation URL handed to a
+        // client that reached us over TLS fails the poll with an authentication error.
+        String url = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
                 + "/providers/Microsoft.ContainerInstance/locations/" + loc
                 + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION;
         return Response.status(status)
@@ -770,6 +774,19 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     /** Wipes all container-group data — used by {@code POST /_admin/reset}. */
     @Override
     public void clear() {
+        // Container-backed groups own real containers, volumes and host ports. Clearing the ARM
+        // records alone would strand them: the ids and port allocations needed to reclaim them live
+        // in the records being deleted, so teardown has to happen first.
+        if (!mocked()) {
+            scanAll().forEach(group -> {
+                try {
+                    containerManager.removeGroup(group);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing containers for group {0} during reset: {1}",
+                            group.getName(), e.getMessage());
+                }
+            });
+        }
         storage.clear();
     }
 }

@@ -133,7 +133,9 @@ public class AciContainerGroupManager {
         // ENTRYPOINT (e.g. hashicorp/http-echo) don't get the binary duplicated in the argv.
         List<String> command = stringList(props.get("command"));
         if (!command.isEmpty()) {
-            builder.withEntrypoint(command);
+            // Entrypoint alone is not enough: Docker appends the image's own CMD as arguments, so
+            // the container would receive a different argv than the group asked for.
+            builder.withEntrypoint(command).withCmd(List.of());
         }
         for (Map<String, Object> envVar : listOfMaps(props.get("environmentVariables"))) {
             String value = envVar.get("secureValue") != null
