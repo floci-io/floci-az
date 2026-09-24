@@ -7,7 +7,10 @@ import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.jboss.logging.Logger;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -17,10 +20,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.nio.file.StandardOpenOption;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 
 /**
  * Write-Ahead Log storage: in-memory reads with append-only binary WAL for durability.
@@ -344,8 +358,8 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
 
     @SuppressWarnings("unchecked")
     private void replayBatch(byte[] payload) throws IOException {
-        Map<K, V> puts = new java.util.LinkedHashMap<>();
-        Set<K> deletes = new java.util.LinkedHashSet<>();
+        Map<K, V> puts = new LinkedHashMap<>();
+        Set<K> deletes = new LinkedHashSet<>();
         try (DataInputStream batch = new DataInputStream(new ByteArrayInputStream(payload))) {
             int deleteCount = batch.readInt();
             for (int i = 0; i < deleteCount; i++) {
@@ -380,8 +394,8 @@ public class WalStorage<K, V> implements StorageBackend<K, V> {
             Files.createDirectories(walPath.getParent());
             walWriter = new DataOutputStream(new BufferedOutputStream(
                     Files.newOutputStream(walPath,
-                            java.nio.file.StandardOpenOption.CREATE,
-                            java.nio.file.StandardOpenOption.APPEND)));
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.APPEND)));
         } catch (IOException e) {
             LOG.errorv(e, "Failed to open WAL writer at {0}", walPath);
         }

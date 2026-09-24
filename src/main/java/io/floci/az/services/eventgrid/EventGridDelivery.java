@@ -20,6 +20,9 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Delivers Event Grid notifications to subscriber webhooks.
@@ -133,7 +136,7 @@ public class EventGridDelivery {
                 "topic", topicResourceId,
                 "subject", "",
                 "eventType", "Microsoft.EventGrid.SubscriptionValidationEvent",
-                "eventTime", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).toString(),
+                "eventTime", OffsetDateTime.now(ZoneOffset.UTC).toString(),
                 "metadataVersion", "1",
                 "dataVersion", "1",
                 "data", Map.of("validationCode", code, "validationUrl", validationUrl));
@@ -162,7 +165,7 @@ public class EventGridDelivery {
             return null;
         }
         try {
-            var node = MAPPER.readTree(body).path("validationResponse");
+            JsonNode node = MAPPER.readTree(body).path("validationResponse");
             return node.isTextual() ? node.asText() : null;
         } catch (Exception e) {
             return null;

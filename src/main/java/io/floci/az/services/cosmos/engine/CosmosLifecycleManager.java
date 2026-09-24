@@ -145,7 +145,7 @@ public class CosmosLifecycleManager {
         containerManager.removeIfExists(containerName);
 
         ContainerSpec spec = buildSpec(containerName, image, hostPort, engine.defaultPort(), api);
-        var info = containerManager.createAndStart(spec);
+        ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
 
         String host = "localhost";
         int mappedPort = Optional.ofNullable(info.getEndpoint(engine.defaultPort()))

@@ -19,8 +19,16 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
+import java.security.SecureRandom;
 
 @ApplicationScoped
 public class KeyVaultHandler implements AzureServiceHandler, Resettable {
@@ -119,7 +127,7 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         if (routePath.isEmpty()) {
             String probeType = hsm ? "Microsoft.KeyVault/managedHSMs" : "Microsoft.KeyVault/vaults";
             String probeId = "https://" + account + (hsm ? ".managedhsm.azure.net/" : ".vault.azure.net/");
-            return Response.ok(java.util.Map.of("type", probeType, "id", probeId)).build();
+            return Response.ok(Map.of("type", probeType, "id", probeId)).build();
         }
 
         // Managed HSM serves Keys, Administration and SecurityDomain only. Secrets and certificates
@@ -164,9 +172,9 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         // Return an empty contacts list so the provider sees no contacts configured.
         if ("certificates/contacts".equals(routePath)) {
             if ("GET".equals(method)) {
-                return Response.ok(java.util.Map.of(
+                return Response.ok(Map.of(
                     "id", "https://" + account + ".vault.azure.net/certificates/contacts",
-                    "contacts", java.util.List.of()
+                    "contacts", List.of()
                 )).build();
             }
             return methodNotAllowed();
@@ -392,9 +400,9 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
             return kvError(400, "BadParameter", "The count parameter must be between 1 and 128.");
         }
         byte[] bytes = new byte[count];
-        new java.security.SecureRandom().nextBytes(bytes);
+        new SecureRandom().nextBytes(bytes);
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("value", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+        response.put("value", Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
         return Response.ok(toJson(response), "application/json").build();
     }
 

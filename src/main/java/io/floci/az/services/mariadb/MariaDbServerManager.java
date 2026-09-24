@@ -88,7 +88,7 @@ public class MariaDbServerManager {
             try {
                 containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
                     "/docker-entrypoint-initdb.d/10-grant-admin.sql");
-                var info = containerManager.startCreated(containerId, spec);
+                ContainerLifecycleManager.ContainerInfo info = containerManager.startCreated(containerId, spec);
 
                 int hostPort = Optional.ofNullable(info.getEndpoint(MARIADB_CONTAINER_PORT))
                     .map(ContainerLifecycleManager.EndpointInfo::port)

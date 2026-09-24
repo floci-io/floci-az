@@ -21,6 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import com.github.dockerjava.api.DockerClient;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 
 /**
  * Manages the Docker lifecycle of k3s containers backing AKS clusters.
@@ -197,7 +200,7 @@ public class AksClusterManager {
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        var dockerClient = lifecycleManager.getDockerClient();
+        DockerClient dockerClient = lifecycleManager.getDockerClient();
         ExecCreateCmdResponse exec = dockerClient
                 .execCreateCmd(containerId)
                 .withCmd(cmd)
@@ -236,13 +239,13 @@ public class AksClusterManager {
         try {
             javax.net.ssl.TrustManager[] trustAll = new javax.net.ssl.TrustManager[]{
                 new javax.net.ssl.X509TrustManager() {
-                    public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
-                    public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                    public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
+                    public X509Certificate[] getAcceptedIssuers() { return null; }
+                    public void checkClientTrusted(X509Certificate[] c, String a) {}
+                    public void checkServerTrusted(X509Certificate[] c, String a) {}
                 }
             };
             javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new java.security.SecureRandom());
+            sc.init(null, trustAll, new SecureRandom());
             conn.setSSLSocketFactory(sc.getSocketFactory());
             conn.setHostnameVerifier((h, s) -> true);
         } catch (Exception e) {

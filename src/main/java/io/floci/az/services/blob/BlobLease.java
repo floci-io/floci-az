@@ -1,6 +1,7 @@
 package io.floci.az.services.blob;
 
 import java.time.Instant;
+import java.time.Duration;
 
 /**
  * State of one blob lease. Immutable; transitions return a new instance.
@@ -61,6 +62,6 @@ public record BlobLease(String leaseId, int durationSeconds, Instant expiresAt, 
         if (breakAt == null || !now.isBefore(breakAt)) {
             return 0;
         }
-        return java.time.Duration.between(now, breakAt).getSeconds();
+        return Duration.between(now, breakAt).getSeconds();
     }
 }

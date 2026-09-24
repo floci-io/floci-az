@@ -30,12 +30,12 @@ public class TableModel {
 
     // Carries both the deserialized entity map and its StoredObject (for etag)
     // Used internally in the query pipeline — NOT serialized to JSON
-    public record EntityWithMeta(java.util.Map<String, Object> entity,
+    public record EntityWithMeta(Map<String, Object> entity,
                                   StoredObject stored) {}
 
     // Result of a single batch operation — used to build the multipart response
     @RegisterForReflection
     public record BatchOpResult(int status, String statusText,
-                                 java.util.Map<String, Object> body,
+                                 Map<String, Object> body,
                                  String etag) {}
 }

@@ -6,6 +6,7 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.command.LogContainerCmd;
 import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Bind;
@@ -184,7 +185,7 @@ public class ContainerLifecycleManager {
             if (inspect.getNetworkSettings() == null) {
                 return List.of();
             }
-            var networks = inspect.getNetworkSettings().getNetworks();
+            Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
             if (networks == null || networks.isEmpty()) {
                 return List.of();
             }
@@ -669,7 +670,7 @@ public class ContainerLifecycleManager {
     public Optional<ContainerStateInfo> containerState(String containerId) {
         try {
             InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-            var state = inspect.getState();
+            InspectContainerResponse.ContainerState state = inspect.getState();
             Long exitCode = state.getExitCodeLong();
             return Optional.of(new ContainerStateInfo(
                     state.getStatus(),
@@ -752,7 +753,7 @@ public class ContainerLifecycleManager {
     public String logs(String containerId, Integer tail, boolean timestamps) {
         StringBuilder output = new StringBuilder();
         try {
-            var logCmd = dockerClient.logContainerCmd(containerId)
+            LogContainerCmd logCmd = dockerClient.logContainerCmd(containerId)
                     .withStdOut(true)
                     .withStdErr(true)
                     .withTimestamps(timestamps);
@@ -912,8 +913,8 @@ public class ContainerLifecycleManager {
                                          String preferredNetwork) {
         if (!containerDetector.isRunningInContainer()) {
             // Native mode: use localhost and the bound host port
-            var bindings = inspect.getNetworkSettings().getPorts().getBindings();
-            var binding = bindings.get(ExposedPort.tcp(containerPort));
+            Map<ExposedPort, Ports.Binding[]> bindings = inspect.getNetworkSettings().getPorts().getBindings();
+            Ports.Binding[] binding = bindings.get(ExposedPort.tcp(containerPort));
             if (binding != null && binding.length > 0) {
                 int hostPort = Integer.parseInt(binding[0].getHostPortSpec());
                 return new EndpointInfo("localhost", hostPort);
@@ -931,7 +932,7 @@ public class ContainerLifecycleManager {
     }
 
     private String resolveContainerIp(InspectContainerResponse inspect, String preferredNetwork) {
-        var networks = inspect.getNetworkSettings().getNetworks();
+        Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
         if (networks != null) {
             // Prefer the configured network so that when the container is on both
             // bridge (default) and the service network, we return the right IP.

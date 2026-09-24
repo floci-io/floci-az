@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 @ApplicationScoped
 public class ApiManagementGateway {
@@ -292,12 +293,12 @@ public class ApiManagementGateway {
         if (value == null || !value.contains("{{")) {
             return value;
         }
-        java.util.regex.Matcher matcher = Pattern.compile("\\{\\{\\s*([^}]+?)\\s*}}").matcher(value);
+        Matcher matcher = Pattern.compile("\\{\\{\\s*([^}]+?)\\s*}}").matcher(value);
         StringBuilder resolved = new StringBuilder();
         while (matcher.find()) {
             String name = matcher.group(1);
             String replacement = findNamedValue(serviceName, name).orElse(matcher.group(0));
-            matcher.appendReplacement(resolved, java.util.regex.Matcher.quoteReplacement(replacement));
+            matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(resolved);
         return resolved.toString();

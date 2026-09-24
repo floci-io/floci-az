@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import io.floci.az.core.ServiceRoutes.SuffixRoute;
+import java.util.TreeSet;
 
 @ApplicationScoped
 public class AzureRoutingFilter {
@@ -313,7 +314,7 @@ public class AzureRoutingFilter {
      * asserts each one actually resolves to a registered handler.
      */
     Set<String> routedServiceTypes() {
-        Set<String> types = new java.util.TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
+        Set<String> types = new TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
         hostRoutes.forEach(route -> types.add(route.serviceType()));
         accountSuffixRoutes.forEach(route -> types.add(route.serviceType()));
         providerRoutes.forEach(route -> types.add(route.serviceType()));

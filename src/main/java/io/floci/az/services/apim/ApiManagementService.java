@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Objects;
 
 @ApplicationScoped
 public class ApiManagementService {
@@ -418,7 +419,7 @@ public class ApiManagementService {
                         .filter(e -> e.getKey().startsWith(productKey(sub, rg, serviceName, productId) + "/apis/"))
                         .map(Map.Entry::getValue)
                         .map(apis::get)
-                        .filter(java.util.Objects::nonNull)
+                        .filter(Objects::nonNull)
                         .map(ApiManagementService::stripInternal)
                         .toList();
                 return Response.ok(Map.of("value", items)).build();

@@ -196,7 +196,7 @@ public class CosmosEngineHandler implements AzureServiceHandler {
         Optional<CosmosConnectionInfo> connInfo = lifecycleManager.getIfRunning(api);
 
         String status = connInfo.isPresent() ? "running" : "stopped";
-        var body = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("api",           api.name());
         body.put("engine",        engine.displayName());
         body.put("status",        status);

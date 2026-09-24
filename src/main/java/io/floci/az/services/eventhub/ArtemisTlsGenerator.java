@@ -26,6 +26,9 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
+import java.security.cert.Certificate;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Generates a self-signed TLS certificate and PKCS12 keystore for the Artemis AMQP broker.
@@ -55,12 +58,12 @@ public class ArtemisTlsGenerator {
         X500Name name = new X500Name("CN=floci-az-artemis");
         BigInteger serial = new BigInteger(128, SECURE_RANDOM);
 
-        var certBuilder = new JcaX509v3CertificateBuilder(
+        JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 name, serial,
                 Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
                 name, keyPair.getPublic());
 
-        java.util.List<GeneralName> sanList = new java.util.ArrayList<>();
+        List<GeneralName> sanList = new ArrayList<>();
         sanList.add(new GeneralName(GeneralName.dNSName, "floci-az-artemis"));
         sanList.add(new GeneralName(GeneralName.dNSName, "localhost"));
         sanList.add(new GeneralName(GeneralName.iPAddress,
@@ -82,7 +85,7 @@ public class ArtemisTlsGenerator {
         KeyStore ks = KeyStore.getInstance("PKCS12");
         ks.load(null, null);
         ks.setKeyEntry(CONTAINER_ALIAS, keyPair.getPrivate(), KEYSTORE_PASSWORD.toCharArray(),
-                new java.security.cert.Certificate[]{cert});
+                new Certificate[]{cert});
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ks.store(baos, KEYSTORE_PASSWORD.toCharArray());
 

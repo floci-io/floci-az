@@ -32,6 +32,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import com.github.dockerjava.api.model.ContainerNetwork;
+import java.io.InputStream;
+import java.util.stream.Stream;
 
 /**
  * Creates and destroys Docker containers for Azure Functions execution.
@@ -157,7 +161,7 @@ public class ContainerLauncher {
         try {
             String selfContainerId = System.getenv("HOSTNAME");
             if (selfContainerId != null) {
-                var networks = dockerClient.inspectContainerCmd(selfContainerId).exec()
+                Map<String, ContainerNetwork> networks = dockerClient.inspectContainerCmd(selfContainerId).exec()
                         .getNetworkSettings().getNetworks();
                 if (!networks.isEmpty()) {
                     cachedNetworkMode = networks.keySet().iterator().next();
@@ -281,7 +285,7 @@ public class ContainerLauncher {
 
     private static void createTarWithPrefix(Path sourceDir, OutputStream out, String prefix) throws IOException {
         try (TarArchiveOutputStream tar = newTar(out);
-             var stream = Files.walk(sourceDir)) {
+             Stream<Path> stream = Files.walk(sourceDir)) {
             for (Path path : (Iterable<Path>) stream::iterator) {
                 if (Files.isDirectory(path)) continue;
                 String entryName = prefix + sourceDir.relativize(path).toString();
@@ -289,7 +293,7 @@ public class ContainerLauncher {
                 entry.setSize(Files.size(path));
                 entry.setMode(0755);
                 tar.putArchiveEntry(entry);
-                try (var fis = Files.newInputStream(path)) {
+                try (InputStream fis = Files.newInputStream(path)) {
                     fis.transferTo(tar);
                 }
                 tar.closeArchiveEntry();

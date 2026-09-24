@@ -24,9 +24,16 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
+import java.time.Instant;
 
 /**
  * ARM management-plane handler for Azure Resource Manager paths that are not
@@ -617,7 +624,7 @@ public class ArmHandler implements AzureServiceHandler {
                         "publicAccess",      "None",
                         "leaseStatus",       "Unlocked",
                         "leaseState",        "Available",
-                        "lastModifiedTime",  java.time.Instant.now().toString(),
+                        "lastModifiedTime",  Instant.now().toString(),
                         "etag",              "\"" + UUID.randomUUID() + "\"");
                 yield Response.status(201).entity(Map.of(
                         "id",         path,

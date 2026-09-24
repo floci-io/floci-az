@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+import java.util.function.Supplier;
 
 /**
  * Shared Blob Storage and ADLS Gen2 Path lease state.
@@ -200,7 +202,7 @@ public class BlobLeaseService {
         } else {
             // Default: infinite leases break immediately, fixed leases run out their term.
             breakPeriod = lease.expiresAt() == null ? 0
-                    : (int) Math.max(0, java.time.Duration.between(now, lease.expiresAt()).getSeconds());
+                    : (int) Math.max(0, Duration.between(now, lease.expiresAt()).getSeconds());
         }
         BlobLease broken = lease.stateAt(now) == BlobLease.State.BREAKING
                 ? lease : lease.broken(breakPeriod, now);
@@ -233,11 +235,11 @@ public class BlobLeaseService {
      * run inside this to stay linearized with lease operations and with
      * container deletion sweeps.
      */
-    public synchronized Response exclusively(java.util.function.Supplier<Response> operation) {
+    public synchronized Response exclusively(Supplier<Response> operation) {
         return operation.get();
     }
 
-    /** {@link #exclusively(java.util.function.Supplier)} for mutations that produce no response. */
+    /** {@link #exclusively(Supplier)} for mutations that produce no response. */
     public synchronized void exclusively(Runnable operation) {
         operation.run();
     }

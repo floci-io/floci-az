@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
+import java.util.Map;
 
 public class QueueModels {
 
@@ -27,7 +28,7 @@ public class QueueModels {
         @JacksonXmlProperty(localName = "Name") String Name,
         @JacksonXmlElementWrapper(localName = "Metadata")
         @JacksonXmlProperty(localName = "Metadata")
-        java.util.Map<String, String> Metadata
+        Map<String, String> Metadata
     ) {}
 
     @RegisterForReflection

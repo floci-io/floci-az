@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import com.github.dockerjava.api.DockerClient;
 
 /**
  * Manages the Docker lifecycle of Redis containers backing Azure Cache for Redis caches.
@@ -177,7 +178,7 @@ public class RedisCacheManager {
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        var dockerClient = lifecycleManager.getDockerClient();
+        DockerClient dockerClient = lifecycleManager.getDockerClient();
         ExecCreateCmdResponse exec = dockerClient
                 .execCreateCmd(containerId)
                 .withCmd(cmd)
