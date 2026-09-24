@@ -224,6 +224,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
+            // Re-checked here, under this method's lock: the guard in handle() runs unlocked, so two
+            // concurrent creates of one name from different scopes can both pass it.
+            Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
+            if (foreign.isPresent()) {
+                return foreign.get();
+            }
             Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
             boolean isNew = current.isEmpty();
 
@@ -717,7 +723,8 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             return Optional.empty();
         }
         String serverName = segment(tail, 1);
-        boolean createsServer = "PUT".equals(request.method()) && tail.matches("servers/[^/]+");
+        boolean createsServer = "PUT".equals(request.method()) && tail.matches("servers/[^/]+")
+            && scope.get().resourceGroup() != null;
         return state.getServer(serverName)
             .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
             .map(s -> createsServer

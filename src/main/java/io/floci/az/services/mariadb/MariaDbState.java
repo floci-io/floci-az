@@ -58,6 +58,15 @@ public class MariaDbState {
         persist(entry);
     }
 
+    /** Stores a new server unless its name is already taken; false when a concurrent create claimed it first. */
+    public synchronized boolean claimServer(ServerEntry entry) {
+        if (servers.containsKey(key(entry.serverName()))) {
+            return false;
+        }
+        putServer(entry);
+        return true;
+    }
+
     public synchronized Optional<ServerEntry> getServer(String serverName) {
         return Optional.ofNullable(servers.get(key(serverName)));
     }

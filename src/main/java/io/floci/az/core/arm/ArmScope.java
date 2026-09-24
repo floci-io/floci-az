@@ -9,21 +9,23 @@ import java.util.Optional;
  * servers) keep one entry per name. Before serving a path they compare the entry's owner with this
  * scope: a read or child call through another scope is a 404, and a create through another scope is a
  * name conflict. Subscription ids and resource-group names are case-insensitive in ARM.
+ *
+ * <p>{@code resourceGroup} is null for a subscription-level path such as
+ * {@code subscriptions/{sub}/providers/{ns}/{type}/{name}}. Such a scope owns nothing: every resource
+ * lives in a resource group, so a path that names none cannot be the owner's.
  */
 public record ArmScope(String subscription, String resourceGroup) {
 
-    /** The scope of a {@code subscriptions/{sub}/resourceGroups/{rg}/...} path, or empty for any other path. */
+    /** The scope of a {@code subscriptions/{sub}/...} path, or empty for a path that names no subscription. */
     public static Optional<ArmScope> of(String path) {
-        Optional<String> subscription = ArmPaths.subscription(path);
-        Optional<String> resourceGroup = ArmPaths.resourceGroup(path);
-        if (subscription.isEmpty() || resourceGroup.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(new ArmScope(subscription.get(), resourceGroup.get()));
+        return ArmPaths.subscription(path)
+                .map(subscription -> new ArmScope(subscription, ArmPaths.resourceGroup(path).orElse(null)));
     }
 
     /** Whether a resource stored under {@code ownerSubscription}/{@code ownerResourceGroup} lives in this scope. */
     public boolean owns(String ownerSubscription, String ownerResourceGroup) {
-        return subscription.equalsIgnoreCase(ownerSubscription) && resourceGroup.equalsIgnoreCase(ownerResourceGroup);
+        return resourceGroup != null
+                && subscription.equalsIgnoreCase(ownerSubscription)
+                && resourceGroup.equalsIgnoreCase(ownerResourceGroup);
     }
 }

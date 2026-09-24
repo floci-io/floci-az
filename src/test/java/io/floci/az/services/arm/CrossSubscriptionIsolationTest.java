@@ -9,8 +9,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -230,6 +236,83 @@ class CrossSubscriptionIsolationTest {
         given().get("/subscriptions/" + SUB_B + "/providers/Microsoft.Communication/emailServices?api-version=2023-04-01")
                 .then().statusCode(200)
                 .body("value.id", not(hasItem(email.path(SUB_A, "rg-email-list"))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("globallyNamed")
+    void aPathWithoutAResourceGroupCannotReachAnotherSubscriptionsResource(GlobalKind global) {
+        Kind kind = global.kind();
+        String rg = "rg-norg-" + kind.name();
+        createGroup(SUB_A, rg);
+        Kind named = new Kind(kind.label(), kind.type(), kind.name() + "norg", kind.api(), kind.body());
+        assertCreated(put(named, SUB_A, rg), named);
+
+        String noGroup = "/subscriptions/" + SUB_B + "/providers/" + named.type() + "/" + named.name()
+                + "?api-version=" + named.api();
+        given().get(noGroup).then().statusCode(not(equalTo(200)));
+        given().delete(noGroup);
+        assertEquals(named.path(SUB_A, rg).toLowerCase(), idOf(named, SUB_A, rg));
+    }
+
+    @Test
+    void storageChildRoutesUnderAnotherSubscriptionCannotReachTheOwnersAccount() {
+        Kind storage = new Kind("storage account", "Microsoft.Storage/storageAccounts", "xsubchild", "2023-01-01",
+                globallyNamed().getFirst().kind().body());
+        createGroup(SUB_A, "rg-child");
+        createGroup(SUB_B, "rg-child");
+        assertCreated(put(storage, SUB_A, "rg-child"), storage);
+
+        String foreignAccount = storage.path(SUB_B, "rg-child");
+        given().contentType("application/json").body("{}")
+                .put(foreignAccount + "/blobServices/default/containers/intruder?api-version=2023-01-01")
+                .then().statusCode(404);
+        given().contentType("application/json").body("{}")
+                .put(foreignAccount + "/queueServices/default/queues/intruder?api-version=2023-01-01")
+                .then().statusCode(404);
+        given().post(foreignAccount + "/listKeys?api-version=2023-01-01").then().statusCode(404);
+
+        // The owner's data plane never received the container.
+        given().get("/xsubchild/intruder?restype=container").then().statusCode(404);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("globallyNamed")
+    void concurrentCreatesFromManySubscriptionsLeaveOneOwner(GlobalKind global) throws Exception {
+        Kind kind = global.kind();
+        Kind raced = new Kind(kind.label(), kind.type(), kind.name() + "race", kind.api(), kind.body());
+        int contenders = 8;
+        List<String> subs = new ArrayList<>();
+        for (int i = 0; i < contenders; i++) {
+            String sub = String.format("cccccccc-0000-0000-0000-%012d", i);
+            subs.add(sub);
+            createGroup(sub, "rg-race");
+        }
+
+        ExecutorService pool = Executors.newFixedThreadPool(contenders);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> results = new ArrayList<>();
+            for (String sub : subs) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return put(raced, sub, "rg-race").statusCode();
+                }));
+            }
+            start.countDown();
+            int created = 0;
+            for (Future<Integer> result : results) {
+                int status = result.get(30, TimeUnit.SECONDS);
+                if (status >= 200 && status < 300) {
+                    created++;
+                }
+            }
+            assertEquals(1, created, raced.label() + " was created by more than one subscription");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        long owners = subs.stream().filter(sub -> given().get(raced.url(sub, "rg-race")).statusCode() == 200).count();
+        assertEquals(1, owners, raced.label() + " is readable from more than one subscription");
     }
 
     private static void createGroup(String sub, String rg) {

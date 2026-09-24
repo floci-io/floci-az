@@ -294,7 +294,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         return notFound("Unknown Communication path: " + tail);
     }
 
-    private Response handleCommunicationServiceCrud(AzureRequest req, String path, String method, String name) {
+    private synchronized Response handleCommunicationServiceCrud(AzureRequest req, String path, String method, String name) {
         // Names are global ({name}.communication.azure.com), so the map holds one entry per name. A path
         // under another subscription or resource group must not reach it.
         Map<String, Object> existing = communicationServices.get(name);

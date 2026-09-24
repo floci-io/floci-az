@@ -414,7 +414,7 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
+    private synchronized Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
         if (ownedElsewhere(webApps, sub, rg, appName).isPresent()) {
             return webAppNameTaken(appName);
         }
@@ -508,6 +508,15 @@ public class ArmHandler implements AzureServiceHandler {
     private Response handleStorage(AzureRequest req, String path, String method, String sub) {
         String rg = extractRg(path);
 
+        // Containers, queues and keys reach the shared data plane, which knows only the account name.
+        // Under a scope that does not own the account they must stop here, before touching the owner's data.
+        if (path.contains("/storageAccounts/") && !path.matches(".*/storageAccounts/[^/?]+([?].*)?")) {
+            String account = extractResourceName(path, "storageAccounts");
+            if (ownedElsewhere(storageAccounts, sub, rg, account).isPresent()) {
+                return armNotFound("storageAccounts/" + account);
+            }
+        }
+
         // POST .../storageAccounts/{name}/listKeys
         if (path.contains("/storageAccounts/") && path.endsWith("/listKeys")) {
             String account = extractResourceName(path, "storageAccounts");
@@ -561,7 +570,7 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateStorageAccount(AzureRequest req, String sub, String rg, String account) {
+    private synchronized Response createOrUpdateStorageAccount(AzureRequest req, String sub, String rg, String account) {
         Optional<Map<String, Object>> owner = ownedElsewhere(storageAccounts, sub, rg, account);
         if (owner.isPresent()) {
             return sub.equalsIgnoreCase((String) owner.get().get("_sub"))
@@ -735,7 +744,7 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateKeyVault(AzureRequest req, String sub, String rg, String vaultName) {
+    private synchronized Response createOrUpdateKeyVault(AzureRequest req, String sub, String rg, String vaultName) {
         if (ownedElsewhere(keyVaults, sub, rg, vaultName).isPresent()) {
             return ArmErrors.error(409, "VaultAlreadyExists", "The vault name '" + vaultName
                     + "' is already in use. Vault names are globally unique so it is possible that the name is already taken.");
@@ -779,7 +788,7 @@ public class ArmHandler implements AzureServiceHandler {
         return Response.ok(stripInternal(resource)).build();
     }
 
-    private Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
+    private synchronized Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
         if (ownedElsewhere(managedHsms, sub, rg, hsmName).isPresent()) {
             // No public source gives the Managed HSM create-conflict code; ARM's generic Conflict stands in.
             return ArmErrors.error(409, "Conflict", "The managed HSM name '" + hsmName + "' is already in use.");
@@ -862,6 +871,7 @@ public class ArmHandler implements AzureServiceHandler {
     // ── Global resource names ────────────────────────────────────────────────
     // Storage accounts, vaults, managed HSMs and web apps are DNS names, unique across every
     // subscription. A create under a second scope is a name conflict, never a second resource.
+    // Their create methods are synchronized so the ownership check and the write are one step.
 
     /** The resource named {@code name} in {@code store} when it belongs to a scope other than {@code sub}/{@code rg}. */
     private static Optional<Map<String, Object>> ownedElsewhere(Map<String, Map<String, Object>> store,

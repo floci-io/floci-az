@@ -165,7 +165,7 @@ public class ApiManagementService {
                 .toList();
     }
 
-    private Response createOrUpdateService(AzureRequest request, String sub, String rg, String serviceName) {
+    private synchronized Response createOrUpdateService(AzureRequest request, String sub, String rg, String serviceName) {
         // Service names are global ({name}.azure-api.net): a second scope cannot claim one already in use.
         ArmScope scope = new ArmScope(sub, rg);
         boolean ownedElsewhere = services.values().stream().anyMatch(s -> serviceName.equalsIgnoreCase((String) s.get("name"))

@@ -83,6 +83,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static final Logger LOG = Logger.getLogger(AcrHandler.class);
 
+    /** Guards the check-and-claim of a global resource name across concurrent creates. */
+    private final Object nameClaims = new Object();
+
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -324,39 +327,49 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode sku = body.path("sku");
             JsonNode props = body.path("properties");
 
-            if (ownedElsewhere(sub, rg, registryName)) {
-                return ArmErrors.error(409, "AlreadyInUse", "The registry DNS name " + registryName
-                        + ".azurecr.io is already in use. You can check if the name is already claimed using following API: "
-                        + "https://docs.microsoft.com/en-us/rest/api/containerregistry/registries/checknameavailability");
-            }
             String storageKey = storageKey(sub, rg, registryName);
-            Optional<Registry> existing = getRegistry(storageKey);
-            boolean isNew = existing.isEmpty();
-
             Registry registry;
-            if (isNew) {
-                registry = new Registry();
-                registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                registry.setSubscriptionId(sub);
-                registry.setResourceGroup(rg);
-                registry.setName(registryName);
-                registry.setCreatedAt(Instant.now());
-                registry.setUsername(registryName);
-                registry.setPassword(generatePassword());
-                registry.setPassword2(generatePassword());
-            } else {
-                registry = existing.get();
+            boolean isNew;
+            // The ownership check and the write that claims the name happen under one lock, so two
+            // subscriptions creating the same name at once cannot both pass the check.
+            synchronized (nameClaims) {
+                if (ownedElsewhere(sub, rg, registryName)) {
+                    return ArmErrors.error(409, "AlreadyInUse", "The registry DNS name " + registryName
+                            + ".azurecr.io is already in use. You can check if the name is already claimed using following API: "
+                            + "https://docs.microsoft.com/en-us/rest/api/containerregistry/registries/checknameavailability");
+                }
+                Optional<Registry> existing = getRegistry(storageKey);
+                isNew = existing.isEmpty();
+
+                if (isNew) {
+                    registry = new Registry();
+                    registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                    registry.setSubscriptionId(sub);
+                    registry.setResourceGroup(rg);
+                    registry.setName(registryName);
+                    registry.setCreatedAt(Instant.now());
+                    registry.setUsername(registryName);
+                    registry.setPassword(generatePassword());
+                    registry.setPassword2(generatePassword());
+                } else {
+                    registry = existing.get();
+                }
+
+                registry.setLocation(location);
+                registry.setSkuName(sku.path("name").asText("Basic"));
+                registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
+                registry.setTags(parseStringMap(body.path("tags")));
+
+                registry.setLoginServer(loginServer(registryName));
+                if (config.services().acr().mocked()) {
+                    registry.setProvisioningState("Succeeded");
+                } else if (isNew) {
+                    registry.setProvisioningState("Creating");
+                }
+                putRegistry(storageKey, registry);
             }
 
-            registry.setLocation(location);
-            registry.setSkuName(sku.path("name").asText("Basic"));
-            registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
-            registry.setTags(parseStringMap(body.path("tags")));
-
-            registry.setLoginServer(loginServer(registryName));
-            if (config.services().acr().mocked()) {
-                registry.setProvisioningState("Succeeded");
-            } else if (isNew) {
+            if (!config.services().acr().mocked() && isNew) {
                 try {
                     registryManager.ensureStarted();
                     registry.setProvisioningState(registryManager.isReady() ? "Succeeded" : "Creating");
@@ -364,9 +377,8 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                     LOG.errorf(e, "Failed to start shared ACR registry for %s", registryName);
                     registry.setProvisioningState("Failed");
                 }
+                putRegistry(storageKey, registry);
             }
-
-            putRegistry(storageKey, registry);
 
             int status = isNew ? 201 : 200;
             return Response.status(status)

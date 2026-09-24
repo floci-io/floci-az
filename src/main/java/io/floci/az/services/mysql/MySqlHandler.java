@@ -166,6 +166,15 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
             String rg  = extractResourceGroup(request.resourcePath());
 
             boolean isNew = !state.serverExists(serverName);
+            if (!isNew) {
+                // The guard in handle() runs unlocked, so a create that raced another scope's claim
+                // arrives here as an update. An existing server's owner never changes, so checking
+                // it now is enough to refuse the update.
+                Optional<Response> foreign = foreignServer(request, "flexibleServers/" + serverName);
+                if (foreign.isPresent()) {
+                    return foreign.get();
+                }
+            }
 
             if (isPatch && isNew) {
                 return notFound("Server '" + serverName + "' not found");
@@ -189,7 +198,10 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                state.putServer(entry);
+                if (!state.claimServer(entry)) {
+                    // A concurrent create took the name between the existence check and this write.
+                    return foreignServer(request, "flexibleServers/" + serverName).orElseGet(() -> getServer(serverName));
+                }
 
                 if (config.services().mysql().mocked()) {
                     return Response.status(201).entity(serverResponse(entry)).build();
@@ -642,7 +654,8 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
             return Optional.empty();
         }
         String serverName = segment(tail, 1);
-        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+");
+        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+")
+            && scope.get().resourceGroup() != null;
         return state.getServer(serverName)
             .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
             .map(s -> createsServer
