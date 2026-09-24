@@ -14,6 +14,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -324,6 +325,11 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode sku = body.path("sku");
             JsonNode props = body.path("properties");
 
+            if (ownedElsewhere(sub, rg, registryName)) {
+                return ArmErrors.error(409, "AlreadyInUse", "The registry DNS name " + registryName
+                        + ".azurecr.io is already in use. You can check if the name is already claimed using following API: "
+                        + "https://docs.microsoft.com/en-us/rest/api/containerregistry/registries/checknameavailability");
+            }
             String storageKey = storageKey(sub, rg, registryName);
             Optional<Registry> existing = getRegistry(storageKey);
             boolean isNew = existing.isEmpty();
@@ -541,6 +547,13 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
      */
     private boolean registryExists(String registryName) {
         return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName()));
+    }
+
+    /** Whether a registry of this name exists under a subscription or resource group other than this one. */
+    private boolean ownedElsewhere(String sub, String rg, String registryName) {
+        ArmScope scope = new ArmScope(sub, rg);
+        return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName())
+                && !scope.owns(r.getSubscriptionId(), r.getResourceGroup()));
     }
 
     private List<Registry> scanAll() {

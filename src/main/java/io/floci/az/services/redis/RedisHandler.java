@@ -13,6 +13,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -188,6 +189,11 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             JsonNode props = body.path("properties");
             JsonNode sku = props.path("sku");
 
+            if (ownedElsewhere(sub, rg, cacheName)) {
+                return ArmErrors.error(409, "NameNotAvailable", "An error occured when trying to reserve the DNS name "
+                        + "for the cache instance. This may be a temporary issue if a cache instance of this name was "
+                        + "recently deleted. Please choose a different name or try again later.");
+            }
             String storageKey = storageKey(sub, rg, cacheName);
             Optional<RedisCache> existing = getCache(storageKey);
             boolean isNew = existing.isEmpty();
@@ -385,6 +391,13 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize Redis cache: " + key, e);
         }
+    }
+
+    /** Whether a cache of this name exists under a subscription or resource group other than this one. */
+    private boolean ownedElsewhere(String sub, String rg, String cacheName) {
+        ArmScope scope = new ArmScope(sub, rg);
+        return scanAll().stream().anyMatch(c -> cacheName.equalsIgnoreCase(c.getName())
+                && !scope.owns(c.getSubscriptionId(), c.getResourceGroup()));
     }
 
     private List<RedisCache> scanAll() {

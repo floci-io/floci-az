@@ -7,7 +7,9 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -78,6 +80,11 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
 
         if (tail.endsWith("checkNameAvailability") && "POST".equals(method)) {
             return handleCheckNameAvailability(request);
+        }
+
+        Optional<Response> foreign = foreignServer(request, tail);
+        if (foreign.isPresent()) {
+            return foreign.get();
         }
 
         if (tail.matches("flexibleServers/[^/]+/connect")) {
@@ -619,6 +626,29 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     // ── Standard error responses ──────────────────────────────────────────────
+
+
+    /**
+     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
+     * subscription or resource group is not the owner's must never reach that entry: creating the
+     * server there is a name conflict, and any other call is a 404.
+     */
+    private Optional<Response> foreignServer(AzureRequest request, String tail) {
+        if (!tail.matches("flexibleServers/[^/]+(/.*)?")) {
+            return Optional.empty();
+        }
+        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        if (scope.isEmpty()) {
+            return Optional.empty();
+        }
+        String serverName = segment(tail, 1);
+        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+");
+        return state.getServer(serverName)
+            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
+            .map(s -> createsServer
+                ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
+                : notFound("Server '" + serverName + "' not found"));
+    }
 
     private static Response notFound(String message) {
         return Response.status(404).entity(Map.of(
