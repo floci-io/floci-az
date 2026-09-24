@@ -5,6 +5,7 @@ import io.smallrye.config.WithDefault;
 import io.smallrye.config.WithName;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
 
 @ConfigMapping(prefix = "floci-az")
 public interface EmulatorConfig {
@@ -548,7 +549,7 @@ public interface EmulatorConfig {
         String mode();
 
         /** Base64 account keys used to validate shared-key Blob service SAS signatures. */
-        java.util.Map<String, String> storageAccountKeys();
+        Map<String, String> storageAccountKeys();
     }
 
     interface AppConfigServiceConfig {

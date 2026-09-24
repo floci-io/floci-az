@@ -25,10 +25,30 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static io.floci.az.services.appconfig.AppConfigModels.*;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_JSON;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_KEYSET;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_KV;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_KVSET;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_LABELSET;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_PROBLEM;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_SNAPSHOT;
+import static io.floci.az.services.appconfig.AppConfigModels.MT_SNAPSHOTSET;
+import static io.floci.az.services.appconfig.AppConfigModels.OperationDetails;
+import static io.floci.az.services.appconfig.AppConfigModels.Page;
+import static io.floci.az.services.appconfig.AppConfigModels.STATUS_ARCHIVED;
+import static io.floci.az.services.appconfig.AppConfigModels.STATUS_PROVISIONING;
+import static io.floci.az.services.appconfig.AppConfigModels.STATUS_READY;
 
 @ApplicationScoped
 public class AppConfigHandler implements AzureServiceHandler, Resettable {

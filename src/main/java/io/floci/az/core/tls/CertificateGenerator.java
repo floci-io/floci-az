@@ -70,7 +70,7 @@ public class CertificateGenerator {
             X500Name caName = new X500Name("CN=floci-az-ca");
             BigInteger caSerial = new BigInteger(128, SECURE_RANDOM);
 
-            var caBuilder = new JcaX509v3CertificateBuilder(
+            JcaX509v3CertificateBuilder caBuilder = new JcaX509v3CertificateBuilder(
                     caName, caSerial,
                     Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
                     caName, caKeyPair.getPublic());
@@ -90,7 +90,7 @@ public class CertificateGenerator {
             X500Name leafName = new X500Name("CN=floci-az");
             BigInteger leafSerial = new BigInteger(128, SECURE_RANDOM);
 
-            var leafBuilder = new JcaX509v3CertificateBuilder(
+            JcaX509v3CertificateBuilder leafBuilder = new JcaX509v3CertificateBuilder(
                     caName, leafSerial,
                     Date.from(now), Date.from(now.plus(365, ChronoUnit.DAYS)),
                     leafName, leafKeyPair.getPublic());
@@ -136,7 +136,7 @@ public class CertificateGenerator {
             X500Name name = new X500Name("CN=" + commonName);
             BigInteger serial = new BigInteger(128, SECURE_RANDOM);
 
-            var certBuilder = new JcaX509v3CertificateBuilder(
+            JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                     name, serial,
                     Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
                     name, keyPair.getPublic());

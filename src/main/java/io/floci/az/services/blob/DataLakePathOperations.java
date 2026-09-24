@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Optional;
 
 public class DataLakePathOperations {
 
@@ -52,7 +53,7 @@ public class DataLakePathOperations {
         // an empty result.
         if (normalizedDirectory != null) {
             String exactKey = account + "/" + filesystem + "/" + normalizedDirectory;
-            var exactPath = store.get(exactKey);
+            Optional<StoredObject> exactPath = store.get(exactKey);
             if (exactPath.isPresent()
                     && !"directory".equals(exactPath.get().metadata().get(RESOURCE_TYPE))) {
                 return List.of(fileEntry(normalizedDirectory, exactPath.get()));
@@ -100,7 +101,7 @@ public class DataLakePathOperations {
         }
 
         String exactKey = account + "/" + filesystem + "/" + normalizedPath;
-        var exact = store.get(exactKey);
+        Optional<StoredObject> exact = store.get(exactKey);
         String descendantPrefix = exactKey + "/";
         List<String> descendants = store.keys().stream()
                 .filter(key -> key.startsWith(descendantPrefix) && !isInternalKey(key))
@@ -145,7 +146,7 @@ public class DataLakePathOperations {
 
         String sourceKey = account + "/" + sourceFilesystem + "/" + normalizedSource;
         String destinationKey = account + "/" + destinationFilesystem + "/" + normalizedDestination;
-        var exact = store.get(sourceKey);
+        Optional<StoredObject> exact = store.get(sourceKey);
         String descendantPrefix = sourceKey + "/";
         List<String> descendants = store.keys().stream()
                 .filter(key -> key.startsWith(descendantPrefix) && !isInternalKey(key))
@@ -203,7 +204,7 @@ public class DataLakePathOperations {
             return true;
         }
         String exactKey = account + "/" + filesystem + "/" + normalizedPath;
-        var exactPath = store.get(exactKey);
+        Optional<StoredObject> exactPath = store.get(exactKey);
         if (exactPath.isPresent()) {
             return true;
         }

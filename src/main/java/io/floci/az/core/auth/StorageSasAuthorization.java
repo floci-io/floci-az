@@ -18,6 +18,10 @@ import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @ApplicationScoped
 public class StorageSasAuthorization {
@@ -25,12 +29,12 @@ public class StorageSasAuthorization {
     private static final String HMAC_SHA256 = "HmacSHA256";
 
     private final UserDelegationKeyMaterial keyMaterial;
-    private final java.util.Map<String, String> storageAccountKeys;
+    private final Map<String, String> storageAccountKeys;
 
     @Inject
     public StorageSasAuthorization(UserDelegationKeyMaterial keyMaterial, EmulatorConfig config) {
         this.keyMaterial = keyMaterial;
-        this.storageAccountKeys = java.util.Map.copyOf(config.auth().storageAccountKeys());
+        this.storageAccountKeys = Map.copyOf(config.auth().storageAccountKeys());
         for (String key : storageAccountKeys.values()) {
             if (Base64.getDecoder().decode(key).length == 0) {
                 throw new IllegalArgumentException("Storage account SAS signing keys must not be empty");
@@ -145,7 +149,7 @@ public class StorageSasAuthorization {
 
     // Service SAS has its own layout; delegation-key and agent fields are not included.
     private static String serviceStringToSign(StorageSasToken token, String canonicalName) {
-        var fields = new java.util.ArrayList<>(Arrays.asList(
+        List<String> fields = new ArrayList<>(Arrays.asList(
                 value(token.permissions()), value(token.startTime()), value(token.expiryTime()),
                 canonicalName, value(token.identifier()), value(token.ipRange()), value(token.protocol()),
                 value(token.version()), value(token.resource()), value(token.snapshotTime())));
@@ -179,7 +183,7 @@ public class StorageSasAuthorization {
         if (layout == null) {
             throw new IllegalArgumentException("Unsupported SAS version");
         }
-        var fields = new java.util.ArrayList<>(Arrays.asList(
+        List<String> fields = new ArrayList<>(Arrays.asList(
                 value(token.permissions()),
                 value(token.startTime()),
                 value(token.expiryTime()),
@@ -230,9 +234,9 @@ public class StorageSasAuthorization {
         if (names == null) {
             return "";
         }
-        var result = new StringBuilder();
+        StringBuilder result = new StringBuilder();
         for (String name : names.split(",", -1)) {
-            String header = name.trim().toLowerCase(java.util.Locale.ROOT);
+            String header = name.trim().toLowerCase(Locale.ROOT);
             if (header.isEmpty()) {
                 return "__invalid__";
             }
@@ -249,10 +253,10 @@ public class StorageSasAuthorization {
         if (names == null) {
             return "";
         }
-        var result = new StringBuilder();
+        StringBuilder result = new StringBuilder();
         for (String name : names.split(",", -1)) {
             String parameter = name.trim();
-            var values = request.queryParamsMulti().get(parameter);
+            List<String> values = request.queryParamsMulti().get(parameter);
             if (parameter.isEmpty() || values == null || values.isEmpty()) {
                 return "__missing__";
             }

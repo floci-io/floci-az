@@ -2,6 +2,7 @@ package io.floci.az.core;
 
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.ArrayList;
 
 /**
  * The routes a service handler claims. Handlers describe themselves; {@link AzureRoutingFilter}
@@ -61,9 +62,9 @@ public record ServiceRoutes(
     }
 
     public static final class Builder {
-        private final List<String> hostSuffixes = new java.util.ArrayList<>();
-        private final List<SuffixRoute> accountSuffixes = new java.util.ArrayList<>();
-        private final List<ProviderRoute> providers = new java.util.ArrayList<>();
+        private final List<String> hostSuffixes = new ArrayList<>();
+        private final List<SuffixRoute> accountSuffixes = new ArrayList<>();
+        private final List<ProviderRoute> providers = new ArrayList<>();
 
         public Builder host(String suffix) {
             hostSuffixes.add(suffix);

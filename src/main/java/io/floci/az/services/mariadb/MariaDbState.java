@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 /**
  * State store for the Azure Database for MariaDB emulator.
@@ -185,7 +186,7 @@ public class MariaDbState {
                 key(entry.serverName()), data,
                 Map.of("serverName", entry.serverName()),
                 entry.createdAt(),
-                java.util.UUID.randomUUID().toString()));
+                UUID.randomUUID().toString()));
         } catch (Exception e) {
             LOG.warnf(e, "Failed to persist MariaDB server entry: %s", entry.serverName());
         }

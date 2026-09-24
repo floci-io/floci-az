@@ -404,7 +404,10 @@ When adding a sidecar-based service, additionally:
 ### General practices
 
 - Make fields `final` wherever possible; avoid static mutable state
-- Never leave a `catch` block empty. If an exception is intentionally tolerated, log it with enough context to diagnose later
+- Never leave a `catch` block empty. If an exception is intentionally tolerated, log it with enough
+  context to diagnose later. When swallowing really is correct and logging would be noise, name the
+  variable `ignored` or `expected` and say in a comment why it is safe. A bare `catch (Exception e) {}`
+  is never acceptable
 - Validate inputs at the protocol boundary and fail fast with the correct Azure error shape
 - Keep methods small and focused; extract helpers instead of growing switch/if ladders
 - Prefer self-explanatory code over comments; only add a comment when the WHY is non-obvious
@@ -412,6 +415,58 @@ When adding a sidecar-based service, additionally:
 - Follow existing project patterns before introducing new abstractions
 - Use modern Java features when they improve clarity
 - Use Java records for simple data carriers; model Azure resources as typed domain objects when practical
+
+### Types and names
+
+- **Do not use `var`. Write the explicit type.** floci-az reproduces Azure wire contracts, so the
+  concrete type at a call site is usually the thing under review: whether a value is a `LinkedHashMap`
+  or a `Map`, an Azure model type or a JDK one, is exactly what a reviewer needs to see. This covers
+  local declarations, enhanced-for, classic for-init, and try-with-resources. The one exception is a
+  record deconstruction pattern (`case Node(var left, var right) ->`), where naming the component types
+  is pure noise
+- **Import the classes you use. Do not write fully-qualified names inline.** `new ArrayList<>()`, never
+  `new java.util.ArrayList<>()`. The only reason to qualify inline is a genuine name collision inside
+  one file: import the type used more often, qualify the other, and leave a short comment naming the
+  clash
+
+### Imports
+
+- No wildcard imports in `src/main`, including static ones. Static wildcards stay fine in tests, where
+  `Assertions.*`, `Matchers.*` and `RestAssured.*` are the established idiom
+- Import order: non-`java`/`javax` imports alphabetically, then `java.*` and `javax.*` last. This is the
+  IntelliJ default layout and what most of the tree already uses
+
+### Conventions the codebase already follows
+
+Written down so they stay true. New code should match them without thinking. A handful of files predate
+them; a violation you find in the tree is a straggler, not a precedent.
+
+- 4-space indentation, K&R braces. Never indent with a tab
+- JBoss Logging, in a field named `LOG`, using the parameterised `...v()` or `...f()` form. No string
+  concatenation in log calls. `src/artemis-*/` is the exception and is covered under Logging below
+- No `printStackTrace`, anywhere. No `System.out` or `System.err` in `src/main`
+- `java.time` for everything floci-az owns. `Calendar` and `SimpleDateFormat` appear nowhere and must
+  not be introduced. A `Date` survives only at a third-party boundary that forces one, currently the
+  BouncyCastle certificate builders and Proton's AMQP timestamps. Convert at that boundary with
+  `Date.from(instant)` and keep `java.time` on floci-az's side of it
+- Constructor injection in `src/main`, per the section above. Field injection is fine in tests
+- `Optional` as a return type, and never as a field: there are none, keep it that way
+- Switch expressions over switch statements. Pattern-matching `instanceof` over cast-after-check
+- Azure-shaped error envelopes for domain errors: `AzureErrorResponse` for the Storage XML shape, and
+  each service's own helper for its JSON envelope (`kvError`, `AcrErrors`, Cosmos `errorResponse`).
+  There is no single exception type; the envelope belongs to the service's wire contract
+- `final` on service fields, but not on locals or parameters
+
+### Tests
+
+These describe `src/test`. `compatibility-tests` is a separate module; follow the module you are in.
+
+- Name test methods as a camelCase sentence (`patchingAnImmutableSystemPropertyIsRejected`). `testX`
+  names appear in a few older tests and are not the pattern to copy
+- JUnit 5 assertions with Hamcrest and RestAssured matchers. AssertJ is not used in `src/test`; do not
+  introduce it
+- `@DisplayName` is used in about 40% of test classes, mostly where the sentence carries more than a
+  method name can. Both styles are established: match the file you are in
 
 ---
 

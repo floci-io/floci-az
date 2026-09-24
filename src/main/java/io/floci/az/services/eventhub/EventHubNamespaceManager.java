@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.io.InputStream;
 
 /**
  * Manages one Artemis container per Event Hubs namespace.
@@ -266,7 +267,7 @@ public class EventHubNamespaceManager {
     }
 
     private static byte[] loadResource(String resource) {
-        try (java.io.InputStream stream =
+        try (InputStream stream =
                 EventHubNamespaceManager.class.getResourceAsStream(resource)) {
             if (stream == null) {
                 throw new IllegalStateException("Embedded Artemis resource not found: " + resource);

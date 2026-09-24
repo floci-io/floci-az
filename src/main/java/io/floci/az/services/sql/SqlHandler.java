@@ -26,6 +26,7 @@ import java.util.Optional;
 
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HTTP handler for Azure SQL Database management-plane requests.
@@ -333,10 +334,10 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             Map<String, String> tags, String provisioningState) {
         Map<String, SqlState.SqlDatabaseEntry> databases = current
             .map(SqlState.SqlServerEntry::databases)
-            .orElseGet(java.util.concurrent.ConcurrentHashMap::new);
+            .orElseGet(ConcurrentHashMap::new);
         Map<String, SqlState.SqlFirewallRule> firewallRules = current
             .map(SqlState.SqlServerEntry::firewallRules)
-            .orElseGet(java.util.concurrent.ConcurrentHashMap::new);
+            .orElseGet(ConcurrentHashMap::new);
         Instant createdAt = current.map(SqlState.SqlServerEntry::createdAt).orElseGet(Instant::now);
         String containerId = current.map(SqlState.SqlServerEntry::containerId).orElse(null);
         int hostPort = current.map(SqlState.SqlServerEntry::hostPort).orElse(0);

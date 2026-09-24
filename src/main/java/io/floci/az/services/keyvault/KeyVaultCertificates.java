@@ -8,9 +8,16 @@ import io.floci.az.core.storage.StorageBackend;
 import jakarta.ws.rs.core.Response;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x509.*;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.KeyPurposeId;
+import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.jboss.logging.Logger;
 
@@ -23,7 +30,20 @@ import java.security.PublicKey;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.Date;
+import java.util.Optional;
+import java.nio.charset.StandardCharsets;
+import java.security.cert.Certificate;
+import java.security.interfaces.RSAPublicKey;
 
 /** Self-signed certificate lifecycle, with addressable matching keys and secrets. */
 final class KeyVaultCertificates {
@@ -105,7 +125,7 @@ final class KeyVaultCertificates {
         }
         Map<String, Object> policy = map(body.get("policy"));
         if (policy.isEmpty()) {
-            var previous = store.get(base(account, "certificates", name));
+            Optional<StoredObject> previous = store.get(base(account, "certificates", name));
             if (previous.isEmpty()) {
                 throw new IllegalArgumentException("policy is required for the first certificate version");
             }
@@ -137,14 +157,14 @@ final class KeyVaultCertificates {
         boolean exportable = bool(keyPolicy, "exportable", true);
         boolean reuse = bool(keyPolicy, "reuse_key", false);
         Map<String, Object> jwk;
-        var previousKey = store.get(base(account, "keys", name));
+        Optional<StoredObject> previousKey = store.get(base(account, "keys", name));
         if (reuse && previousKey.isPresent()) {
             jwk = read(previousKey.get());
             if (!type.equals(jwk.get("kty"))) {
                 throw new IllegalArgumentException("Cannot reuse a key of a different type");
             }
             if ("RSA".equals(type) && keyPolicy.containsKey("key_size")
-                    && ((java.security.interfaces.RSAPublicKey) KeyVaultCrypto.reconstructRsaPublic(jwk)).getModulus().bitLength()
+                    && ((RSAPublicKey) KeyVaultCrypto.reconstructRsaPublic(jwk)).getModulus().bitLength()
                     != integer(keyPolicy.get("key_size"), "key_size")) {
                 throw new IllegalArgumentException("Cannot reuse an RSA key with a different size");
             }
@@ -160,12 +180,12 @@ final class KeyVaultCertificates {
         Instant now = Instant.now();
         Instant expires = now.atZone(ZoneOffset.UTC).plusMonths(months).toInstant();
         X500Name distinguishedName = new X500Name(subject);
-        var builder = new JcaX509v3CertificateBuilder(distinguishedName,
+        JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(distinguishedName,
                 new BigInteger(UUID.randomUUID().toString().replace("-", ""), 16),
                 Date.from(now.minusSeconds(60)), Date.from(expires), distinguishedName, publicKey);
         builder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
         addExtensions(builder, x509);
-        var signer = new JcaContentSignerBuilder("RSA".equals(type) ? "SHA256WithRSA" : "SHA256withECDSA").build(privateKey);
+        ContentSigner signer = new JcaContentSignerBuilder("RSA".equals(type) ? "SHA256WithRSA" : "SHA256withECDSA").build(privateKey);
         X509Certificate certificate = new JcaX509CertificateConverter().getCertificate(builder.build(signer));
         certificate.verify(publicKey);
         byte[] der = certificate.getEncoded();
@@ -174,23 +194,23 @@ final class KeyVaultCertificates {
             KeyStore pfx = KeyStore.getInstance("PKCS12");
             pfx.load(null, new char[0]);
             if (exportable) {
-                pfx.setKeyEntry(name, privateKey, new char[0], new java.security.cert.Certificate[]{certificate});
+                pfx.setKeyEntry(name, privateKey, new char[0], new Certificate[]{certificate});
             } else {
                 pfx.setCertificateEntry(name, certificate);
             }
-            var output = new ByteArrayOutputStream();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
             pfx.store(output, new char[0]);
             secretBytes = output.toByteArray();
         } else {
             String pem = pem("CERTIFICATE", der) + (exportable ? pem("PRIVATE KEY", privateKey.getEncoded()) : "");
-            secretBytes = pem.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            secretBytes = pem.getBytes(StandardCharsets.UTF_8);
         }
         String version = UUID.randomUUID().toString().replace("-", "");
         Map<String, Object> attributes = new LinkedHashMap<>(Map.of("enabled", bool(map(body.get("attributes")), "enabled", true),
                 "created", now.getEpochSecond(), "updated", now.getEpochSecond(), "nbf", certificate.getNotBefore().toInstant().getEpochSecond(),
                 "exp", expires.getEpochSecond(), "recoveryLevel", "Purgeable", "recoverableDays", 7));
         Map<String, Object> tags = map(body.get("tags"));
-        var bundle = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> bundle = new LinkedHashMap<String, Object>();
         bundle.put("id", id(account, "certificates", name, version));
         bundle.put("kid", id(account, "keys", name, version));
         bundle.put("sid", id(account, "secrets", name, version));
@@ -205,7 +225,7 @@ final class KeyVaultCertificates {
         metadata.put("latestVersion", version);
         jwk.put("tags", tags);
         String secret = "application/x-pkcs12".equals(contentType) ? Base64.getEncoder().encodeToString(secretBytes)
-                : new String(secretBytes, java.nio.charset.StandardCharsets.UTF_8);
+                : new String(secretBytes, StandardCharsets.UTF_8);
         Map<String, StoredObject> puts = new LinkedHashMap<>();
         addVersion(puts, account, "keys", name, version, jwk, metadata);
         addVersion(puts, account, "secrets", name, version, Map.of("value", secret, "contentType", contentType, "tags", tags), metadata);
@@ -238,7 +258,7 @@ final class KeyVaultCertificates {
         }
         List<GeneralName> names = new ArrayList<>();
         Map<String, Object> sans = map(x509.get("sans"));
-        for (var field : Map.of("dns_names", GeneralName.dNSName, "emails", GeneralName.rfc822Name, "upns", GeneralName.otherName).entrySet()) {
+        for (Map.Entry<String, Integer> field : Map.of("dns_names", GeneralName.dNSName, "emails", GeneralName.rfc822Name, "upns", GeneralName.otherName).entrySet()) {
             if (field.getValue() == GeneralName.otherName && !list(sans.get(field.getKey())).isEmpty()) {
                 throw new IllegalArgumentException("UPN subject alternative names are not yet supported");
             }
@@ -283,7 +303,7 @@ final class KeyVaultCertificates {
 
     private Response deleted(String account, String name, String[] parts, String method) throws Exception {
         String root = base(account, "deletedcertificates", name);
-        var deleted = store.get(root);
+        Optional<StoredObject> deleted = store.get(root);
         if (deleted.isEmpty()) {
             return missing(name);
         }
@@ -321,7 +341,7 @@ final class KeyVaultCertificates {
     }
 
     private static Map<String, Object> item(Map<String, Object> certificate) {
-        var item = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> item = new LinkedHashMap<String, Object>();
         for (String key : List.of("id", "x5t", "attributes", "tags")) {
             item.put(key, certificate.get(key));
         }
@@ -378,7 +398,7 @@ final class KeyVaultCertificates {
         if (!(value instanceof Map<?, ?> map)) {
             throw new IllegalArgumentException("Expected a JSON object");
         }
-        var result = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> result = new LinkedHashMap<String, Object>();
         map.forEach((key, item) -> result.put(String.valueOf(key), item));
         return result;
     }

@@ -29,7 +29,7 @@ final class SignalRTokens {
         try {
             String[] parts = token.split("\\.");
             if (parts.length != 3) { throw new IllegalArgumentException("Invalid token"); }
-            var decoder = Base64.getUrlDecoder();
+            Base64.Decoder decoder = Base64.getUrlDecoder();
             Map<String, Object> header = JSON.readValue(decoder.decode(parts[0]), new TypeReference<>() {});
             if (!"HS256".equals(header.get("alg"))) { throw new IllegalArgumentException("Unsupported token algorithm"); }
             Mac mac = Mac.getInstance("HmacSHA256");

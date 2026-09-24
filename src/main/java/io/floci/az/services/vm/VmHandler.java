@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.io.InputStream;
 
 /**
  * HTTP handler for Azure Virtual Machines (Microsoft.Compute/virtualMachines) management-plane
@@ -525,7 +526,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         return MAPPER.convertValue(node, Map.class);
     }
 
-    private JsonNode readBody(java.io.InputStream stream) {
+    private JsonNode readBody(InputStream stream) {
         try {
             if (stream == null || stream.available() == 0) { return MAPPER.createObjectNode(); }
             return MAPPER.readTree(stream);

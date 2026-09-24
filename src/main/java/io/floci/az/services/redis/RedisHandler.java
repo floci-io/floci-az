@@ -36,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.io.InputStream;
 
 /**
  * HTTP handler for Azure Cache for Redis ({@code Microsoft.Cache/redis}) management-plane requests.
@@ -483,7 +484,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         return map;
     }
 
-    private JsonNode readBody(java.io.InputStream stream) {
+    private JsonNode readBody(InputStream stream) {
         try {
             if (stream == null || stream.available() == 0) { return MAPPER.createObjectNode(); }
             return MAPPER.readTree(stream);

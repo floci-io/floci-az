@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Map;
 
 /**
  * {@link StorageFactory}-backed CRUD for Entra tenants, app registrations and service principals,
@@ -206,10 +207,10 @@ public class EntraStore implements Resettable {
     private void write(String key, Object value) {
         try {
             byte[] data = mapper.writeValueAsBytes(value);
-            store.put(key, new StoredObject(key, data, java.util.Map.of(), Instant.now(),
+            store.put(key, new StoredObject(key, data, Map.of(), Instant.now(),
                     Integer.toHexString(new String(data, StandardCharsets.UTF_8).hashCode())));
         } catch (Exception e) {
-            throw new UncheckedIOException(new java.io.IOException("Failed to write entra record: " + key, e));
+            throw new UncheckedIOException(new IOException("Failed to write entra record: " + key, e));
         }
     }
 }

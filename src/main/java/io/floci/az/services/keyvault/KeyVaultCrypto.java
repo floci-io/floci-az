@@ -36,6 +36,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.security.Key;
 
 /**
  * Pure-JDK crypto engine for the Key Vault keys data plane: static helpers using only built-in
@@ -845,7 +846,7 @@ final class KeyVaultCrypto {
         }
     }
 
-    private static int rsaModulusBits(java.security.Key key) {
+    private static int rsaModulusBits(Key key) {
         return ((RSAKey) key).getModulus().bitLength();
     }
 

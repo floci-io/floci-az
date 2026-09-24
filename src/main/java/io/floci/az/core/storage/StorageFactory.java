@@ -67,7 +67,7 @@ public class StorageFactory {
             case "memory"     -> new InMemoryStorage<>();
             case "persistent" -> new PersistentStorage<>(filePath, TYPE_REF);
             case "hybrid" -> {
-                var h = new HybridStorage<>(filePath, TYPE_REF, flushIntervalMs);
+                HybridStorage<String, StoredObject> h = new HybridStorage<>(filePath, TYPE_REF, flushIntervalMs);
                 hybridBackends.add(h);
                 yield h;
             }
@@ -75,7 +75,7 @@ public class StorageFactory {
                 long compaction = config.storage().wal().compactionIntervalMs();
                 Path snapshot   = basePath.resolve(serviceName + "-snapshot.json");
                 Path wal        = basePath.resolve(serviceName + ".wal");
-                var w = new WalStorage<>(snapshot, wal, TYPE_REF, compaction);
+                WalStorage<String, StoredObject> w = new WalStorage<>(snapshot, wal, TYPE_REF, compaction);
                 walBackends.add(w);
                 yield w;
             }

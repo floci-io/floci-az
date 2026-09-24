@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ArrayList;
 
 /**
  * Data-plane publish endpoint ({@code POST /api/events}). Parses incoming events (Event Grid or
@@ -169,7 +170,7 @@ public class EventGridPublisher {
     }
 
     private static List<JsonNode> toList(JsonNode array) {
-        java.util.List<JsonNode> list = new java.util.ArrayList<>();
+        List<JsonNode> list = new ArrayList<>();
         array.forEach(list::add);
         return list;
     }

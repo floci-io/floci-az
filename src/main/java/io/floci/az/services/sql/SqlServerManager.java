@@ -113,7 +113,7 @@ public class SqlServerManager {
         // back. Guarding each individual step instead is what let this leak twice already.
         boolean claimTransferred = false;
         try {
-            var info = containerManager.createAndStart(spec);
+            ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
             String containerId = info.containerId();
 
             int hostPort = Optional.ofNullable(info.getEndpoint(SQL_CONTAINER_PORT))
