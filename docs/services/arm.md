@@ -120,7 +120,10 @@ group, Container Apps environment or email service under the same name.
 
 Resources whose name is a global DNS name behave as in Azure: the first subscription to create the name
 owns it. A create of the same name from another subscription or resource group is refused, that scope
-reads the name as `404`, and the name is free again once the owner deletes it.
+reads the name as `404`, and the name is free again once the owner deletes it. The same holds for child
+calls: a storage account's containers, queues and `listKeys` answer `404` under any scope but the
+owner's, and a path that names no resource group never reaches another subscription's resource.
+Concurrent creates of one name from several subscriptions leave exactly one owner.
 
 | Resource | Refused with |
 |---|---|
