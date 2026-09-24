@@ -170,7 +170,8 @@ public class BannerLogger {
         }
         sb.append(String.format("   %-9s [%s]  %s\n", "arm",
                 config.services().arm().enabled() ? "enabled " : "disabled",
-                "management plane (/providers, /subscriptions, resource groups)"));
+                "management plane (/providers, /subscriptions, resource groups)  subscription:"
+                        + config.services().arm().defaultSubscriptionId()));
         sb.append(String.format("   %-9s [%s]  %s\n", "network",
                 config.services().network().enabled() ? "enabled " : "disabled",
                 "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
