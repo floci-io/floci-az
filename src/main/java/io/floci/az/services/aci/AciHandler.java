@@ -7,16 +7,19 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aci.AciModels.ContainerGroup;
-import io.quarkus.runtime.StartupEvent;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -30,8 +33,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * HTTP handler for Azure Container Instances (Microsoft.ContainerInstance/containerGroups)
@@ -83,21 +90,89 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static final double DEFAULT_CPU = 1.0;
     private static final double DEFAULT_MEMORY_GB = 1.5;
     private static final String MOCKED_IP = "10.0.0.4";
+    private static final int MAX_TRACKED_OPERATIONS = 1024;
+
+    private final Map<String, String> operationOutcomes = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > MAX_TRACKED_OPERATIONS;
+        }
+    };
 
     private final EmulatorConfig config;
+    private final AciContainerGroupManager containerManager;
     private final StorageBackend<String, StoredObject> storage;
+    private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "aci-readiness-poller");
+        t.setDaemon(true);
+        return t;
+    });
 
     @Inject
-    public AciHandler(EmulatorConfig config, StorageFactory storageFactory) {
+    public AciHandler(EmulatorConfig config, AciContainerGroupManager containerManager,
+                      StorageFactory storageFactory) {
         this.config = config;
+        this.containerManager = containerManager;
         this.storage = storageFactory.create("aci");
     }
 
-    void onStart(@Observes StartupEvent event) {
-        if (config.services().aci().enabled() && !config.services().aci().mocked()) {
-            LOG.warn("ACI: container-backed mode (floci-az.services.aci.mocked=false) is not "
-                    + "available yet; container groups are emulated as mocked ARM state");
+    @PostConstruct
+    public void init() {
+        if (!mocked()) {
+            reconcilePersistedGroups();
+            startReadinessPoller();
         }
+    }
+
+    /**
+     * Reattaches persisted groups to real containers at startup. With a persistent storage mode the
+     * ARM records outlive the process, but {@link #shutdown()} removed the containers they name, so
+     * without this the records point at container ids that no longer exist: the group reports
+     * Stopped and never recovers.
+     *
+     * <p>Groups whose containers survived are adopted untouched. Groups that were provisioned and
+     * lost theirs are relaunched. A group left Failed is not resurrected. Startup failures stay
+     * non-fatal per the sidecar rules, so a Docker problem here marks the group and moves on.</p>
+     */
+    private void reconcilePersistedGroups() {
+        for (ContainerGroup group : scanAll()) {
+            if (containerManager.containersStillExist(group)) {
+                continue;
+            }
+            if (!"Succeeded".equals(group.getProvisioningState())
+                    && !"Creating".equals(group.getProvisioningState())) {
+                continue;
+            }
+            group.setContainerIds(null);
+            group.setAllocatedHostPorts(null);
+            try {
+                group.setProvisioningState("Creating");
+                containerManager.startGroup(group);
+                LOG.infov("Container group {0}: relaunched after restart", group.getName());
+            } catch (Exception e) {
+                LOG.errorf(e, "Could not relaunch container group %s after restart", group.getName());
+                group.setProvisioningState("Failed");
+            }
+            putGroup(group.storageKey(), group);
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        poller.shutdownNow();
+        if (!mocked()) {
+            scanAll().forEach(group -> {
+                try {
+                    containerManager.removeGroup(group);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing containers for group {0}: {1}", group.getName(), e.getMessage());
+                }
+            });
+        }
+    }
+
+    private boolean mocked() {
+        return config.services().aci().mocked();
     }
 
     @Override
@@ -126,9 +201,15 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         LOG.debugf("AciHandler: %s %s (tail=%s)", method, fullPath, tail);
 
-        // ── LRO operation status (returns terminal Succeeded immediately) ──────
+        // ── LRO operation status ───────────────────────────────────────────────
+        // Terminal immediately: every action this handler issues has already run by the time the
+        // Location header is returned, so its outcome is known. handleAction is the only thing that
+        // issues an operation URL here (PUT returns a body with no LRO header, DELETE is
+        // synchronous), so an id this handler does not know is one it never issued: 404, not a
+        // guess. Answering an unknown id Succeeded would turn an evicted failure back into a
+        // success, which is the whole point of recording outcomes.
         if (tail.matches("locations/[^/]+/operations/[^/?]+.*")) {
-            return Response.ok(Map.of("status", "Succeeded")).type("application/json").build();
+            return operationStatusResponse(segment(tail, 3));
         }
 
         // ── Location-scoped catalogs probed by the CLI/portal ───────────────────
@@ -167,7 +248,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         // ── Actions ────────────────────────────────────────────────────────────
         if (tail.matches("containerGroups/[^/]+/(start|stop|restart)(?:[?].*)?") && "POST".equals(method)) {
-            return handleAction(sub, rg, segment(tail, 1), segment(tail, 2));
+            return handleAction(req, sub, rg, segment(tail, 1), segment(tail, 2));
         }
 
         // ── Single group CRUD ──────────────────────────────────────────────────
@@ -203,6 +284,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             boolean isNew = existing.isEmpty();
 
             ContainerGroup group = existing.orElseGet(ContainerGroup::new);
+            Map<String, Object> previousProperties = isNew ? null : group.getProperties();
             if (isNew) {
                 group.setSubscriptionId(sub);
                 group.setResourceGroup(rg);
@@ -214,9 +296,40 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             group.setTags(tags.isEmpty() ? null : tags);
             group.setProperties(properties);
 
-            // Mocked mode (PR 1): groups are provisioned immediately. PR 2 adds the
-            // Creating → Succeeded/Failed lifecycle backed by real containers.
-            group.setProvisioningState("Succeeded");
+            if (mocked()) {
+                // Mocked mode: groups are provisioned immediately, no Docker.
+                group.setProvisioningState("Succeeded");
+            } else if (isNew) {
+                // Real mode: launch the backing containers; the readiness poller flips the group
+                // to Succeeded once every container runs. A Docker failure is an honest Failed —
+                // the azurerm provisioningState poller treats it as terminal (deliberately NOT
+                // VM's degrade-to-Succeeded).
+                group.setProvisioningState("Creating");
+                try {
+                    containerManager.startGroup(group);
+                } catch (Exception e) {
+                    LOG.errorf(e, "Failed to start containers for group %s; provisioningState=Failed", name);
+                    group.setProvisioningState("Failed");
+                }
+            } else if (Objects.equals(previousProperties, properties)) {
+                // Nothing that shapes the containers changed, so leave them running. A tags-only
+                // PUT lands here: tags and location are fields of their own, not properties.
+                group.setProvisioningState("Succeeded");
+            } else {
+                // The spec changed. Keeping the old containers would make the ARM read-back
+                // describe an image, command, environment or port set that nothing is running,
+                // and report Succeeded while doing it. azurerm never reaches this branch (its
+                // container block is ForceNew, so it destroys and recreates), but a direct PUT
+                // from an SDK, the CLI or raw REST does.
+                group.setProvisioningState("Creating");
+                try {
+                    containerManager.removeGroup(group);
+                    containerManager.startGroup(group);
+                } catch (Exception e) {
+                    LOG.errorf(e, "Failed to replace containers for group %s; provisioningState=Failed", name);
+                    group.setProvisioningState("Failed");
+                }
+            }
 
             putGroup(key, group);
             return Response.status(isNew ? 201 : 200)
@@ -263,8 +376,18 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (existing.isEmpty()) {
             return Response.status(204).build();
         }
+        // Built before the containers go away: toArmResponse reads live Docker state, so a body
+        // rendered after teardown would report the group it just deleted as Stopped/Waiting.
+        Object body = toArmResponse(existing.get(), true);
+        if (!mocked()) {
+            try {
+                containerManager.removeGroup(existing.get());
+            } catch (Exception e) {
+                LOG.warnv("Error removing containers for group {0}: {1}", name, e.getMessage());
+            }
+        }
         storage.delete(key);
-        return Response.ok(toArmResponse(existing.get(), true)).type("application/json").build();
+        return Response.ok(body).type("application/json").build();
     }
 
     private Response handleList(String sub, String rg) {
@@ -278,21 +401,36 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
-    private Response handleAction(String sub, String rg, String name, String action) {
+    private Response handleAction(AzureRequest req, String sub, String rg, String name, String action) {
         Optional<ContainerGroup> found = getGroup(storageKey(sub, rg, name));
         if (found.isEmpty()) {
             return groupNotFound(rg, name);
         }
         ContainerGroup group = found.get();
-        // Mocked mode: actions are accepted and the group stays Succeeded/Running. PR 2 maps
-        // them onto the backing containers (primary first on restart — shared netns).
+        boolean succeeded = true;
+        if (!mocked()) {
+            // Map the action onto the backing containers. The shared lifecycle helpers log and
+            // swallow Docker errors, so each call reports the state the containers actually
+            // reached; that outcome is what the operation status below must tell the client.
+            succeeded = switch (action) {
+                case "stop"    -> containerManager.stopGroupContainers(group);
+                case "restart" -> containerManager.restartGroupContainers(group);
+                default        -> containerManager.startGroupContainers(group);
+            };
+            if (!succeeded) {
+                LOG.warnv("Action {0} on container group {1} did not reach its expected state",
+                        action, group.getName());
+            }
+            // start may have recreated the containers, giving the group new ids and host ports.
+            putGroup(group.storageKey(), group);
+        }
         return switch (action) {
             // The spec's only synchronous action: bare 204, no LRO headers.
             case "stop"    -> Response.status(204).build();
             // Async per spec, final-state-via: location. start → 202, restart → 204 (the spec
             // signals restart's LRO on a 204 — unusual but per ContainerGroup.tsp).
-            case "start"   -> asyncActionResponse(202, sub, group.getLocation());
-            default        -> asyncActionResponse(204, sub, group.getLocation());
+            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation(), succeeded);
+            default        -> asyncActionResponse(req, 204, sub, group.getLocation(), succeeded);
         };
     }
 
@@ -305,9 +443,19 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             return ArmErrors.notFound("The container '" + containerName
                     + "' was not found in container group '" + name + "'.");
         }
-        // Mocked mode: no backing container, so there is no log stream. PR 2 reads real
-        // Docker logs honoring the tail and timestamps query parameters.
-        return Response.ok(Map.of("content", "")).type("application/json").build();
+        if (mocked()) {
+            // No backing container in mocked mode, so there is no log stream.
+            return Response.ok(Map.of("content", "")).type("application/json").build();
+        }
+        Integer tail = null;
+        String tailParam = req.queryParams() == null ? null : req.queryParams().get("tail");
+        if (tailParam != null && tailParam.matches("\\d+")) {
+            tail = Integer.parseInt(tailParam);
+        }
+        boolean timestamps = req.queryParams() != null
+                && "true".equalsIgnoreCase(req.queryParams().get("timestamps"));
+        String content = containerManager.logs(found.get(), containerName, tail, timestamps);
+        return Response.ok(Map.of("content", content)).type("application/json").build();
     }
 
     // ── Validation & normalization ─────────────────────────────────────────────
@@ -400,7 +548,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (props.get("ipAddress") instanceof Map<?, ?> ip) {
             @SuppressWarnings("unchecked")
             Map<String, Object> ipAddress = (Map<String, Object>) ip;
-            ipAddress.put("ip", MOCKED_IP);
+            ipAddress.put("ip", mocked() ? MOCKED_IP : containerManager.groupIp(group));
             String dnsNameLabel = asString(ipAddress.get("dnsNameLabel"));
             if (dnsNameLabel != null) {
                 ipAddress.put("fqdn", dnsNameLabel + "." + group.getLocation() + ".azurecontainer.io");
@@ -410,11 +558,12 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (includeInstanceView) {
             props.put("instanceView", Map.of(
                     "events", List.of(),
-                    "state", "Running"));
+                    "state", groupState(group)));
             for (Map<String, Object> container : listOfMaps(props.get("containers"))) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> containerProps = (Map<String, Object>) container.get("properties");
-                containerProps.put("instanceView", containerInstanceView(group));
+                containerProps.put("instanceView",
+                        containerInstanceView(group, asString(container.get("name"))));
             }
         }
 
@@ -430,8 +579,59 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return out;
     }
 
-    private Map<String, Object> containerInstanceView(ContainerGroup group) {
+    /** Group-level instanceView state: real container states in unmocked mode. */
+    private String groupState(ContainerGroup group) {
+        if (mocked()) {
+            return "Running";
+        }
+        if ("Failed".equals(group.getProvisioningState())) {
+            return "Failed";
+        }
+        if (containerManager.isRunning(group)) {
+            return "Running";
+        }
+        // Containers that have all terminated under Never or OnFailure ended the way the policy
+        // intends, so the group succeeded or failed on their exit codes rather than being "Stopped".
+        // Under Always an exit is a restart the emulator does not perform, so Stopped stays honest.
+        List<ContainerStateInfo> states = containerManager.containerStates(group);
+        boolean allTerminated = !states.isEmpty()
+                && states.stream().allMatch(info -> !info.isRunning() && info.exitCode() != null);
+        if (allTerminated && !"Always".equals(restartPolicy(group))) {
+            return states.stream().allMatch(info -> info.exitCode() == 0) ? "Succeeded" : "Failed";
+        }
+        return "Stopped";
+    }
+
+    /** The group's restartPolicy, defaulting to the Azure default of Always when unset. */
+    private String restartPolicy(ContainerGroup group) {
+        Object policy = group.getProperties() == null ? null : group.getProperties().get("restartPolicy");
+        return policy == null || String.valueOf(policy).isBlank() ? "Always" : String.valueOf(policy);
+    }
+
+    private Map<String, Object> containerInstanceView(ContainerGroup group, String containerName) {
         Map<String, Object> currentState = new LinkedHashMap<>();
+        if (!mocked()) {
+            Optional<ContainerStateInfo> state = containerManager.containerState(group, containerName);
+            if (state.isPresent()) {
+                ContainerStateInfo info = state.get();
+                currentState.put("state", mapDockerState(info));
+                if (info.startedAt() != null && !info.startedAt().isBlank()) {
+                    currentState.put("startTime", info.startedAt());
+                }
+                if (!info.isRunning() && info.exitCode() != null) {
+                    currentState.put("exitCode", info.exitCode());
+                    if (info.finishedAt() != null && !info.finishedAt().isBlank()) {
+                        currentState.put("finishTime", info.finishedAt());
+                    }
+                }
+                currentState.put("detailStatus", "");
+                return Map.of("restartCount", 0, "currentState", currentState, "events", List.of());
+            }
+            // No backing container (e.g. Failed group): report an honest Waiting state.
+            currentState.put("state", "Waiting");
+            currentState.put("detailStatus", "");
+            return Map.of("restartCount", 0, "currentState", currentState, "events", List.of());
+        }
         currentState.put("state", "Running");
         if (group.getTimeCreated() != null) {
             currentState.put("startTime",
@@ -442,6 +642,38 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 "restartCount", 0,
                 "currentState", currentState,
                 "events", List.of());
+    }
+
+    /** Docker inspect status → ACI container state vocabulary. */
+    private static String mapDockerState(ContainerStateInfo info) {
+        return switch (info.status() == null ? "" : info.status().toLowerCase()) {
+            case "running" -> "Running";
+            case "exited", "dead" -> "Terminated";
+            default -> "Waiting";  // created, paused, restarting
+        };
+    }
+
+    // ── Readiness poller (non-mocked mode) ─────────────────────────────────────
+
+    private void startReadinessPoller() {
+        poller.scheduleAtFixedRate(() -> {
+            try {
+                scanAll().forEach(group -> {
+                    // Every container has started, whether or not they are all running right now:
+                    // the deployment is what provisioningState describes. Requiring simultaneous
+                    // running left short-lived commands, and Never/OnFailure policies, in Creating
+                    // for ever while ARM clients polled a state that could never change.
+                    if ("Creating".equals(group.getProvisioningState())
+                            && containerManager.allContainersStarted(group)) {
+                        group.setProvisioningState("Succeeded");
+                        putGroup(group.storageKey(), group);
+                        LOG.infov("Container group {0} has started; provisioningState=Succeeded", group.getName());
+                    }
+                });
+            } catch (Exception e) {
+                LOG.error("Error in ACI readiness poller", e);
+            }
+        }, 2, 3, TimeUnit.SECONDS);
     }
 
     /**
@@ -482,15 +714,44 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return MAPPER.convertValue(MAPPER.valueToTree(source), Map.class);
     }
 
-    private Response asyncActionResponse(int status, String sub, String location) {
+    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location,
+                                         boolean succeeded) {
         String loc = (location == null || location.isBlank()) ? "eastus" : location;
-        String url = config.effectiveBaseUrl() + "/subscriptions/" + sub
+        String operationId = UUID.randomUUID().toString();
+        recordOperation(operationId, succeeded);
+        // Built from the caller's own scheme and host, not the configured base URL: the az CLI
+        // refuses to send credentials to a non-HTTPS URL, so an http:// operation URL handed to a
+        // client that reached us over TLS fails the poll with an authentication error.
+        String url = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
                 + "/providers/Microsoft.ContainerInstance/locations/" + loc
-                + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION;
+                + "/operations/" + operationId + "?api-version=" + API_VERSION;
         return Response.status(status)
                 .header("Location", url)
                 .header("Retry-After", "1")
                 .build();
+    }
+
+    /**
+     * Records the outcome of an action LRO, keeping the newest {@value #MAX_TRACKED_OPERATIONS}.
+     * The cap bounds memory in a long-running emulator; it is not a correctness knob, because an
+     * evicted id is answered 404 rather than assumed to have succeeded.
+     */
+    private void recordOperation(String operationId, boolean succeeded) {
+        synchronized (operationOutcomes) {
+            operationOutcomes.put(operationId, succeeded ? "Succeeded" : "Failed");
+        }
+    }
+
+    /** 200 with the recorded status, or 404 for an id this handler never issued or has evicted. */
+    private Response operationStatusResponse(String operationId) {
+        String status;
+        synchronized (operationOutcomes) {
+            status = operationOutcomes.get(operationId);
+        }
+        if (status == null) {
+            return ArmErrors.notFound("The operation '" + operationId + "' was not found.");
+        }
+        return Response.ok(Map.of("status", status)).type("application/json").build();
     }
 
     private Response groupNotFound(String rg, String name) {
@@ -634,6 +895,19 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     /** Wipes all container-group data — used by {@code POST /_admin/reset}. */
     @Override
     public void clear() {
+        // Container-backed groups own real containers, volumes and host ports. Clearing the ARM
+        // records alone would strand them: the ids and port allocations needed to reclaim them live
+        // in the records being deleted, so teardown has to happen first.
+        if (!mocked()) {
+            scanAll().forEach(group -> {
+                try {
+                    containerManager.removeGroup(group);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing containers for group {0} during reset: {1}",
+                            group.getName(), e.getMessage());
+                }
+            });
+        }
         storage.clear();
     }
 }

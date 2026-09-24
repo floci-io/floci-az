@@ -127,7 +127,9 @@ public class ContainerLifecycleManager {
         if (spec.name() != null) createCmd.withName(spec.name());
         if (spec.user() != null && !spec.user().isBlank()) createCmd.withUser(spec.user());
         if (spec.env() != null && !spec.env().isEmpty()) createCmd.withEnv(spec.env());
-        if (spec.cmd() != null && !spec.cmd().isEmpty()) createCmd.withCmd(spec.cmd());
+        // An empty list is meaningful: it clears the image's own CMD, which a caller that sets
+        // only an entrypoint needs (Docker appends the inherited CMD as arguments otherwise).
+        if (spec.cmd() != null) createCmd.withCmd(spec.cmd());
         if (spec.entrypoint() != null && !spec.entrypoint().isEmpty())
             createCmd.withEntrypoint(spec.entrypoint());
         if (spec.workingDir() != null && !spec.workingDir().isBlank())
@@ -652,6 +654,36 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /** Runtime state of a container, read via inspect. */
+    public record ContainerStateInfo(String status, Integer exitCode, String startedAt, String finishedAt) {
+        public boolean isRunning() {
+            return "running".equalsIgnoreCase(status);
+        }
+    }
+
+    /**
+     * Reads a container's runtime state (status, exit code, start/finish timestamps).
+     * Empty when the container does not exist or the inspect fails — callers can then report
+     * an honest unknown state instead of a stale one.
+     */
+    public Optional<ContainerStateInfo> containerState(String containerId) {
+        try {
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            var state = inspect.getState();
+            Long exitCode = state.getExitCodeLong();
+            return Optional.of(new ContainerStateInfo(
+                    state.getStatus(),
+                    exitCode == null ? null : exitCode.intValue(),
+                    state.getStartedAt(),
+                    state.getFinishedAt()));
+        } catch (NotFoundException e) {
+            return Optional.empty();
+        } catch (Exception e) {
+            LOG.debugv("Could not inspect container {0}: {1}", containerId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     /**
      * Resolves the endpoint (host and port) to connect to a specific container port.
      *
@@ -705,6 +737,46 @@ public class ContainerLifecycleManager {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted executing command in container " + containerId, ie);
         }
+    }
+
+    /**
+     * Fetches a container's log output (stdout + stderr, interleaved in arrival order).
+     * A missing container yields an empty string rather than an error, so callers can serve
+     * a log request racing a container removal without a 500.
+     *
+     * @param containerId the container to read logs from
+     * @param tail        maximum number of trailing lines, or null for the full log
+     * @param timestamps  when true, each line is prefixed with its RFC3339Nano timestamp
+     * @return the collected log output, empty when the container has none or does not exist
+     */
+    public String logs(String containerId, Integer tail, boolean timestamps) {
+        StringBuilder output = new StringBuilder();
+        try {
+            var logCmd = dockerClient.logContainerCmd(containerId)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTimestamps(timestamps);
+            if (tail != null && tail >= 0) {
+                logCmd.withTail(tail);
+            } else {
+                logCmd.withTailAll();
+            }
+            logCmd.exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame frame) {
+                            output.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    })
+                    .awaitCompletion(30, TimeUnit.SECONDS);
+        } catch (NotFoundException e) {
+            LOG.debugv("Container {0} not found; returning empty logs", containerId);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOG.warnv("Interrupted reading logs from container {0}", containerId);
+        } catch (Exception e) {
+            LOG.warnv("Error reading logs from container {0}: {1}", containerId, e.getMessage());
+        }
+        return output.toString();
     }
 
     /**

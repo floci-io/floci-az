@@ -203,3 +203,18 @@ setup() {
     assert_output --partial "Running"
     assert_output --partial "Succeeded"
 }
+
+@test "OpenTofu: container group created with Succeeded state" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerInstance/containerGroups/${ACI_NAME}"
+    assert_success
+    assert_output --partial "Microsoft.ContainerInstance/containerGroups"
+    assert_output --partial "Succeeded"
+}
+
+@test "OpenTofu: container group echoes canonical enum casing and resource requests" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerInstance/containerGroups/${ACI_NAME}"
+    assert_success
+    assert_output --partial "\"osType\":\"Linux\""
+    assert_output --partial "\"protocol\":\"TCP\""
+    assert_output --partial "memoryInGB"
+}

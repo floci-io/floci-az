@@ -27,7 +27,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Virtual Machines** | ARM path (`Microsoft.Compute`) | ✅ VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView; mocked (Docker backing planned) |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | ✅ Cache CRUD, listKeys/regenerateKey; real Redis containers (data plane) or mocked |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | ✅ Registry CRUD, admin credentials, checkNameAvailability; `az acr login` via the Entra token exchange on `{name}.azurecr.io`; one shared `registry:2` (Docker Registry V2 push/pull) or mocked |
-| **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | ✅ Container group lifecycle (create/update/delete/list), start/stop/restart, container logs, instanceView; mocked (Docker backing planned) |
+| **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | ✅ Container group lifecycle (create/update/delete/list), start/stop/restart, container logs, instanceView; real Docker containers (shared-netns pods) or mocked |
 | **Microsoft Entra ID** | `/{tenant}/oauth2/...` + `/.well-known/openid-configuration` | ✅ OpenID Connect provider — RS256-signed tokens, JWKS, discovery; client-credentials, ROPC, and authorization-code+PKCE grants (app registration management still planned) |
 | **Microsoft Graph** | `/v1.0/...` | ✅ Narrow slice: service principal discovery, group-membership management (`getMemberGroups`, `members/$ref`); full Graph CRUD out of scope |
 | **Event Grid** | ARM path (`Microsoft.EventGrid`) + `/{topic}-eventgrid/api/events` | ✅ Custom Topics, access keys, webhook event subscriptions with filters, publish (Event Grid + CloudEvents 1.0), async delivery with retry, subscription validation handshake |
@@ -53,5 +53,6 @@ The following services spin up Docker containers on demand and require the Docke
 | **Azure Database for MySQL** | `mysql:8.0` | MySQL wire protocol direct to container port |
 | **Azure Database for MariaDB** | `mariadb:10.11` | MySQL wire protocol direct to container port |
 | **Azure Container Apps** | User-provided images | HTTP ingress proxied through port 4577 |
+| **Azure Container Instances** | User-provided images | Shared-netns group, published ports on 7500-7599 (opt in with `mocked: false`) |
 
 > These services **must** have access to the Docker daemon (`/var/run/docker.sock` mount in Docker Compose).

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -302,6 +303,19 @@ class AciHandlerTest {
     }
 
     @Test
+    @DisplayName("The operation Location follows a forwarded proto")
+    void actionLocationFollowsAForwardedProto() {
+        // A TLS-terminating proxy in front of the emulator: the caller reached it over https, even
+        // though this hop is plaintext. An http:// operation URL is one the az CLI refuses to poll,
+        // which is the failure this Location header was changed to avoid in the first place.
+        createGroup("cg-proto");
+        given().header("X-Forwarded-Proto", "https")
+                .when().post(BASE + "/containerGroups/cg-proto/start" + API)
+                .then().statusCode(202)
+                .header("Location", startsWith("https://"));
+    }
+
+    @Test
     @DisplayName("Actions on an unknown group return 404")
     void actionOnUnknownGroup404() {
         given().when().post(BASE + "/containerGroups/nope/start" + API)
@@ -309,11 +323,26 @@ class AciHandlerTest {
     }
 
     @Test
-    @DisplayName("The operations endpoint reports terminal Succeeded")
-    void operationsEndpointSucceeded() {
-        given().when().get(SUB_BASE + "/locations/eastus/operations/" + java.util.UUID.randomUUID() + API)
+    @DisplayName("An issued operation reports its terminal status")
+    void operationsEndpointReportsAnIssuedOperation() {
+        createGroup("cg-op");
+        String location = given().when().post(BASE + "/containerGroups/cg-op/start" + API)
+                .then().statusCode(202)
+                .extract().header("Location");
+
+        given().when().get(location)
                 .then().statusCode(200)
                 .body("status", equalTo("Succeeded"));
+    }
+
+    @Test
+    @DisplayName("An operation that was never issued is 404, not an assumed success")
+    void operationsEndpointRejectsAnUnknownId() {
+        // handleAction is the only issuer of operation URLs, so an id the handler does not hold is
+        // one it never issued. Answering Succeeded here would turn an evicted failure back into a
+        // success, which is exactly what recording outcomes exists to prevent.
+        given().when().get(SUB_BASE + "/locations/eastus/operations/" + UUID.randomUUID() + API)
+                .then().statusCode(404);
     }
 
     // ── Container sub-resources ────────────────────────────────────────────────
