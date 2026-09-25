@@ -247,7 +247,18 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
                     LOG.errorf(e, "Failed to start Redis container for cache %s", cacheName);
                     cache.setProvisioningState("Failed");
                 }
-                putCache(storageKey, cache);
+                // A DELETE may have removed the claim while the container started; writing the record
+                // back would resurrect a name another subscription may have claimed since.
+                boolean stillClaimed;
+                synchronized (nameClaims) {
+                    stillClaimed = isSameCache(getCache(storageKey), cache);
+                    if (stillClaimed) {
+                        putCache(storageKey, cache);
+                    }
+                }
+                if (!stillClaimed) {
+                    stopQuietly(cache);
+                }
             }
 
             int status = isNew ? 201 : 200;
@@ -303,13 +314,11 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             return notFound("Redis cache '" + cacheName + "' not found.");
         }
         if (!config.services().redis().mocked()) {
-            try {
-                cacheManager.stopCache(found.get());
-            } catch (Exception e) {
-                LOG.warnv("Error stopping Redis container for cache {0}: {1}", cacheName, e.getMessage());
-            }
+            stopQuietly(found.get());
         }
-        storage.delete(key);
+        synchronized (nameClaims) {
+            storage.delete(key);
+        }
         return Response.status(202).build();
     }
 
@@ -401,6 +410,18 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize Redis cache: " + key, e);
+        }
+    }
+
+    private static boolean isSameCache(Optional<RedisCache> stored, RedisCache cache) {
+        return stored.isPresent() && cache.getInstanceId().equals(stored.get().getInstanceId());
+    }
+
+    private void stopQuietly(RedisCache cache) {
+        try {
+            cacheManager.stopCache(cache);
+        } catch (Exception e) {
+            LOG.warnv("Error stopping Redis container for cache {0}: {1}", cache.getName(), e.getMessage());
         }
     }
 

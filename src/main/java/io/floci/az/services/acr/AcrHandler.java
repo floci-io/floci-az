@@ -377,7 +377,14 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                     LOG.errorf(e, "Failed to start shared ACR registry for %s", registryName);
                     registry.setProvisioningState("Failed");
                 }
-                putRegistry(storageKey, registry);
+                // A DELETE may have removed the claim while the registry started; writing the record
+                // back would resurrect a name another subscription may have claimed since.
+                synchronized (nameClaims) {
+                    Optional<Registry> stored = getRegistry(storageKey);
+                    if (stored.isPresent() && registry.getInstanceId().equals(stored.get().getInstanceId())) {
+                        putRegistry(storageKey, registry);
+                    }
+                }
             }
 
             int status = isNew ? 201 : 200;
@@ -431,7 +438,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         }
         // The backing registry is shared across all registries, so deleting one only removes its
         // metadata; its repositories remain in the shared registry until garbage collection.
-        storage.delete(key);
+        synchronized (nameClaims) {
+            storage.delete(key);
+        }
         return Response.status(202).build();
     }
 

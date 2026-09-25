@@ -78,6 +78,19 @@ public class PostgresState {
         return true;
     }
 
+    /**
+     * Overwrites a server only while the stored entry is still the one {@code entry} was built from.
+     * False once that server was deleted, or deleted and claimed again, while its container started.
+     */
+    public synchronized boolean replaceServer(ServerEntry entry) {
+        ServerEntry current = servers.get(key(entry.serverName()));
+        if (current == null || !current.createdAt().equals(entry.createdAt())) {
+            return false;
+        }
+        putServer(entry);
+        return true;
+    }
+
     public synchronized Optional<ServerEntry> getServer(String serverName) {
         return Optional.ofNullable(servers.get(key(serverName)));
     }

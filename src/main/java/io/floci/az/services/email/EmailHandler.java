@@ -274,6 +274,11 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── emailServices ─────────────────────────────────────────────────
+        // Email services and their domains live in a resource group; a path that names none
+        // addresses no email service.
+        if (tail.matches("emailServices/[^/?]+.*") && ArmScope.of(path).map(ArmScope::resourceGroup).isEmpty()) {
+            return notFound("emailServices/" + extractSegment(tail, "emailServices"));
+        }
         // Domain CRUD: emailServices/{name}/domains/{domain}
         if (tail.matches("emailServices/[^/]+/domains/[^/?]+(\\?.*)?")) {
             String emailServiceName = extractSegment(tail, "emailServices");
@@ -418,9 +423,13 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
 
     // ── ARM scope helpers ────────────────────────────────────────────────────
 
-    /** Email services and their domains are resource-group scoped: the key carries the path's subscription and group. */
+    /**
+     * Email services and their domains are resource-group scoped: the key carries the path's subscription
+     * and group. Callers reject a path without a resource group before reaching here.
+     */
     private static String scopedKey(String path, String name) {
         return ArmScope.of(path)
+                .filter(scope -> scope.resourceGroup() != null)
                 .map(scope -> scope.subscription().toLowerCase() + "/" + scope.resourceGroup().toLowerCase() + "/" + name)
                 .orElse(name);
     }

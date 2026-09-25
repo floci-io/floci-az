@@ -195,34 +195,41 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                if (!state.claimServer(entry)) {
-                    // A concurrent create took the name between the existence check and this write.
-                    return foreignServer(request, "servers/" + serverName).orElseGet(() -> getServer(serverName));
-                }
+                if (state.claimServer(entry)) {
+                    if (config.services().mariaDb().mocked()) {
+                        return Response.status(201).entity(serverResponse(entry)).build();
+                    }
 
-                if (config.services().mariaDb().mocked()) {
+                    try {
+                        Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+                        synchronized (lock) {
+                            Optional<MariaDbState.ServerEntry> current = state.getServer(serverName);
+                            if (current.isPresent() && current.get().containerId() != null) {
+                                entry = current.get();
+                            } else {
+                                entry = serverManager.startServer(entry);
+                                if (!state.replaceServer(entry)) {
+                                    // Deleted while its container started: writing it back would resurrect
+                                    // a name another subscription may have claimed since.
+                                    stopQuietly(entry);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        state.removeServer(serverName);
+                        LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
+                        return Response.status(500)
+                            .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                            .build();
+                    }
                     return Response.status(201).entity(serverResponse(entry)).build();
                 }
-
-                try {
-                    Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                    synchronized (lock) {
-                        Optional<MariaDbState.ServerEntry> current = state.getServer(serverName);
-                        if (current.isPresent() && current.get().containerId() != null) {
-                            entry = current.get();
-                        } else {
-                            entry = serverManager.startServer(entry);
-                            state.putServer(entry);
-                        }
-                    }
-                } catch (Exception e) {
-                    state.removeServer(serverName);
-                    LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
-                    return Response.status(500)
-                        .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
-                        .build();
+                // A concurrent create claimed the name between the existence check and this write.
+                // Another scope's claim is a conflict; this scope's claim takes this request as an update.
+                Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
+                if (foreign.isPresent()) {
+                    return foreign.get();
                 }
-                return Response.status(201).entity(serverResponse(entry)).build();
             }
 
             MariaDbState.ServerEntry existing = state.getServer(serverName).get();
@@ -633,6 +640,14 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     // ── Standard error responses ──────────────────────────────────────────────
 
+
+    private void stopQuietly(MariaDbState.ServerEntry entry) {
+        try {
+            serverManager.stopServer(entry);
+        } catch (Exception e) {
+            LOG.warnf(e, "Error stopping MariaDB container for server %s", entry.serverName());
+        }
+    }
 
     /**
      * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose

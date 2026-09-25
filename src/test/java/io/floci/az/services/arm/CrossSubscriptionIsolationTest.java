@@ -315,6 +315,53 @@ class CrossSubscriptionIsolationTest {
         assertEquals(1, owners, raced.label() + " is readable from more than one subscription");
     }
 
+    static List<Kind> flexibleServers() {
+        return globallyNamed().stream()
+                .map(GlobalKind::kind)
+                .filter(kind -> kind.type().startsWith("Microsoft.DBfor"))
+                .toList();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("flexibleServers")
+    void concurrentCreatesInOneScopeEachApplyTheirOwnRequest(Kind kind) throws Exception {
+        Kind raced = new Kind(kind.label(), kind.type(), kind.name() + "same", kind.api(), kind.body());
+        createGroup(SUB_A, "rg-same");
+        int contenders = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(contenders);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Response>> results = new ArrayList<>();
+            for (int i = 0; i < contenders; i++) {
+                String tagged = raced.body().replaceFirst("^\\{", "{\"tags\":{\"request\":\"r" + i + "\"},");
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return given().contentType("application/json").body(tagged).put(raced.url(SUB_A, "rg-same"));
+                }));
+            }
+            start.countDown();
+            for (int i = 0; i < contenders; i++) {
+                Response response = results.get(i).get(30, TimeUnit.SECONDS);
+                int status = response.statusCode();
+                assertTrue(status >= 200 && status < 300, raced.label() + " create returned " + status);
+                assertEquals("r" + i, response.jsonPath().getString("tags.request"),
+                        raced.label() + " reported success without applying request r" + i);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void anEmailServicePathWithoutAResourceGroupIsNotFound() {
+        given().get("/subscriptions/" + SUB_B + "/providers/Microsoft.Communication/emailServices/xsub-email-norg"
+                        + "?api-version=2023-04-01")
+                .then().statusCode(404);
+        given().get("/subscriptions/" + SUB_B + "/providers/Microsoft.Communication/emailServices/xsub-email-norg"
+                        + "/domains/example.com?api-version=2023-04-01")
+                .then().statusCode(404);
+    }
+
     private static void createGroup(String sub, String rg) {
         given().contentType("application/json").body(LOC)
                 .put("/subscriptions/" + sub + "/resourceGroups/" + rg + "?api-version=2021-04-01")
