@@ -255,6 +255,7 @@ floci-az:
       enabled: true
     arm:
       enabled: true       # central management plane (/providers, /subscriptions, resource groups). Disabling turns OFF all ARM-based services.
+      default-subscription-id: "00000000-0000-0000-0000-000000000001"   # the subscription GET /subscriptions lists (what az login selects)
     network:
       enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
     event-grid:
@@ -265,7 +266,7 @@ floci-az:
       enabled: true       # Microsoft.ManagedIdentity — user-assigned identities + IMDS token endpoint (tokens signed with the entra key)
       # ARM scope that seeds the system-assigned IMDS identity; set it to your resource's
       # scope so IMDS tokens match GET {scope}/.../identities/default reads.
-      system-assigned-scope: subscriptions/00000000-0000-0000-0000-000000000001
+      system-assigned-scope: subscriptions/${floci-az.services.arm.default-subscription-id}
 
   auth:
     # dev: accept any credentials without signature validation

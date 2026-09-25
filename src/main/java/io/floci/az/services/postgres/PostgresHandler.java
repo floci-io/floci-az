@@ -10,6 +10,7 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -115,6 +116,11 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         // ARM: subscriptions/{sub}/providers/Microsoft.DBforPostgreSQL/locations/{loc}/checkNameAvailability
         if (tail.endsWith("checkNameAvailability") && "POST".equals(method)) {
             return handleCheckNameAvailability(request);
+        }
+
+        Optional<Response> foreign = foreignServer(request, tail);
+        if (foreign.isPresent()) {
+            return foreign.get();
         }
 
         // ── Convenience /connect ───────────────────────────────────────────
@@ -229,6 +235,15 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             String rg  = extractResourceGroup(request.resourcePath());
 
             boolean isNew = !state.serverExists(serverName);
+            if (!isNew) {
+                // The guard in handle() runs unlocked, so a create that raced another scope's claim
+                // arrives here as an update. An existing server's owner never changes, so checking
+                // it now is enough to refuse the update.
+                Optional<Response> foreign = foreignServer(request, "flexibleServers/" + serverName);
+                if (foreign.isPresent()) {
+                    return foreign.get();
+                }
+            }
 
             if (isPatch && isNew) {
                 return notFound("Server '" + serverName + "' not found");
@@ -252,32 +267,42 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                state.putServer(entry);
+                if (state.claimServer(entry)) {
+                    if (config.services().postgres().mocked()) {
+                        // Control-plane only: no container, data plane unavailable. Reports Ready.
+                        return accepted(request, entry.armId(), serverResponse(entry));
+                    }
 
-                if (config.services().postgres().mocked()) {
-                    // Control-plane only: no container, data plane unavailable. Reports Ready.
+                    try {
+                        Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+                        synchronized (lock) {
+                            Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
+                            if (current.isPresent() && current.get().containerId() != null) {
+                                entry = current.get();
+                            } else {
+                                entry = serverManager.startServer(entry);
+                                if (!state.replaceServer(entry)) {
+                                    // Deleted while its container started: writing it back would resurrect
+                                    // a name another subscription may have claimed since.
+                                    stopQuietly(entry);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        state.removeServer(serverName);
+                        LOG.errorf(e, "Failed to start PostgreSQL container for server=%s", serverName);
+                        return Response.status(500)
+                            .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                            .build();
+                    }
                     return accepted(request, entry.armId(), serverResponse(entry));
                 }
-
-                try {
-                    Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                    synchronized (lock) {
-                        Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
-                        if (current.isPresent() && current.get().containerId() != null) {
-                            entry = current.get();
-                        } else {
-                            entry = serverManager.startServer(entry);
-                            state.putServer(entry);
-                        }
-                    }
-                } catch (Exception e) {
-                    state.removeServer(serverName);
-                    LOG.errorf(e, "Failed to start PostgreSQL container for server=%s", serverName);
-                    return Response.status(500)
-                        .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
-                        .build();
+                // A concurrent create claimed the name between the existence check and this write.
+                // Another scope's claim is a conflict; this scope's claim takes this request as an update.
+                Optional<Response> foreign = foreignServer(request, "flexibleServers/" + serverName);
+                if (foreign.isPresent()) {
+                    return foreign.get();
                 }
-                return accepted(request, entry.armId(), serverResponse(entry));
             }
 
             // Update existing server metadata in place — do NOT restart the container.
@@ -613,6 +638,38 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     }
 
     // ── Standard error responses ──────────────────────────────────────────────
+
+
+    private void stopQuietly(PostgresState.ServerEntry entry) {
+        try {
+            serverManager.stopServer(entry);
+        } catch (Exception e) {
+            LOG.warnf(e, "Error stopping PostgreSQL container for server %s", entry.serverName());
+        }
+    }
+
+    /**
+     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
+     * subscription or resource group is not the owner's must never reach that entry: creating the
+     * server there is a name conflict, and any other call is a 404.
+     */
+    private Optional<Response> foreignServer(AzureRequest request, String tail) {
+        if (!tail.matches("flexibleServers/[^/]+(/.*)?")) {
+            return Optional.empty();
+        }
+        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        if (scope.isEmpty()) {
+            return Optional.empty();
+        }
+        String serverName = segment(tail, 1);
+        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+")
+            && scope.get().resourceGroup() != null;
+        return state.getServer(serverName)
+            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
+            .map(s -> createsServer
+                ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
+                : notFound("Server '" + serverName + "' not found"));
+    }
 
     private static Response notFound(String message) {
         return ArmErrors.notFound(message);

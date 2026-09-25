@@ -69,6 +69,28 @@ public class PostgresState {
         persist(entry);
     }
 
+    /** Stores a new server unless its name is already taken; false when a concurrent create claimed it first. */
+    public synchronized boolean claimServer(ServerEntry entry) {
+        if (servers.containsKey(key(entry.serverName()))) {
+            return false;
+        }
+        putServer(entry);
+        return true;
+    }
+
+    /**
+     * Overwrites a server only while the stored entry is still the one {@code entry} was built from.
+     * False once that server was deleted, or deleted and claimed again, while its container started.
+     */
+    public synchronized boolean replaceServer(ServerEntry entry) {
+        ServerEntry current = servers.get(key(entry.serverName()));
+        if (current == null || !current.createdAt().equals(entry.createdAt())) {
+            return false;
+        }
+        putServer(entry);
+        return true;
+    }
+
     public synchronized Optional<ServerEntry> getServer(String serverName) {
         return Optional.ofNullable(servers.get(key(serverName)));
     }

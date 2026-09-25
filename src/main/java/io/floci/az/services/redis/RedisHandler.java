@@ -16,6 +16,7 @@ import io.floci.az.services.redis.RedisModels.RedisCache;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -65,6 +66,9 @@ import java.util.concurrent.TimeUnit;
 public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(RedisHandler.class);
+
+    /** Guards the check-and-claim of a global resource name across concurrent creates. */
+    private final Object nameClaims = new Object();
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -188,49 +192,74 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             JsonNode sku = props.path("sku");
 
             String storageKey = storageKey(sub, rg, cacheName);
-            Optional<RedisCache> existing = getCache(storageKey);
-            boolean isNew = existing.isEmpty();
-
             RedisCache cache;
-            if (isNew) {
-                cache = new RedisCache();
-                cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                cache.setSubscriptionId(sub);
-                cache.setResourceGroup(rg);
-                cache.setName(cacheName);
-                cache.setCreatedAt(Instant.now());
-                cache.setPrimaryKey(generateAccessKey());
-                cache.setSecondaryKey(generateAccessKey());
-                cache.setSslPort(SSL_PORT);
-            } else {
-                cache = existing.get();
+            boolean isNew;
+            // The ownership check and the write that claims the name happen under one lock, so two
+            // subscriptions creating the same name at once cannot both pass the check. The container
+            // start stays outside it.
+            synchronized (nameClaims) {
+                if (ownedElsewhere(sub, rg, cacheName)) {
+                    return ArmErrors.error(409, "NameNotAvailable", "An error occured when trying to reserve the DNS name "
+                            + "for the cache instance. This may be a temporary issue if a cache instance of this name was "
+                            + "recently deleted. Please choose a different name or try again later.");
+                }
+                Optional<RedisCache> existing = getCache(storageKey);
+                isNew = existing.isEmpty();
+
+                if (isNew) {
+                    cache = new RedisCache();
+                    cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                    cache.setSubscriptionId(sub);
+                    cache.setResourceGroup(rg);
+                    cache.setName(cacheName);
+                    cache.setCreatedAt(Instant.now());
+                    cache.setPrimaryKey(generateAccessKey());
+                    cache.setSecondaryKey(generateAccessKey());
+                    cache.setSslPort(SSL_PORT);
+                } else {
+                    cache = existing.get();
+                }
+
+                cache.setLocation(location);
+                cache.setSkuName(sku.path("name").asText("Basic"));
+                cache.setSkuFamily(sku.path("family").asText("C"));
+                cache.setSkuCapacity(sku.path("capacity").asInt(0));
+                cache.setRedisVersion("7.0");
+                cache.setEnableNonSslPort(props.path("enableNonSslPort").asBoolean(true));
+                cache.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
+                cache.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
+                cache.setTags(parseStringMap(body.path("tags")));
+
+                if (config.services().redis().mocked()) {
+                    cache.setProvisioningState("Succeeded");
+                    cache.setHostName("localhost");
+                    cache.setPort(6379);
+                } else if (isNew) {
+                    cache.setProvisioningState("Creating");
+                }
+                putCache(storageKey, cache);
             }
 
-            cache.setLocation(location);
-            cache.setSkuName(sku.path("name").asText("Basic"));
-            cache.setSkuFamily(sku.path("family").asText("C"));
-            cache.setSkuCapacity(sku.path("capacity").asInt(0));
-            cache.setRedisVersion("7.0");
-            cache.setEnableNonSslPort(props.path("enableNonSslPort").asBoolean(true));
-            cache.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
-            cache.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
-            cache.setTags(parseStringMap(body.path("tags")));
-
-            if (config.services().redis().mocked()) {
-                cache.setProvisioningState("Succeeded");
-                cache.setHostName("localhost");
-                cache.setPort(6379);
-            } else if (isNew) {
-                cache.setProvisioningState("Creating");
+            if (!config.services().redis().mocked() && isNew) {
                 try {
                     cacheManager.startCache(cache);
                 } catch (Exception e) {
                     LOG.errorf(e, "Failed to start Redis container for cache %s", cacheName);
                     cache.setProvisioningState("Failed");
                 }
+                // A DELETE may have removed the claim while the container started; writing the record
+                // back would resurrect a name another subscription may have claimed since.
+                boolean stillClaimed;
+                synchronized (nameClaims) {
+                    stillClaimed = isSameCache(getCache(storageKey), cache);
+                    if (stillClaimed) {
+                        putCache(storageKey, cache);
+                    }
+                }
+                if (!stillClaimed) {
+                    stopQuietly(cache);
+                }
             }
-
-            putCache(storageKey, cache);
 
             int status = isNew ? 201 : 200;
             return Response.status(status)
@@ -285,13 +314,11 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             return notFound("Redis cache '" + cacheName + "' not found.");
         }
         if (!config.services().redis().mocked()) {
-            try {
-                cacheManager.stopCache(found.get());
-            } catch (Exception e) {
-                LOG.warnv("Error stopping Redis container for cache {0}: {1}", cacheName, e.getMessage());
-            }
+            stopQuietly(found.get());
         }
-        storage.delete(key);
+        synchronized (nameClaims) {
+            storage.delete(key);
+        }
         return Response.status(202).build();
     }
 
@@ -384,6 +411,25 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize Redis cache: " + key, e);
         }
+    }
+
+    private static boolean isSameCache(Optional<RedisCache> stored, RedisCache cache) {
+        return stored.isPresent() && cache.getInstanceId().equals(stored.get().getInstanceId());
+    }
+
+    private void stopQuietly(RedisCache cache) {
+        try {
+            cacheManager.stopCache(cache);
+        } catch (Exception e) {
+            LOG.warnv("Error stopping Redis container for cache {0}: {1}", cache.getName(), e.getMessage());
+        }
+    }
+
+    /** Whether a cache of this name exists under a subscription or resource group other than this one. */
+    private boolean ownedElsewhere(String sub, String rg, String cacheName) {
+        ArmScope scope = new ArmScope(sub, rg);
+        return scanAll().stream().anyMatch(c -> cacheName.equalsIgnoreCase(c.getName())
+                && !scope.owns(c.getSubscriptionId(), c.getResourceGroup()));
     }
 
     private List<RedisCache> scanAll() {

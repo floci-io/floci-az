@@ -189,6 +189,14 @@ public interface EmulatorConfig {
     interface ArmConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * The subscription {@code GET /subscriptions} lists, and so the one {@code az login} selects.
+         * {@code GET /subscriptions/{sub}} still answers for any id, so clients configured with their
+         * own subscription keep working.
+         */
+        @WithDefault("00000000-0000-0000-0000-000000000001")
+        String defaultSubscriptionId();
     }
 
     /** Microsoft.Network — virtual networks, subnets, NICs, public IPs, NSGs, and DNS zones. */

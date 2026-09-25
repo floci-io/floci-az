@@ -7,6 +7,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmScope;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -164,7 +165,14 @@ public class ApiManagementService {
                 .toList();
     }
 
-    private Response createOrUpdateService(AzureRequest request, String sub, String rg, String serviceName) {
+    private synchronized Response createOrUpdateService(AzureRequest request, String sub, String rg, String serviceName) {
+        // Service names are global ({name}.azure-api.net): a second scope cannot claim one already in use.
+        ArmScope scope = new ArmScope(sub, rg);
+        boolean ownedElsewhere = services.values().stream().anyMatch(s -> serviceName.equalsIgnoreCase((String) s.get("name"))
+                && !scope.owns((String) s.get("_sub"), (String) s.get("_rg")));
+        if (ownedElsewhere) {
+            return ArmErrors.error(409, "ServiceAlreadyExists", "Api service already exists: " + serviceName);
+        }
         Map<String, Object> body = parseBody(request);
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
         properties.put("provisioningState", "Succeeded");

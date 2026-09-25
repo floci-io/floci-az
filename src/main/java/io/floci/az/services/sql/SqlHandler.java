@@ -10,6 +10,7 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -98,6 +99,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         // ── checkNameAvailability ──────────────────────────────────────────
         if ("checkNameAvailability".equalsIgnoreCase(tail) && "POST".equals(method)) {
             return handleCheckNameAvailability(request);
+        }
+
+        Optional<Response> foreign = foreignServer(request, tail);
+        if (foreign.isPresent()) {
+            return foreign.get();
         }
 
         // Azure SQL server create long-running operation polling.
@@ -218,6 +224,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
+            // Re-checked here, under this method's lock: the guard in handle() runs unlocked, so two
+            // concurrent creates of one name from different scopes can both pass it.
+            Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
+            if (foreign.isPresent()) {
+                return foreign.get();
+            }
             Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
             boolean isNew = current.isEmpty();
 
@@ -695,6 +707,31 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     // ── Standard error responses ──────────────────────────────────────────────
+
+
+    /**
+     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
+     * subscription or resource group is not the owner's must never reach that entry: creating the
+     * server there is a name conflict, and any other call is a 404.
+     */
+    private Optional<Response> foreignServer(AzureRequest request, String tail) {
+        if (!tail.matches("servers/[^/]+(/.*)?")) {
+            return Optional.empty();
+        }
+        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        if (scope.isEmpty()) {
+            return Optional.empty();
+        }
+        String serverName = segment(tail, 1);
+        boolean createsServer = "PUT".equals(request.method()) && tail.matches("servers/[^/]+")
+            && scope.get().resourceGroup() != null;
+        return state.getServer(serverName)
+            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
+            .map(s -> createsServer
+                ? ArmErrors.error(400, "NameAlreadyExists",
+                    "The name '" + serverName + "' already exists. Choose a different name.")
+                : notFound("Server '" + serverName + "' not found"));
+    }
 
     private static Response notFound(String message) {
         return ArmErrors.notFound(message);

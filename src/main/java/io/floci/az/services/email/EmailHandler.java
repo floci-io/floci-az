@@ -16,6 +16,7 @@ import io.floci.az.services.email.EmailModels.EmailSendRequest;
 import io.floci.az.services.email.EmailModels.EmailSendResult;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmScope;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -263,7 +264,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         // ── communicationServices ──────────────────────────────────────────
         // LIST
         if (tail.matches("communicationServices(\\?.*)?") && "GET".equals(method)) {
-            return Response.ok(Map.of("value", new ArrayList<>(communicationServices.values())))
+            return Response.ok(Map.of("value", inListScope(communicationServices, path)))
                     .type("application/json").build();
         }
         // Single resource CRUD
@@ -273,6 +274,11 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── emailServices ─────────────────────────────────────────────────
+        // Email services and their domains live in a resource group; a path that names none
+        // addresses no email service.
+        if (tail.matches("emailServices/[^/?]+.*") && ArmScope.of(path).map(ArmScope::resourceGroup).isEmpty()) {
+            return notFound("emailServices/" + extractSegment(tail, "emailServices"));
+        }
         // Domain CRUD: emailServices/{name}/domains/{domain}
         if (tail.matches("emailServices/[^/]+/domains/[^/?]+(\\?.*)?")) {
             String emailServiceName = extractSegment(tail, "emailServices");
@@ -281,7 +287,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         }
         // emailServices LIST
         if (tail.matches("emailServices(\\?.*)?") && "GET".equals(method)) {
-            return Response.ok(Map.of("value", new ArrayList<>(emailServices.values())))
+            return Response.ok(Map.of("value", inListScope(emailServices, path)))
                     .type("application/json").build();
         }
         // emailServices single CRUD
@@ -293,7 +299,16 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
         return notFound("Unknown Communication path: " + tail);
     }
 
-    private Response handleCommunicationServiceCrud(AzureRequest req, String path, String method, String name) {
+    private synchronized Response handleCommunicationServiceCrud(AzureRequest req, String path, String method, String name) {
+        // Names are global ({name}.communication.azure.com), so the map holds one entry per name. A path
+        // under another subscription or resource group must not reach it.
+        Map<String, Object> existing = communicationServices.get(name);
+        if (existing != null && !ownedByPathScope(existing, path)) {
+            return "PUT".equals(method)
+                    // No public source gives the create-conflict code; ARM's generic Conflict stands in.
+                    ? ArmErrors.error(409, "Conflict", "The communication service name '" + name + "' is already in use.")
+                    : notFound("communicationServices/" + name);
+        }
         return switch (method) {
             case "PUT" -> {
                 Map<String, Object> body = readBodyMap(req);
@@ -331,6 +346,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response handleEmailServiceCrud(AzureRequest req, String path, String method, String name) {
+        String key = scopedKey(path, name);
         return switch (method) {
             case "PUT" -> {
                 Map<String, Object> body = readBodyMap(req);
@@ -347,18 +363,18 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
                 if (body.containsKey("tags")) {
                     resource.put("tags", body.get("tags"));
                 }
-                emailServices.put(name, resource);
+                emailServices.put(key, resource);
                 LOG.infof("ARM: created email service %s", name);
                 yield Response.status(201).entity(resource).type("application/json").build();
             }
             case "GET" -> {
-                Map<String, Object> resource = emailServices.get(name);
+                Map<String, Object> resource = emailServices.get(key);
                 yield resource != null
                         ? Response.ok(resource).type("application/json").build()
                         : notFound("emailServices/" + name);
             }
             case "DELETE" -> {
-                emailServices.remove(name);
+                emailServices.remove(key);
                 yield Response.ok().build();
             }
             default -> Response.status(405).build();
@@ -367,7 +383,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
 
     private Response handleEmailDomainCrud(AzureRequest req, String path, String method,
                                             String emailServiceName, String domainName) {
-        String key = emailServiceName + "/" + domainName;
+        String key = scopedKey(path, emailServiceName + "/" + domainName);
         return switch (method) {
             case "PUT" -> {
                 Map<String, Object> body = readBodyMap(req);
@@ -403,6 +419,36 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
             }
             default -> Response.status(405).build();
         };
+    }
+
+    // ── ARM scope helpers ────────────────────────────────────────────────────
+
+    /**
+     * Email services and their domains are resource-group scoped: the key carries the path's subscription
+     * and group. Callers reject a path without a resource group before reaching here.
+     */
+    private static String scopedKey(String path, String name) {
+        return ArmScope.of(path)
+                .filter(scope -> scope.resourceGroup() != null)
+                .map(scope -> scope.subscription().toLowerCase() + "/" + scope.resourceGroup().toLowerCase() + "/" + name)
+                .orElse(name);
+    }
+
+    private static boolean ownedByPathScope(Map<String, Object> resource, String path) {
+        Optional<ArmScope> requested = ArmScope.of(path);
+        Optional<ArmScope> owner = ArmScope.of(String.valueOf(resource.get("id")));
+        return requested.isEmpty() || owner.isEmpty()
+                || requested.get().owns(owner.get().subscription(), owner.get().resourceGroup());
+    }
+
+    /** The resources whose id falls under the list path's subscription (and resource group, when it names one). */
+    private static List<Map<String, Object>> inListScope(Map<String, Map<String, Object>> store, String path) {
+        String normalized = path.startsWith("/") ? path : "/" + path;
+        int providers = normalized.indexOf(PROVIDER_COMMUNICATION);
+        String prefix = (providers >= 0 ? normalized.substring(0, providers) : "").toLowerCase() + "/";
+        return store.values().stream()
+                .filter(r -> String.valueOf(r.get("id")).toLowerCase().startsWith(prefix))
+                .toList();
     }
 
     // ── Path parsing helpers ─────────────────────────────────────────────────
