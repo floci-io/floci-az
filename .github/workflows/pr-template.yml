@@ -45,17 +45,32 @@ jobs:
           # indentation is restricted to 0-3 plain spaces (no tab): CommonMark
           # treats a tab, or 4+ spaces, as an indented code block rather than
           # an ATX heading, and so does this check.
+          #
+          # As in CommonMark, only a run of the opening fence's character, at
+          # least as long as the opener and followed by nothing but whitespace,
+          # closes a fence. A shorter or different fence inside the block is
+          # content, and a backtick opener whose info string contains a
+          # backtick is not a fence at all.
           declare -A FOUND
           for header in "${REQUIRED_HEADERS[@]}"; do FOUND["$header"]=0; done
-          FENCE_RE='^[[:space:]]{0,3}(```|~~~)'
-          in_fence=0
+          FENCE_RE='^[ ]{0,3}(`{3,}|~{3,})(.*)$'
+          fence=""
 
           while IFS= read -r line; do
             if [[ "$line" =~ $FENCE_RE ]]; then
-              in_fence=$((1 - in_fence))
-              continue
+              run="${BASH_REMATCH[1]}"
+              rest="${BASH_REMATCH[2]}"
+              if [ -z "$fence" ]; then
+                if [[ "${run:0:1}" != '`' || "$rest" != *'`'* ]]; then
+                  fence="$run"
+                  continue
+                fi
+              elif [[ "${run:0:1}" == "${fence:0:1}" && ${#run} -ge ${#fence} && "$rest" =~ ^[[:space:]]*$ ]]; then
+                fence=""
+                continue
+              fi
             fi
-            [ "$in_fence" -eq 1 ] && continue
+            [ -n "$fence" ] && continue
 
             for header in "${REQUIRED_HEADERS[@]}"; do
               header_re="^[ ]{0,3}${header}[[:space:]]*\$"
