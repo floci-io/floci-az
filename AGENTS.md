@@ -427,7 +427,9 @@ When adding a sidecar-based service, additionally:
 - **Import the classes you use. Do not write fully-qualified names inline.** `new ArrayList<>()`, never
   `new java.util.ArrayList<>()`. The only reason to qualify inline is a genuine name collision inside
   one file: import the type used more often, qualify the other, and leave a short comment naming the
-  clash
+  clash. A qualified name inside a string literal is data, not a type reference: Jolokia and JMX
+  operation signatures such as `"createQueue(java.lang.String)"` must stay fully qualified, or the
+  broker matches no operation
 
 ### Imports
 

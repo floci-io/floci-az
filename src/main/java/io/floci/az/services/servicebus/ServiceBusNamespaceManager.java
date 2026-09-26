@@ -2,12 +2,14 @@ package io.floci.az.services.servicebus;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -30,9 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import java.lang.String;
 
 /**
  * Manages one Artemis container per Service Bus namespace.
@@ -405,16 +404,16 @@ public class ServiceBusNamespaceManager {
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(queueName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(String)",
+                    "createQueue(java.lang.String)",
                     jsonArr(messageQueueConfiguration(queueName, requiresSession)));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(deadLetterQueue, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(String)",
+                    "createQueue(java.lang.String)",
                     jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
@@ -422,7 +421,7 @@ public class ServiceBusNamespaceManager {
                     requiresSession, lockDurationSeconds);
             applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "addAddressSettings(String,String)",
+                    "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
             configureDuplicateDetection(
                     http, baseUrl, auth, queueName, duplicateDetection);
@@ -439,16 +438,16 @@ public class ServiceBusNamespaceManager {
             deleteManagementAddress(http, baseUrl, auth, mbean, queueName);
             deleteManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(queueName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(deadLetterQueue, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "deleteAddress(String,boolean)",
+                    "deleteAddress(java.lang.String,boolean)",
                     jsonArr(deadLetterQueue, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "removeAddressSettings(String)",
+                    "removeAddressSettings(java.lang.String)",
                     jsonArr(queueName));
             removeDuplicateDetection(http, baseUrl, auth, queueName);
             removeExpiry(http, baseUrl, auth, queueName);
@@ -466,13 +465,13 @@ public class ServiceBusNamespaceManager {
         String topicAddress = topicName + TOPIC_ADDRESS_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(topicName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(String,String,String,String,boolean,int,boolean,boolean)",
+                    "createQueue(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,int,boolean,boolean)",
                     jsonArr(topicName, "ANYCAST", topicName, "", true, -1, false, false));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(topicAddress, "MULTICAST"));
             jolokiaCreateDivert(http, baseUrl, auth, mbean,
                     topicName + TOPIC_DIVERT_SUFFIX, topicName, topicAddress, "", true);
@@ -487,22 +486,22 @@ public class ServiceBusNamespaceManager {
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             removeDuplicateDetection(http, baseUrl, auth, topicName);
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyDivert(String)",
+                    "destroyDivert(java.lang.String)",
                     jsonArr(topicName + TOPIC_DIVERT_SUFFIX));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(topicName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyDivert(String)",
+                    "destroyDivert(java.lang.String)",
                     jsonArr(topicName + TOPIC_DIVERT_SUFFIX));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(topicName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "deleteAddress(String,boolean)",
+                    "deleteAddress(java.lang.String,boolean)",
                     jsonArr(topicName, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "deleteAddress(String,boolean)",
+                    "deleteAddress(java.lang.String,boolean)",
                     jsonArr(topicAddress, true));
         });
     }
@@ -517,14 +516,14 @@ public class ServiceBusNamespaceManager {
             return;
         }
         jolokiaExec(http, baseUrl, auth, DUPLICATE_DETECTION_MBEAN,
-                "configure(String,long)",
+                "configure(java.lang.String,long)",
                 jsonArr(address, Math.multiplyExact(settings.historySeconds(), 1_000L)));
     }
 
     private void removeDuplicateDetection(
             HttpClient http, String baseUrl, String auth, String address) {
         jolokiaExec(http, baseUrl, auth, DUPLICATE_DETECTION_MBEAN,
-                "remove(String)", jsonArr(address));
+                "remove(java.lang.String)", jsonArr(address));
     }
 
     /**
@@ -554,16 +553,16 @@ public class ServiceBusNamespaceManager {
                 + ",\"autoCreateQueues\":false,\"autoCreateAddresses\":false}";
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(queueName, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(String)",
+                    "createQueue(java.lang.String)",
                     jsonArr(messageQueueConfiguration(queueName, requiresSession)));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createAddress(String,String)",
+                    "createAddress(java.lang.String,java.lang.String)",
                     jsonArr(deadLetterQueue, "ANYCAST"));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "createQueue(String)",
+                    "createQueue(java.lang.String)",
                     jsonArr(messageQueueConfiguration(deadLetterQueue, false)));
             createManagementAddress(http, baseUrl, auth, mbean, queueName);
             createManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
@@ -571,7 +570,7 @@ public class ServiceBusNamespaceManager {
                     requiresSession, lockDurationSeconds);
             applyLockMetadata(http, baseUrl, auth, mbean, deadLetterQueue, false, lockDurationSeconds);
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "addAddressSettings(String,String)",
+                    "addAddressSettings(java.lang.String,java.lang.String)",
                     jsonArr(queueName, addressSettings));
             jolokiaCreateDivert(http, baseUrl, auth, mbean, divertName,
                     topicName + TOPIC_ADDRESS_SUFFIX, queueName, filter, false);
@@ -590,7 +589,7 @@ public class ServiceBusNamespaceManager {
         String divertName = queueName + SUBSCRIPTION_DIVERT_SUFFIX;
         withJolokia(namespaceName, (http, baseUrl, auth, mbean) -> {
             jolokiaExecRequired(http, baseUrl, auth, mbean,
-                    "updateDivert(String,String,String,String,Map,String)",
+                    "updateDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.util.Map,java.lang.String)",
                     jsonArr(divertName, queueName, filter, null, Map.of(), "STRIP"));
         });
     }
@@ -604,22 +603,22 @@ public class ServiceBusNamespaceManager {
             deleteManagementAddress(http, baseUrl, auth, mbean, queueName);
             deleteManagementAddress(http, baseUrl, auth, mbean, deadLetterQueue);
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyDivert(String)",
+                    "destroyDivert(java.lang.String)",
                     jsonArr(divertName));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(queueName, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "deleteAddress(String,boolean)",
+                    "deleteAddress(java.lang.String,boolean)",
                     jsonArr(queueName, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "destroyQueue(String,boolean,boolean)",
+                    "destroyQueue(java.lang.String,boolean,boolean)",
                     jsonArr(deadLetterQueue, true, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "deleteAddress(String,boolean)",
+                    "deleteAddress(java.lang.String,boolean)",
                     jsonArr(deadLetterQueue, true));
             jolokiaExec(http, baseUrl, auth, mbean,
-                    "removeAddressSettings(String)",
+                    "removeAddressSettings(java.lang.String)",
                     jsonArr(queueName));
             removeDuplicateDetection(http, baseUrl, auth, queueName);
             removeExpiry(http, baseUrl, auth, queueName);
@@ -630,7 +629,7 @@ public class ServiceBusNamespaceManager {
             HttpClient http, String baseUrl, String auth, String queueName, long ttlMillis,
             String deadLetterAddress) {
         jolokiaExec(http, baseUrl, auth, EXPIRY_MBEAN,
-                "configure(String,long,String)",
+                "configure(java.lang.String,long,java.lang.String)",
                 jsonArr(queueName, ttlMillis, deadLetterAddress));
     }
 
@@ -638,7 +637,7 @@ public class ServiceBusNamespaceManager {
             HttpClient http, String baseUrl, String auth, String mbean, String entityPath) {
         String managementAddress = entityPath + MANAGEMENT_SUFFIX;
         jolokiaExec(http, baseUrl, auth, mbean,
-                "createAddress(String,String)",
+                "createAddress(java.lang.String,java.lang.String)",
                 jsonArr(managementAddress, "MULTICAST"));
     }
 
@@ -646,14 +645,14 @@ public class ServiceBusNamespaceManager {
             HttpClient http, String baseUrl, String auth, String mbean, String entityPath) {
         String managementAddress = entityPath + MANAGEMENT_SUFFIX;
         jolokiaExec(http, baseUrl, auth, mbean,
-                "deleteAddress(String,boolean)",
+                "deleteAddress(java.lang.String,boolean)",
                 jsonArr(managementAddress, true));
     }
 
     private void removeExpiry(
             HttpClient http, String baseUrl, String auth, String queueName) {
         jolokiaExec(http, baseUrl, auth, EXPIRY_MBEAN,
-                "remove(String)", jsonArr(queueName));
+                "remove(java.lang.String)", jsonArr(queueName));
     }
     // ── Private helpers ───────────────────────────────────────────────────────
 
@@ -695,7 +694,7 @@ public class ServiceBusNamespaceManager {
                                       String mbean, String divertName, String sourceAddress,
                                       String forwardingAddress, String filter, boolean exclusive) {
         jolokiaExec(http, baseUrl, auth, mbean,
-                "createDivert(String,String,String,String,boolean,String,String)",
+                "createDivert(java.lang.String,java.lang.String,java.lang.String,java.lang.String,boolean,java.lang.String,java.lang.String)",
                 jsonArr(divertName, divertName, sourceAddress, forwardingAddress,
                         exclusive, filter, null));
     }
@@ -716,7 +715,7 @@ public class ServiceBusNamespaceManager {
         String queueConfiguration = "{\"name\":" + jsonString(queueName)
                 + ",\"user\":" + jsonString(metadata) + "}";
         jolokiaExec(http, baseUrl, auth, mbean,
-                "updateQueue(String)", jsonArr(queueConfiguration));
+                "updateQueue(java.lang.String)", jsonArr(queueConfiguration));
     }
     private void withJolokia(String namespaceName, JolokiaAction action) {
         NamespaceState state = namespaces.get(namespaceName);
