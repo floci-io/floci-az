@@ -3,6 +3,7 @@ package io.floci.az.services.table;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.floci.az.core.StoredObject;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.util.List;
 import java.util.Map;
 

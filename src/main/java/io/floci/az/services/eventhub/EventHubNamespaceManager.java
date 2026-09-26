@@ -1,18 +1,19 @@
 package io.floci.az.services.eventhub;
 
-import io.floci.az.services.servicebus.ArtemisPatchVersions;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
+import io.floci.az.services.servicebus.ArtemisPatchVersions;
 import io.floci.az.services.servicebus.ServiceBusCbsResponder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -25,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.io.InputStream;
 
 /**
  * Manages one Artemis container per Event Hubs namespace.

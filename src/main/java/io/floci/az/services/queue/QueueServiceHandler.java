@@ -1,12 +1,12 @@
 package io.floci.az.services.queue;
 
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
-import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;

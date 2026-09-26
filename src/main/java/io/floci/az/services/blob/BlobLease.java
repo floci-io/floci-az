@@ -1,7 +1,7 @@
 package io.floci.az.services.blob;
 
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * State of one blob lease. Immutable; transitions return a new instance.

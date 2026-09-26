@@ -7,12 +7,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
-import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,9 +39,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.HexFormat;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Cosmos DB SQL API emulator.

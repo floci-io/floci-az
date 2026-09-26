@@ -1,6 +1,7 @@
 package io.floci.az.services.functions;
 
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
@@ -18,23 +19,22 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.Map;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import java.io.InputStream;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /**

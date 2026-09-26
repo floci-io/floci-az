@@ -23,27 +23,27 @@ import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.Date;
-import java.util.Optional;
-import java.nio.charset.StandardCharsets;
-import java.security.cert.Certificate;
-import java.security.interfaces.RSAPublicKey;
 
 /** Self-signed certificate lifecycle, with addressable matching keys and secrets. */
 final class KeyVaultCertificates {

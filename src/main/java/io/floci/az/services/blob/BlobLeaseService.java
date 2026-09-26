@@ -5,11 +5,11 @@ import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.core.Response;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.time.Duration;
 import java.util.function.Supplier;
 
 /**

@@ -3,9 +3,10 @@ package io.floci.az.config;
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
 import io.smallrye.config.WithName;
+
 import java.util.List;
-import java.util.Optional;
 import java.util.Map;
+import java.util.Optional;
 
 @ConfigMapping(prefix = "floci-az")
 public interface EmulatorConfig {

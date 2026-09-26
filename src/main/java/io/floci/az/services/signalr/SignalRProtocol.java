@@ -1,7 +1,9 @@
 package io.floci.az.services.signalr;
 
+import org.msgpack.core.MessageBufferPacker;
 import org.msgpack.core.MessagePack;
 import org.msgpack.core.MessagePacker;
+import org.msgpack.core.MessageUnpacker;
 import org.msgpack.value.Value;
 
 import java.io.ByteArrayOutputStream;
@@ -12,8 +14,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import org.msgpack.core.MessageBufferPacker;
-import org.msgpack.core.MessageUnpacker;
 
 /** Azure service protocol: a base-128 length prefix followed by a MessagePack array. */
 final class SignalRProtocol {

@@ -1,14 +1,15 @@
 package io.floci.az.services.redis;
 
+import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.model.Frame;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import com.github.dockerjava.api.DockerClient;
 
 /**
  * Manages the Docker lifecycle of Redis containers backing Azure Cache for Redis caches.

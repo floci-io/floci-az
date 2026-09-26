@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
@@ -23,10 +23,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HTTP handler for Azure SQL Database management-plane requests.

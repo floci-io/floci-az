@@ -1,7 +1,6 @@
 package io.floci.az.core.docker;
 
 import com.github.dockerjava.api.DockerClient;
-import io.floci.az.config.EmulatorConfig;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
@@ -19,6 +18,7 @@ import com.github.dockerjava.api.model.Mount;
 import com.github.dockerjava.api.model.MountType;
 import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
+import io.floci.az.config.EmulatorConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;

@@ -8,6 +8,7 @@ import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigInteger;
 import java.security.AlgorithmParameters;
+import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -36,7 +37,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.security.Key;
 
 /**
  * Pure-JDK crypto engine for the Key Vault keys data plane: static helpers using only built-in

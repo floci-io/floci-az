@@ -1,8 +1,8 @@
 package io.floci.az.core;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
-import java.util.ArrayList;
 
 /**
  * The routes a service handler claims. Handlers describe themselves; {@link AzureRoutingFilter}

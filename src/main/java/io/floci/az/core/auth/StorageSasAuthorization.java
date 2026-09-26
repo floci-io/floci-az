@@ -1,8 +1,8 @@
 package io.floci.az.core.auth;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
-import io.floci.az.config.EmulatorConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -15,13 +15,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Optional;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 @ApplicationScoped
 public class StorageSasAuthorization {

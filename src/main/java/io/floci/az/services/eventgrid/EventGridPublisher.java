@@ -3,21 +3,21 @@ package io.floci.az.services.eventgrid;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.Topic;
-import io.floci.az.core.arm.ArmErrors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ArrayList;
 
 /**
  * Data-plane publish endpoint ({@code POST /api/events}). Parses incoming events (Event Grid or

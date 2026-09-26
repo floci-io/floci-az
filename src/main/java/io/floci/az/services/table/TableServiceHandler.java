@@ -1,12 +1,12 @@
 package io.floci.az.services.table;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.storage.StorageBackend;
@@ -35,8 +35,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class TableServiceHandler implements AzureServiceHandler, Resettable {
