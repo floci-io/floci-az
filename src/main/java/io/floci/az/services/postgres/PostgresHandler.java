@@ -273,6 +273,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                         return accepted(request, entry.armId(), serverResponse(entry));
                     }
 
+                    PostgresState.ServerEntry claimed = entry;
                     try {
                         Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
                         synchronized (lock) {
@@ -280,8 +281,11 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                             if (current.isPresent() && current.get().containerId() != null) {
                                 entry = current.get();
                             } else {
-                                entry = serverManager.startServer(entry);
-                                if (!state.replaceServer(entry)) {
+                                entry = serverManager.startServer(claimed);
+                                Optional<PostgresState.ServerEntry> attached = state.attachContainer(entry);
+                                if (attached.isPresent()) {
+                                    entry = attached.get();
+                                } else {
                                     // Deleted while its container started: writing it back would resurrect
                                     // a name another subscription may have claimed since.
                                     stopQuietly(entry);
@@ -289,7 +293,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                             }
                         }
                     } catch (Exception e) {
-                        state.removeServer(serverName);
+                        state.releaseClaim(claimed);
                         LOG.errorf(e, "Failed to start PostgreSQL container for server=%s", serverName);
                         return Response.status(500)
                             .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))

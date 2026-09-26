@@ -40,6 +40,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * HTTP handler for Azure Container Registry ({@code Microsoft.ContainerRegistry/registries})
@@ -371,20 +372,22 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             }
 
             if (!config.services().acr().mocked() && isNew) {
+                String provisioningState;
                 try {
                     registryManager.ensureStarted();
-                    registry.setProvisioningState(registryManager.isReady() ? "Succeeded" : "Creating");
+                    provisioningState = registryManager.isReady() ? "Succeeded" : "Creating";
                 } catch (Exception e) {
                     LOG.errorf(e, "Failed to start shared ACR registry for %s", registryName);
-                    registry.setProvisioningState("Failed");
+                    provisioningState = "Failed";
                 }
                 // A DELETE may have removed the claim while the registry started; writing the record
                 // back would resurrect a name another subscription may have claimed since.
-                synchronized (nameClaims) {
-                    Optional<Registry> stored = getRegistry(storageKey);
-                    if (stored.isPresent() && registry.getInstanceId().equals(stored.get().getInstanceId())) {
-                        putRegistry(storageKey, registry);
-                    }
+                String startedState = provisioningState;
+                registry.setProvisioningState(startedState);
+                Optional<Registry> stored = updateIfSameInstance(registry,
+                        current -> current.setProvisioningState(startedState));
+                if (stored.isPresent()) {
+                    registry = stored.get();
                 }
             }
 
@@ -528,9 +531,8 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                         // so a pending registry cannot stay Creating forever.
                         registryManager.ensureStarted();
                         if (registryManager.isReady()) {
-                            LOG.infov("ACR registry {0} is now ready", reg.getName());
-                            reg.setProvisioningState("Succeeded");
-                            putRegistry(reg.storageKey(), reg);
+                            updateIfSameInstance(reg, current -> current.setProvisioningState("Succeeded"))
+                                    .ifPresent(ready -> LOG.infov("ACR registry {0} is now ready", ready.getName()));
                         }
                     }
                 });
@@ -559,6 +561,24 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize ACR registry: " + key, e);
+        }
+    }
+
+    /**
+     * Applies {@code change} to the stored copy of {@code registry} while it is still the same instance, and
+     * returns the stored result. Changing the stored copy, rather than writing {@code registry} back, keeps any
+     * update made since {@code registry} was read. Empty once the registry was deleted, or deleted and created
+     * again.
+     */
+    private Optional<Registry> updateIfSameInstance(Registry registry, Consumer<Registry> change) {
+        synchronized (nameClaims) {
+            Optional<Registry> stored = getRegistry(registry.storageKey());
+            if (stored.isEmpty() || !registry.getInstanceId().equals(stored.get().getInstanceId())) {
+                return Optional.empty();
+            }
+            change.accept(stored.get());
+            putRegistry(registry.storageKey(), stored.get());
+            return stored;
         }
     }
 

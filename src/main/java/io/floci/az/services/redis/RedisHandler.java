@@ -38,6 +38,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * HTTP handler for Azure Cache for Redis ({@code Microsoft.Cache/redis}) management-plane requests.
@@ -250,15 +251,20 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
                 }
                 // A DELETE may have removed the claim while the container started; writing the record
                 // back would resurrect a name another subscription may have claimed since.
-                boolean stillClaimed;
-                synchronized (nameClaims) {
-                    stillClaimed = isSameCache(getCache(storageKey), cache);
-                    if (stillClaimed) {
-                        putCache(storageKey, cache);
+                RedisCache started = cache;
+                Optional<RedisCache> stored = updateIfSameInstance(started, current -> {
+                    current.setContainerId(started.getContainerId());
+                    current.setHostName(started.getHostName());
+                    current.setPort(started.getPort());
+                    current.setInternalEndpoint(started.getInternalEndpoint());
+                    if ("Failed".equals(started.getProvisioningState())) {
+                        current.setProvisioningState("Failed");
                     }
-                }
-                if (!stillClaimed) {
-                    stopQuietly(cache);
+                });
+                if (stored.isPresent()) {
+                    cache = stored.get();
+                } else {
+                    stopQuietly(started);
                 }
             }
 
@@ -380,10 +386,9 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             try {
                 scanAll().forEach(cache -> {
                     if ("Creating".equals(cache.getProvisioningState()) && cacheManager.isReady(cache)) {
-                        LOG.infov("Redis cache {0} is now ready", cache.getName());
                         cacheManager.applyAccessKeys(cache, cache.getPrimaryKey());
-                        cache.setProvisioningState("Succeeded");
-                        putCache(cache.storageKey(), cache);
+                        updateIfSameInstance(cache, current -> current.setProvisioningState("Succeeded"))
+                                .ifPresent(ready -> LOG.infov("Redis cache {0} is now ready", ready.getName()));
                     }
                 });
             } catch (Exception e) {
@@ -416,6 +421,23 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     private static boolean isSameCache(Optional<RedisCache> stored, RedisCache cache) {
         return stored.isPresent() && cache.getInstanceId().equals(stored.get().getInstanceId());
+    }
+
+    /**
+     * Applies {@code change} to the stored copy of {@code cache} while it is still the same instance, and
+     * returns the stored result. Changing the stored copy, rather than writing {@code cache} back, keeps any
+     * update made since {@code cache} was read. Empty once the cache was deleted, or deleted and created again.
+     */
+    private Optional<RedisCache> updateIfSameInstance(RedisCache cache, Consumer<RedisCache> change) {
+        synchronized (nameClaims) {
+            Optional<RedisCache> stored = getCache(cache.storageKey());
+            if (!isSameCache(stored, cache)) {
+                return Optional.empty();
+            }
+            change.accept(stored.get());
+            putCache(cache.storageKey(), stored.get());
+            return stored;
+        }
     }
 
     private void stopQuietly(RedisCache cache) {
