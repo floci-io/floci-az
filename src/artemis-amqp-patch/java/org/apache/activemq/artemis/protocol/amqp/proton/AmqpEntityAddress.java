@@ -1,10 +1,17 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-/** Reduces the several ways a client can address one event hub down to the entity path itself. */
+import java.util.Locale;
+
+/**
+ * Reduces the several ways a client can address one event hub or Service Bus entity down to the
+ * entity path itself.
+ */
 public final class AmqpEntityAddress {
 
    private static final String CONSUMER_GROUPS_SEGMENT = "/ConsumerGroups/";
    private static final String PARTITIONS_SEGMENT = "/Partitions/";
+   private static final String SUBSCRIPTIONS_SEGMENT = "/subscriptions/";
+   private static final String DEAD_LETTER_QUEUE_SUFFIX = "/$deadletterqueue";
 
    private AmqpEntityAddress() {
    }
@@ -25,12 +32,17 @@ public final class AmqpEntityAddress {
     * the transport turns out to be, so it carries no information about the connection.
     *
     * <p>Only event-hub-shaped paths are reduced — a bare entity, or one followed by
-    * {@code /Partitions/{id}} or {@code /ConsumerGroups/{group}/Partitions/{id}}. floci also serves
-    * addresses whose path carries the namespace ({@code amqp://host/{namespace}/{entity}}), and
-    * those name a different topology: the same path without a host is the multicast address that
-    * path-addressing clients publish to. Reducing one onto the other would merge two address
-    * families that are deliberately distinct, so anything that is not event-hub-shaped is returned
-    * exactly as it arrived.
+    * {@code /Partitions/{id}} or {@code /ConsumerGroups/{group}/Partitions/{id}} — plus the Service
+    * Bus entity paths that carry more than one segment: {@code {queue}/$DeadLetterQueue} and
+    * {@code {topic}/Subscriptions/{subscription}}, with or without its own
+    * {@code /$DeadLetterQueue}. The Python and Rust Service Bus SDKs address those under a scheme
+    * and host too, and left whole they match no address, so every subscription receive fails with
+    * {@code AMQ119010}. floci also serves addresses whose path carries the namespace
+    * ({@code amqp://host/{namespace}/{entity}}), and those name a different topology: the same
+    * path without a host is the multicast address that path-addressing clients publish to.
+    * Reducing one onto the other would merge two address families that are deliberately distinct,
+    * so anything that is neither event-hub- nor Service-Bus-shaped is returned exactly as it
+    * arrived.
     */
    public static String toEntityPath(String address) {
       if (address == null) {
@@ -50,7 +62,7 @@ public final class AmqpEntityAddress {
          return path;
       }
       String afterHost = stripLeadingSlashes(path.substring(hostEnd + 1));
-      return isEventHubPath(afterHost) ? afterHost : path;
+      return isEventHubPath(afterHost) || isServiceBusPath(afterHost) ? afterHost : path;
    }
 
    private static String stripLeadingSlashes(String value) {
@@ -75,5 +87,28 @@ public final class AmqpEntityAddress {
          return path.indexOf('/', partitions + PARTITIONS_SEGMENT.length()) < 0;
       }
       return path.indexOf('/') < 0;
+   }
+
+   /**
+    * True for {@code queue/$DeadLetterQueue}, {@code topic/Subscriptions/sub} and
+    * {@code topic/Subscriptions/sub/$DeadLetterQueue}, matched without regard to case (the caller
+    * normalizes the case afterwards, as it does for hostless paths). Neither shape can be read as
+    * the namespace family: {@code $} is not legal in an event hub name, and a namespace path never
+    * has a {@code Subscriptions} segment between two others.
+    */
+   private static boolean isServiceBusPath(String path) {
+      String lower = path.toLowerCase(Locale.ROOT);
+      if (lower.endsWith(DEAD_LETTER_QUEUE_SUFFIX)) {
+         lower = lower.substring(0, lower.length() - DEAD_LETTER_QUEUE_SUFFIX.length());
+         if (lower.indexOf('/') < 0) {
+            return !lower.isEmpty();
+         }
+      }
+      int subscriptions = lower.indexOf(SUBSCRIPTIONS_SEGMENT);
+      if (subscriptions <= 0 || lower.lastIndexOf('/', subscriptions - 1) >= 0) {
+         return false;
+      }
+      String subscription = lower.substring(subscriptions + SUBSCRIPTIONS_SEGMENT.length());
+      return !subscription.isEmpty() && subscription.indexOf('/') < 0;
    }
 }

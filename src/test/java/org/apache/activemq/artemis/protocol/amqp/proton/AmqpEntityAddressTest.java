@@ -75,13 +75,75 @@ class AmqpEntityAddressTest {
                 reduce("amqp://localhost/emulatorNs1/eh1/$Default"));
     }
 
-    /** Service Bus entity paths are not event-hub-shaped and must survive untouched. */
+    /**
+     * The Python and Rust Service Bus SDKs name every entity under {@code {scheme}://{host}/}.
+     * A bare queue was already reduced as an event-hub-shaped path; the multi-segment Service Bus
+     * paths were not, so a subscription receive from those SDKs failed with
+     * {@code AMQ119010: source address does not exist}.
+     */
     @Test
-    @DisplayName("a Service Bus subscription path keeps its host")
-    void leavesServiceBusAddressesAlone() throws Exception {
-        assertEquals("sb://ns.servicebus.windows.net/topic1/Subscriptions/sub1",
+    @DisplayName("a Service Bus entity path is reduced whatever the scheme and host")
+    void reducesServiceBusAddresses() throws Exception {
+        assertEquals("events/Subscriptions/worker",
+                reduce("amqps://localhost:5673/events/Subscriptions/worker"));
+        assertEquals("topic1/Subscriptions/sub1",
                 reduce("sb://ns.servicebus.windows.net/topic1/Subscriptions/sub1"));
+        assertEquals("topic1/Subscriptions/sub1/$DeadLetterQueue",
+                reduce("amqps://ns.servicebus.windows.net/topic1/Subscriptions/sub1/$DeadLetterQueue"));
+        assertEquals("queue1/$DeadLetterQueue",
+                reduce("amqps://ns.servicebus.windows.net/queue1/$DeadLetterQueue"));
+        assertEquals("queue1", reduce("amqps://ns.servicebus.windows.net/queue1"));
+    }
+
+    /** Case is the caller's business (it normalizes afterwards); only the host is stripped. */
+    @Test
+    @DisplayName("Service Bus segments are recognized in any case and passed through as sent")
+    void reducesServiceBusAddressesInAnyCase() throws Exception {
+        assertEquals("Topic1/subscriptions/Sub1",
+                reduce("amqps://ns.servicebus.windows.net/Topic1/subscriptions/Sub1"));
+        assertEquals("queue1/$deadletterqueue",
+                reduce("amqps://ns.servicebus.windows.net/queue1/$deadletterqueue"));
+    }
+
+    /**
+     * The receive path runs the reduction and then the Service Bus case normalization; the two
+     * together must land on the subscription queue's exact name.
+     */
+    @Test
+    @DisplayName("the receive path resolves a URI-addressed subscription to its queue name")
+    void receivePathResolvesSubscriptionQueue() throws Exception {
+        Method normalize = Class.forName(
+                        "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusSessionSupport",
+                        true, loader)
+                .getMethod("normalizeEntityPath", String.class);
+        assertEquals("events/Subscriptions/worker/$DeadLetterQueue",
+                normalize.invoke(null,
+                        reduce("amqps://localhost:5673/events/subscriptions/worker/$deadletterqueue")));
+    }
+
+    /**
+     * Only whole Service Bus shapes are reduced: anything else with a host could be the namespace
+     * family, so it keeps the host exactly as the event-hub rule already does.
+     */
+    @Test
+    @DisplayName("a path that is only partly Service-Bus-shaped keeps its host")
+    void leavesPartialServiceBusShapesAlone() throws Exception {
+        for (String address : new String[] {
+                "amqps://ns.servicebus.windows.net/topic1/Subscriptions",
+                "amqps://ns.servicebus.windows.net/topic1/Subscriptions/",
+                "amqps://ns.servicebus.windows.net/Subscriptions/sub1",
+                "amqps://ns.servicebus.windows.net/ns1/topic1/Subscriptions/sub1",
+                "amqps://ns.servicebus.windows.net/topic1/Subscriptions/sub1/extra",
+                "amqps://ns.servicebus.windows.net/ns1/queue1/$DeadLetterQueue"}) {
+            assertEquals(address, reduce(address), address);
+        }
+    }
+
+    @Test
+    @DisplayName("a hostless Service Bus path passes through")
+    void leavesHostlessServiceBusPathsAlone() throws Exception {
         assertEquals("queue1/$DeadLetterQueue", reduce("queue1/$DeadLetterQueue"));
+        assertEquals("topic1/Subscriptions/sub1", reduce("topic1/Subscriptions/sub1"));
     }
 
     @Test
