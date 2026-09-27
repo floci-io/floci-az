@@ -57,6 +57,7 @@ floci-az:
 
   docker:
     docker-host: unix:///var/run/docker.sock
+    endpoint-mode: auto                # auto · published: address sidecars at the Docker daemon's host + published port (remote daemons)
     log-max-size: "10m"
     log-max-file: "3"
     resource-namespace: ""            # Optional; inserted into sidecar container/volume names (floci-az-<ns>-...)

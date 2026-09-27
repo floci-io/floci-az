@@ -257,6 +257,7 @@ All variables are optional; the default applies when unset.
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket — unix socket or `tcp://host:port` |
+| `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed, by floci-az and in the host/port reported to clients. `auto`: container name/IP and internal port when floci-az runs in a container, `localhost` and the published port otherwise. `published`: always the Docker daemon's host (from `docker-host`) and the published port — for remote daemons such as docker-in-docker or kubedock, whose containers aren't directly reachable |
 | `FLOCI_AZ_DOCKER_LOG_MAX_SIZE` | `10m` | Max log file size per function container |
 | `FLOCI_AZ_DOCKER_LOG_MAX_FILE` | `3` | Max rotated log files per function container |
 | `FLOCI_AZ_DOCKER_DOCKER_CONFIG_PATH` | _(unset)_ | Path to Docker `config.json` for private registry auth |

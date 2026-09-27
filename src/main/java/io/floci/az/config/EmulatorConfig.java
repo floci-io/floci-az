@@ -677,6 +677,11 @@ public interface EmulatorConfig {
         Optional<SqlDataPlaneProvider> provider();
     }
 
+    enum DockerEndpointMode {
+        AUTO,
+        PUBLISHED
+    }
+
     enum SqlDataPlaneProvider {
         NONE,
         MANAGED,
@@ -850,6 +855,19 @@ public interface EmulatorConfig {
         /** Unix socket or TCP URL for the Docker daemon. */
         @WithDefault("unix:///var/run/docker.sock")
         String dockerHost();
+
+        /**
+         * How sidecar containers are addressed, both by floci-az's own connections to them and in
+         * the host and port it reports to clients.
+         *
+         * <p>{@code auto}: the container's name or IP and internal port when floci-az runs in a
+         * container, {@code localhost} and the published port otherwise. {@code published}: always
+         * the Docker daemon's host and the published port. Use it when the daemon is remote
+         * (docker-in-docker, kubedock, a daemon on another machine), since its container IPs and
+         * names aren't reachable from floci-az or its clients.
+         */
+        @WithDefault("auto")
+        DockerEndpointMode endpointMode();
 
         /** Path to a directory containing Docker's config.json. */
         Optional<String> dockerConfigPath();

@@ -98,6 +98,10 @@ floci-az:
 
   docker:
     docker-host: unix:///var/run/docker.sock
+    # How sidecars are addressed: auto (container name/IP when floci-az runs in a
+    # container, localhost otherwise) or published (the Docker daemon's host and the
+    # published port; for remote daemons such as docker-in-docker or kubedock).
+    endpoint-mode: auto
     log-max-size: "10m"
     log-max-file: "3"
     resource-namespace: ""

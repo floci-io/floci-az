@@ -97,7 +97,10 @@ public class MariaDbServerManager {
 
                 String reachableHost;
                 int reachablePort;
-                if (containerDetector.isRunningInContainer()) {
+                if (containerManager.publishedEndpoints()) {
+                    reachableHost = containerManager.daemonHost();
+                    reachablePort = hostPort;
+                } else if (containerDetector.isRunningInContainer()) {
                     reachableHost = containerName;
                     reachablePort = MARIADB_CONTAINER_PORT;
                 } else {

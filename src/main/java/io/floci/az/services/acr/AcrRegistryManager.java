@@ -93,10 +93,11 @@ public class AcrRegistryManager {
             this.publishedPort = chosenPort;
 
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REGISTRY_PORT);
-            if (containerDetector.isRunningInContainer()) {
+            if (containerDetector.isRunningInContainer() && !lifecycleManager.publishedEndpoints()) {
                 this.internalEndpoint = sharedName() + ":" + REGISTRY_PORT;
             } else {
-                this.internalEndpoint = ep != null ? ep.host() + ":" + ep.port() : "localhost:" + chosenPort;
+                String host = lifecycleManager.publishedEndpoints() ? lifecycleManager.daemonHost() : "localhost";
+                this.internalEndpoint = ep != null ? ep.host() + ":" + ep.port() : host + ":" + chosenPort;
             }
             this.started = true;
             LOG.infov("Started shared ACR registry {0} on host port {1}", sharedName(), String.valueOf(chosenPort));
