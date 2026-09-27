@@ -231,8 +231,9 @@ public class AciContainerGroupManager {
      * reached at the Docker daemon's host, and clients pair that address with the group's
      * advertised container ports, so a port published on any other number would be unreachable
      * (or reach another group holding the number). Nothing is probed locally: floci-az's own host
-     * says nothing about a remote daemon's ports. A port another group here already holds fails
-     * the start at once; one taken on the daemon by anything else fails the container's bind.
+     * says nothing about a remote daemon's ports. A port floci-az has already reserved (for
+     * another group or a sidecar) fails the start at once; one taken on the daemon by anything
+     * else fails the container's bind.
      */
     Map<Integer, Integer> allocatePublishedPorts(ContainerGroup group, List<Integer> allocated) {
         Map<Integer, Integer> bindings = new LinkedHashMap<>();
@@ -242,9 +243,9 @@ public class AciContainerGroupManager {
             if (lifecycleManager.publishedEndpoints()) {
                 if (!portAllocator.reserveUnprobed(containerPort)) {
                     throw new IllegalStateException("Container group " + group.getName() + ": port "
-                            + containerPort + " is already published by another container group. In "
-                            + "published endpoint mode every group is reached at the Docker daemon's "
-                            + "host, so groups can't share a port.");
+                            + containerPort + " is already reserved by floci-az (by another container "
+                            + "group or service). In published endpoint mode this group needs that port "
+                            + "on the Docker daemon host.");
                 }
                 hostPort = containerPort;
             } else {

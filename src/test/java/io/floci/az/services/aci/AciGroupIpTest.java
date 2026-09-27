@@ -129,7 +129,7 @@ class AciGroupIpTest {
     }
 
     @Test
-    @DisplayName("published mode: a port another group holds fails the start, naming it, without releasing it")
+    @DisplayName("published mode: a port floci-az already reserved fails the start, naming it, without releasing it")
     void publishedConflictFails() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
         lenient().when(portAllocator.reserveUnprobed(80)).thenReturn(true);
@@ -137,9 +137,8 @@ class AciGroupIpTest {
         List<Integer> allocated = new ArrayList<>();
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
-        assertTrue(e.getMessage().contains("port 443 is already published by another container group"),
-                e.getMessage());
-        // only this group's port is recorded, so rollback can't release the other group's 443
+        assertTrue(e.getMessage().contains("port 443 is already reserved by floci-az"), e.getMessage());
+        // only this group's port is recorded, so rollback can't release whoever holds 443
         assertEquals(List.of(80), allocated);
     }
 
