@@ -90,4 +90,15 @@ class SqlConnectionInfoTest {
         assertTrue(info.pyodbc().contains("14567"),  "pyodbc should have non-default port");
         assertTrue(info.efCore().contains("14567"),  "ef core should have non-default port");
     }
+
+    @Test
+    @DisplayName("an IPv6 host goes in the JDBC serverName property; a hostname keeps the URL form")
+    void ipv6Host() {
+        SqlConnectionInfo v6 = SqlConnectionInfo.of("::1", 1433, "sqladmin", "Pass123!", "orders");
+        assertTrue(v6.jdbcUrl().startsWith("jdbc:sqlserver://;serverName=::1;portNumber=1433;databaseName=orders;"),
+                v6.jdbcUrl());
+        SqlConnectionInfo named = SqlConnectionInfo.of("localhost", 1433, "sqladmin", "Pass123!", "orders");
+        assertTrue(named.jdbcUrl().startsWith("jdbc:sqlserver://localhost:1433;databaseName=orders;"),
+                named.jdbcUrl());
+    }
 }

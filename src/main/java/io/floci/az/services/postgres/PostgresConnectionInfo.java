@@ -1,5 +1,7 @@
 package io.floci.az.services.postgres;
 
+import io.floci.az.core.docker.HostLiterals;
+
 /**
  * Aggregates connection string formats for a PostgreSQL flexible-server container.
  *
@@ -35,15 +37,17 @@ public record PostgresConnectionInfo(
     public static PostgresConnectionInfo of(String host, int port,
                                             String login, String password,
                                             String database) {
+        // URL forms need an IPv6 literal in brackets; keyword forms (psql, CLI, .NET) take it bare
+        String urlHost = HostLiterals.forUrl(host);
         String db = (database != null && !database.isBlank()) ? database : "postgres";
 
         String jdbc = String.format(
             "jdbc:postgresql://%s:%d/%s?user=%s&password=%s&sslmode=disable",
-            host, port, db, login, password);
+            urlHost, port, db, login, password);
 
         String uri = String.format(
             "postgresql://%s:%s@%s:%d/%s?sslmode=disable",
-            login, password, host, port, db);
+            login, password, urlHost, port, db);
 
         String psql = String.format(
             "psql \"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable\"",

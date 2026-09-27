@@ -114,28 +114,32 @@ class AciGroupIpTest {
     }
 
     @Test
-    @DisplayName("published mode: each port is published on its own number")
-    void publishedAllocatesSameNumbers() {
+    @DisplayName("published mode: each port is reserved on its own number, without a local probe")
+    void publishedReservesSameNumbers() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
-        lenient().when(portAllocator.allocate(80, 80)).thenReturn(80);
-        lenient().when(portAllocator.allocate(443, 443)).thenReturn(443);
+        lenient().when(portAllocator.reserveUnprobed(80)).thenReturn(true);
+        lenient().when(portAllocator.reserveUnprobed(443)).thenReturn(true);
         List<Integer> allocated = new ArrayList<>();
         assertEquals(Map.of(80, 80, 443, 443),
                 manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
         assertEquals(List.of(80, 443), allocated);
+        // floci-az's own host says nothing about a remote daemon's ports: never probe it
+        org.mockito.Mockito.verify(portAllocator, org.mockito.Mockito.never())
+                .allocate(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
-    @DisplayName("published mode: a port already in use fails the start, naming the port")
+    @DisplayName("published mode: a port another group holds fails the start, naming it, without releasing it")
     void publishedConflictFails() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
-        lenient().when(portAllocator.allocate(80, 80)).thenReturn(80);
-        portTaken(443);
+        lenient().when(portAllocator.reserveUnprobed(80)).thenReturn(true);
+        lenient().when(portAllocator.reserveUnprobed(443)).thenReturn(false);
         List<Integer> allocated = new ArrayList<>();
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
-        assertTrue(e.getMessage().contains("port 443 is already in use"), e.getMessage());
-        // only the port that was allocated is recorded, so startGroup releases exactly that one
+        assertTrue(e.getMessage().contains("port 443 is already published by another container group"),
+                e.getMessage());
+        // only this group's port is recorded, so rollback can't release the other group's 443
         assertEquals(List.of(80), allocated);
     }
 

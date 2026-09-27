@@ -987,8 +987,7 @@ public class ContainerLifecycleManager {
      * {@link #daemonHost()} but with an IPv6 literal's URL brackets removed.
      */
     public String daemonAddress() {
-        String host = daemonHost();
-        return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        return HostLiterals.bare(daemonHost());
     }
 
     static String daemonHostname(String dockerHost) {

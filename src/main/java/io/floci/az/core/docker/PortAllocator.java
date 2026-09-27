@@ -81,6 +81,22 @@ public class PortAllocator {
     }
 
     /**
+     * Reserves one specific port without probing whether it is free here. For ports a remote
+     * Docker daemon binds: whether they're free on floci-az's own host says nothing about the
+     * daemon, which rejects a taken port itself when the container binds it.
+     *
+     * @return {@code true} if the port was reserved (release it with {@link #release(int)}),
+     *         {@code false} if floci-az already holds it
+     */
+    public synchronized boolean reserveUnprobed(int port) {
+        boolean added = reserved.add(port);
+        if (added) {
+            LOG.debugv("Reserved port {0} without probing", String.valueOf(port));
+        }
+        return added;
+    }
+
+    /**
      * Releases a previously allocated port back to the pool.
      * Should be called when the Docker container that was using the port is removed.
      */

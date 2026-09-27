@@ -1,5 +1,7 @@
 package io.floci.az.services.mysql;
 
+import io.floci.az.core.docker.HostLiterals;
+
 /**
  * Aggregates connection string formats for an Azure Database for MySQL container.
  *
@@ -31,15 +33,17 @@ public record MySqlConnectionInfo(
     public static MySqlConnectionInfo of(String host, int port,
                                          String login, String password,
                                          String database) {
+        // URL forms need an IPv6 literal in brackets; keyword forms (psql, CLI, .NET) take it bare
+        String urlHost = HostLiterals.forUrl(host);
         String db = (database != null && !database.isBlank()) ? database : "floci";
 
         String jdbc = String.format(
             "jdbc:mysql://%s:%d/%s?user=%s&password=%s&useSSL=false&allowPublicKeyRetrieval=true",
-            host, port, db, login, password);
+            urlHost, port, db, login, password);
 
         String uri = String.format(
             "mysql://%s:%s@%s:%d/%s",
-            login, password, host, port, db);
+            login, password, urlHost, port, db);
 
         String mysql = String.format(
             "mysql -h %s -P %d -u %s -p%s %s",

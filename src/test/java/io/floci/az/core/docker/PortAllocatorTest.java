@@ -83,4 +83,14 @@ class PortAllocatorTest {
         assertNotEquals(base, fromRange, "range allocation must not reissue a claimed port");
         assertTrue(fromRange > base && fromRange <= base + 20);
     }
+
+    @Test
+    @DisplayName("reserveUnprobed reserves without probing and reports an existing reservation")
+    void reserveUnprobed() {
+        PortAllocator allocator = new PortAllocator();
+        org.junit.jupiter.api.Assertions.assertTrue(allocator.reserveUnprobed(65001));
+        org.junit.jupiter.api.Assertions.assertFalse(allocator.reserveUnprobed(65001));
+        allocator.release(65001);
+        org.junit.jupiter.api.Assertions.assertTrue(allocator.reserveUnprobed(65001));
+    }
 }

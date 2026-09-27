@@ -1,5 +1,7 @@
 package io.floci.az.services.sql;
 
+import io.floci.az.core.docker.HostLiterals;
+
 /**
  * Aggregates all connection string formats for a SQL Server container.
  *
@@ -36,10 +38,15 @@ public record SqlConnectionInfo(
         // encrypt=true + trustServerCertificate=true: use the mssql-jdbc 12.x secure default
         // while accepting the self-signed SQL Server container certificate without validating
         // the chain.
+        // The JDBC driver doesn't accept an IPv6 literal as the URL's server name; it has to go in
+        // the serverName property (and the port in portNumber).
+        String server = HostLiterals.isBareIpv6(host)
+            ? String.format(";serverName=%s;portNumber=%d", host, port)
+            : String.format("%s:%d", host, port);
         String jdbc = String.format(
-            "jdbc:sqlserver://%s:%d;databaseName=%s;user=%s;password=%s;"
+            "jdbc:sqlserver://%s;databaseName=%s;user=%s;password=%s;"
             + "encrypt=true;trustServerCertificate=true;",
-            host, port, db, login, password);
+            server, db, login, password);
 
         String ado = String.format(
             "Server=tcp:%s,%d;Initial Catalog=%s;Persist Security Info=False;"

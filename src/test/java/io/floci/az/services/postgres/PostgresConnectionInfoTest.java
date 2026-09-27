@@ -87,4 +87,14 @@ class PostgresConnectionInfoTest {
         assertTrue(info.psql().contains("15567"),    "psql port");
         assertTrue(info.dotNet().contains("15567"),  "dotnet port");
     }
+
+    @Test
+    @DisplayName("an IPv6 host is bracketed in URLs and bare in keyword forms")
+    void ipv6Host() {
+        PostgresConnectionInfo info = PostgresConnectionInfo.of("::1", 5432, "psqladmin", "Pass123!", "mydb");
+        assertTrue(info.jdbcUrl().startsWith("jdbc:postgresql://[::1]:5432/mydb"), info.jdbcUrl());
+        assertTrue(info.uri().startsWith("postgresql://psqladmin:Pass123!@[::1]:5432/mydb"), info.uri());
+        assertTrue(info.psql().contains("host=::1 "), info.psql());
+        assertEquals("::1", info.host());
+    }
 }

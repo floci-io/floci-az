@@ -1,5 +1,7 @@
 package io.floci.az.services.mariadb;
 
+import io.floci.az.core.docker.HostLiterals;
+
 /**
  * Aggregates connection string formats for an Azure Database for MariaDB container.
  *
@@ -30,15 +32,17 @@ public record MariaDbConnectionInfo(
     public static MariaDbConnectionInfo of(String host, int port,
                                             String login, String password,
                                             String database) {
+        // URL forms need an IPv6 literal in brackets; keyword forms (psql, CLI, .NET) take it bare
+        String urlHost = HostLiterals.forUrl(host);
         String db = (database != null && !database.isBlank()) ? database : "floci";
 
         String jdbc = String.format(
             "jdbc:mariadb://%s:%d/%s?user=%s&password=%s&useSSL=false",
-            host, port, db, login, password);
+            urlHost, port, db, login, password);
 
         String uri = String.format(
             "mariadb://%s:%s@%s:%d/%s",
-            login, password, host, port, db);
+            login, password, urlHost, port, db);
 
         String mysql = String.format(
             "mysql -h %s -P %d -u %s -p%s %s",
