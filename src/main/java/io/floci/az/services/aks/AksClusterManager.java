@@ -259,7 +259,12 @@ public class AksClusterManager {
     List<String> k3sServerArgs() {
         List<String> args = new ArrayList<>(List.of("server", "--disable=traefik", "--tls-san=localhost"));
         if (lifecycleManager.publishedEndpoints() && !"localhost".equals(lifecycleManager.daemonHost())) {
-            args.add("--tls-san=" + lifecycleManager.daemonHost());
+            String host = lifecycleManager.daemonHost();
+            // a SAN takes a bare IPv6 address, not the bracketed URL form
+            if (host.startsWith("[") && host.endsWith("]")) {
+                host = host.substring(1, host.length() - 1);
+            }
+            args.add("--tls-san=" + host);
         }
         return args;
     }

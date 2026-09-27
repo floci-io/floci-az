@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.net.InetAddress;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -175,7 +176,7 @@ class ContainerLifecycleManagerEndpointModeTest {
             "TCP://Build-Host:2376, Build-Host",
             "http://docker:2375, docker",
             "https://docker:2376, docker",
-            "'tcp://[::1]:2375', ::1",
+            "'tcp://[::1]:2375', [::1]",
             "unix:///var/run/docker.sock, localhost",
             "npipe:////./pipe/docker_engine, localhost",
             "'', localhost",
@@ -184,6 +185,27 @@ class ContainerLifecycleManagerEndpointModeTest {
     @DisplayName("the daemon hostname comes from the Docker host URI")
     void daemonHostname(String dockerHost, String expected) {
         assertEquals(expected, ContainerLifecycleManager.daemonHostname(dockerHost));
+    }
+
+    /** Keeping the brackets makes the host usable in URLs (AKS, ACR) and still valid for sockets. */
+    @Test
+    @DisplayName("published, IPv6 daemon: the bracketed host, usable in URLs and sockets")
+    void publishedIpv6Daemon() throws Exception {
+        mode(DockerEndpointMode.PUBLISHED, "tcp://[::1]:2375");
+        lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ContainerLifecycleManager.EndpointInfo ep = resolve();
+        assertEquals(new ContainerLifecycleManager.EndpointInfo("[::1]", HOST_PORT), ep);
+        assertEquals("https://[::1]:" + HOST_PORT, java.net.URI.create("https://" + ep.host() + ":" + ep.port()).toString());
+        assertTrue(InetAddress.getByName(ep.host()).isLoopbackAddress());
+    }
+
+    @Test
+    @DisplayName("resolveAutoEndpoint ignores published mode")
+    void autoEndpointIgnoresPublishedMode() {
+        mode(DockerEndpointMode.PUBLISHED, "tcp://docker:2375");
+        lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
+        assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, CONTAINER_PORT),
+                manager().resolveAutoEndpoint(CONTAINER_ID, CONTAINER_PORT));
     }
 
     @Test

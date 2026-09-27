@@ -922,6 +922,21 @@ public class ContainerLifecycleManager {
             LOG.warnv("endpoint-mode is published, but container port {0} has no published "
                     + "binding; addressing it as in auto mode", String.valueOf(containerPort));
         }
+        return resolveAutoEndpoint(inspect, containerPort, preferredNetwork);
+    }
+
+    /**
+     * The endpoint {@code auto} mode gives, whatever the configured mode: for callers whose
+     * address must pair with a container port rather than a published one (e.g. an ACI group's
+     * reported IP, which clients combine with the group's container ports).
+     */
+    public EndpointInfo resolveAutoEndpoint(String containerId, int containerPort) {
+        InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+        return resolveAutoEndpoint(inspect, containerPort, null);
+    }
+
+    private EndpointInfo resolveAutoEndpoint(InspectContainerResponse inspect, int containerPort,
+                                             String preferredNetwork) {
         if (!containerDetector.isRunningInContainer()) {
             // Native mode: use localhost and the bound host port
             var bindings = inspect.getNetworkSettings().getPorts().getBindings();
@@ -975,10 +990,9 @@ public class ContainerLifecycleManager {
                 if (scheme != null && host != null && !host.isBlank()
                         && (scheme.equalsIgnoreCase("tcp") || scheme.equalsIgnoreCase("http")
                             || scheme.equalsIgnoreCase("https"))) {
-                    // URI keeps the brackets around an IPv6 literal; sockets don't want them
-                    return host.startsWith("[") && host.endsWith("]")
-                            ? host.substring(1, host.length() - 1)
-                            : host;
+                    // An IPv6 literal keeps its brackets: callers build URLs from this host
+                    // (AKS, ACR), and InetAddress accepts the bracketed form for sockets too.
+                    return host;
                 }
             } catch (IllegalArgumentException e) {
                 LOG.debugv("Could not parse Docker host {0}: {1}", dockerHost, e.getMessage());

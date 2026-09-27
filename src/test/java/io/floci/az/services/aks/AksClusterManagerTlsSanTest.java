@@ -66,4 +66,13 @@ class AksClusterManagerTlsSanTest {
         lenient().when(lifecycleManager.daemonHost()).thenReturn("localhost");
         assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost"), manager().k3sServerArgs());
     }
+
+    @Test
+    @DisplayName("published mode, IPv6 daemon: the SAN is the bare address")
+    void publishedIpv6() {
+        lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
+        lenient().when(lifecycleManager.daemonHost()).thenReturn("[::1]");
+        assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=::1"),
+                manager().k3sServerArgs());
+    }
 }
