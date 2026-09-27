@@ -92,12 +92,15 @@ ln -s AGENTS.md COPILOT.md
 ## Adding a New Azure Service
 
 1. Create a package under `src/main/java/io/floci/az/services/<service>/`
-2. Add a `*Handler.java` implementing `AzureServiceHandler` (`getServiceType()`, `canHandle()`, `handle()`), and declare how requests reach it from `routes()`: an account suffix such as `-queue`, a host suffix such as `.blob.core.windows.net`, or an ARM provider such as `Microsoft.App`
-3. Add model classes (`*Models.java`) as needed. A service backed by a Docker sidecar also gets a `*ContainerManager`, a `*Manager` and, if the sidecar needs one, a `*ConfigGenerator`
-4. Add config entries in `EmulatorConfig.java` and `application.yml`
-5. Add tests (e.g. `*ServiceTest.java`), and compatibility tests in `./compatibility-tests/` for SDK-facing behavior
+2. Add a `*Handler.java` implementing `AzureServiceHandler` (`getServiceType()`, `canHandle()`, `handle()`), and implement `enabled(String serviceType)` to read the service's config flag
+3. Declare how requests reach the handler: return a `ServiceRoutes` from `routes()` naming its account suffix (such as `-queue`), host suffixes (such as `.blob.core.windows.net`) and ARM providers (such as `Microsoft.App`), and add the same literals to the golden lists in `RoutingTableAssemblyTest`, or `./mvnw test` fails
+4. Add model classes (`*Models.java`) as needed. A service backed by a Docker sidecar also gets a `*ContainerManager`, a `*Manager` and, if the sidecar needs one, a `*ConfigGenerator`
+5. Add config entries in `EmulatorConfig.java` and `application.yml`
+6. Add tests (e.g. `*ServiceTest.java`), and compatibility tests in `./compatibility-tests/` for SDK-facing behavior
 
-`AzureServiceRegistry` discovers handlers through CDI, and `AzureRoutingFilter` builds its dispatch tables from every handler's `routes()`, so a new service needs no changes to either. Copy an existing service's pattern before introducing a new one.
+`AzureServiceRegistry` discovers handlers through CDI, and `AzureRoutingFilter` builds its dispatch tables from every handler's `routes()`, so a service routed by an account suffix, host suffix or ARM provider needs no change to either. A service whose URLs fit none of those three (like IMDS, Entra ID, Microsoft Graph or the Cosmos root) needs a routing **stage** instead: a method added to the `stages` list in `AzureRoutingFilter`, ordered against its neighbours, plus its service type in `LITERAL_ROUTE_SERVICE_TYPES`. That set only declares the type for the routing-drift test; adding to it alone routes nothing.
+
+See [Service Implementation Pattern](AGENTS.md#service-implementation-pattern) in `AGENTS.md` for the full checklist, and copy an existing service's pattern before introducing a new one.
 
 Always implement the **real Azure wire protocol**. Never invent custom endpoints. The Azure SDKs and the Azure CLI must work against floci-az without modification.
 
