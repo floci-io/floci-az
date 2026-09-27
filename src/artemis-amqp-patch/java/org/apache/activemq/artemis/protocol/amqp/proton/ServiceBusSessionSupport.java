@@ -149,6 +149,35 @@ public final class ServiceBusSessionSupport {
       }
    }
 
+   /**
+    * Broker-name prefix of every Service Bus namespace broker. Must match the {@code <name>}
+    * that {@code ServiceBusConfigGenerator} writes; {@code ServiceBusConfigGeneratorTest} pins
+    * the two together.
+    */
+   public static final String SERVICE_BUS_BROKER_PREFIX = "floci-az-servicebus-";
+
+   /** True on a Service Bus namespace broker, false on the Event Hubs broker (or any other). */
+   public static boolean isServiceBusBroker(ActiveMQServer server) {
+      if (server == null || server.getConfiguration() == null) {
+         return false;
+      }
+      String name = server.getConfiguration().getName();
+      return name != null && name.startsWith(SERVICE_BUS_BROKER_PREFIX);
+   }
+
+   /**
+    * The entity path a receiver's source address names on this broker. A Service Bus broker
+    * reduces every scheme-and-host spelling ({@link AmqpEntityAddress#toServiceBusEntityPath});
+    * any other broker keeps the event-hub-only reduction ({@link AmqpEntityAddress#toEntityPath}),
+    * which must leave namespace-carrying URIs such as {@code amqp://host/ns/Subscriptions/$Default}
+    * whole. Both then get the Service Bus case normalization, as before.
+    */
+   public static String sourceEntityPath(ActiveMQServer server, String address) {
+      return normalizeEntityPath(isServiceBusBroker(server)
+                                    ? AmqpEntityAddress.toServiceBusEntityPath(address)
+                                    : AmqpEntityAddress.toEntityPath(address));
+   }
+
    public static String normalizeEntityPath(String entityPath) {
       if (entityPath == null) {
          return null;

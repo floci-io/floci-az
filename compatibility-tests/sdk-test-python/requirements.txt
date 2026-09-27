@@ -8,5 +8,7 @@ azure-keyvault-secrets>=4.7.0
 azure-keyvault-keys>=4.7.0
 azure-identity>=1.15.0
 azure-core>=1.30.0
+# 7.15.0 decodes AMQP frames with omitted trailing fields (as Artemis sends them); earlier releases can't connect. Pre-release until 7.15.0 ships.
+azure-servicebus==7.15.0b2
 redis==5.0.8
 requests>=2.31.0
