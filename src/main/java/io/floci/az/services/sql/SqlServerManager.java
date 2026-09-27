@@ -127,7 +127,7 @@ public class SqlServerManager {
             String reachableHost;
             int reachablePort;
             if (containerManager.publishedEndpoints()) {
-                reachableHost = containerManager.daemonHost();
+                reachableHost = containerManager.daemonAddress();
                 reachablePort = hostPort;
             } else if (containerDetector.isRunningInContainer()) {
                 reachableHost = containerName;

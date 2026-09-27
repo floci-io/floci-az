@@ -12,10 +12,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 
 /**
@@ -61,7 +64,7 @@ class AciGroupIpTest {
 
     private void inContainer(boolean published) {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(published);
-        lenient().when(lifecycleManager.daemonHost()).thenReturn("docker");
+        lenient().when(lifecycleManager.daemonAddress()).thenReturn("docker");
         lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
         lenient().when(lifecycleManager.resolveAutoEndpoint(CONTAINER_ID, 80))
                 .thenReturn(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, 80));
@@ -94,5 +97,61 @@ class AciGroupIpTest {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
         lenient().when(containerDetector.isRunningInContainer()).thenReturn(false);
         assertEquals("127.0.0.1", manager().groupIp(group(List.of(80), List.of(30080))));
+    }
+
+    @Test
+    @DisplayName("published mode, IPv6 daemon: ipAddress.ip is the bare address")
+    void publishedIpv6() {
+        inContainer(true);
+        lenient().when(lifecycleManager.daemonAddress()).thenReturn("::1");
+        assertEquals("::1", manager().groupIp(group(List.of(80), List.of(80))));
+    }
+
+    // ---------------------------------------------------------- published port allocation
+
+    private void portTaken(int port) {
+        lenient().when(portAllocator.allocate(port, port)).thenThrow(new IllegalStateException("port in use"));
+    }
+
+    @Test
+    @DisplayName("published mode: each port is published on its own number")
+    void publishedAllocatesSameNumbers() {
+        lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
+        lenient().when(portAllocator.allocate(80, 80)).thenReturn(80);
+        lenient().when(portAllocator.allocate(443, 443)).thenReturn(443);
+        List<Integer> allocated = new ArrayList<>();
+        assertEquals(Map.of(80, 80, 443, 443),
+                manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
+        assertEquals(List.of(80, 443), allocated);
+    }
+
+    @Test
+    @DisplayName("published mode: a port already in use fails the start, naming the port")
+    void publishedConflictFails() {
+        lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
+        lenient().when(portAllocator.allocate(80, 80)).thenReturn(80);
+        portTaken(443);
+        List<Integer> allocated = new ArrayList<>();
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
+        assertTrue(e.getMessage().contains("port 443 is already in use"), e.getMessage());
+        // only the port that was allocated is recorded, so startGroup releases exactly that one
+        assertEquals(List.of(80), allocated);
+    }
+
+    @Test
+    @DisplayName("auto mode: a port already in use falls back to the configured range, as before")
+    void autoConflictFallsBack() {
+        EmulatorConfig.ServicesConfig services = org.mockito.Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.AciConfig aci = org.mockito.Mockito.mock(EmulatorConfig.AciConfig.class);
+        lenient().when(config.services()).thenReturn(services);
+        lenient().when(services.aci()).thenReturn(aci);
+        lenient().when(aci.basePort()).thenReturn(30000);
+        lenient().when(aci.maxPort()).thenReturn(30099);
+        lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(false);
+        portTaken(80);
+        lenient().when(portAllocator.allocate(30000, 30099)).thenReturn(30000);
+        assertEquals(Map.of(80, 30000),
+                manager().allocatePublishedPorts(group(List.of(80), null), new ArrayList<>()));
     }
 }

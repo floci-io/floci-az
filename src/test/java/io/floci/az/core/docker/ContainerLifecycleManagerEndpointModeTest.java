@@ -200,6 +200,16 @@ class ContainerLifecycleManagerEndpointModeTest {
     }
 
     @Test
+    @DisplayName("daemonAddress is daemonHost without an IPv6 literal's URL brackets")
+    void daemonAddressIsBare() {
+        mode(DockerEndpointMode.PUBLISHED, "tcp://[::1]:2375");
+        assertEquals("[::1]", manager().daemonHost());
+        assertEquals("::1", manager().daemonAddress());
+        mode(DockerEndpointMode.PUBLISHED, "tcp://docker:2375");
+        assertEquals("docker", manager().daemonAddress());
+    }
+
+    @Test
     @DisplayName("resolveAutoEndpoint ignores published mode")
     void autoEndpointIgnoresPublishedMode() {
         mode(DockerEndpointMode.PUBLISHED, "tcp://docker:2375");

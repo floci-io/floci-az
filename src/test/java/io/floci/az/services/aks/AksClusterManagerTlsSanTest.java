@@ -54,7 +54,7 @@ class AksClusterManagerTlsSanTest {
     @DisplayName("published mode: the daemon's host is added")
     void publishedMode() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
-        lenient().when(lifecycleManager.daemonHost()).thenReturn("docker");
+        lenient().when(lifecycleManager.daemonAddress()).thenReturn("docker");
         assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=docker"),
                 manager().k3sServerArgs());
     }
@@ -63,7 +63,7 @@ class AksClusterManagerTlsSanTest {
     @DisplayName("published mode with a local daemon: no duplicate localhost")
     void publishedLocalDaemon() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
-        lenient().when(lifecycleManager.daemonHost()).thenReturn("localhost");
+        lenient().when(lifecycleManager.daemonAddress()).thenReturn("localhost");
         assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost"), manager().k3sServerArgs());
     }
 
@@ -71,7 +71,7 @@ class AksClusterManagerTlsSanTest {
     @DisplayName("published mode, IPv6 daemon: the SAN is the bare address")
     void publishedIpv6() {
         lenient().when(lifecycleManager.publishedEndpoints()).thenReturn(true);
-        lenient().when(lifecycleManager.daemonHost()).thenReturn("[::1]");
+        lenient().when(lifecycleManager.daemonAddress()).thenReturn("::1");
         assertEquals(List.of("server", "--disable=traefik", "--tls-san=localhost", "--tls-san=::1"),
                 manager().k3sServerArgs());
     }

@@ -226,8 +226,13 @@ public class AciContainerGroupManager {
     /**
      * Pre-allocates a host port for each published group port, preferring the container port
      * itself so `localhost:<port>` works natively, falling back to the configured range.
+     *
+     * <p>In published endpoint mode there is no fallback. Every group is reached at the Docker
+     * daemon's host, and clients pair that address with the group's advertised container ports,
+     * so a port published on any other number would be unreachable (or reach another group
+     * holding the number). A port already in use there fails the start instead.
      */
-    private Map<Integer, Integer> allocatePublishedPorts(ContainerGroup group, List<Integer> allocated) {
+    Map<Integer, Integer> allocatePublishedPorts(ContainerGroup group, List<Integer> allocated) {
         Map<Integer, Integer> bindings = new LinkedHashMap<>();
         for (Map<String, Object> port : listOfMaps(ipAddress(group).get("ports"))) {
             int containerPort = ((Number) port.get("port")).intValue();
@@ -235,6 +240,12 @@ public class AciContainerGroupManager {
             try {
                 hostPort = portAllocator.allocate(containerPort, containerPort);
             } catch (Exception e) {
+                if (lifecycleManager.publishedEndpoints()) {
+                    throw new IllegalStateException("Container group " + group.getName() + ": port "
+                            + containerPort + " is already in use on the Docker daemon host. In "
+                            + "published endpoint mode every group is reached at that host, so a "
+                            + "group's ports must be free there.", e);
+                }
                 hostPort = portAllocator.allocate(config.services().aci().basePort(),
                         config.services().aci().maxPort());
             }
@@ -310,7 +321,7 @@ public class AciContainerGroupManager {
      */
     public String groupIp(ContainerGroup group) {
         if (lifecycleManager.publishedEndpoints() && publishedOnAdvertisedPorts(group)) {
-            return lifecycleManager.daemonHost();
+            return lifecycleManager.daemonAddress();
         }
         if (containerDetector.isRunningInContainer()) {
             String primaryId = primaryContainerId(group);

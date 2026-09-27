@@ -981,6 +981,16 @@ public class ContainerLifecycleManager {
         return host;
     }
 
+    /**
+     * The Docker daemon's host as an address, for fields that hold one (an ACI group's
+     * {@code ipAddress.ip}, the host a service reports to clients, a certificate SAN): the same as
+     * {@link #daemonHost()} but with an IPv6 literal's URL brackets removed.
+     */
+    public String daemonAddress() {
+        String host = daemonHost();
+        return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+    }
+
     static String daemonHostname(String dockerHost) {
         if (dockerHost != null && !dockerHost.isBlank()) {
             try {
