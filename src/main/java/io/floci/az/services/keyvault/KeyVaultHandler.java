@@ -152,13 +152,13 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
         }
 
         // Keys data plane
-        if ("keys".equals(path)) {
+        if ("keys".equals(routePath)) {
             return "GET".equals(method) ? keys.listKeys(account, hsm) : methodNotAllowed();
         }
         if (path.startsWith("keys/")) {
             return handleKeys(req, method, account, path.substring("keys/".length()), hsm);
         }
-        if ("deletedkeys".equals(path)) {
+        if ("deletedkeys".equals(routePath)) {
             return "GET".equals(method) ? keys.listDeletedKeys(account, hsm) : methodNotAllowed();
         }
         if (path.startsWith("deletedkeys/")) {

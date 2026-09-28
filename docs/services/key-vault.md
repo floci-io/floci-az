@@ -23,6 +23,8 @@ Self-signed certificate issuance also supports the Key Vault Certificates SDK.
 - **Keys CRUD** — create/import RSA (`RSA`, `RSA-HSM`), EC (`EC`, `EC-HSM`, P-256/P-384/P-521), and
   oct (`oct`, `oct-HSM`) keys; get/list/list-versions; PATCH attributes
 - **Soft-delete lifecycle** — delete → `deletedkeys` namespace → recover or purge
+- **Optional timestamps**: unset `nbf` and `exp` attributes are omitted from key responses; supplied values remain numeric Unix timestamps
+- **Optional trailing slash**: `/keys` and `/deletedkeys` accept a trailing slash, which the .NET `KeyClient` always sends when listing
 - **Backup/restore** — `POST /keys/{name}/backup` and `POST /keys/restore` (see deviations below)
 - **Rotation** — `POST /keys/{name}/rotate` and rotation-policy management (`/keys/{name}/rotationpolicy`)
 - **Crypto ops** — `encrypt`/`decrypt` (RSA-OAEP, RSA-OAEP-256, RSA1_5; AES-GCM A128/A192/A256),
