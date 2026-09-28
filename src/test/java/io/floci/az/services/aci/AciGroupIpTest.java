@@ -19,7 +19,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /**
  * An ACI group reports one IP, and clients combine it with the group's container ports. In
@@ -124,8 +128,8 @@ class AciGroupIpTest {
                 manager().allocatePublishedPorts(group(List.of(80, 443), null), allocated));
         assertEquals(List.of(80, 443), allocated);
         // floci-az's own host says nothing about a remote daemon's ports: never probe it
-        org.mockito.Mockito.verify(portAllocator, org.mockito.Mockito.never())
-                .allocate(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(portAllocator, never())
+                .allocate(anyInt(), anyInt());
     }
 
     @Test
@@ -145,8 +149,8 @@ class AciGroupIpTest {
     @Test
     @DisplayName("auto mode: a port already in use falls back to the configured range, as before")
     void autoConflictFallsBack() {
-        EmulatorConfig.ServicesConfig services = org.mockito.Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.AciConfig aci = org.mockito.Mockito.mock(EmulatorConfig.AciConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.AciConfig aci = mock(EmulatorConfig.AciConfig.class);
         lenient().when(config.services()).thenReturn(services);
         lenient().when(services.aci()).thenReturn(aci);
         lenient().when(aci.basePort()).thenReturn(30000);

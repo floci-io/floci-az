@@ -1015,8 +1015,8 @@ public class ContainerLifecycleManager {
         if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getPorts() == null) {
             return OptionalInt.empty();
         }
-        var bindings = inspect.getNetworkSettings().getPorts().getBindings();
-        var binding = bindings == null ? null : bindings.get(ExposedPort.tcp(containerPort));
+        Map<ExposedPort, Ports.Binding[]> bindings = inspect.getNetworkSettings().getPorts().getBindings();
+        Ports.Binding[] binding = bindings == null ? null : bindings.get(ExposedPort.tcp(containerPort));
         if (binding == null || binding.length == 0 || binding[0].getHostPortSpec() == null) {
             return OptionalInt.empty();
         }
