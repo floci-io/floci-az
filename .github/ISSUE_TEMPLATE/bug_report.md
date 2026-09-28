@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: An AWS API call returns wrong behavior or an error
+about: An Azure API call returns wrong behavior or an error
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -8,11 +8,11 @@ assignees: ''
 
 ## Service
 
-<!-- e.g. Function, Store, etc -->
+<!-- e.g. Blob Storage, Key Vault, Service Bus -->
 
 ## Azure API Action
 
-<!-- e.g. .. -->
+<!-- e.g. Put Blob, Set Secret, Create Queue, or the ARM operation -->
 
 ## Expected behavior
 
@@ -20,7 +20,7 @@ assignees: ''
 
 ## Actual behavior
 
-<!-- What Floci-az returns — include the full error message or response body -->
+<!-- What floci-az returns — include the full error message or response body -->
 
 ## Reproduction
 
@@ -29,6 +29,6 @@ assignees: ''
 
 ## Environment
 
-- Floci-az version / image tag:
-- Java SDK version (if applicable):
-- How you're running Floci-az (Docker / native / `mvn quarkus:dev`):
+- floci-az version / image tag:
+- Azure SDK or CLI and version (e.g. Python `azure-storage-blob` 12.23.1, Azure CLI 2.x):
+- How you're running floci-az (Docker / native / `mvn quarkus:dev`):

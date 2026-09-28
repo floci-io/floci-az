@@ -1,5 +1,6 @@
 package io.floci.az.core;
 
+import io.floci.az.core.ServiceRoutes.SuffixRoute;
 import io.floci.az.core.auth.AuthPipeline;
 import io.floci.az.services.arm.ArmHandler;
 import io.floci.az.services.monitor.MonitorHandler;
@@ -19,15 +20,14 @@ import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
-
-import io.floci.az.core.ServiceRoutes.SuffixRoute;
 
 @ApplicationScoped
 public class AzureRoutingFilter {
@@ -313,7 +313,7 @@ public class AzureRoutingFilter {
      * asserts each one actually resolves to a registered handler.
      */
     Set<String> routedServiceTypes() {
-        Set<String> types = new java.util.TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
+        Set<String> types = new TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
         hostRoutes.forEach(route -> types.add(route.serviceType()));
         accountSuffixRoutes.forEach(route -> types.add(route.serviceType()));
         providerRoutes.forEach(route -> types.add(route.serviceType()));

@@ -4,8 +4,6 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
-
-import java.util.List;
 import io.floci.az.services.cosmos.CosmosHandler;
 import io.floci.az.services.cosmos.table.CosmosTableApiHandler;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -14,6 +12,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -196,7 +195,7 @@ public class CosmosEngineHandler implements AzureServiceHandler {
         Optional<CosmosConnectionInfo> connInfo = lifecycleManager.getIfRunning(api);
 
         String status = connInfo.isPresent() ? "running" : "stopped";
-        var body = new LinkedHashMap<String, Object>();
+        LinkedHashMap<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("api",           api.name());
         body.put("engine",        engine.displayName());
         body.put("status",        status);

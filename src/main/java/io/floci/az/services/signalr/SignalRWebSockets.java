@@ -16,6 +16,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,7 +58,7 @@ public class SignalRWebSockets {
         boolean server = endpoint.equals("server");
         String hubName = context.request().getParam("hub");
         if (hubName == null || hubName.isBlank()) { error(context, 400, "BadRequest", "hub is required"); return; }
-        var hub = new SignalRConnections.Hub(account, hubName.toLowerCase(java.util.Locale.ROOT));
+        SignalRConnections.Hub hub = new SignalRConnections.Hub(account, hubName.toLowerCase(Locale.ROOT));
         String authorization = context.request().getHeader("Authorization");
         String token = authorization != null && authorization.startsWith("Bearer ") ? authorization.substring(7)
                 : context.request().getParam("access_token");

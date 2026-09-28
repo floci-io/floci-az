@@ -9,13 +9,14 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Objects;
-import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Manages function code packages on disk.
@@ -153,7 +154,7 @@ public class FunctionCodeStore {
 
     private static void deleteDir(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
-        try (var walk = Files.walk(dir)) {
+        try (Stream<Path> walk = Files.walk(dir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try { Files.delete(p); } catch (IOException ignored) {}
             });

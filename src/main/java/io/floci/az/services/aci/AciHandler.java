@@ -26,6 +26,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.InputStream;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -883,7 +884,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return MAPPER.convertValue(node, Map.class);
     }
 
-    private JsonNode readBody(java.io.InputStream stream) {
+    private JsonNode readBody(InputStream stream) {
         try {
             if (stream == null || stream.available() == 0) { return MAPPER.createObjectNode(); }
             return MAPPER.readTree(stream);

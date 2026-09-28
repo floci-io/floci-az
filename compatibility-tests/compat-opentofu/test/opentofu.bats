@@ -57,6 +57,17 @@ setup() {
 
 # --- Spot Checks ---
 
+@test "OpenTofu: azurerm_location resolves the configured location" {
+    cd "$TOFU_DIR"
+    run tofu output -raw location_display_name
+    assert_success
+    assert_output "East US"
+
+    run tofu output -raw location_zone_count
+    assert_success
+    assert_output "3"
+}
+
 @test "OpenTofu: resource group created" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}"
     assert_success

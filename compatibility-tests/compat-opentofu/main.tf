@@ -3,6 +3,19 @@ variable "location" {
   default = "eastus"
 }
 
+# Reads GET /subscriptions/{sub}/locations; azurerm matches the entry by name and regionType Physical.
+data "azurerm_location" "current" {
+  location = var.location
+}
+
+output "location_display_name" {
+  value = data.azurerm_location.current.display_name
+}
+
+output "location_zone_count" {
+  value = length(data.azurerm_location.current.zone_mappings)
+}
+
 resource "azurerm_resource_group" "rg" {
   name     = "floci-test-rg"
   location = var.location

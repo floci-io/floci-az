@@ -3,6 +3,14 @@ package io.floci.az.services.arm;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ArmResourceFilter;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.services.apim.ApiManagementHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
@@ -10,13 +18,6 @@ import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.network.NetworkHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
-import io.floci.az.core.arm.ArmErrors;
-import io.floci.az.core.arm.ArmJson;
-import io.floci.az.core.arm.ArmPaths;
-import io.floci.az.core.arm.ArmProviderService;
-import io.floci.az.core.arm.ArmResourceFilter;
-import io.floci.az.core.arm.ArmResources;
-import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -24,7 +25,15 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.*;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
@@ -51,8 +60,6 @@ public class ArmHandler implements AzureServiceHandler {
     static final String FAKE_STORAGE_KEY =
             "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
 
-    private static final String SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000001";
-    private static final String TENANT_ID       = "00000000-0000-0000-0000-000000000002";
     private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
 
     // In-memory ARM resource state — no StorageBackend needed, these are ephemeral
@@ -155,11 +162,12 @@ public class ArmHandler implements AzureServiceHandler {
         // GET /tenants — the az CLI enumerates tenants during `az login`.
         if (path.matches("tenants([?].*)?")) {
             return Response.ok(Map.of("value", List.of(Map.of(
-                    "id",                "/tenants/" + TENANT_ID,
-                    "tenantId",          TENANT_ID,
+                    "id",                "/tenants/" + tenantId(),
+                    "tenantId",          tenantId(),
                     "displayName",       "floci-az local",
                     "tenantCategory",    "Home",
                     "defaultDomain",     "floci-az.local",
+                    "domains",           List.of("floci-az.local"),
                     "tenantType",        "AAD"
             )))).build();
         }
@@ -167,7 +175,7 @@ public class ArmHandler implements AzureServiceHandler {
         // ── Subscription list ─────────────────────────────────────────────────
         // GET /subscriptions — the az CLI enumerates subscriptions during `az login`.
         if (path.matches("subscriptions([?].*)?")) {
-            return Response.ok(Map.of("value", List.of(subscriptionBody(SUBSCRIPTION_ID)))).build();
+            return Response.ok(Map.of("value", List.of(subscriptionBody(defaultSubscriptionId())))).build();
         }
 
         // ── Subscription ──────────────────────────────────────────────────────
@@ -176,10 +184,17 @@ public class ArmHandler implements AzureServiceHandler {
             return subscriptionResponse(extractSub(path));
         }
 
+        // ── Location list ─────────────────────────────────────────────────────
+        // GET /subscriptions/{sub}/locations — `az account list-locations`, the CLI's display-name
+        // location translation, and azurerm's data.azurerm_location all read this.
+        if (path.matches("subscriptions/[^/?]+/locations([?].*)?")) {
+            return Response.ok(Map.of("value", AzureLocations.forSubscription(extractSub(path)))).build();
+        }
+
         // ── checkNameAvailability ──────────────────────────────────────────────
         // az CLI probes this before creating storage accounts / key vaults / etc.
         if (path.matches("subscriptions/[^/]+/providers/Microsoft\\.[^/]+/checkNameAvailability([?].*)?")) {
-            return Response.ok(Map.of("nameAvailable", true)).build();
+            return checkNameAvailability(req, path);
         }
 
         // ── Cross-subscription storage account listing ─────────────────────────
@@ -243,7 +258,12 @@ public class ArmHandler implements AzureServiceHandler {
 
         // GET subscriptions/{sub}/resourceGroups  (list)
         if (lc.matches("subscriptions/[^/]+/resourcegroups([?].*)?")) {
-            return Response.ok(Map.of("value", new ArrayList<>(resourceGroups.values()))).build();
+            String prefix = sub.toLowerCase() + "/";
+            List<Map<String, Object>> groups = resourceGroups.entrySet().stream()
+                    .filter(e -> e.getKey().toLowerCase().startsWith(prefix))
+                    .map(Map.Entry::getValue)
+                    .toList();
+            return Response.ok(Map.of("value", groups)).build();
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}  (no trailing segments)
@@ -402,7 +422,10 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
+    private synchronized Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
+        if (ownedElsewhere(webApps, sub, rg, appName).isPresent()) {
+            return webAppNameTaken(appName);
+        }
         Map<String, Object> body = parseBody(req);
         Map<String, Object> properties = cast(body.get("properties"));
         Map<String, Object> siteConfig = cast(properties.get("siteConfig"));
@@ -493,6 +516,15 @@ public class ArmHandler implements AzureServiceHandler {
     private Response handleStorage(AzureRequest req, String path, String method, String sub) {
         String rg = extractRg(path);
 
+        // Containers, queues and keys reach the shared data plane, which knows only the account name.
+        // Under a scope that does not own the account they must stop here, before touching the owner's data.
+        if (path.contains("/storageAccounts/") && !path.matches(".*/storageAccounts/[^/?]+([?].*)?")) {
+            String account = extractResourceName(path, "storageAccounts");
+            if (ownedElsewhere(storageAccounts, sub, rg, account).isPresent()) {
+                return armNotFound("storageAccounts/" + account);
+            }
+        }
+
         // POST .../storageAccounts/{name}/listKeys
         if (path.contains("/storageAccounts/") && path.endsWith("/listKeys")) {
             String account = extractResourceName(path, "storageAccounts");
@@ -546,7 +578,15 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateStorageAccount(AzureRequest req, String sub, String rg, String account) {
+    private synchronized Response createOrUpdateStorageAccount(AzureRequest req, String sub, String rg, String account) {
+        Optional<Map<String, Object>> owner = ownedElsewhere(storageAccounts, sub, rg, account);
+        if (owner.isPresent()) {
+            return sub.equalsIgnoreCase((String) owner.get().get("_sub"))
+                    ? ArmErrors.error(409, "StorageAccountInAnotherResourceGroup",
+                            "The account " + account + " is already in another resource group in this subscription.")
+                    : ArmErrors.error(409, "StorageAccountAlreadyTaken",
+                            "The storage account named " + account + " is already taken.");
+        }
         Map<String, Object> body = parseBody(req);
         String location = bodyString(body, "location", "eastus");
         // Return domain-based storage endpoints so the azurerm provider can parse the account name.
@@ -617,7 +657,7 @@ public class ArmHandler implements AzureServiceHandler {
                         "publicAccess",      "None",
                         "leaseStatus",       "Unlocked",
                         "leaseState",        "Available",
-                        "lastModifiedTime",  java.time.Instant.now().toString(),
+                        "lastModifiedTime",  Instant.now().toString(),
                         "etag",              "\"" + UUID.randomUUID() + "\"");
                 yield Response.status(201).entity(Map.of(
                         "id",         path,
@@ -712,7 +752,11 @@ public class ArmHandler implements AzureServiceHandler {
         return armNotFound(path);
     }
 
-    private Response createOrUpdateKeyVault(AzureRequest req, String sub, String rg, String vaultName) {
+    private synchronized Response createOrUpdateKeyVault(AzureRequest req, String sub, String rg, String vaultName) {
+        if (ownedElsewhere(keyVaults, sub, rg, vaultName).isPresent()) {
+            return ArmErrors.error(409, "VaultAlreadyExists", "The vault name '" + vaultName
+                    + "' is already in use. Vault names are globally unique so it is possible that the name is already taken.");
+        }
         Map<String, Object> body     = parseBody(req);
         String location              = bodyString(body, "location", "eastus");
         // Use vault.azure.net domain format so the azurerm provider accepts the URI.
@@ -720,7 +764,7 @@ public class ArmHandler implements AzureServiceHandler {
         String vaultUri              = vaultUri(vaultName);
         Map<String, Object> bodyProps = body.containsKey("properties")
                 ? cast(body.get("properties")) : Map.of();
-        String tenantId = bodyString(bodyProps, "tenantId", TENANT_ID);
+        String tenantId = bodyString(bodyProps, "tenantId", tenantId());
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("_sub",  sub);
@@ -752,13 +796,17 @@ public class ArmHandler implements AzureServiceHandler {
         return Response.ok(stripInternal(resource)).build();
     }
 
-    private Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
+    private synchronized Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
+        if (ownedElsewhere(managedHsms, sub, rg, hsmName).isPresent()) {
+            // No public source gives the Managed HSM create-conflict code; ARM's generic Conflict stands in.
+            return ArmErrors.error(409, "Conflict", "The managed HSM name '" + hsmName + "' is already in use.");
+        }
         Map<String, Object> body     = parseBody(req);
         String location              = bodyString(body, "location", "eastus");
         String hsmUri                = "https://" + hsmName + ".managedhsm.azure.net/";
         Map<String, Object> bodyProps = body.containsKey("properties")
                 ? cast(body.get("properties")) : Map.of();
-        String tenantId = bodyString(bodyProps, "tenantId", TENANT_ID);
+        String tenantId = bodyString(bodyProps, "tenantId", tenantId());
         @SuppressWarnings("unchecked")
         List<String> initialAdminObjectIds = bodyProps.get("initialAdminObjectIds") instanceof List<?> l
                 ? (List<String>) l : List.of();
@@ -828,20 +876,83 @@ public class ArmHandler implements AzureServiceHandler {
         return Response.ok(resource).build();
     }
 
+    // ── Global resource names ────────────────────────────────────────────────
+    // Storage accounts, vaults, managed HSMs and web apps are DNS names, unique across every
+    // subscription. A create under a second scope is a name conflict, never a second resource.
+    // Their create methods are synchronized so the ownership check and the write are one step.
+
+    /** The resource named {@code name} in {@code store} when it belongs to a scope other than {@code sub}/{@code rg}. */
+    private static Optional<Map<String, Object>> ownedElsewhere(Map<String, Map<String, Object>> store,
+                                                               String sub, String rg, String name) {
+        ArmScope scope = new ArmScope(sub, rg);
+        return store.values().stream()
+                .filter(r -> name.equalsIgnoreCase((String) r.get("name")))
+                .filter(r -> !scope.owns((String) r.get("_sub"), (String) r.get("_rg")))
+                .findFirst();
+    }
+
+    /** App Service answers a taken site name in its own error shape, not the ARM CloudError envelope. */
+    private static Response webAppNameTaken(String appName) {
+        Map<String, Object> errorEntity = new LinkedHashMap<>();
+        errorEntity.put("ExtendedCode", "54001");
+        errorEntity.put("MessageTemplate", "Website with given name {0} already exists.");
+        errorEntity.put("Parameters", List.of(appName));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("Code", "Conflict");
+        body.put("Message", "Website with given name " + appName + " already exists.");
+        body.put("ErrorEntity", errorEntity);
+        return Response.status(409).entity(body).build();
+    }
+
+    /**
+     * {@code POST .../providers/{namespace}/checkNameAvailability}. Storage accounts and vaults are answered
+     * from this handler's own stores; any other namespace routed here has no store to consult and reports
+     * the name as available.
+     */
+    private Response checkNameAvailability(AzureRequest req, String path) {
+        String name = bodyString(parseBody(req), "name", "");
+        Map<String, Map<String, Object>> store = path.contains("/Microsoft.Storage/") ? storageAccounts
+                : path.contains("/Microsoft.KeyVault/") ? keyVaults
+                : null;
+        boolean taken = store != null && store.values().stream()
+                .anyMatch(r -> name.equalsIgnoreCase((String) r.get("name")));
+        if (!taken) {
+            return Response.ok(Map.of("nameAvailable", true)).build();
+        }
+        String message = store == storageAccounts
+                ? "The storage account named " + name + " is already taken."
+                : "The vault name '" + name + "' is already in use.";
+        return Response.ok(Map.of("nameAvailable", false, "reason", "AlreadyExists", "message", message)).build();
+    }
+
     // ── Subscription ─────────────────────────────────────────────────────────
 
     private Response subscriptionResponse(String sub) {
         return Response.ok(subscriptionBody(sub)).build();
     }
 
-    private static Map<String, Object> subscriptionBody(String sub) {
+    private Map<String, Object> subscriptionBody(String sub) {
         return Map.of(
-                "id",             "/subscriptions/" + sub,
-                "subscriptionId", sub,
-                "displayName",    "floci-az local",
-                "state",          "Enabled",
-                "tenantId",       TENANT_ID
+                "id",                   "/subscriptions/" + sub,
+                "subscriptionId",       sub,
+                "displayName",          "floci-az local",
+                "state",                "Enabled",
+                "tenantId",             tenantId(),
+                "authorizationSource",  "RoleBased",
+                "managedByTenants",     List.of(),
+                "subscriptionPolicies", Map.of(
+                        "locationPlacementId", "Internal_2014-09-01",
+                        "quotaId",             "Internal_2014-09-01",
+                        "spendingLimit",       "Off")
         );
+    }
+
+    private String defaultSubscriptionId() {
+        return config.services().arm().defaultSubscriptionId();
+    }
+
+    private String tenantId() {
+        return config.services().entra().defaultTenantId();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

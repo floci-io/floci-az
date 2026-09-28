@@ -1,5 +1,6 @@
 package io.floci.az.services.blob;
 
+import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -61,6 +62,6 @@ public record BlobLease(String leaseId, int durationSeconds, Instant expiresAt, 
         if (breakAt == null || !now.isBefore(breakAt)) {
             return 0;
         }
-        return java.time.Duration.between(now, breakAt).getSeconds();
+        return Duration.between(now, breakAt).getSeconds();
     }
 }

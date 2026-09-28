@@ -3,7 +3,9 @@ package io.floci.az.config;
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
 import io.smallrye.config.WithName;
+
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @ConfigMapping(prefix = "floci-az")
@@ -189,6 +191,14 @@ public interface EmulatorConfig {
     interface ArmConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * The subscription {@code GET /subscriptions} lists, and so the one {@code az login} selects.
+         * {@code GET /subscriptions/{sub}} still answers for any id, so clients configured with their
+         * own subscription keep working.
+         */
+        @WithDefault("00000000-0000-0000-0000-000000000001")
+        String defaultSubscriptionId();
     }
 
     /** Microsoft.Network — virtual networks, subnets, NICs, public IPs, NSGs, and DNS zones. */
@@ -548,7 +558,7 @@ public interface EmulatorConfig {
         String mode();
 
         /** Base64 account keys used to validate shared-key Blob service SAS signatures. */
-        java.util.Map<String, String> storageAccountKeys();
+        Map<String, String> storageAccountKeys();
     }
 
     interface AppConfigServiceConfig {

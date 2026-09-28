@@ -1,16 +1,17 @@
 package io.floci.az.services.aks;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.model.Frame;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.api.model.Frame;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,6 +19,8 @@ import org.jboss.logging.Logger;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -199,7 +202,7 @@ public class AksClusterManager {
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        var dockerClient = lifecycleManager.getDockerClient();
+        DockerClient dockerClient = lifecycleManager.getDockerClient();
         ExecCreateCmdResponse exec = dockerClient
                 .execCreateCmd(containerId)
                 .withCmd(cmd)
@@ -238,13 +241,13 @@ public class AksClusterManager {
         try {
             javax.net.ssl.TrustManager[] trustAll = new javax.net.ssl.TrustManager[]{
                 new javax.net.ssl.X509TrustManager() {
-                    public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
-                    public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                    public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
+                    public X509Certificate[] getAcceptedIssuers() { return null; }
+                    public void checkClientTrusted(X509Certificate[] c, String a) {}
+                    public void checkServerTrusted(X509Certificate[] c, String a) {}
                 }
             };
             javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new java.security.SecureRandom());
+            sc.init(null, trustAll, new SecureRandom());
             conn.setSSLSocketFactory(sc.getSocketFactory());
             conn.setHostnameVerifier((h, s) -> true);
         } catch (Exception e) {

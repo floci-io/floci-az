@@ -1,11 +1,11 @@
 package io.floci.az.services.sql;
 
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -113,7 +113,7 @@ public class SqlServerManager {
         // back. Guarding each individual step instead is what let this leak twice already.
         boolean claimTransferred = false;
         try {
-            var info = containerManager.createAndStart(spec);
+            ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
             String containerId = info.containerId();
 
             int hostPort = Optional.ofNullable(info.getEndpoint(SQL_CONTAINER_PORT))

@@ -2,12 +2,14 @@ package io.floci.az.services.servicebus;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -834,10 +836,10 @@ public class ServiceBusNamespaceManager {
 
     static String jolokiaMessageCountRequest(
             String namespaceName, List<String> queueNames) throws IOException {
-        var requests = MAPPER.createArrayNode();
+        ArrayNode requests = MAPPER.createArrayNode();
         for (String queueName : queueNames) {
             for (String suffix : List.of("", DEAD_LETTER_QUEUE_SUFFIX)) {
-                var request = requests.addObject();
+                ObjectNode request = requests.addObject();
                 request.put("type", "read");
                 request.put("mbean", queueMBean(namespaceName, queueName + suffix));
                 request.put("attribute", "MessageCount");

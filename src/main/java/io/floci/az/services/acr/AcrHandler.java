@@ -7,17 +7,18 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
-import io.floci.az.core.storage.StorageBackend;
-import io.floci.az.core.storage.StorageFactory;
-import io.floci.az.services.acr.AcrModels.Registry;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.acr.AcrModels.Registry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +26,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.InputStream;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -38,6 +40,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * HTTP handler for Azure Container Registry ({@code Microsoft.ContainerRegistry/registries})
@@ -81,6 +84,9 @@ import java.util.concurrent.TimeUnit;
 public class AcrHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(AcrHandler.class);
+
+    /** Guards the check-and-claim of a global resource name across concurrent creates. */
+    private final Object nameClaims = new Object();
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -324,43 +330,66 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode props = body.path("properties");
 
             String storageKey = storageKey(sub, rg, registryName);
-            Optional<Registry> existing = getRegistry(storageKey);
-            boolean isNew = existing.isEmpty();
-
             Registry registry;
-            if (isNew) {
-                registry = new Registry();
-                registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                registry.setSubscriptionId(sub);
-                registry.setResourceGroup(rg);
-                registry.setName(registryName);
-                registry.setCreatedAt(Instant.now());
-                registry.setUsername(registryName);
-                registry.setPassword(generatePassword());
-                registry.setPassword2(generatePassword());
-            } else {
-                registry = existing.get();
+            boolean isNew;
+            // The ownership check and the write that claims the name happen under one lock, so two
+            // subscriptions creating the same name at once cannot both pass the check.
+            synchronized (nameClaims) {
+                if (ownedElsewhere(sub, rg, registryName)) {
+                    return ArmErrors.error(409, "AlreadyInUse", "The registry DNS name " + registryName
+                            + ".azurecr.io is already in use. You can check if the name is already claimed using following API: "
+                            + "https://docs.microsoft.com/en-us/rest/api/containerregistry/registries/checknameavailability");
+                }
+                Optional<Registry> existing = getRegistry(storageKey);
+                isNew = existing.isEmpty();
+
+                if (isNew) {
+                    registry = new Registry();
+                    registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                    registry.setSubscriptionId(sub);
+                    registry.setResourceGroup(rg);
+                    registry.setName(registryName);
+                    registry.setCreatedAt(Instant.now());
+                    registry.setUsername(registryName);
+                    registry.setPassword(generatePassword());
+                    registry.setPassword2(generatePassword());
+                } else {
+                    registry = existing.get();
+                }
+
+                registry.setLocation(location);
+                registry.setSkuName(sku.path("name").asText("Basic"));
+                registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
+                registry.setTags(parseStringMap(body.path("tags")));
+
+                registry.setLoginServer(loginServer(registryName));
+                if (config.services().acr().mocked()) {
+                    registry.setProvisioningState("Succeeded");
+                } else if (isNew) {
+                    registry.setProvisioningState("Creating");
+                }
+                putRegistry(storageKey, registry);
             }
 
-            registry.setLocation(location);
-            registry.setSkuName(sku.path("name").asText("Basic"));
-            registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
-            registry.setTags(parseStringMap(body.path("tags")));
-
-            registry.setLoginServer(loginServer(registryName));
-            if (config.services().acr().mocked()) {
-                registry.setProvisioningState("Succeeded");
-            } else if (isNew) {
+            if (!config.services().acr().mocked() && isNew) {
+                String provisioningState;
                 try {
                     registryManager.ensureStarted();
-                    registry.setProvisioningState(registryManager.isReady() ? "Succeeded" : "Creating");
+                    provisioningState = registryManager.isReady() ? "Succeeded" : "Creating";
                 } catch (Exception e) {
                     LOG.errorf(e, "Failed to start shared ACR registry for %s", registryName);
-                    registry.setProvisioningState("Failed");
+                    provisioningState = "Failed";
+                }
+                // A DELETE may have removed the claim while the registry started; writing the record
+                // back would resurrect a name another subscription may have claimed since.
+                String startedState = provisioningState;
+                registry.setProvisioningState(startedState);
+                Optional<Registry> stored = updateIfSameInstance(registry,
+                        current -> current.setProvisioningState(startedState));
+                if (stored.isPresent()) {
+                    registry = stored.get();
                 }
             }
-
-            putRegistry(storageKey, registry);
 
             int status = isNew ? 201 : 200;
             return Response.status(status)
@@ -413,7 +442,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         }
         // The backing registry is shared across all registries, so deleting one only removes its
         // metadata; its repositories remain in the shared registry until garbage collection.
-        storage.delete(key);
+        synchronized (nameClaims) {
+            storage.delete(key);
+        }
         return Response.status(202).build();
     }
 
@@ -500,9 +531,8 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                         // so a pending registry cannot stay Creating forever.
                         registryManager.ensureStarted();
                         if (registryManager.isReady()) {
-                            LOG.infov("ACR registry {0} is now ready", reg.getName());
-                            reg.setProvisioningState("Succeeded");
-                            putRegistry(reg.storageKey(), reg);
+                            updateIfSameInstance(reg, current -> current.setProvisioningState("Succeeded"))
+                                    .ifPresent(ready -> LOG.infov("ACR registry {0} is now ready", ready.getName()));
                         }
                     }
                 });
@@ -535,11 +565,36 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     /**
+     * Applies {@code change} to the stored copy of {@code registry} while it is still the same instance, and
+     * returns the stored result. Changing the stored copy, rather than writing {@code registry} back, keeps any
+     * update made since {@code registry} was read. Empty once the registry was deleted, or deleted and created
+     * again.
+     */
+    private Optional<Registry> updateIfSameInstance(Registry registry, Consumer<Registry> change) {
+        synchronized (nameClaims) {
+            Optional<Registry> stored = getRegistry(registry.storageKey());
+            if (stored.isEmpty() || !registry.getInstanceId().equals(stored.get().getInstanceId())) {
+                return Optional.empty();
+            }
+            change.accept(stored.get());
+            putRegistry(registry.storageKey(), stored.get());
+            return stored;
+        }
+    }
+
+    /**
      * Whether a registry of this name was created, in any subscription or resource group. The data
      * plane knows only the name: {@code {name}.azurecr.io} carries no ARM scope.
      */
     private boolean registryExists(String registryName) {
         return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName()));
+    }
+
+    /** Whether a registry of this name exists under a subscription or resource group other than this one. */
+    private boolean ownedElsewhere(String sub, String rg, String registryName) {
+        ArmScope scope = new ArmScope(sub, rg);
+        return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName())
+                && !scope.owns(r.getSubscriptionId(), r.getResourceGroup()));
     }
 
     private List<Registry> scanAll() {
@@ -655,7 +710,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         return map;
     }
 
-    private JsonNode readBody(java.io.InputStream stream) {
+    private JsonNode readBody(InputStream stream) {
         try {
             if (stream == null || stream.available() == 0) { return MAPPER.createObjectNode(); }
             return MAPPER.readTree(stream);

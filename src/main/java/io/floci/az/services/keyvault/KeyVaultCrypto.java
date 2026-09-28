@@ -8,6 +8,7 @@ import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigInteger;
 import java.security.AlgorithmParameters;
+import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -845,7 +846,7 @@ final class KeyVaultCrypto {
         }
     }
 
-    private static int rsaModulusBits(java.security.Key key) {
+    private static int rsaModulusBits(Key key) {
         return ((RSAKey) key).getModulus().bitLength();
     }
 

@@ -1,14 +1,15 @@
 package io.floci.az.services.redis;
 
+import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.model.Frame;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -182,7 +183,7 @@ public class RedisCacheManager {
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {
-        var dockerClient = lifecycleManager.getDockerClient();
+        DockerClient dockerClient = lifecycleManager.getDockerClient();
         ExecCreateCmdResponse exec = dockerClient
                 .execCreateCmd(containerId)
                 .withCmd(cmd)

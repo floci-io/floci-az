@@ -2,7 +2,6 @@ package io.floci.az.services.functions;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.services.functions.FunctionModels.FunctionDefinition;
-import java.util.List;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,6 +11,7 @@ import org.jboss.logging.Logger;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -151,7 +151,7 @@ public class WarmPool {
         long idleMs = config.services().functions().containerIdleTimeoutSeconds() * 1000L;
         long now = System.currentTimeMillis();
 
-        for (var entry : pool.entrySet()) {
+        for (Map.Entry<String, ArrayDeque<ContainerHandle>> entry : pool.entrySet()) {
             String key = entry.getKey();
             ArrayDeque<ContainerHandle> q = entry.getValue();
             List<ContainerHandle> toEvict = new ArrayList<>();

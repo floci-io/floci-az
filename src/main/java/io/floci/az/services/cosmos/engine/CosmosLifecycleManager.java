@@ -1,10 +1,10 @@
 package io.floci.az.services.cosmos.engine;
 
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -145,7 +145,7 @@ public class CosmosLifecycleManager {
         containerManager.removeIfExists(containerName);
 
         ContainerSpec spec = buildSpec(containerName, image, hostPort, engine.defaultPort(), api);
-        var info = containerManager.createAndStart(spec);
+        ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
 
         String host = "localhost";
         int mappedPort = Optional.ofNullable(info.getEndpoint(engine.defaultPort()))

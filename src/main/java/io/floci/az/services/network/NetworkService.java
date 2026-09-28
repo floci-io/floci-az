@@ -13,6 +13,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 @ApplicationScoped
 public class NetworkService {
@@ -275,7 +277,7 @@ public class NetworkService {
             }
             case "Microsoft.Network/privateLinkServices" -> {
                 properties.putIfAbsent("alias",
-                        name + "." + java.util.UUID.randomUUID() + ".azure.privatelinkservice");
+                        name + "." + UUID.randomUUID() + ".azure.privatelinkservice");
                 properties.putIfAbsent("visibility", new LinkedHashMap<>(Map.of("subscriptions", List.of())));
                 properties.putIfAbsent("autoApproval", new LinkedHashMap<>(Map.of("subscriptions", List.of())));
                 properties.putIfAbsent("fqdns", List.of());
@@ -316,7 +318,7 @@ public class NetworkService {
      */
     @SuppressWarnings("unchecked")
     private static void stampChildArray(Map<String, Object> properties, String segment, String parentId,
-                                        java.util.function.Consumer<Map<String, Object>> defaults) {
+                                        Consumer<Map<String, Object>> defaults) {
         if (!(properties.get(segment) instanceof List<?> items) || items.isEmpty()) {
             return;
         }
@@ -513,7 +515,7 @@ public class NetworkService {
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
 
         Map<String, Object> existingZone = resources.get(key);
-        String etag = existingZone != null ? (String) existingZone.get("etag") : "\"" + java.util.UUID.randomUUID() + "\"";
+        String etag = existingZone != null ? (String) existingZone.get("etag") : "\"" + UUID.randomUUID() + "\"";
         int numberOfRecordSets = existingZone != null ? ((Number) cast(existingZone.get("properties")).getOrDefault("numberOfRecordSets", 2)).intValue() : 2;
 
         properties.putIfAbsent("maxNumberOfRecordSets", 10000);
@@ -570,7 +572,7 @@ public class NetworkService {
         soa.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName + "/SOA/@");
         soa.put("name", "@");
         soa.put("type", "Microsoft.Network/dnsZones/SOA");
-        soa.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        soa.put("etag", "\"" + UUID.randomUUID() + "\"");
         soa.put("properties", soaProperties);
         resources.put(soaKey, soa);
 
@@ -590,7 +592,7 @@ public class NetworkService {
         ns.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName + "/NS/@");
         ns.put("name", "@");
         ns.put("type", "Microsoft.Network/dnsZones/NS");
-        ns.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        ns.put("etag", "\"" + UUID.randomUUID() + "\"");
         ns.put("properties", nsProperties);
         resources.put(nsKey, ns);
     }
@@ -711,7 +713,7 @@ public class NetworkService {
 
         copyRecordProperties(recordType, bodyProps, properties);
 
-        String newEtag = "\"" + java.util.UUID.randomUUID() + "\"";
+        String newEtag = "\"" + UUID.randomUUID() + "\"";
 
         Map<String, Object> recordSet = new LinkedHashMap<>();
         recordSet.put("_sub", sub);
@@ -890,7 +892,7 @@ public class NetworkService {
 
         Map<String, Object> existingZone = resources.get(key);
         // Azure rotates the ETag on every mutation (as record sets and VNet links do here).
-        String etag = "\"" + java.util.UUID.randomUUID() + "\"";
+        String etag = "\"" + UUID.randomUUID() + "\"";
         Map<String, Object> existingProps = existingZone != null ? cast(existingZone.get("properties")) : Map.of();
 
         properties.putIfAbsent("maxNumberOfRecordSets", 25000);
@@ -948,7 +950,7 @@ public class NetworkService {
         soa.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName + "/SOA/@");
         soa.put("name", "@");
         soa.put("type", "Microsoft.Network/privateDnsZones/SOA");
-        soa.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        soa.put("etag", "\"" + UUID.randomUUID() + "\"");
         soa.put("properties", soaProperties);
         resources.put(soaKey, soa);
     }
@@ -1052,7 +1054,7 @@ public class NetworkService {
         recordSet.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
         recordSet.put("name", relativeRecordSetName);
         recordSet.put("type", "Microsoft.Network/privateDnsZones/" + recordType);
-        recordSet.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        recordSet.put("etag", "\"" + UUID.randomUUID() + "\"");
         recordSet.put("properties", properties);
 
         resources.put(key, recordSet);
@@ -1115,7 +1117,7 @@ public class NetworkService {
         if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
             link.put("tags", tags);
         }
-        link.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        link.put("etag", "\"" + UUID.randomUUID() + "\"");
         link.put("properties", properties);
 
         resources.put(key, link);
@@ -1252,7 +1254,7 @@ public class NetworkService {
             nicId = String.valueOf(cast(resources.get(existingNicKey)).get("id"));
         } else {
             String nicName = customNicName != null ? customNicName
-                    : peName + ".nic." + java.util.UUID.randomUUID().toString().substring(0, 8);
+                    : peName + ".nic." + UUID.randomUUID().toString().substring(0, 8);
             nicKey = key(sub, rg, "networkInterfaces/" + nicName);
             nicId = "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/networkInterfaces/" + nicName;
             Map<String, Object> nicProps = new LinkedHashMap<>();
@@ -1388,7 +1390,7 @@ public class NetworkService {
         group.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateEndpoints/" + peName + "/privateDnsZoneGroups/" + groupName);
         group.put("name", groupName);
         group.put("type", "Microsoft.Network/privateEndpoints/privateDnsZoneGroups");
-        group.put("etag", "\"" + java.util.UUID.randomUUID() + "\"");
+        group.put("etag", "\"" + UUID.randomUUID() + "\"");
         group.put("properties", properties);
 
         boolean created = resources.put(key, group) == null;

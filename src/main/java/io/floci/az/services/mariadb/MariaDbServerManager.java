@@ -1,11 +1,11 @@
 package io.floci.az.services.mariadb;
 
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -88,7 +88,7 @@ public class MariaDbServerManager {
             try {
                 containerManager.copyFileToContainer(containerId, grantAdminSql(entry.administratorLogin()),
                     "/docker-entrypoint-initdb.d/10-grant-admin.sql");
-                var info = containerManager.startCreated(containerId, spec);
+                ContainerLifecycleManager.ContainerInfo info = containerManager.startCreated(containerId, spec);
 
                 int hostPort = Optional.ofNullable(info.getEndpoint(MARIADB_CONTAINER_PORT))
                     .map(ContainerLifecycleManager.EndpointInfo::port)

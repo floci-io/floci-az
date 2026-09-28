@@ -1,12 +1,12 @@
 package io.floci.az.services.table;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.storage.StorageBackend;
@@ -22,8 +22,20 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -1046,7 +1058,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
      * and stripping the leading CRLF/LF from each resulting part).
      */
     private String[] splitOnBoundary(String body, String boundary) {
-        String[] parts = body.split(java.util.regex.Pattern.quote("--" + boundary), -1);
+        String[] parts = body.split(Pattern.quote("--" + boundary), -1);
         // Strip leading CRLF or LF from each part (artifact of the delimiter encoding)
         for (int i = 0; i < parts.length; i++) {
             String p = parts[i];

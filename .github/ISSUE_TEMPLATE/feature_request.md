@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Missing AWS API action or service
+about: Missing Azure API action or service
 title: '[FEAT] '
 labels: enhancement
 assignees: ''
@@ -8,15 +8,15 @@ assignees: ''
 
 ## Service
 
-<!-- e.g. S3, Kinesis, CloudWatch -->
+<!-- e.g. Blob Storage, Event Hubs, Azure Monitor -->
 
 ## API Action / Feature
 
-<!-- e.g. S3 Object Tagging, Kinesis GetShardIterator -->
+<!-- e.g. Blob index tags, Event Hubs geo-replication -->
 
-## AWS Documentation
+## Azure Documentation
 
-<!-- Link to the AWS API reference for this action -->
+<!-- Link to the Azure REST API reference for this action -->
 
 ## Why is this needed?
 

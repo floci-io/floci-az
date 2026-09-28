@@ -1,7 +1,9 @@
 package io.floci.az.services.signalr;
 
+import org.msgpack.core.MessageBufferPacker;
 import org.msgpack.core.MessagePack;
 import org.msgpack.core.MessagePacker;
+import org.msgpack.core.MessageUnpacker;
 import org.msgpack.value.Value;
 
 import java.io.ByteArrayOutputStream;
@@ -47,7 +49,7 @@ final class SignalRProtocol {
                 offset = start;
                 break;
             }
-            try (var unpacker = MessagePack.newDefaultUnpacker(input, offset, length)) {
+            try (MessageUnpacker unpacker = MessagePack.newDefaultUnpacker(input, offset, length)) {
                 Object decoded = decode(unpacker.unpackValue());
                 if (!(decoded instanceof List<?> values) || values.isEmpty() || unpacker.hasNext()) {
                     throw new IOException("Expected one service message array");
@@ -60,10 +62,10 @@ final class SignalRProtocol {
     }
 
     static byte[] frame(Object... values) {
-        try (var packer = MessagePack.newDefaultBufferPacker()) {
+        try (MessageBufferPacker packer = MessagePack.newDefaultBufferPacker()) {
             pack(packer, Arrays.asList(values));
             byte[] payload = packer.toByteArray();
-            var output = new ByteArrayOutputStream(payload.length + 5);
+            ByteArrayOutputStream output = new ByteArrayOutputStream(payload.length + 5);
             int remaining = payload.length;
             do {
                 int digit = remaining & 127;
@@ -90,11 +92,11 @@ final class SignalRProtocol {
             }
             case SignalRTokens.Claims claims -> {
                 packer.packMapHeader(claims.values().size());
-                for (var claim : claims.values()) { packer.packString(claim.getKey()); packer.packString(claim.getValue()); }
+                for (Map.Entry<String, String> claim : claims.values()) { packer.packString(claim.getKey()); packer.packString(claim.getValue()); }
             }
             case Map<?, ?> map -> {
                 packer.packMapHeader(map.size());
-                for (var entry : map.entrySet()) { pack(packer, entry.getKey()); pack(packer, entry.getValue()); }
+                for (Map.Entry<?, ?> entry : map.entrySet()) { pack(packer, entry.getKey()); pack(packer, entry.getValue()); }
             }
             default -> throw new IOException("Unsupported service message value");
         }
@@ -114,7 +116,7 @@ final class SignalRProtocol {
             }
             case MAP -> {
                 Map<Object, Object> items = new LinkedHashMap<>();
-                for (var item : value.asMapValue().entrySet()) { items.put(decode(item.getKey()), decode(item.getValue())); }
+                for (Map.Entry<Value, Value> item : value.asMapValue().entrySet()) { items.put(decode(item.getKey()), decode(item.getValue())); }
                 yield items;
             }
             default -> throw new IOException("Unsupported service message value");

@@ -143,13 +143,13 @@ floci-az:
   services:
     managed-identity:
       enabled: true
-      system-assigned-scope: subscriptions/00000000-0000-0000-0000-000000000001
+      system-assigned-scope: subscriptions/${floci-az.services.arm.default-subscription-id}
 ```
 
 | Property | Env var | Default | Description |
 |---|---|---|---|
 | `enabled` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_ENABLED` | `true` | Enables the ARM provider and the IMDS endpoint |
-| `system-assigned-scope` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_SYSTEM_ASSIGNED_SCOPE` | `subscriptions/00000000-0000-0000-0000-000000000001` | ARM scope that seeds the system-assigned IMDS identity's `principalId`/`clientId`. Set it to your resource's scope (e.g. `subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{vm}`) so IMDS tokens match `GET {scope}/.../identities/default` reads |
+| `system-assigned-scope` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_SYSTEM_ASSIGNED_SCOPE` | `subscriptions/` + the [ARM](arm.md) `default-subscription-id` | ARM scope that seeds the system-assigned IMDS identity's `principalId`/`clientId`. Set it to your resource's scope (e.g. `subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{vm}`) so IMDS tokens match `GET {scope}/.../identities/default` reads |
 
 Token tenant, issuer, and lifetime follow the [Entra ID](entra.md) settings
 (`floci-az.services.entra.*`).

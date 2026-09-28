@@ -1,5 +1,6 @@
 package io.floci.az.services.eventgrid;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.RetryPolicy;
@@ -14,6 +15,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -133,7 +136,7 @@ public class EventGridDelivery {
                 "topic", topicResourceId,
                 "subject", "",
                 "eventType", "Microsoft.EventGrid.SubscriptionValidationEvent",
-                "eventTime", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).toString(),
+                "eventTime", OffsetDateTime.now(ZoneOffset.UTC).toString(),
                 "metadataVersion", "1",
                 "dataVersion", "1",
                 "data", Map.of("validationCode", code, "validationUrl", validationUrl));
@@ -162,7 +165,7 @@ public class EventGridDelivery {
             return null;
         }
         try {
-            var node = MAPPER.readTree(body).path("validationResponse");
+            JsonNode node = MAPPER.readTree(body).path("validationResponse");
             return node.isTextual() ? node.asText() : null;
         } catch (Exception e) {
             return null;

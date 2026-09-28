@@ -244,6 +244,8 @@ public class EmbeddedDnsServer {
     byte[] forwardToUpstreams(byte[] query, List<String> upstreams, int upstreamPort) throws Exception {
         Exception last = null;
         for (String upstream : upstreams) {
+            // Name clash: io.vertx.core.datagram.DatagramSocket is the one used throughout this
+            // file, so the JDK socket used for this one upstream forward stays qualified.
             try (java.net.DatagramSocket fwd = new java.net.DatagramSocket()) {
                 fwd.setSoTimeout(FORWARD_TIMEOUT_MS);
                 InetAddress addr = InetAddress.getByName(upstream);

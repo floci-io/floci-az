@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -55,6 +56,41 @@ public class MySqlState {
     public synchronized void putServer(ServerEntry entry) {
         servers.put(key(entry.serverName()), entry);
         persist(entry);
+    }
+
+    /** Stores a new server unless its name is already taken; false when a concurrent create claimed it first. */
+    public synchronized boolean claimServer(ServerEntry entry) {
+        if (servers.containsKey(key(entry.serverName()))) {
+            return false;
+        }
+        putServer(entry);
+        return true;
+    }
+
+    /**
+     * Records a started container on the stored server, while that server is still the one {@code started}
+     * was built from. Only the container fields are taken from {@code started}, so an update made while the
+     * container started is kept. Empty once that server was deleted, or deleted and claimed again.
+     */
+    public synchronized Optional<ServerEntry> attachContainer(ServerEntry started) {
+        ServerEntry current = servers.get(key(started.serverName()));
+        if (current == null || !current.createdAt().equals(started.createdAt())) {
+            return Optional.empty();
+        }
+        ServerEntry attached = current.withContainer(started.containerId(), started.hostPort(), started.host());
+        putServer(attached);
+        return Optional.of(attached);
+    }
+
+    /**
+     * Removes a server this request claimed, but only while the stored entry is still that claim. A failed
+     * create must not remove a server another subscription claimed after this one was deleted.
+     */
+    public synchronized void releaseClaim(ServerEntry claimed) {
+        ServerEntry current = servers.get(key(claimed.serverName()));
+        if (current != null && current.createdAt().equals(claimed.createdAt())) {
+            removeServer(claimed.serverName());
+        }
     }
 
     public synchronized Optional<ServerEntry> getServer(String serverName) {
@@ -184,7 +220,7 @@ public class MySqlState {
                 key(entry.serverName()), data,
                 Map.of("serverName", entry.serverName()),
                 entry.createdAt(),
-                java.util.UUID.randomUUID().toString()));
+                UUID.randomUUID().toString()));
         } catch (Exception e) {
             LOG.warnf(e, "Failed to persist MySQL server entry: %s", entry.serverName());
         }

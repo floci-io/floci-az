@@ -1,11 +1,11 @@
-# Contributing to Floci
+# Contributing to floci-az
 
-Thank you for your interest in contributing! Floci is a community-driven project and all contributions are welcome.
+Thank you for your interest in contributing! floci-az is a community-driven project and all contributions are welcome.
 
 ## Ways to Contribute
 
 - **Bug reports**: open an issue with a minimal reproduction
-- **Feature requests**: open an issue describing the AWS behavior you need
+- **Feature requests**: open an issue describing the Azure behavior you need
 - **Pull requests**: bug fixes, new service implementations, or improvements
 - **Compatibility tests**: add cases to `./compatibility-tests/`
 
@@ -15,7 +15,7 @@ Thank you for your interest in contributing! Floci is a community-driven project
 
 - Java 25+
 - Maven 3.9+
-- Docker (for integration tests that spin up Lambda/RDS/ElastiCache)
+- Docker (for the sidecar-backed services and their tests: Service Bus, Event Hubs, SQL, PostgreSQL, Redis, AKS, and others)
 
 Any Java 25+ distribution will work. If you need to install it, [SDKMAN](https://sdkman.io/) is a convenient option:
 
@@ -30,9 +30,9 @@ sdk install java 25-open
 This project includes a Maven wrapper, so you don't need to install Maven separately:
 
 ```bash
-git clone https://github.com/floci-io/floci.git
-cd floci
-./mvnw quarkus:dev     # hot reload on port 4566
+git clone https://github.com/floci-io/floci-az.git
+cd floci-az
+./mvnw quarkus:dev     # hot reload on port 4577
 ```
 
 If you prefer to use your own Maven installation (3.9+), you can use `mvn` instead of `./mvnw`.
@@ -40,14 +40,14 @@ If you prefer to use your own Maven installation (3.9+), you can use `mvn` inste
 ### Run Tests
 
 ```bash
-./mvnw test                                          # all tests
-./mvnw test -Dtest=SsmIntegrationTest                # single class
-./mvnw test -Dtest=SsmIntegrationTest#putParameter   # single method
+./mvnw test                                                            # all tests
+./mvnw test -Dtest=QueueServiceTest                                    # single class
+./mvnw test -Dtest=QueueServiceTest#getQueueServicePropertiesReturnsXml  # single method
 ```
 
 ## Branching Model
 
-Floci uses a **tag-driven release model**. Docker images are never published on PR merge, only when a maintainer pushes a version tag.
+floci-az uses a **tag-driven release model**. Docker images are never published on PR merge, only when a maintainer pushes a version tag.
 
 | Branch | Purpose | Docker published? |
 |---|---|---|
@@ -60,8 +60,8 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/): 
 
 | Prefix | When to use | Version bump |
 |--------|-------------|--------------|
-| `feat:` | New AWS API action or service | minor |
-| `fix:` | Bug fix or AWS compatibility correction | patch |
+| `feat:` | New Azure API action or service | minor |
+| `fix:` | Bug fix or Azure compatibility correction | patch |
 | `perf:` | Performance improvement | patch |
 | `docs:` | Documentation only | none |
 | `chore:` | Build, CI, dependencies | none |
@@ -72,36 +72,37 @@ Do not include `Co-Authored-By` trailers for AI tools in commit messages. Attrib
 **Examples:**
 
 ```
-feat: add SQS SendMessageBatch action
-fix: correct DynamoDB QueryFilter comparison operators
+feat: add Blob Storage append blob operations
+fix: correct Table Storage OData filter comparison operators
 feat!: change default storage mode to persistent
 ```
 
 ## Architecture
 
-See [AGENT.md](AGENT.md) for a detailed description of the three-layer architecture (Controller → Service → Storage), the AWS wire protocol mapping, and conventions for adding new services.
+See [AGENTS.md](AGENTS.md) for a detailed description of the architecture (`AzureRoutingFilter` → `AzureServiceHandler` → `StorageBackend`), the Azure protocol mapping, and conventions for adding new services.
 
-`AGENT.md` is the canonical agent instructions file for this repository. If your coding agent expects a different filename, create a local symlink to `AGENT.md` instead of copying the file.
+`AGENTS.md` is the canonical agent instructions file for this repository. If your coding agent expects a different filename, create a local symlink to `AGENTS.md` instead of copying the file.
 
 ```bash
-ln -s AGENT.md CLAUDE.md
-ln -s AGENT.md GEMINI.md
-ln -s AGENT.md COPILOT.md
+ln -s AGENTS.md CLAUDE.md
+ln -s AGENTS.md GEMINI.md
+ln -s AGENTS.md COPILOT.md
 ```
 
-## Adding a New AWS Service
+## Adding a New Azure Service
 
-1. Create a package under `src/main/java/.../services/<service>/`
-2. Add a Controller (follow the correct protocol: Query, JSON 1.1, REST JSON, or REST XML)
-3. Add a Service (`@ApplicationScoped`) and model POJOs
-4. Add config entries in `EmulatorConfig.java` and `application.yml`
-5. Register a `ServiceDescriptor` in `ResolvedServiceCatalog`
-6. Wire controller/handler dispatch for the service
-7. Add integration tests in `*IntegrationTest.java`
+1. Create a package under `src/main/java/io/floci/az/services/<service>/`
+2. Add a `*Handler.java` implementing `AzureServiceHandler` (`getServiceType()`, `canHandle()`, `handle()`), and implement `enabled(String serviceType)` to read the service's config flag
+3. Declare how requests reach the handler: return a `ServiceRoutes` from `routes()` naming its account suffix (such as `-queue`), host suffixes (such as `.blob.core.windows.net`) and ARM providers (such as `Microsoft.App`), and add the same literals to the golden lists in `RoutingTableAssemblyTest`, or `./mvnw test` fails
+4. Add model classes (`*Models.java`) as needed. A service backed by a Docker sidecar also gets a `*ContainerManager`, a `*Manager` and, if the sidecar needs one, a `*ConfigGenerator`
+5. Add config entries in `EmulatorConfig.java` and `application.yml`
+6. Add tests (e.g. `*ServiceTest.java`), and compatibility tests in `./compatibility-tests/` for SDK-facing behavior
 
-`ServiceRegistry`, `ServiceEnabledFilter`, and `StorageFactory` now resolve service metadata from the descriptor catalog. Adding a service should not require new service-keyed switch statements in those consumers.
+`AzureServiceRegistry` discovers handlers through CDI, and `AzureRoutingFilter` builds its dispatch tables from every handler's `routes()`, so a service routed by an account suffix, host suffix or ARM provider needs no change to either. A service whose URLs fit none of those three (like IMDS, Entra ID, Microsoft Graph or the Cosmos root) needs a routing **stage** instead: a method added to the `stages` list in `AzureRoutingFilter`, ordered against its neighbours, plus its service type in `LITERAL_ROUTE_SERVICE_TYPES`. That set only declares the type for the routing-drift test; adding to it alone routes nothing.
 
-Always implement the **real AWS wire protocol**. Never invent custom endpoints. The AWS SDK must work against Floci without modification.
+See [Service Implementation Pattern](AGENTS.md#service-implementation-pattern) in `AGENTS.md` for the full checklist, and copy an existing service's pattern before introducing a new one.
+
+Always implement the **real Azure wire protocol**. Never invent custom endpoints. The Azure SDKs and the Azure CLI must work against floci-az without modification.
 
 ## Pull Request Guidelines
 
@@ -132,7 +133,7 @@ require the `changelog-edit` label on the PR.
 
 ## Testing Policy for Pull Requests
 
-Floci accepts pull requests only when the test coverage is appropriate for the type of change being proposed.
+floci-az accepts pull requests only when the test coverage is appropriate for the type of change being proposed.
 
 As a project policy:
 

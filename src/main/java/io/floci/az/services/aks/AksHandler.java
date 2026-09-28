@@ -7,17 +7,17 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
-import io.floci.az.core.storage.StorageBackend;
-import io.floci.az.core.storage.StorageFactory;
-import io.floci.az.services.aks.AksModels.AgentPoolProfile;
-import io.floci.az.services.aks.AksModels.ManagedCluster;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.aks.AksModels.AgentPoolProfile;
+import io.floci.az.services.aks.AksModels.ManagedCluster;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +25,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -616,7 +617,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
         return tags;
     }
 
-    private JsonNode readBody(java.io.InputStream stream) {
+    private JsonNode readBody(InputStream stream) {
         try {
             if (stream == null || stream.available() == 0) { return MAPPER.createObjectNode(); }
             return MAPPER.readTree(stream);
