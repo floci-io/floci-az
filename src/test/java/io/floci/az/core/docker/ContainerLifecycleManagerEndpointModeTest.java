@@ -30,10 +30,10 @@ import static org.mockito.Mockito.mock;
 /**
  * How floci-az addresses a sidecar. {@code auto} must behave exactly as before; {@code published}
  * uses the Docker daemon's host and the published port, which is what a remote daemon
- * (docker-in-docker, kubedock) needs — its container IPs aren't reachable from floci-az.
+ * (docker-in-docker, kubedock) needs: its container IPs aren't reachable from floci-az.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("ContainerLifecycleManager — sidecar endpoint mode")
+@DisplayName("ContainerLifecycleManager: sidecar endpoint mode")
 class ContainerLifecycleManagerEndpointModeTest {
 
     private static final String CONTAINER_ID = "c1";

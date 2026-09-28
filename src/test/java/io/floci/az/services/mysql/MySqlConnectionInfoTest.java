@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("MySqlConnectionInfo — connection string builder")
+@DisplayName("MySqlConnectionInfo: connection string builder")
 class MySqlConnectionInfoTest {
 
     @Test

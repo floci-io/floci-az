@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("MariaDbConnectionInfo — connection string builder")
+@DisplayName("MariaDbConnectionInfo: connection string builder")
 class MariaDbConnectionInfoTest {
 
     @Test

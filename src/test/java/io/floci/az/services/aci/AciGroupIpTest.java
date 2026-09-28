@@ -27,7 +27,7 @@ import static org.mockito.Mockito.lenient;
  * published on the same number; otherwise the group must keep reporting the auto address.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("AciContainerGroupManager — reported group IP")
+@DisplayName("AciContainerGroupManager: reported group IP")
 class AciGroupIpTest {
 
     private static final String CONTAINER_ID = "c1";

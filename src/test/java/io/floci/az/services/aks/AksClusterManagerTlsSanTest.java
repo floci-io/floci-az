@@ -21,7 +21,7 @@ import static org.mockito.Mockito.lenient;
  * endpoint mode that includes the Docker daemon's host, or kubectl fails TLS verification.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("AksClusterManager — k3s API certificate names")
+@DisplayName("AksClusterManager: k3s API certificate names")
 class AksClusterManagerTlsSanTest {
 
     @Mock
