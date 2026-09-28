@@ -294,7 +294,7 @@ miss, because a var set only there does not appear in any `SUITE_ENV_*` variable
 
 **One exception on the emulator axis: `compat-docker`.** It starts a single shared emulator with
 `JAVA_SERVICEBUS_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5`)
-and runs every suite against it. The node and dotnet suites therefore see a longer lock duration there
+and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
 than under their own `test-*-compat` targets or in CI, where they get `SERVICEBUS_EMULATOR_ENV` alone.
 The table below is the per-suite contract that CI and the individual targets honour; `compat-docker` is
 a convenience runner that deliberately shares one emulator, so a Service Bus timing behaviour that only
@@ -313,6 +313,9 @@ Suite container (`SUITE_ENV_*` ↔ `extra_env`):
 | `sdk-test-dotnet` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-dotnet` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-python` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
+| `sdk-test-python` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
+| `sdk-test-python` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
+| `sdk-test-python` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
 | `sdk-test-node` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
@@ -326,6 +329,7 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`JAVA_SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` | ✓ |
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.

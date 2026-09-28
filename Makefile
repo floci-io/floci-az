@@ -39,7 +39,10 @@ AZCLI_IMAGE     = compat-azcli
 # Suite-internal defaults (FLOCI_AZ_ENDPOINT, EVENTHUB_*, JEST_JUNIT_*) are baked as
 # ENV in each suite's Dockerfile — only network-topology overrides belong here.
 POD_IDENTITY_ENV = -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
-SUITE_ENV_PYTHON = $(POD_IDENTITY_ENV)
+SUITE_ENV_PYTHON = $(POD_IDENTITY_ENV) \
+	-e SERVICEBUS_HOST=floci-az-servicebus-default \
+	-e SERVICEBUS_AMQP_PORT=5672 \
+	-e SERVICEBUS_NAMESPACE=default
 SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	--add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1 \
 	-e FLOCI_AZ_ABFS_LOOPBACK=true \
@@ -225,7 +228,7 @@ run-sql:
 
 test-python-compat:
 	@echo "==> Python SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,python,python,$(SUITE_ENV_PYTHON),,)
+	$(call COMPAT_SESSION,python,python,$(SUITE_ENV_PYTHON),,,$(SERVICEBUS_EMULATOR_ENV))
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
