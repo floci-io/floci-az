@@ -13,7 +13,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.39.2</quarkus.platform.version>
+        <quarkus.platform.version>3.39.5</quarkus.platform.version>
         <!-- Coupled to the Artemis sidecar image (application.yml *.artemis-image): the patched
              artemis-amqp-protocol and proton-j jars built below replace the same-version jars inside
              that image, so these two only move together with the image tag. Guarded by
@@ -40,7 +40,7 @@
         <dependency>
             <groupId>org.msgpack</groupId>
             <artifactId>msgpack-core</artifactId>
-            <version>0.9.9</version>
+            <version>0.9.12</version>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -138,12 +138,12 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.85.2</version>
+            <version>1.86</version>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk18on</artifactId>
-            <version>1.85</version>
+            <version>1.86</version>
         </dependency>
         <!-- proton-j for Service Bus CBS responder (same version as azure-core-amqp) -->
         <dependency>
