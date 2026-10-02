@@ -580,7 +580,8 @@ public class ContainerLifecycleManager {
 
     /**
      * Matches every required label, reading aliased keys new-first with the legacy fallback. A
-     * container whose new and legacy keys disagree never matches: it is left alone and logged.
+     * container whose new and legacy keys disagree never matches, whether or not that key is
+     * required (orphan cleanup requires only the base labels): it is left alone and logged.
      */
     private static boolean hasRequiredLabels(
             Container container, Map<String, String> requiredLabels) {
@@ -588,12 +589,14 @@ public class ContainerLifecycleManager {
         if (labels == null) {
             return false;
         }
-        for (Map.Entry<String, String> required : requiredLabels.entrySet()) {
-            if (ContainerStorageHelper.legacyAliasDisagrees(labels, required.getKey())) {
+        for (String aliasedKey : ContainerStorageHelper.legacyLabelAliases().keySet()) {
+            if (ContainerStorageHelper.legacyAliasDisagrees(labels, aliasedKey)) {
                 LOG.warnv("Container {0} carries label {1} and its legacy alias with different values;"
-                        + " leaving it alone", container.getId(), required.getKey());
+                        + " leaving it alone", container.getId(), aliasedKey);
                 return false;
             }
+        }
+        for (Map.Entry<String, String> required : requiredLabels.entrySet()) {
             if (!required.getValue().equals(ContainerStorageHelper.labelValue(labels, required.getKey()))) {
                 return false;
             }

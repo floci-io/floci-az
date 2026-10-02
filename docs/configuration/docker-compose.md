@@ -280,11 +280,13 @@ Every container and volume floci-az creates carries the base labels `floci=true`
 
 This makes `docker ps --filter label=io.floci.service=postgres --filter label=io.floci.resource-id=orders-db` resolve an emulated resource to its backing container directly. A label whose value is unknown is omitted rather than written empty.
 
+Labels are written when a container is created, so they apply to containers floci-az starts after upgrading. A container that already existed keeps the labels it was created with (typically only the base labels and `floci_service`) until floci-az recreates it, for example when the resource is deleted and created again.
+
 - **All six keys:** Azure Cache for Redis, Azure Database for PostgreSQL, MySQL and MariaDB, Azure SQL Database, AKS, Virtual Machines, Container Instances and Container Apps.
 - **No scope keys** (`io.floci.subscription`, `io.floci.resource-group`, `io.floci.location`): Service Bus and Event Hubs namespaces and Azure Functions apps, whose data-plane APIs carry no Azure scope.
 - **No `io.floci.resource-id` and no scope keys:** the shared ACR registry, the Event Hubs Kafka (Redpanda) sidecar and the per-API Cosmos DB engine containers, which are singletons with no single resource behind them.
 
-The key set is shared with floci-aws, floci-gcp and floci-oci; each emulator adds its own scope keys.
+`io.floci`, `io.floci.service` and `io.floci.resource-id` follow the keys floci-aws uses, so a host running both emulators can filter their containers the same way; each emulator adds its own scope keys (`io.floci.account` and `io.floci.region` there, the subscription, resource group and location keys here). floci-gcp and floci-oci do not write these keys yet.
 
 ---
 
