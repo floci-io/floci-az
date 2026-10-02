@@ -76,13 +76,38 @@ class ContainerLifecycleManagerLabelsTest {
         CreateContainerCmd createCmd = stubCreateContainer();
         ContainerSpec spec = new ContainerSpec(
                 "busybox:stable", null, List.of(), null, null, null, Map.of(), List.of(), null,
-                List.of(), List.of(), List.of(), Map.of("floci_service", "functions"), null, false,
+                List.of(), List.of(), List.of(), Map.of("floci_az_aci_group", "sub/rg/group"), null, false,
                 null, List.of(), null, null, List.of());
 
         manager().create(spec);
 
         assertEquals(
-                Map.of("floci", "true", "floci_emulator", "floci-az", "floci_service", "functions"),
+                Map.of("floci", "true", "floci_emulator", "floci-az", "floci_az_aci_group", "sub/rg/group"),
+                capturedLabels(createCmd));
+    }
+
+    @Test
+    void createStampsTheLegacyServiceAliasNextToResourceIdentityLabels() {
+        CreateContainerCmd createCmd = stubCreateContainer();
+        ContainerSpec spec = new ContainerSpec(
+                "busybox:stable", null, List.of(), null, null, null, Map.of(), List.of(), null,
+                List.of(), List.of(), List.of(),
+                ContainerStorageHelper.resourceIdentityLabels("redis", "cache-one", "sub", "rg", "eastus"),
+                null, false, null, List.of(), null, null, List.of());
+
+        manager().create(spec);
+
+        assertEquals(
+                Map.of(
+                        "floci", "true",
+                        "floci_emulator", "floci-az",
+                        "io.floci", "az",
+                        "io.floci.service", "redis",
+                        "io.floci.resource-id", "cache-one",
+                        "io.floci.subscription", "sub",
+                        "io.floci.resource-group", "rg",
+                        "io.floci.location", "eastus",
+                        "floci_service", "redis"),
                 capturedLabels(createCmd));
     }
 

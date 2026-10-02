@@ -56,6 +56,7 @@ public class EventHubsKafkaManager {
 
         ContainerSpec spec = containerBuilder.newContainer(eh.redpandaImage())
                 .withName(containerName())
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels("eventhub", null, null, null, null))
                 .withCmd(List.of(
                         "redpanda", "start",
                         "--overprovisioned",

@@ -87,6 +87,8 @@ public class PostgresServerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
+            .withLabels(ContainerStorageHelper.resourceIdentityLabels("postgres", entry.serverName(),
+                entry.subscriptionId(), entry.resourceGroupName(), entry.location()))
             .withPortBinding(PG_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("POSTGRES_USER", entry.administratorLogin())

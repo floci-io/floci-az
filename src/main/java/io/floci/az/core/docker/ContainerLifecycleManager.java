@@ -213,7 +213,10 @@ public class ContainerLifecycleManager {
         }
     }
 
-    /** Returns IP addresses for running containers carrying every required label. */
+    /**
+     * Returns IP addresses for running containers carrying every required label. Aliased keys
+     * match on the new key or, when it is absent, its legacy alias; see {@link #hasRequiredLabels}.
+     */
     public List<String> runningContainerAddresses(Map<String, String> requiredLabels) {
         try {
             return dockerClient.listContainersCmd().withShowAll(false).exec().stream()
@@ -395,13 +398,16 @@ public class ContainerLifecycleManager {
         }
     }
 
-    /** Default emulator labels merged with per-spec labels; spec labels win on collision. */
+    /**
+     * Default emulator labels merged with per-spec labels (spec labels win on collision), plus
+     * the legacy alias of every aliased resource-identity key the spec sets.
+     */
     private Map<String, String> mergedLabels(Map<String, String> specLabels) {
         Map<String, String> labels = ContainerStorageHelper.defaultLabels(config);
         if (specLabels != null) {
             labels.putAll(specLabels);
         }
-        return labels;
+        return ContainerStorageHelper.withLegacyAliases(labels);
     }
 
     /**
@@ -572,11 +578,27 @@ public class ContainerLifecycleManager {
         return false;
     }
 
+    /**
+     * Matches every required label, reading aliased keys new-first with the legacy fallback. A
+     * container whose new and legacy keys disagree never matches: it is left alone and logged.
+     */
     private static boolean hasRequiredLabels(
             Container container, Map<String, String> requiredLabels) {
         Map<String, String> labels = container.getLabels();
-        return labels != null && requiredLabels.entrySet().stream()
-                .allMatch(entry -> entry.getValue().equals(labels.get(entry.getKey())));
+        if (labels == null) {
+            return false;
+        }
+        for (Map.Entry<String, String> required : requiredLabels.entrySet()) {
+            if (ContainerStorageHelper.legacyAliasDisagrees(labels, required.getKey())) {
+                LOG.warnv("Container {0} carries label {1} and its legacy alias with different values;"
+                        + " leaving it alone", container.getId(), required.getKey());
+                return false;
+            }
+            if (!required.getValue().equals(ContainerStorageHelper.labelValue(labels, required.getKey()))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean ownerIsStoppedOrMissing(Container container, String ownerLabel) {

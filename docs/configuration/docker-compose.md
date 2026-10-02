@@ -264,6 +264,30 @@ All variables are optional; the default applies when unset.
 
 ---
 
+## Resource Identity Labels
+
+Every container and volume floci-az creates carries the base labels `floci=true`, `floci_emulator=floci-az` and, when `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` is set, `floci_namespace`. A container backing an emulated Azure resource also carries labels tying it back to that resource, additive to the base labels:
+
+| Label | Value | Purpose |
+|---|---|---|
+| `io.floci` | `az` | Cloud provider, for multi-cloud discovery when several Floci emulators share a host |
+| `io.floci.service` | e.g. `postgres` | The Azure service the container backs |
+| `io.floci.resource-id` | e.g. `orders-db` | The Azure resource name (server, cache, cluster, VM, container group, container app, namespace, function app) |
+| `io.floci.subscription` | the subscription id | The subscription the resource belongs to |
+| `io.floci.resource-group` | the resource group name | The resource group the resource belongs to |
+| `io.floci.location` | e.g. `eastus` | The Azure location of the resource |
+| `floci_service` | same as `io.floci.service` | Legacy: still written, prefer the new key |
+
+This makes `docker ps --filter label=io.floci.service=postgres --filter label=io.floci.resource-id=orders-db` resolve an emulated resource to its backing container directly. A label whose value is unknown is omitted rather than written empty.
+
+- **All six keys:** Azure Cache for Redis, Azure Database for PostgreSQL, MySQL and MariaDB, Azure SQL Database, AKS, Virtual Machines, Container Instances and Container Apps.
+- **No scope keys** (`io.floci.subscription`, `io.floci.resource-group`, `io.floci.location`): Service Bus and Event Hubs namespaces and Azure Functions apps, whose data-plane APIs carry no Azure scope.
+- **No `io.floci.resource-id` and no scope keys:** the shared ACR registry, the Event Hubs Kafka (Redpanda) sidecar and the per-API Cosmos DB engine containers, which are singletons with no single resource behind them.
+
+The key set is shared with floci-aws, floci-gcp and floci-oci; each emulator adds its own scope keys.
+
+---
+
 ## Docker Socket Access
 
 The Docker socket mount (`/var/run/docker.sock`) is required for Azure Functions. The container

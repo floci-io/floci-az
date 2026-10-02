@@ -78,6 +78,8 @@ public class AksClusterManager {
         lifecycleManager.ensureVolume(volumeName);
         ContainerSpec spec = containerBuilder.newContainer(image)
                 .withName(containerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels("aks", cluster.getName(),
+                        cluster.getSubscriptionId(), cluster.getResourceGroup(), cluster.getLocation()))
                 .withCmd(k3sServerArgs())
                 .withEnv("K3S_KUBECONFIG_MODE", "644")
                 .withPortBinding(K3S_API_SERVER_PORT, hostPort)

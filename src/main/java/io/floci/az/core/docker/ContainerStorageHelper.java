@@ -33,6 +33,22 @@ public final class ContainerStorageHelper {
     static final String CONTAINER_PREFIX = "floci-" + CLOUD + "-";
     static final String LEGACY_PREFIX = "floci-";
 
+    /** Cloud discriminator shared by every Floci emulator; its value is {@code az} here. */
+    public static final String CLOUD_LABEL = "io.floci";
+    public static final String SERVICE_LABEL = "io.floci.service";
+    public static final String RESOURCE_ID_LABEL = "io.floci.resource-id";
+    public static final String SUBSCRIPTION_LABEL = "io.floci.subscription";
+    public static final String RESOURCE_GROUP_LABEL = "io.floci.resource-group";
+    public static final String LOCATION_LABEL = "io.floci.location";
+
+    /**
+     * New label key to the legacy key it replaces. Writers set only the new key; the container
+     * create path stamps the legacy alias next to it with the same value, and readers resolve
+     * through {@link #labelValue}. This is the only place a legacy key is spelled.
+     */
+    private static final Map<String, String> LEGACY_LABEL_ALIASES = Map.of(
+            SERVICE_LABEL, "floci_service");
+
     private ContainerStorageHelper() {}
 
     /**
@@ -72,6 +88,82 @@ public final class ContainerStorageHelper {
             labels.put("floci_namespace", namespace);
         }
         return labels;
+    }
+
+    /**
+     * Labels tying a container to the emulated Azure resource it backs, merged into a container
+     * spec's labels (never into {@link #defaultLabels}). The key set is shared with the other
+     * Floci emulators; subscription, resource group and location are the Azure scope keys. A
+     * {@code null} or blank value omits its key, so shared singletons pass no resource id.
+     */
+    public static Map<String, String> resourceIdentityLabels(String service, String resourceId,
+                                                             String subscription, String resourceGroup,
+                                                             String location) {
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put(CLOUD_LABEL, CLOUD);
+        putIfNotBlank(labels, SERVICE_LABEL, service);
+        putIfNotBlank(labels, RESOURCE_ID_LABEL, resourceId);
+        putIfNotBlank(labels, SUBSCRIPTION_LABEL, subscription);
+        putIfNotBlank(labels, RESOURCE_GROUP_LABEL, resourceGroup);
+        putIfNotBlank(labels, LOCATION_LABEL, location);
+        return labels;
+    }
+
+    /** The new-key to legacy-key alias table. */
+    public static Map<String, String> legacyLabelAliases() {
+        return LEGACY_LABEL_ALIASES;
+    }
+
+    /**
+     * Returns a copy of {@code labels} with the legacy alias of every aliased new key it carries,
+     * set to the new key's value, so the two can never drift at the source.
+     */
+    public static Map<String, String> withLegacyAliases(Map<String, String> labels) {
+        Map<String, String> result = new LinkedHashMap<>(labels);
+        LEGACY_LABEL_ALIASES.forEach((newKey, legacyKey) -> {
+            String value = labels.get(newKey);
+            if (value != null) {
+                result.put(legacyKey, value);
+            }
+        });
+        return result;
+    }
+
+    /**
+     * Reads a label by its new key, falling back to the legacy alias when the new key is absent,
+     * so containers created before the new keys existed are still recognised.
+     */
+    public static String labelValue(Map<String, String> labels, String newKey) {
+        if (labels == null) {
+            return null;
+        }
+        String value = labels.get(newKey);
+        if (value != null) {
+            return value;
+        }
+        String legacyKey = LEGACY_LABEL_ALIASES.get(newKey);
+        return legacyKey == null ? null : labels.get(legacyKey);
+    }
+
+    /**
+     * True when {@code labels} carries both {@code newKey} and its legacy alias with different
+     * values. Floci always writes them equal, so a disagreement means something else relabelled
+     * the container; callers that act on the label leave such a container alone.
+     */
+    public static boolean legacyAliasDisagrees(Map<String, String> labels, String newKey) {
+        String legacyKey = LEGACY_LABEL_ALIASES.get(newKey);
+        if (labels == null || legacyKey == null) {
+            return false;
+        }
+        String value = labels.get(newKey);
+        String legacyValue = labels.get(legacyKey);
+        return value != null && legacyValue != null && !value.equals(legacyValue);
+    }
+
+    private static void putIfNotBlank(Map<String, String> labels, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            labels.put(key, value);
+        }
     }
 
     private static String stripPrefix(String baseName) {

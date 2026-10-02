@@ -70,6 +70,8 @@ public class MariaDbServerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
+            .withLabels(ContainerStorageHelper.resourceIdentityLabels("mariadb", entry.serverName(),
+                entry.subscriptionId(), entry.resourceGroupName(), entry.location()))
             .withPortBinding(MARIADB_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())
             .withEnv("MARIADB_ROOT_PASSWORD", entry.administratorLoginPassword())

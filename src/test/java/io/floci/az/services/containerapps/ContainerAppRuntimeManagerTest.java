@@ -34,7 +34,15 @@ class ContainerAppRuntimeManagerTest {
     private static final String ENVIRONMENT_ID = "/subscriptions/sub/resourcegroups/rg/providers/"
             + "microsoft.app/managedenvironments/env";
     private static final Map<String, String> ENVIRONMENT_LABELS = Map.of(
-            "floci_service", "containerapps",
+            "io.floci.service", "containerapps",
+            "floci_containerapps_environment", ENVIRONMENT_ID);
+    private static final Map<String, String> REPLICA_LABELS = Map.of(
+            "io.floci", "az",
+            "io.floci.service", "containerapps",
+            "io.floci.resource-id", "app",
+            "io.floci.subscription", "sub",
+            "io.floci.resource-group", "rg",
+            "io.floci.location", "westeurope",
             "floci_containerapps_environment", ENVIRONMENT_ID);
 
     private ContainerBuilder containerBuilder;
@@ -76,7 +84,7 @@ class ContainerAppRuntimeManagerTest {
 
         verify(builder).withDockerNetwork(Optional.of("test-network"));
         verify(builder).withNetworkMode("container:leader-id");
-        verify(builder, times(2)).withLabels(ENVIRONMENT_LABELS);
+        verify(builder, times(2)).withLabels(REPLICA_LABELS);
         assertTrue(runtimeManager.isInternalCaller("172.18.0.9", ENVIRONMENT_ID));
         assertFalse(runtimeManager.isInternalCaller("172.18.0.9", ENVIRONMENT_ID + "-other"));
         assertFalse(runtimeManager.isInternalCaller("172.18.0.10", ENVIRONMENT_ID));
@@ -124,7 +132,7 @@ class ContainerAppRuntimeManagerTest {
     }
 
     private static ContainerAppState app() throws Exception {
-        JsonNode document = MAPPER.readTree("{\"properties\":{\"environmentId\":\""
+        JsonNode document = MAPPER.readTree("{\"location\":\"westeurope\",\"properties\":{\"environmentId\":\""
                 + ENVIRONMENT_ID + "\"}}");
         return new ContainerAppState("sub", "rg", "app", document, Instant.now());
     }

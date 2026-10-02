@@ -89,7 +89,7 @@ public class ServiceBusNamespaceManager {
     private static final String TOPIC_DIVERT_SUFFIX = "/$TopicDivert";
     private static final String SESSION_METADATA_PREFIX = "floci-az:servicebus-session:";
     private static final String PEEK_LOCK_METADATA_PREFIX = "floci-az:servicebus-peeklock:";
-    private static final String SERVICE_LABEL = "servicebus";
+    private static final String SERVICE_TOKEN = "servicebus";
     private static final String OWNER_CONTAINER_LABEL = "floci_owner_container";
     private static final String DUPLICATE_DETECTION_MBEAN =
             "io.floci.az.artemis:type=ServiceBusDuplicateDetection";
@@ -190,7 +190,7 @@ public class ServiceBusNamespaceManager {
                             config.services().serviceBus().artemisImage())
                     .withName(containerName)
                     .withEnv("ANONYMOUS_LOGIN", "true")
-                    .withLabels(serviceContainerLabels())
+                    .withLabels(serviceContainerLabels(namespaceName))
                     .withPortBinding(AMQP_PORT, amqpHostPort)
                     .withPortBinding(AMQPS_PORT, amqpsHostPort)
                     .withDynamicPort(JOLOKIA_PORT)
@@ -300,9 +300,9 @@ public class ServiceBusNamespaceManager {
                 OWNER_CONTAINER_LABEL);
     }
 
-    Map<String, String> serviceContainerLabels() {
-        Map<String, String> labels = new LinkedHashMap<>();
-        labels.put("floci_service", SERVICE_LABEL);
+    Map<String, String> serviceContainerLabels(String namespaceName) {
+        Map<String, String> labels = new LinkedHashMap<>(ContainerStorageHelper.resourceIdentityLabels(
+                SERVICE_TOKEN, namespaceName, null, null, null));
         if (currentContainerResolver != null) {
             currentContainerResolver.resolveContainerId()
                     .ifPresent(ownerId -> labels.put(OWNER_CONTAINER_LABEL, ownerId));

@@ -95,6 +95,37 @@ class ContainerLifecycleManagerCleanupTest {
         assertEquals(0, removed);
     }
 
+    @Test
+    void aliasedRequiredLabelMatchesLegacyOnlyContainersAndSkipsDisagreeingOnes() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        ListContainersCmd listCmd = mock(ListContainersCmd.class, RETURNS_SELF);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        Map<String, String> legacyOnly = ownedLabels(null, "gone-owner");
+        legacyOnly.put("floci_service", "servicebus");
+        Map<String, String> disagreeing = ownedLabels(null, "gone-owner");
+        disagreeing.put("io.floci.service", "servicebus");
+        disagreeing.put("floci_service", "containerapps");
+        Container legacy = container(
+                "legacy-only", new String[]{"/floci-az-servicebus-old"}, legacyOnly);
+        Container conflicting = container(
+                "disagreeing", new String[]{"/floci-az-servicebus-relabelled"}, disagreeing);
+        when(listCmd.exec()).thenReturn(List.of(legacy, conflicting));
+        InspectContainerCmd ownerCmd = mock(InspectContainerCmd.class);
+        when(dockerClient.inspectContainerCmd("gone-owner")).thenReturn(ownerCmd);
+        when(ownerCmd.exec()).thenThrow(new NotFoundException("gone"));
+        RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class, RETURNS_SELF);
+        when(dockerClient.removeContainerCmd("legacy-only")).thenReturn(removeCmd);
+        Map<String, String> required = new LinkedHashMap<>(emulatorLabels(null));
+        required.put("io.floci.service", "servicebus");
+
+        int removed = manager(dockerClient).removeOrphanedContainers(
+                "floci-az-servicebus-", required, "floci_owner_container");
+
+        assertEquals(1, removed);
+        verify(removeCmd).exec();
+        verify(dockerClient, never()).removeContainerCmd("disagreeing");
+    }
+
     private static Container container(String id, String[] names, Map<String, String> labels) {
         Container container = mock(Container.class);
         when(container.getId()).thenReturn(id);

@@ -103,6 +103,8 @@ public class ContainerLauncher {
 
         ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                 .withName(containerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "functions", primary.appName(), null, null, null))
                 .withDynamicPort(FUNCTIONS_PORT)
                 .withEnv(env)
                 .withHostDockerInternalOnLinux()

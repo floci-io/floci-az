@@ -73,6 +73,8 @@ public class VmContainerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
                 .withName(containerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels("vm", vm.getName(),
+                        vm.getSubscriptionId(), vm.getResourceGroup(), vm.getLocation()))
                 .withCmd(KEEP_ALIVE)
                 .withDockerNetwork(config.services().dockerNetwork())
                 .withLogRotation()

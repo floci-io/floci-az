@@ -101,6 +101,8 @@ public class SqlServerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
+            .withLabels(ContainerStorageHelper.resourceIdentityLabels("sql", entry.serverName(),
+                entry.subscriptionId(), entry.resourceGroupName(), entry.location()))
             .withPortBinding(SQL_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())  // join the shared network when running in Docker
             .withEnv("ACCEPT_EULA", "Y")

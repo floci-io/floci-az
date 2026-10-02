@@ -127,6 +127,8 @@ public class AciContainerGroupManager {
 
         ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
                 .withName(dockerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels("aci", group.getName(),
+                        group.getSubscriptionId(), group.getResourceGroup(), group.getLocation()))
                 .withLabel("floci_az_aci_group", group.storageKey())
                 .withLogRotation();
 

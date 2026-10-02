@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -112,7 +113,8 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> postgresManager.startServer(postgresEntry()));
 
-        assertClaimWasMade(pgPort(), 5432);
+        ContainerSpec spec = assertClaimWasMade(pgPort(), 5432);
+        assertEquals(identityLabels("postgres", "leak-test-pg"), resourceIdentityLabels(spec));
         assertEquals(pgPort(), portAllocator.claimOrZero(pgPort()),
             "the configured port must be claimable again, or default-port silently stops working");
         portAllocator.release(pgPort());
@@ -126,7 +128,8 @@ class PortClaimReleaseTest {
 
         assertThrows(RuntimeException.class, () -> sqlManager.startServer(sqlEntry()));
 
-        assertClaimWasMade(sqlPort(), 1433);
+        ContainerSpec spec = assertClaimWasMade(sqlPort(), 1433);
+        assertEquals(identityLabels("sql", "leak-test-sql"), resourceIdentityLabels(spec));
         assertEquals(sqlPort(), portAllocator.claimOrZero(sqlPort()),
             "the configured port must be claimable again, or default-port silently stops working");
         portAllocator.release(sqlPort());
@@ -175,11 +178,28 @@ class PortClaimReleaseTest {
      * ever claimed the port, nothing was reserved and reclaiming it trivially succeeds. Checking the
      * spec Docker was asked to create proves the claim was made and applied.
      */
-    private void assertClaimWasMade(int expectedHostPort, int containerPort) {
+    private ContainerSpec assertClaimWasMade(int expectedHostPort, int containerPort) {
         ArgumentCaptor<ContainerSpec> spec = ArgumentCaptor.forClass(ContainerSpec.class);
         verify(containerManager).createAndStart(spec.capture());
         assertEquals(expectedHostPort, spec.getValue().portBindings().get(containerPort),
             "the manager must have claimed and bound the configured port for this test to mean anything");
+        return spec.getValue();
+    }
+
+    private static Map<String, String> identityLabels(String service, String serverName) {
+        return Map.of(
+            "io.floci", "az",
+            "io.floci.service", service,
+            "io.floci.resource-id", serverName,
+            "io.floci.subscription", "sub",
+            "io.floci.resource-group", "rg",
+            "io.floci.location", "eastus");
+    }
+
+    private static Map<String, String> resourceIdentityLabels(ContainerSpec spec) {
+        Map<String, String> labels = new HashMap<>(spec.labels());
+        labels.keySet().removeIf(key -> !key.startsWith("io.floci"));
+        return labels;
     }
 
     private PostgresState.ServerEntry postgresEntry() {

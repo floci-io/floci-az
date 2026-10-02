@@ -123,6 +123,8 @@ public class EventHubNamespaceManager {
 
         ContainerSpec spec = containerBuilder.newContainer(config.services().eventHub().artemisImage())
                 .withName(containerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "eventhub", namespaceName, null, null, null))
                 .withEnv("ANONYMOUS_LOGIN", "true")
                 .withPortBinding(AMQP_PORT, amqpHostPort)
                 .withPortBinding(AMQPS_PORT, amqpsHostPort)

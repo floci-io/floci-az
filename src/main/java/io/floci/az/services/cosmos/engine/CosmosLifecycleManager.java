@@ -161,6 +161,7 @@ public class CosmosLifecycleManager {
     private ContainerSpec buildSpec(String name, String image, int hostPort, int containerPort, CosmosApi api) {
         ContainerBuilder.Builder builder = containerBuilder.newContainer(image)
             .withName(name)
+            .withLabels(ContainerStorageHelper.resourceIdentityLabels("cosmos", null, null, null, null))
             .withPortBinding(containerPort, hostPort);
 
         // PostgreSQL needs env vars

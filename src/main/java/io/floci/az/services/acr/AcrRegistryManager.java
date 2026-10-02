@@ -81,6 +81,7 @@ public class AcrRegistryManager {
         try {
             ContainerSpec spec = containerBuilder.newContainer(acrConfig.defaultImage())
                     .withName(sharedName())
+                    .withLabels(ContainerStorageHelper.resourceIdentityLabels("acr", null, null, null, null))
                     .withEnv("REGISTRY_STORAGE_DELETE_ENABLED", "true")
                     .withEnv("REGISTRY_HTTP_ADDR", "0.0.0.0:" + REGISTRY_PORT)
                     .withPortBinding(REGISTRY_PORT, chosenPort)

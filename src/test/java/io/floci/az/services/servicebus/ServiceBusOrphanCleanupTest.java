@@ -66,8 +66,10 @@ class ServiceBusOrphanCleanupTest {
                 mock(ArtemisTlsGenerator.class));
 
         assertEquals(Map.of(
-                "floci_service", "servicebus",
-                "floci_owner_container", "owner-id"), manager.serviceContainerLabels());
+                "io.floci", "az",
+                "io.floci.service", "servicebus",
+                "io.floci.resource-id", "orders",
+                "floci_owner_container", "owner-id"), manager.serviceContainerLabels("orders"));
     }
 
     @Test
@@ -79,6 +81,9 @@ class ServiceBusOrphanCleanupTest {
                 mock(ServiceBusConfigGenerator.class),
                 mock(ArtemisTlsGenerator.class));
 
-        assertEquals(Map.of("floci_service", "servicebus"), manager.serviceContainerLabels());
+        assertEquals(Map.of(
+                "io.floci", "az",
+                "io.floci.service", "servicebus",
+                "io.floci.resource-id", "default"), manager.serviceContainerLabels("default"));
     }
 }

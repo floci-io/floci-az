@@ -70,6 +70,8 @@ public class MySqlServerManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
             .withName(containerName)
+            .withLabels(ContainerStorageHelper.resourceIdentityLabels("mysql", entry.serverName(),
+                entry.subscriptionId(), entry.resourceGroupName(), entry.location()))
             .withPortBinding(MYSQL_CONTAINER_PORT, requestedHostPort)   // 0 = OS picks (default-port unset or unavailable)
             .withDockerNetwork(config.services().dockerNetwork())
             .withEnv("MYSQL_ROOT_PASSWORD", entry.administratorLoginPassword())

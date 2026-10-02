@@ -30,8 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ContainerAppRuntimeManager {
 
     private static final Logger LOG = Logger.getLogger(ContainerAppRuntimeManager.class);
-    private static final String SERVICE_LABEL = "floci_service";
-    private static final String SERVICE_LABEL_VALUE = "containerapps";
+    private static final String SERVICE_TOKEN = "containerapps";
     private static final String ENVIRONMENT_LABEL = "floci_containerapps_environment";
 
     private final ContainerBuilder containerBuilder;
@@ -129,7 +128,10 @@ public class ContainerAppRuntimeManager {
         ContainerLifecycleManager.EndpointInfo ingressEndpoint = null;
         String networkNamespace = null;
         List<String> networkAddresses = List.of();
-        Map<String, String> labels = environmentLabels(normalizedEnvironmentId(app));
+        Map<String, String> labels = new HashMap<>(ContainerStorageHelper.resourceIdentityLabels(
+                SERVICE_TOKEN, app.getName(), app.getSubscriptionId(), app.getResourceGroup(),
+                app.getDocument().path("location").asText()));
+        labels.putAll(environmentLabels(normalizedEnvironmentId(app)));
 
         try {
             for (int containerIndex = 0; containerIndex < containers.size(); containerIndex++) {
@@ -271,9 +273,14 @@ public class ContainerAppRuntimeManager {
         return environmentId == null ? "" : environmentId.toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * Labels identifying an environment's replica containers. Also the discovery filter for
+     * {@link ContainerLifecycleManager#runningContainerAddresses}, which reads the service key
+     * new-first and falls back to its legacy alias, so replicas from older versions still match.
+     */
     private static Map<String, String> environmentLabels(String environmentId) {
         return Map.of(
-                SERVICE_LABEL, SERVICE_LABEL_VALUE,
+                ContainerStorageHelper.SERVICE_LABEL, SERVICE_TOKEN,
                 ENVIRONMENT_LABEL, environmentId);
     }
 

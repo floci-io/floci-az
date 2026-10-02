@@ -79,6 +79,8 @@ public class RedisCacheManager {
 
         ContainerSpec spec = containerBuilder.newContainer(image)
                 .withName(containerName)
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels("redis", cache.getName(),
+                        cache.getSubscriptionId(), cache.getResourceGroup(), cache.getLocation()))
                 .withCmd(cmd)
                 .withPortBinding(REDIS_PORT, hostPort)
                 .withDockerNetwork(config.services().dockerNetwork())
