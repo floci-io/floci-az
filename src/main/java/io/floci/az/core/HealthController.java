@@ -15,9 +15,16 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 public class HealthController {
 
-    @Inject EmulatorConfig config;
+    private final EmulatorConfig config;
+    // Resolved per instance, never in a static initializer: native image runs those at build
+    // time, where FLOCI_AZ_VERSION is unset, and would bake "dev" into every release binary.
+    private final String version;
 
-    private static final String VERSION = resolveVersion();
+    @Inject
+    public HealthController(EmulatorConfig config) {
+        this.config = config;
+        this.version = resolveVersion();
+    }
 
     static String resolveVersion() {
         String env = System.getenv("FLOCI_AZ_VERSION");
@@ -30,8 +37,6 @@ public class HealthController {
     @GET
     @Path("{path:(health|_floci/health)}")
     public Response health() {
-        String version = VERSION;
-
         return Response.ok(Map.of(
             "status", "UP",
             "version", version,
