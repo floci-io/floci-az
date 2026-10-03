@@ -64,6 +64,8 @@ jobs:
           context: .
           file: docker/Dockerfile.native-package
           tags: floci-az:test-native
+          build-args: |
+            VERSION=ci-${{ github.sha }}
           outputs: type=docker,dest=/tmp/floci-az-native-image.tar
           # No layer cache here, deliberately. The COPY below brings in a natively
           # compiled binary that changes every commit, and Docker layer reuse is
@@ -157,6 +159,11 @@ jobs:
 
       - name: Wait for floci-az to be ready
         run: timeout 60 bash -c 'until curl -sf http://localhost:4577/health >/dev/null 2>&1; do sleep 1; done'
+
+      # A static initializer runs at native build time, where FLOCI_AZ_VERSION is unset, so a
+      # regression there reports "dev" from every release binary; JVM-mode tests cannot see it.
+      - name: Check floci-az reports its build version
+        run: curl -sf http://localhost:4577/_floci/health | jq -e --arg v "ci-${{ github.sha }}" '.version == $v'
 
       - name: Checkout repository
         uses: actions/checkout@v7
