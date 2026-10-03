@@ -1,0 +1,42 @@
+name: Dockerfile.native
+
+# docker-compose.yml and the installation docs build docker/Dockerfile.native, but the
+# compatibility and release workflows package a runner-built binary with
+# Dockerfile.native-package instead, so nothing else starts an image from this file.
+# Path-filtered: the in-container native build takes several minutes.
+on:
+  pull_request:
+    paths:
+      - 'docker/Dockerfile.native'
+      - 'docker/entrypoint.sh'
+      - 'docker/healthcheck.sh'
+      - '.github/workflows/dockerfile-native.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-start:
+    name: Build and start the Dockerfile.native image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -f docker/Dockerfile.native -t floci-az:dockerfile-native .
+
+      - name: Start floci-az
+        run: docker run -d --name floci-az -p 4577:4577 floci-az:dockerfile-native
+
+      - name: Wait for floci-az to be healthy
+        run: |
+          timeout 60 bash -c 'until curl -sf http://localhost:4577/_floci/health | jq -e ".status == \"UP\"" >/dev/null 2>&1; do sleep 1; done'
+
+      - name: Dump floci-az logs
+        if: failure()
+        run: docker logs floci-az || true
