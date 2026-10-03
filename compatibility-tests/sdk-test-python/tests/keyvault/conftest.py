@@ -17,10 +17,16 @@ class FakeCredential(TokenCredential):
 class ForceHttpTransport(RequestsTransport):
     """Rewrites https:// → http:// so the SDK's TLS-enforcement check passes
     (it inspects the URL before the transport layer) while traffic actually
-    goes to the plain-HTTP emulator."""
+    goes to the plain-HTTP emulator. The URL is restored after sending: the
+    challenge policy re-checks it on the 401 response (azure-keyvault 4.11.3+)
+    and rejects a request left pointing at http://."""
     def send(self, request, **kwargs):
-        request.url = request.url.replace("https://", "http://", 1)
-        return super().send(request, **kwargs)
+        original_url = request.url
+        request.url = original_url.replace("https://", "http://", 1)
+        try:
+            return super().send(request, **kwargs)
+        finally:
+            request.url = original_url
 
 
 ENDPOINT = os.environ.get("FLOCI_AZ_ENDPOINT", "http://localhost:4577")

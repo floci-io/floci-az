@@ -587,6 +587,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     private synchronized Response createOrUpdateStorageAccount(AzureRequest req, String sub, String rg, String account) {
+        if (!account.matches("[a-z0-9]{3,24}")) {
+            return ArmErrors.error(400, "AccountNameInvalid", account
+                    + " is not a valid storage account name. Storage account name must be between 3 and 24 "
+                    + "characters in length and use numbers and lower-case letters only.");
+        }
         Optional<Map<String, Object>> owner = ownedElsewhere(storageAccounts, sub, rg, account);
         if (owner.isPresent()) {
             return sub.equalsIgnoreCase((String) owner.get().get("_sub"))
@@ -600,10 +605,17 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         Map<String, Object> requestedProperties = cast(body.get("properties"));
         Map<String, Object> existing = storageAccounts.get(saKey(sub, rg, account));
         Map<String, Object> existingProperties = cast(existing == null ? null : existing.get("properties"));
+        boolean existingHnsEnabled = Boolean.TRUE.equals(existingProperties.get("isHnsEnabled"));
+        if (existing != null && requestedProperties.containsKey("isHnsEnabled")
+                && existingHnsEnabled != Boolean.TRUE.equals(requestedProperties.get("isHnsEnabled"))) {
+            return ArmErrors.error(400, "AccountPropertyCannotBeUpdated",
+                    "The property 'isHnsEnabled' was specified in the input, but it cannot be updated as it is "
+                            + "read-only. For more information, see - https://aka.ms/storageaccountupdate");
+        }
         boolean hnsEnabled = requestedProperties.containsKey("isHnsEnabled")
                 ? Boolean.TRUE.equals(requestedProperties.get("isHnsEnabled"))
                 : existingProperties.containsKey("isHnsEnabled")
-                        ? Boolean.TRUE.equals(existingProperties.get("isHnsEnabled"))
+                        ? existingHnsEnabled
                         : config.services().blob().hierarchicalNamespaceAccounts().contains(account);
         // Return domain-based storage endpoints so the azurerm provider can parse the account name.
         // The port is taken from the configured base URL so data-plane requests reach our emulator.
@@ -929,6 +941,13 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      */
     private Response checkNameAvailability(AzureRequest req, String path) {
         String name = bodyString(parseBody(req), "name", "");
+        if (path.contains("/Microsoft.Storage/") && !name.matches("[a-z0-9]{3,24}")) {
+            return Response.ok(Map.of(
+                    "nameAvailable", false,
+                    "reason", "AccountNameInvalid",
+                    "message", name + " is not a valid storage account name. Storage account name must be between "
+                            + "3 and 24 characters in length and use numbers and lower-case letters only.")).build();
+        }
         Map<String, Map<String, Object>> store = path.contains("/Microsoft.Storage/") ? storageAccounts
                 : path.contains("/Microsoft.KeyVault/") ? keyVaults
                 : null;

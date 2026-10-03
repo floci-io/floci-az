@@ -83,6 +83,67 @@ class KeyVaultTimestampTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unsetDatesAreOmittedThroughoutKeyLifecycle(boolean explicitNulls) {
+        String vault = vault();
+        Map<String, Object> body = new HashMap<>(Map.of("kty", "RSA", "key_size", 2048));
+        if (explicitNulls) {
+            Map<String, Object> attributes = new HashMap<>();
+            attributes.put("nbf", null);
+            attributes.put("exp", null);
+            body.put("attributes", attributes);
+        }
+
+        var created = request().body(body).post(vault + "keys/example/create");
+        try {
+            assertUnsetDates(created.then(), "attributes");
+            String kid = created.jsonPath().getString("key.kid");
+            String version = kid.substring(kid.lastIndexOf('/') + 1);
+
+            assertUnsetDates(request().get(vault + "keys/example").then(), "attributes");
+            assertUnsetDates(request().get(vault + "keys/example/" + version).then(), "attributes");
+            assertUnsetDates(request().get(vault + "keys").then(), "value[0].attributes");
+            assertUnsetDates(request().get(vault + "keys/example/versions").then(), "value[0].attributes");
+            assertUnsetDates(request().body(Map.of("tags", Map.of("t", "v")))
+                    .patch(vault + "keys/example/" + version).then(), "attributes");
+            assertUnsetDates(request().delete(vault + "keys/example").then(), "attributes");
+            assertUnsetDates(request().get(vault + "deletedkeys/example").then(), "attributes");
+            assertUnsetDates(request().get(vault + "deletedkeys").then(), "value[0].attributes");
+            assertUnsetDates(request().post(vault + "deletedkeys/example/recover").then(), "attributes");
+        } finally {
+            purgeKey(vault);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"nbf, 0", "exp, 0", "nbf, 1700000000", "exp, 1900000000"})
+    void setKeyDatesStayNumericAndClearedDatesAreOmitted(String attribute, int timestamp) {
+        String vault = vault();
+        String otherAttribute = "nbf".equals(attribute) ? "exp" : "nbf";
+        var created = request().body(Map.of("kty", "RSA", "key_size", 2048,
+                        "attributes", Map.of(attribute, timestamp)))
+                .post(vault + "keys/example/create");
+        try {
+            created.then().statusCode(200)
+                    .body("attributes." + attribute, equalTo(timestamp))
+                    .body("attributes", not(hasKey(otherAttribute)));
+            String kid = created.jsonPath().getString("key.kid");
+            String versionPath = vault + "keys/example/" + kid.substring(kid.lastIndexOf('/') + 1);
+
+            request().get(vault + "keys").then().statusCode(200)
+                    .body("value[0].attributes." + attribute, equalTo(timestamp));
+
+            Map<String, Object> cleared = new HashMap<>();
+            cleared.put(attribute, null);
+            assertUnsetDates(request().body(Map.of("attributes", cleared))
+                    .patch(versionPath).then(), "attributes");
+            assertUnsetDates(request().get(versionPath).then(), "attributes");
+        } finally {
+            purgeKey(vault);
+        }
+    }
+
     private static void assertUnsetDates(ValidatableResponse response, String path) {
         response.statusCode(200)
                 .body(path, not(hasKey("nbf")))
@@ -104,5 +165,10 @@ class KeyVaultTimestampTest {
     private static void purge(String vault) {
         request().delete(vault + "secrets/example").then().statusCode(anyOf(is(200), is(404)));
         request().delete(vault + "deletedsecrets/example").then().statusCode(204);
+    }
+
+    private static void purgeKey(String vault) {
+        request().delete(vault + "keys/example").then().statusCode(anyOf(is(200), is(404)));
+        request().delete(vault + "deletedkeys/example").then().statusCode(204);
     }
 }

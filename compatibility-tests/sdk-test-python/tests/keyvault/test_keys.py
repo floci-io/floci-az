@@ -37,11 +37,16 @@ class _FakeCredential(TokenCredential):
 
 
 class _ForceHttpTransport(RequestsTransport):
+    # Restore the URL after sending: the challenge policy re-checks it for https.
     def send(self, request, **kwargs):
-        request.url = request.url.replace(
+        original_url = request.url
+        request.url = original_url.replace(
             f"https://{_VAULT_HOST}/", f"{_ENDPOINT}/devstoreaccount1-keyvault/", 1
         )
-        return super().send(request, **kwargs)
+        try:
+            return super().send(request, **kwargs)
+        finally:
+            request.url = original_url
 
 
 def _crypto(key_name, key_version):
