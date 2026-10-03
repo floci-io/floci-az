@@ -111,4 +111,63 @@ class KeyVaultServiceTest {
                     .then().statusCode(405);
         }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"keys", "keys/"})
+    void listKeysWithOptionalTrailingSlash(String path) {
+        String vault = "/kv" + UUID.randomUUID().toString().replace("-", "") + "-keyvault/";
+
+        given().header("Authorization", "Bearer test-token")
+                .queryParam("api-version", "7.4")
+                .when().get(vault + path)
+                .then().statusCode(200)
+                .body("value", hasSize(0));
+
+        given().header("Authorization", "Bearer test-token")
+                .contentType("application/json")
+                .body(Map.of("kty", "RSA", "key_size", 2048))
+                .when().post(vault + "keys/example/create?api-version=7.4")
+                .then().statusCode(200);
+
+        try {
+            String expected = given().header("Authorization", "Bearer test-token")
+                    .when().get(vault + "keys?api-version=7.4")
+                    .then().statusCode(200).extract().asString();
+
+            given().header("Authorization", "Bearer test-token")
+                    .queryParam("api-version", "7.4")
+                    .when().get(vault + path)
+                    .then().statusCode(200)
+                    .body(equalTo(expected))
+                    .body("value", hasSize(1))
+                    .body("value[0].kid", containsString("/keys/example"));
+        } finally {
+            given().header("Authorization", "Bearer test-token")
+                    .when().delete(vault + "keys/example").then().statusCode(200);
+            given().header("Authorization", "Bearer test-token")
+                    .when().delete(vault + "deletedkeys/example").then().statusCode(204);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"deletedkeys", "deletedkeys/"})
+    void listDeletedKeysWithOptionalTrailingSlash(String path) {
+        String vault = "/kv" + UUID.randomUUID().toString().replace("-", "") + "-keyvault/";
+        given().header("Authorization", "Bearer test-token")
+                .contentType("application/json").body(Map.of("kty", "RSA", "key_size", 2048))
+                .when().post(vault + "keys/example/create").then().statusCode(200);
+        given().header("Authorization", "Bearer test-token")
+                .when().delete(vault + "keys/example").then().statusCode(200);
+        try {
+            given().header("Authorization", "Bearer test-token")
+                    .queryParam("api-version", "7.4")
+                    .when().get(vault + path)
+                    .then().statusCode(200)
+                    .body("value", hasSize(1))
+                    .body("value[0].recoveryId", containsString("/deletedkeys/example"));
+        } finally {
+            given().header("Authorization", "Bearer test-token")
+                    .when().delete(vault + "deletedkeys/example").then().statusCode(204);
+        }
+    }
 }
