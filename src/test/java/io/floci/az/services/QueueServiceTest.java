@@ -324,6 +324,28 @@ public class QueueServiceTest {
             .body(containsString("delayed"));
     }
 
+    // Enqueued late in a wall-clock second, a visibility deadline truncated to whole seconds would
+    // expire at the next second boundary, well before the requested timeout.
+    @Test
+    void visibilityTimeoutIsNotTruncatedToWholeSeconds() throws Exception {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        while (System.currentTimeMillis() % 1000 < 700) {
+            Thread.sleep(10);
+        }
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>sub-second</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages?visibilitytimeout=1&messagettl=5", ACCOUNT, QUEUE);
+
+        Thread.sleep(400);
+
+        given()
+            .when().get("/{account}/{queue}/messages?peekonly=true", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body(not(containsString("sub-second")));
+    }
+
     // A bodyless HEAD error must not advertise a content type: the Azure SDK for C++ parses the body
     // whenever content-type contains "xml" without guarding against an empty buffer, and crashes.
     @Test
