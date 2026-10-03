@@ -329,8 +329,8 @@ public class QueueServiceTest {
     @Test
     void visibilityTimeoutIsNotTruncatedToWholeSeconds() throws Exception {
         given().put("/{account}/{queue}", ACCOUNT, QUEUE);
-        while (System.currentTimeMillis() % 1000 < 700) {
-            Thread.sleep(10);
+        while (System.currentTimeMillis() % 1000 < 700 || System.currentTimeMillis() % 1000 > 750) {
+            Thread.sleep(5);
         }
         given()
             .contentType("application/xml")
@@ -344,6 +344,24 @@ public class QueueServiceTest {
             .then()
             .statusCode(200)
             .body(not(containsString("sub-second")));
+    }
+
+    @Test
+    void visibilityTimeoutAboveSevenDaysIsRejected() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>too-long</MessageText></QueueMessage>")
+            .when().post("/{account}/{queue}/messages?visibilitytimeout=604801", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .body(containsString("OutOfRangeQueryParameterValue"));
+
+        given()
+            .when().get("/{account}/{queue}/messages?visibilitytimeout=10000000000000000", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .body(containsString("OutOfRangeQueryParameterValue"));
     }
 
     // A bodyless HEAD error must not advertise a content type: the Azure SDK for C++ parses the body
