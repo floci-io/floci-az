@@ -140,6 +140,8 @@ Concurrent creates of one name from several subscriptions leave exactly one owne
 
 `POST /subscriptions/{sub}/providers/Microsoft.Storage/checkNameAvailability` and the
 `Microsoft.KeyVault` equivalent report a taken name as `nameAvailable: false`, reason `AlreadyExists`.
+For `Microsoft.Storage`, malformed names report `nameAvailable: false`, reason
+`AccountNameInvalid`. Storage account names must contain 3 to 24 lowercase letters or digits.
 
 The codes come from Microsoft's troubleshooting pages and real error payloads, because the REST specs
 do not model create conflicts. No public source gives the code for Managed HSM or Communication Services,
