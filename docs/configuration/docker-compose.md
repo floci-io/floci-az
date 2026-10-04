@@ -261,7 +261,7 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_DOCKER_LOG_MAX_SIZE` | `10m` | Max log file size per function container |
 | `FLOCI_AZ_DOCKER_LOG_MAX_FILE` | `3` | Max rotated log files per function container |
 | `FLOCI_AZ_DOCKER_DOCKER_CONFIG_PATH` | _(unset)_ | Path to Docker `config.json` for private registry auth |
-| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into sidecar container and volume names (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
+| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
 ---
 

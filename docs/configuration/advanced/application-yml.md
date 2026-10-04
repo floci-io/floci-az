@@ -105,7 +105,7 @@ floci-az:
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `true` | Keep Container Apps ARM state without Docker runtimes |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |
-| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into sidecar container and volume names (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
+| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
 Blob service SAS signing keys are configured per account (independent of `auth.mode`):
 

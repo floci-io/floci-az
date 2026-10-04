@@ -726,7 +726,7 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_STORAGE_MODE` | `memory` | Storage mode: `memory`, `persistent`, `hybrid`, or `wal` |
 | `FLOCI_AZ_STORAGE_PATH` | `/app/data` | Directory used for persisted state |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker socket used to spawn function and sidecar containers |
-| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into sidecar container and volume names (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
+| `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
 Per-service enable flags (`FLOCI_AZ_SERVICES_<SERVICE>_ENABLED`), TLS certificate paths, Cosmos engine settings, and the rest are documented in the full reference.
 
