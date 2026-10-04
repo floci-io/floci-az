@@ -70,7 +70,7 @@ clients can discover the Gen2 endpoint shape.
     from azure.storage.blob import BlobServiceClient
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
             "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
     svc = BlobServiceClient.from_connection_string(conn)
     container = svc.create_container("my-container")

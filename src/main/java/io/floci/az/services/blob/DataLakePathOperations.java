@@ -285,6 +285,9 @@ public class DataLakePathOperations {
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
+        while (normalized.contains("//")) {
+            normalized = normalized.replace("//", "/");
+        }
         return normalized.isEmpty() ? null : normalized;
     }
 

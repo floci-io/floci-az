@@ -4,7 +4,7 @@ from azure.appconfiguration import AzureAppConfigurationClient
 from azure.core.pipeline.transport import RequestsTransport
 
 # Same dev key used across all floci-az emulator tests
-DEV_KEY = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="
+DEV_KEY = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 ACCOUNT_NAME = "devstoreaccount1"
 
 EMULATOR_BASE = os.environ.get("FLOCI_AZ_ENDPOINT", "http://localhost:4577")

@@ -1,5 +1,5 @@
 export const DEV_KEY =
-  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
+  "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 export const ACCOUNT = "devstoreaccount1";
 
 const BASE = process.env.FLOCI_AZ_ENDPOINT ?? "http://localhost:4577";

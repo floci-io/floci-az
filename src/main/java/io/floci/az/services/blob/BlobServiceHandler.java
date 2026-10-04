@@ -24,6 +24,8 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -59,6 +61,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private static final String SNAPSHOT_PREFIX = "__snapshot__:";
     private static final String USER_METADATA_PREFIX = "UserMeta:";
     private static final String CREATION_TIME_KEY = "CreationTime";
+    private static final String CUSTOMER_PROVIDED_KEY_SHA256 = "CustomerProvidedKeySha256";
     private static final String DATALAKE_APPEND_PREFIX = "__abfs_append__:";
     private static final String DATALAKE_OWNER = DataLakePathOperations.DEFAULT_OWNER;
     private static final String DATALAKE_GROUP = DataLakePathOperations.DEFAULT_GROUP;
@@ -174,12 +177,40 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String[] parts = path.split("/", 2);
             String containerName = parts[0];
             String blobName = parts.length > 1 ? parts[1] : "";
+            boolean invalidBlobName = false;
+            if (!blobName.isEmpty() && !blobName.equals("/")) {
+                List<String> normalizedSegments = new ArrayList<>();
+                for (String segment : blobName.split("/", -1)) {
+                    if (segment.equals(".")) {
+                        continue;
+                    }
+                    if (segment.equals("..")) {
+                        if (normalizedSegments.isEmpty()) {
+                            invalidBlobName = true;
+                            break;
+                        }
+                        normalizedSegments.removeLast();
+                    } else {
+                        normalizedSegments.add(segment);
+                    }
+                }
+                blobName = String.join("/", normalizedSegments);
+                if (blobName.isEmpty()) {
+                    invalidBlobName = true;
+                }
+            }
 
             String comp = query.get("comp");
             String action = query.get("action");
             boolean dataLakeRequest = isDataLakeRequest(request);
 
-            if (blobName.isEmpty()) {
+            if (invalidBlobName) {
+                AzureErrorResponse error = new AzureErrorResponse(
+                        "InvalidUri", "The requested URI does not represent any resource on the server.");
+                response = dataLakeRequest
+                        ? error.toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode())
+                        : error.toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            } else if (blobName.isEmpty()) {
                 if (dataLakeRequest && "filesystem".equals(query.get("resource"))
                         && (comp != null || action != null)) {
                     // ADLS filesystem operations do not use Blob-style `comp` or path `action`
@@ -247,9 +278,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (dataLakeRequest && "HEAD".equalsIgnoreCase(method)
                         && "checkAccess".equals(action)) {
                     response = checkDataLakeAccess(request, containerName, blobName);
-                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "append".equals(action)) {
+                } else if (dataLakeRequest && ("PUT".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method))
+                        && "append".equals(action)) {
                     response = appendDataLakePath(request, containerName, blobName);
-                } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "flush".equals(action)) {
+                } else if (dataLakeRequest && ("PUT".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method))
+                        && "flush".equals(action)) {
                     response = flushDataLakePath(request, containerName, blobName);
                 } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method) && "setProperties".equals(action)) {
                     response = setDataLakePathProperties(request, containerName, blobName);
@@ -262,7 +295,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (dataLakeRequest && "PUT".equalsIgnoreCase(method)
                         && action == null && ("file".equals(query.get("resource"))
                         || "directory".equals(query.get("resource")))) {
-                    response = createDataLakePath(request, containerName, blobName);
+                    response = blobName.contains("//")
+                            ? new AzureErrorResponse("InvalidUri", "The request URI is invalid.")
+                                    .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode())
+                            : createDataLakePath(request, containerName, blobName);
                 } else if (dataLakeRequest && action != null) {
                     // Never allow an ADLS Path Update action to fall through into PutBlob:
                     // Hadoop setProperties/setAccessControl requests have empty bodies and a
@@ -546,9 +582,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 if ("file".equals(dataLakeResourceType) || "directory".equals(dataLakeResourceType)) {
                     metadata.put("DataLakeResourceType", dataLakeResourceType);
                 }
+                if ("directory".equals(dataLakeResourceType)
+                        && isHierarchicalNamespaceEnabled(request.accountName())) {
+                    metadata.put(USER_METADATA_PREFIX + "hdi_isfolder", "true");
+                }
                 metadata.put("Name", blobName);
                 metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
                 metadata.putAll(readUserMetadata(request));
+                String customerProvidedKeySha256 =
+                        request.headers().getHeaderString("x-ms-encryption-key-sha256");
+                if (customerProvidedKeySha256 != null) {
+                    metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
+                }
 
                 String etag = UUID.randomUUID().toString();
                 store.put(objKey(request.accountName(), containerName, blobName),
@@ -785,6 +830,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String requestedBlobType = request.queryParams().get("blobType");
             metadata.put("BlobType", "AppendBlob".equalsIgnoreCase(requestedBlobType)
                     ? "AppendBlob" : "BlockBlob");
+            String customerProvidedKeySha256 =
+                    request.headers().getHeaderString("x-ms-encryption-key-sha256");
+            if (customerProvidedKeySha256 != null) {
+                metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
+            }
             String etag = UUID.randomUUID().toString();
             Instant now = Instant.now();
             store.put(key, new StoredObject(path, new byte[0], metadata, now, etag));
@@ -1066,6 +1116,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         Map<String, String> metadata = new HashMap<>();
         metadata.put("Name", path == null ? "" : path);
         metadata.put(DATALAKE_RESOURCE_TYPE_KEY, directory ? "directory" : "file");
+        if (directory) {
+            metadata.put(USER_METADATA_PREFIX + "hdi_isfolder", "true");
+        }
         metadata.put(DATALAKE_OWNER_KEY, DATALAKE_OWNER);
         metadata.put(DATALAKE_GROUP_KEY, DATALAKE_GROUP);
         String requestedPermissions = request == null ? null
@@ -1079,6 +1132,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     private static void ensureDataLakeDefaults(Map<String, String> metadata, boolean directory) {
         metadata.putIfAbsent(DATALAKE_RESOURCE_TYPE_KEY, directory ? "directory" : "file");
+        if (directory) {
+            metadata.putIfAbsent(USER_METADATA_PREFIX + "hdi_isfolder", "true");
+        }
         metadata.putIfAbsent(DATALAKE_OWNER_KEY, DATALAKE_OWNER);
         metadata.putIfAbsent(DATALAKE_GROUP_KEY, DATALAKE_GROUP);
         String permissions = metadata.getOrDefault(DATALAKE_PERMISSIONS_KEY,
@@ -1542,6 +1598,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         while (normalized.endsWith("/") && !normalized.isEmpty()) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
+        while (normalized.contains("//")) {
+            normalized = normalized.replace("//", "/");
+        }
         return normalized.isEmpty() ? null : normalized;
     }
 
@@ -1569,7 +1628,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
 
-        String key = objKey(request.accountName(), filesystem, path);
+        String normalizedPath = normalizeDataLakePath(path);
+        String key = objKey(request.accountName(), filesystem, normalizedPath);
         Optional<StoredObject> exact = store.get(key);
         List<StoredObject> descendants = List.of();
         boolean directory;
@@ -1600,7 +1660,25 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         Instant lastModified = source.lastModified().equals(Instant.EPOCH) ? Instant.now() : source.lastModified();
 
         boolean implicitDirectory = directory && exact.isEmpty();
-        Map<String, String> metadata = implicitDirectory ? Map.of() : source.metadata();
+        Map<String, String> metadata = implicitDirectory
+                ? defaultDataLakeMetadata(normalizedPath, true, null)
+                : new HashMap<>(source.metadata());
+        String customerProvidedKeySha256 = metadata.get(CUSTOMER_PROVIDED_KEY_SHA256);
+        if (customerProvidedKeySha256 != null) {
+            String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+            if (customerProvidedKey == null) {
+                return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                        "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            if (!customerProvidedKeySha256.equals(
+                    request.headers().getHeaderString("x-ms-encryption-key-sha256"))) {
+                return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                        "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+        }
+        ensureDataLakeDefaults(metadata, directory);
         Response.ResponseBuilder builder = Response.ok()
                 .header("Last-Modified", RFC1123_DATE_TIME.format(lastModified))
                 .header("ETag", etag)
@@ -1612,8 +1690,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         ? DATALAKE_DIRECTORY_PERMISSIONS
                         : DATALAKE_FILE_PERMISSIONS))
                 .header("x-ms-request-server-encrypted", "true");
+        if (customerProvidedKeySha256 != null) {
+            builder.header("x-ms-encryption-key-sha256", customerProvidedKeySha256);
+        }
         if (request.queryParams().get("action") == null) {
             builder.header("x-ms-properties", metadata.getOrDefault(DATALAKE_PROPERTIES_KEY, ""));
+            addUserMetadataHeaders(builder, metadata);
         }
         leaseService.addLeaseHeaders(builder, key);
 
@@ -1657,6 +1739,29 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     return new AzureErrorResponse("InvalidSourceOrDestinationResourceType",
                             "The source and destination resource type must be identical.")
                             .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+
+                String customerProvidedKeySha256 =
+                        existing.get().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+                if (customerProvidedKeySha256 != null) {
+                    String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+                    if (customerProvidedKey == null) {
+                        return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                                "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                                .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                    String requestKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
+                    String calculatedKeySha256 = customerProvidedKeySha256(customerProvidedKey);
+                    if (calculatedKeySha256 == null || !calculatedKeySha256.equals(requestKeySha256)) {
+                        return new AzureErrorResponse("InvalidHeaderValue",
+                                "The value for one of the HTTP headers is not in the correct format.")
+                                .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                    }
+                    if (!customerProvidedKeySha256.equals(requestKeySha256)) {
+                        return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                                "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                                .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
                 }
 
                 Response conditionFailure = validateBlobConditions(request, existing);
@@ -1709,7 +1814,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    /** ADLS Gen2 Flush Data (HTTP PUT + X-Http-Method-Override: PATCH, action=flush). */
+    /** ADLS Gen2 Flush Data (HTTP PATCH or PUT + X-Http-Method-Override: PATCH, action=flush). */
     private Response flushDataLakePath(AzureRequest request, String filesystem, String path) {
         Response authFailure = authorizeWrite(request, filesystem, path);
         if (authFailure != null) {
@@ -1742,6 +1847,28 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return new AzureErrorResponse("InvalidFlushOperation",
                     "The specified resource cannot be flushed as a file.")
                     .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+
+        String customerProvidedKeySha256 = current.metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+        if (customerProvidedKeySha256 != null) {
+            String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+            if (customerProvidedKey == null) {
+                return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                        "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            String requestKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
+            String calculatedKeySha256 = customerProvidedKeySha256(customerProvidedKey);
+            if (calculatedKeySha256 == null || !calculatedKeySha256.equals(requestKeySha256)) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toDataLakeJsonResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            if (!customerProvidedKeySha256.equals(requestKeySha256)) {
+                return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                        "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                        .toDataLakeJsonResponse(Response.Status.CONFLICT.getStatusCode());
+            }
         }
 
         Response conditionFailure = validateBlobConditions(request, existing);
@@ -1890,7 +2017,15 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> object = findBlob(request, containerName, blobName);
+        Optional<StoredObject> object = blobName.equals("/") && isHierarchicalNamespaceEnabled(request.accountName())
+                ? store.get(nsKey(request.accountName(), containerName))
+                : findBlob(request, containerName, blobName);
+        if (object.isEmpty() && isHierarchicalNamespaceEnabled(request.accountName())) {
+            DataLakePathState state = resolveDataLakePath(request.accountName(), containerName, blobName);
+            if (state != null && state.directory()) {
+                object = Optional.of(state.object());
+            }
+        }
 
         if (object.isEmpty()) {
             return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
@@ -1903,6 +2038,31 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         StoredObject so = object.get();
+        String customerProvidedKeySha256 = so.metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+        if (customerProvidedKeySha256 != null) {
+            String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+            if (customerProvidedKey == null) {
+                return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                        "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+            String requestKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
+            String calculatedKeySha256 = customerProvidedKeySha256(customerProvidedKey);
+            if (calculatedKeySha256 == null || !calculatedKeySha256.equals(requestKeySha256)) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            if (!customerProvidedKeySha256.equals(requestKeySha256)) {
+                return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                        "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+            }
+        } else if (request.headers().getHeaderString("x-ms-encryption-key") != null) {
+            return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
+                    "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
         long totalSize = so.data().length;
         String rangeHeader = request.headers().getHeaderString("x-ms-range");
         if (rangeHeader == null) rangeHeader = request.headers().getHeaderString("Range");
@@ -1917,15 +2077,21 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 rangeStart = Long.parseLong(parts[0]);
                 rangeEnd   = parts.length > 1 && !parts[1].isEmpty()
                         ? Long.parseLong(parts[1]) : totalSize - 1;
-                if (rangeStart < 0 || rangeStart >= totalSize) {
+                boolean emptyBlobFallbackRange = totalSize == 0 && rangeStart == 0
+                        && parts.length > 1 && parts[1].equals("-1");
+                if (emptyBlobFallbackRange) {
+                    rangeEnd = -1;
+                } else if (rangeStart < 0 || rangeStart >= totalSize) {
                     return Response.fromResponse(new AzureErrorResponse("InvalidRange",
                             "The range specified is invalid for the current size of the resource.")
                             .toXmlResponse(416))
                             .header("Content-Range", "bytes */" + totalSize)
                             .build();
                 }
-                rangeEnd   = Math.min(rangeEnd, totalSize - 1);
-                isRangeRequest = true;
+                if (!emptyBlobFallbackRange) {
+                    rangeEnd = Math.min(rangeEnd, totalSize - 1);
+                    isRangeRequest = true;
+                }
             } catch (NumberFormatException e) {
                 return new AzureErrorResponse("InvalidRange",
                         "The range specified is invalid.").toXmlResponse(416);
@@ -1946,6 +2112,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 // they are absent.
                 .header("x-ms-creation-time", RFC1123_DATE_TIME.format(creationTime(so)))
                 .header("x-ms-server-encrypted", "true");
+        if (customerProvidedKeySha256 != null) {
+            rb.header("x-ms-encryption-key-sha256", customerProvidedKeySha256);
+        }
         for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
             if (value != null && !(isRangeRequest && "Content-MD5".equals(header))) {
@@ -2310,6 +2479,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         String prefix = request.queryParams().getOrDefault("prefix", "");
         String delimiter = request.queryParams().getOrDefault("delimiter", "");
         String marker = request.queryParams().getOrDefault("marker", "");
+        String startFrom = request.queryParams().getOrDefault("startFrom", "");
         int maxResults = parseMaxResults(request.queryParams().get("maxresults"));
         String keyPrefix = objKey(request.accountName(), containerName, prefix);
 
@@ -2338,21 +2508,72 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             ), includes(request.queryParams().get("include"), "metadata") ? userMetadata(so.metadata()) : null));
         });
         blobs.sort(Comparator.comparing(BlobModels.BlobItem::Name));
+        blobPrefixes.sort(Comparator.comparing(BlobModels.BlobPrefix::Name));
+        List<String> itemNames = new ArrayList<>();
+        blobPrefixes.forEach(blobPrefix -> itemNames.add(blobPrefix.Name()));
+        blobs.forEach(blob -> itemNames.add(blob.Name()));
+        itemNames.sort(Comparator.naturalOrder());
 
         int start = 0;
-        if (!marker.isEmpty()) {
-            while (start < blobs.size() && blobs.get(start).Name().compareTo(marker) < 0) {
+        String lowerBound = marker.compareTo(startFrom) >= 0 ? marker : startFrom;
+        if (!lowerBound.isEmpty()) {
+            while (start < itemNames.size() && itemNames.get(start).compareTo(lowerBound) < 0) {
                 start++;
             }
         }
-        int end = Math.min(start + maxResults, blobs.size());
-        String nextMarker = end < blobs.size() ? blobs.get(end).Name() : "";
-        BlobModels.BlobListResponse response = new BlobModels.BlobListResponse(
-                "http://localhost:4577/" + request.accountName(),
-                containerName, prefix, delimiter, marker, maxResults, new BlobModels.BlobItems(blobPrefixes, blobs.subList(start, end)), nextMarker
-        );
+        int end = Math.min(start + maxResults, itemNames.size());
+        String nextMarker = end < itemNames.size() ? itemNames.get(end) : "";
+        Set<String> blobPrefixNames = blobPrefixes.stream()
+                .map(BlobModels.BlobPrefix::Name)
+                .collect(Collectors.toSet());
+        Map<String, BlobModels.BlobItem> blobsByName = blobs.stream()
+                .collect(Collectors.toMap(BlobModels.BlobItem::Name, blob -> blob));
 
-        return Response.ok(XmlUtils.toXml(response)).type(MediaType.APPLICATION_XML).build();
+        XmlBuilder xml = new XmlBuilder()
+                .startAttr("EnumerationResults",
+                        "ServiceEndpoint", "http://localhost:4577/" + request.accountName(),
+                        "ContainerName", containerName)
+                .elem("Prefix", prefix);
+        if (!delimiter.isEmpty()) {
+            xml.elem("Delimiter", delimiter);
+        }
+        xml.elem("Marker", marker)
+                .elem("MaxResults", maxResults)
+                .start("Blobs");
+        for (String name : itemNames.subList(start, end)) {
+            if (blobPrefixNames.contains(name)) {
+                xml.start("BlobPrefix")
+                        .elem("Name", name)
+                        .end("BlobPrefix");
+            } else {
+                appendBlobListItem(xml, blobsByName.get(name));
+            }
+        }
+        String response = xml.end("Blobs")
+                .elem("NextMarker", nextMarker)
+                .end("EnumerationResults")
+                .build();
+
+        return Response.ok(response).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private static void appendBlobListItem(XmlBuilder xml, BlobModels.BlobItem blob) {
+        BlobModels.BlobProperties properties = blob.Properties();
+        xml.start("Blob")
+                .elem("Name", blob.Name())
+                .start("Properties")
+                .elem("Last-Modified", properties.LastModified())
+                .elem("Etag", properties.Etag())
+                .elem("Content-Length", properties.ContentLength())
+                .elem("Content-Type", properties.ContentType())
+                .elem("BlobType", properties.BlobType())
+                .end("Properties");
+        if (blob.Metadata() != null && !blob.Metadata().isEmpty()) {
+            xml.start("Metadata");
+            blob.Metadata().forEach(xml::elem);
+            xml.end("Metadata");
+        }
+        xml.end("Blob");
     }
 
     private Response listDataLakePaths(AzureRequest request, String filesystem) {
@@ -2514,8 +2735,47 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 if (leaseFailure != null) {
                     return leaseFailure;
                 }
+                String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+                String customerProvidedKeySha256 =
+                        request.headers().getHeaderString("x-ms-encryption-key-sha256");
+                String calculatedKeySha256 = customerProvidedKey == null
+                        ? null
+                        : customerProvidedKeySha256(customerProvidedKey);
+                if (customerProvidedKey != null
+                        && (calculatedKeySha256 == null || !calculatedKeySha256.equals(customerProvidedKeySha256))) {
+                    return new AzureErrorResponse("InvalidHeaderValue",
+                            "The value for one of the HTTP headers is not in the correct format.")
+                            .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                }
+                List<StoredObject> stagedBlocks = store.scan(key -> key.startsWith(
+                        blockStagingPrefix(request.accountName(), containerName, blobName)));
+                if (!stagedBlocks.isEmpty()) {
+                    String stagedCustomerProvidedKeySha256 =
+                            stagedBlocks.getFirst().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+                    if (stagedCustomerProvidedKeySha256 == null && customerProvidedKey != null) {
+                        return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
+                                "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                    if (stagedCustomerProvidedKeySha256 != null && customerProvidedKey == null) {
+                        return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                                "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                    if (stagedCustomerProvidedKeySha256 != null
+                            && !stagedCustomerProvidedKeySha256.equals(customerProvidedKeySha256)) {
+                        return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                                "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                }
+                Map<String, String> metadata = new HashMap<>();
+                metadata.put("BlockId", blockId);
+                if (customerProvidedKey != null) {
+                    metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
+                }
                 store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
-                        new StoredObject(blockId, data, Map.of("BlockId", blockId), Instant.now(),
+                        new StoredObject(blockId, data, metadata, Instant.now(),
                                 UUID.randomUUID().toString()));
                 return Response.status(Response.Status.CREATED)
                         .header("x-ms-request-server-encrypted", "true")
@@ -2550,6 +2810,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 // Resolve every block ID → staged data
                 List<byte[]> chunks = new ArrayList<>(blockIds.size());
                 List<String> committedMeta = new ArrayList<>(blockIds.size()); // "base64id:size"
+                Optional<StoredObject> existing = store.get(
+                        objKey(request.accountName(), containerName, blobName));
+                String stagedCustomerProvidedKeySha256 = null;
+                boolean stagedEncryptionStateSet = false;
 
                 for (String blockId : blockIds) {
                     Optional<StoredObject> staged = store.get(
@@ -2562,6 +2826,49 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     byte[] blockData = staged.get().data();
                     chunks.add(blockData);
                     committedMeta.add(blockId + ":" + blockData.length);
+                    String blockCustomerProvidedKeySha256 =
+                            staged.get().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+                    if (!stagedEncryptionStateSet) {
+                        stagedCustomerProvidedKeySha256 = blockCustomerProvidedKeySha256;
+                        stagedEncryptionStateSet = true;
+                    } else if ((stagedCustomerProvidedKeySha256 == null) !=
+                            (blockCustomerProvidedKeySha256 == null)
+                            || (stagedCustomerProvidedKeySha256 != null
+                            && !stagedCustomerProvidedKeySha256.equals(blockCustomerProvidedKeySha256))) {
+                        return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                                "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                }
+
+                String expectedCustomerProvidedKeySha256 = stagedCustomerProvidedKeySha256 != null
+                        ? stagedCustomerProvidedKeySha256
+                        : existing.map(StoredObject::metadata)
+                                .map(metadata -> metadata.get(CUSTOMER_PROVIDED_KEY_SHA256))
+                                .orElse(null);
+                String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+                if (expectedCustomerProvidedKeySha256 != null) {
+                    if (customerProvidedKey == null) {
+                        return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                                "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                    String requestKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
+                    String calculatedKeySha256 = customerProvidedKeySha256(customerProvidedKey);
+                    if (calculatedKeySha256 == null || !calculatedKeySha256.equals(requestKeySha256)) {
+                        return new AzureErrorResponse("InvalidHeaderValue",
+                                "The value for one of the HTTP headers is not in the correct format.")
+                                .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+                    }
+                    if (!expectedCustomerProvidedKeySha256.equals(requestKeySha256)) {
+                        return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                                "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                    }
+                } else if (customerProvidedKey != null) {
+                    return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
+                            "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
+                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
                 }
 
                 // Concatenate all block data into the final blob body
@@ -2585,11 +2892,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 metadata.put("BlobType", blobType != null ? blobType : "BlockBlob");
                 addBlobHttpProperties(request, metadata);
                 metadata.put("Name", blobName);
-                metadata.put(CREATION_TIME_KEY, createdOn(
-                        store.get(objKey(request.accountName(), containerName, blobName))).toString());
+                metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
                 // Persist committed block list for future GetBlockList calls
                 metadata.put("CommittedBlocks", String.join("|", committedMeta));
                 metadata.putAll(readUserMetadata(request));
+                if (expectedCustomerProvidedKeySha256 != null) {
+                    metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, expectedCustomerProvidedKeySha256);
+                }
 
                 String etag = UUID.randomUUID().toString();
                 store.put(objKey(request.accountName(), containerName, blobName),
@@ -2798,6 +3107,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             ids.add(m.group(1).trim());
         }
         return ids;
+    }
+
+    private static String customerProvidedKeySha256(String customerProvidedKey) {
+        try {
+            byte[] decodedKey = Base64.getDecoder().decode(customerProvidedKey);
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(decodedKey);
+            return Base64.getEncoder().encodeToString(digest);
+        } catch (IllegalArgumentException e) {
+            return null;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
     }
 
     private static boolean isDataLakeRequest(AzureRequest request) {

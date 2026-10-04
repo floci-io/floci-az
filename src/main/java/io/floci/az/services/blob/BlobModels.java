@@ -1,6 +1,5 @@
 package io.floci.az.services.blob;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlElementWrapper;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
@@ -34,32 +33,6 @@ public class BlobModels {
     public record ContainerProperties(
         @JacksonXmlProperty(localName = "Last-Modified") String LastModified,
         @JacksonXmlProperty(localName = "Etag") String Etag
-    ) {}
-
-    @RegisterForReflection
-    @JacksonXmlRootElement(localName = "EnumerationResults")
-    public record BlobListResponse(
-        @JacksonXmlProperty(localName = "ServiceEndpoint", isAttribute = true) String ServiceEndpoint,
-        @JacksonXmlProperty(localName = "ContainerName", isAttribute = true) String ContainerName,
-        @JacksonXmlProperty(localName = "Prefix") String Prefix,
-        @JsonInclude(JsonInclude.Include.NON_EMPTY)
-        @JacksonXmlProperty(localName = "Delimiter") String Delimiter,
-        @JacksonXmlProperty(localName = "Marker") String Marker,
-        @JacksonXmlProperty(localName = "MaxResults") Integer MaxResults,
-        @JacksonXmlProperty(localName = "Blobs") BlobItems Blobs,
-        @JacksonXmlProperty(localName = "NextMarker") String NextMarker
-    ) {}
-
-    @RegisterForReflection
-    public record BlobItems(
-        @JsonInclude(JsonInclude.Include.NON_EMPTY)
-        @JacksonXmlElementWrapper(useWrapping = false)
-        @JacksonXmlProperty(localName = "BlobPrefix")
-        List<BlobPrefix> BlobPrefixes,
-        @JsonInclude(JsonInclude.Include.NON_EMPTY)
-        @JacksonXmlElementWrapper(useWrapping = false)
-        @JacksonXmlProperty(localName = "Blob")
-        List<BlobItem> Blobs
     ) {}
 
     @RegisterForReflection

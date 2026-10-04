@@ -34,7 +34,7 @@ class CosmosTableEngineCompatibilityTest {
     // Well-known Azurite / floci-az development account key
     private static final String ACCOUNT_NAME = "devstoreaccount1";
     private static final String ACCOUNT_KEY  =
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 
     private TableServiceClient tableServiceClient;
     private TableClient        tableClient;

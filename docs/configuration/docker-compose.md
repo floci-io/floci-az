@@ -170,7 +170,7 @@ services:
     environment:
       AZURE_STORAGE_CONNECTION_STRING: >-
         DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;
-        AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;
+        AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;
         BlobEndpoint=http://floci-az:4577/devstoreaccount1;
         QueueEndpoint=http://floci-az:4577/devstoreaccount1-queue;
         TableEndpoint=http://floci-az:4577/devstoreaccount1-table;

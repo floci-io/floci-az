@@ -41,7 +41,7 @@ The account also answers at the host-style address `{account}.queue.core.windows
     from azure.storage.queue import QueueClient
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
             "QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;")
     queue = QueueClient.from_connection_string(conn, "my-queue")
     queue.create_queue()

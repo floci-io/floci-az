@@ -68,7 +68,7 @@ public class TableCosmosEngine implements CosmosEngineProvider {
                         + "/devstoreaccount1-cosmos-table";
                 String cs = "DefaultEndpointsProtocol=http;"
                         + "AccountName=devstoreaccount1;"
-                        + "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+                        + "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
                         + "TableEndpoint=" + tableEndpoint + "/;";
                 return new CosmosConnectionInfo(host, port, cs,
                     "Use any Azure Table Storage SDK with this connection string. "

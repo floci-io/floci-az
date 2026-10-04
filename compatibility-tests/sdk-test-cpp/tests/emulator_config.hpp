@@ -10,7 +10,7 @@ namespace floci {
 inline const char* DevKey()
 {
   return "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
-         "K1SZFPTOtr/KBHBeksoGMh0==";
+         "K1SZFPTOtr/KBHBeksoGMGw==";
 }
 
 inline const char* AccountName() { return "devstoreaccount1"; }

@@ -39,7 +39,7 @@ http://localhost:4577/{account}-table/$batch                                   #
     from azure.data.tables import TableServiceClient
 
     conn = ("DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+            "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
             "TableEndpoint=http://localhost:4577/devstoreaccount1-table;")
     svc = TableServiceClient.from_connection_string(conn)
     table = svc.create_table("people")

@@ -54,7 +54,7 @@ import javax.net.ssl.X509TrustManager;
 public final class EmulatorConfig {
 
     static final String DEV_KEY =
-        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
     static final String ACCOUNT = "devstoreaccount1";
 
     private static final String BASE =

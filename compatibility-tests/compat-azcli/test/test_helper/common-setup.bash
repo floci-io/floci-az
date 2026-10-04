@@ -35,7 +35,7 @@ export REDIS_NAME="floci-test-redis"
 
 # Dev storage key (well-known Azurite key floci-az accepts) — used to build a
 # data-plane connection string, mirroring azfloci/azfloci.py.
-export DEV_STORAGE_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="
+export DEV_STORAGE_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 
 # Run an az command and emit JSON on stdout only — stderr (warnings/InsecureRequestWarning)
 # is dropped so bats `run` doesn't merge it into $output and break jq parsing.

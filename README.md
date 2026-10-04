@@ -453,7 +453,7 @@ Floci AZ uses path-style routing:
 The standard development storage connection string works out of the box:
 
 ```text
-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
+DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:4577/devstoreaccount1;QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;TableEndpoint=http://localhost:4577/devstoreaccount1-table;
 ```
 
 <details>
@@ -465,7 +465,7 @@ from azure.storage.blob import BlobServiceClient
 
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
     "BlobEndpoint=http://localhost:4577/devstoreaccount1;"
 )
 
@@ -483,7 +483,7 @@ from azure.storage.queue import QueueServiceClient
 
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
     "QueueEndpoint=http://localhost:4577/devstoreaccount1-queue;"
 )
 
@@ -499,7 +499,7 @@ from azure.data.tables import TableServiceClient
 
 conn_str = (
     "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+    "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
     "TableEndpoint=http://localhost:4577/devstoreaccount1-table;"
 )
 
@@ -518,7 +518,7 @@ print(table.get_entity("pk1", "rk1")["Value"])
 BlobServiceClient client = new BlobServiceClientBuilder()
     .connectionString(
         "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
-        "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
+        "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
         "BlobEndpoint=http://localhost:4577/devstoreaccount1;")
     .buildClient();
 
@@ -538,7 +538,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 
 const CONN =
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
-  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;" +
+  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
   "BlobEndpoint=http://localhost:4577/devstoreaccount1;";
 
 const client = BlobServiceClient.fromConnectionString(CONN);

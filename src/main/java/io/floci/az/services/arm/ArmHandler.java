@@ -59,7 +59,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     private static final Logger LOG = Logger.getLogger(ArmHandler.class);
 
     static final String FAKE_STORAGE_KEY =
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==";
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 
     private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
 

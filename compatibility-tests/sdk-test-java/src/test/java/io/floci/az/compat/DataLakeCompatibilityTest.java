@@ -3,6 +3,7 @@ package io.floci.az.compat;
 import com.azure.core.credential.AccessToken;
 import com.azure.core.http.policy.HttpPipelinePolicy;
 import com.azure.core.http.rest.PagedResponse;
+import com.azure.core.http.rest.Response;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobContainerClientBuilder;
@@ -12,10 +13,12 @@ import com.azure.storage.file.datalake.DataLakeFileClient;
 import com.azure.storage.file.datalake.DataLakeFileSystemClient;
 import com.azure.storage.file.datalake.DataLakeServiceClient;
 import com.azure.storage.file.datalake.DataLakeServiceClientBuilder;
+import com.azure.storage.file.datalake.models.CustomerProvidedKey;
 import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import com.azure.storage.file.datalake.models.ListPathsOptions;
 import com.azure.storage.file.datalake.models.PathItem;
 import com.azure.storage.file.datalake.models.PathPermissions;
+import com.azure.storage.file.datalake.models.PathProperties;
 import com.azure.storage.file.datalake.models.UserDelegationKey;
 import com.azure.storage.file.datalake.sas.DataLakeServiceSasSignatureValues;
 import com.azure.storage.file.datalake.sas.FileSystemSasPermission;
@@ -26,6 +29,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import reactor.core.publisher.Mono;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +71,154 @@ class DataLakeCompatibilityTest {
         assertTrue(file.exists());
 
         client.deleteFileSystem(name);
+    }
+
+    @Test
+    @DisplayName("customer-provided key: encrypted path properties require the matching key")
+    void customerProvidedKeyIsRequiredForEncryptedPathProperties() {
+        DataLakeServiceClient secureClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase().replaceFirst("^http://", "https://"))
+                .credential(new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY))
+                .addPolicy(dfsHostPolicy())
+                .buildClient();
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = secureClient.createFileSystem(name);
+        CustomerProvidedKey key = new CustomerProvidedKey(
+                "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
+        CustomerProvidedKey wrongKey = new CustomerProvidedKey(new byte[32]);
+        DataLakeFileClient file = fileSystem.getFileClient("encrypted.txt");
+        DataLakeFileClient encryptedFile = file.getCustomerProvidedKeyClient(key);
+        DataLakeFileClient fileWithWrongKey = file.getCustomerProvidedKeyClient(wrongKey);
+
+        try {
+            encryptedFile.create();
+
+            DataLakeStorageException missingKey = assertThrows(
+                    DataLakeStorageException.class, file::getProperties);
+            assertEquals(409, missingKey.getStatusCode());
+            assertEquals("BlobUsesCustomerSpecifiedEncryption", missingKey.getErrorCode());
+
+            DataLakeStorageException mismatchedKey = assertThrows(
+                    DataLakeStorageException.class, fileWithWrongKey::getProperties);
+            assertEquals(409, mismatchedKey.getStatusCode());
+            assertEquals("BlobCustomerSpecifiedEncryptionMismatch", mismatchedKey.getErrorCode());
+
+            assertEquals(key.getKeySha256(), encryptedFile.getProperties().getEncryptionKeySha256());
+        } finally {
+            secureClient.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("customer-provided key: encrypted path updates require the matching key")
+    void customerProvidedKeyIsRequiredForEncryptedPathUpdates() {
+        DataLakeServiceClient secureClient = new DataLakeServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase().replaceFirst("^http://", "https://"))
+                .credential(new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY))
+                .addPolicy(dfsHostPolicy())
+                .buildClient();
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = secureClient.createFileSystem(name);
+        CustomerProvidedKey key = new CustomerProvidedKey(
+                "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
+        CustomerProvidedKey wrongKey = new CustomerProvidedKey(new byte[32]);
+        DataLakeFileClient file = fileSystem.getFileClient("encrypted.txt");
+        DataLakeFileClient encryptedFile = file.getCustomerProvidedKeyClient(key);
+        DataLakeFileClient fileWithWrongKey = file.getCustomerProvidedKeyClient(wrongKey);
+        byte[] content = "customer-provided path".getBytes(StandardCharsets.UTF_8);
+
+        try {
+            encryptedFile.create();
+
+            DataLakeStorageException missingAppendKey = assertThrows(DataLakeStorageException.class,
+                    () -> file.append(new ByteArrayInputStream(content), 0, content.length));
+            assertEquals(409, missingAppendKey.getStatusCode());
+            assertEquals("BlobUsesCustomerSpecifiedEncryption", missingAppendKey.getErrorCode());
+
+            DataLakeStorageException mismatchedAppendKey = assertThrows(DataLakeStorageException.class,
+                    () -> fileWithWrongKey.append(new ByteArrayInputStream(content), 0, content.length));
+            assertEquals(409, mismatchedAppendKey.getStatusCode());
+            assertEquals("BlobCustomerSpecifiedEncryptionMismatch", mismatchedAppendKey.getErrorCode());
+
+            encryptedFile.append(new ByteArrayInputStream(content), 0, content.length);
+
+            DataLakeStorageException missingFlushKey = assertThrows(
+                    DataLakeStorageException.class, () -> file.flush(content.length, true));
+            assertEquals(409, missingFlushKey.getStatusCode());
+            assertEquals("BlobUsesCustomerSpecifiedEncryption", missingFlushKey.getErrorCode());
+
+            DataLakeStorageException mismatchedFlushKey = assertThrows(
+                    DataLakeStorageException.class, () -> fileWithWrongKey.flush(content.length, true));
+            assertEquals(409, mismatchedFlushKey.getStatusCode());
+            assertEquals("BlobCustomerSpecifiedEncryptionMismatch", mismatchedFlushKey.getErrorCode());
+
+            encryptedFile.flush(content.length, true);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            encryptedFile.read(output);
+            assertEquals("customer-provided path", output.toString(StandardCharsets.UTF_8));
+        } finally {
+            secureClient.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("file flush: accepts current SDK PATCH request")
+    void fileFlushUsesPatchRequest() {
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = client.createFileSystem(name);
+        try {
+            DataLakeFileClient file = fileSystem.createFile("file.txt");
+            byte[] content = "content".getBytes(StandardCharsets.UTF_8);
+
+            file.append(new ByteArrayInputStream(content), 0, content.length);
+            file.flush(content.length, true);
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            file.read(output);
+            assertEquals("content", output.toString(StandardCharsets.UTF_8));
+        } finally {
+            client.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("path separators: listing normalizes repeats and creation rejects them")
+    void repeatedPathSeparatorsMatchAzureBehavior() {
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = client.createFileSystem(name);
+        try {
+            fileSystem.createFile("repeated/file.txt");
+
+            assertEquals(List.of("repeated/file.txt"), names(pathItems(fileSystem.listPaths(
+                    new ListPathsOptions().setPath("repeated//").setRecursive(true), null))));
+            assertTrue(fileSystem.getDirectoryClient("repeated//").exists());
+
+            DataLakeStorageException failure = assertThrows(DataLakeStorageException.class,
+                    () -> fileSystem.createFile("repeated//other.txt"));
+            assertEquals(400, failure.getStatusCode());
+        } finally {
+            client.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("directory properties: explicit and implicit directories report directory type")
+    void directoryPropertiesReportDirectoryType() {
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = client.createFileSystem(name);
+        try {
+            DataLakeDirectoryClient explicit = fileSystem.createDirectory("explicit");
+            PathProperties explicitProperties = explicit.getProperties();
+            assertTrue(explicitProperties.isDirectory());
+            assertEquals("true", explicitProperties.getMetadata().get("hdi_isfolder"));
+
+            fileSystem.createFile("implicit/file.txt");
+            PathProperties implicitProperties = fileSystem.getDirectoryClient("implicit").getProperties();
+            assertTrue(implicitProperties.isDirectory());
+            assertEquals("true", implicitProperties.getMetadata().get("hdi_isfolder"));
+        } finally {
+            client.deleteFileSystem(name);
+        }
     }
 
     @Test
@@ -254,6 +408,44 @@ class DataLakeCompatibilityTest {
             }
             assertEquals(List.of("dir/file.txt", "dir/sub/leaf.txt"), firstPage);
             assertNotNull(continuation);
+        } finally {
+            client.deleteFileSystem(name);
+        }
+    }
+
+    @Test
+    @DisplayName("listPaths: includes block blobs written through blob endpoint")
+    void listPathsIncludesBlockBlobs() {
+        String name = "test-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        DataLakeFileSystemClient fileSystem = client.createFileSystem(name);
+        try {
+            BlobContainerClient container = new BlobContainerClientBuilder()
+                    .endpoint(EmulatorConfig.httpBase() + "/" + EmulatorConfig.ACCOUNT)
+                    .credential(new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY))
+                    .containerName(name)
+                    .buildClient();
+            byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+            List<String> paths = List.of(
+                    "level0/level1-file0",
+                    "level0/level1-file1",
+                    "level0/level1-file2",
+                    "level0/level1/level2-file0",
+                    "level0/level1/level2-file1",
+                    "level0/level1/level2-file2");
+            paths.forEach(path -> container.getBlobClient(path)
+                    .upload(new ByteArrayInputStream(data), data.length, true));
+
+            DataLakeDirectoryClient directory = fileSystem.getDirectoryClient("level0");
+            assertTrue(directory.exists());
+            assertTrue(directory.getProperties().isDirectory());
+            Response<Boolean> trailingSlashExists = fileSystem.getDirectoryClient("level0/")
+                    .existsWithResponse(null, Context.NONE);
+            assertEquals(200, trailingSlashExists.getStatusCode());
+            assertTrue(trailingSlashExists.getValue());
+            List<PathItem> listedPaths = pathItems(directory
+                    .listPaths(new ListPathsOptions().setRecursive(true), null, null));
+            assertEquals(paths, names(listedPaths));
+            assertTrue(listedPaths.stream().noneMatch(PathItem::isDirectory));
         } finally {
             client.deleteFileSystem(name);
         }

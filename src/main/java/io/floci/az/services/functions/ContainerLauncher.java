@@ -181,7 +181,7 @@ public class ContainerLauncher {
         String flociHost = hostResolver.resolve();
         int flociPort    = config.port();
         String connStr   = "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
-                + "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==;"
+                + "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
                 + "BlobEndpoint=http://" + flociHost + ":" + flociPort + "/devstoreaccount1;";
 
         List<String> env = new ArrayList<>();

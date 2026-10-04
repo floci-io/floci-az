@@ -1,7 +1,9 @@
 package io.floci.az.services;
 
+import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlParser;
 import io.floci.az.core.auth.UserDelegationKeyMaterial;
+import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,9 +11,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.crypto.Mac;
@@ -28,11 +32,18 @@ public class BlobServiceTest {
     private static final String CONTAINER = "test-container";
     private static final String BLOB = "test-blob.txt";
     private static final String BLOB_CONTENT = "Hello, Blob!";
+    private static final String CUSTOMER_PROVIDED_KEY =
+            "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
+    private static final String CUSTOMER_PROVIDED_KEY_SHA256 =
+            "hhAJ7E1Zn6sfQKvHbm+JiAz/WDPHnFSMmfkEXxkc2Qs=";
     private static final String DATALAKE_ID_FOR_TESTS = "00000000-0000-0000-0000-000000000000";
     private static final Pattern ISO_UTC_SECONDS = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z");
 
     @Inject
     UserDelegationKeyMaterial keyMaterial;
+
+    @Inject
+    StorageFactory storageFactory;
 
     @BeforeEach
     void reset() {
@@ -1173,7 +1184,8 @@ public class BlobServiceTest {
             .statusCode(200)
             .header("x-ms-resource-type", "directory")
             .header("Content-Length", "0")
-            .header("x-ms-permissions", "rwxr-x---");
+            .header("x-ms-permissions", "rwxr-x---")
+            .header("x-ms-meta-hdi_isfolder", nullValue());
 
         given()
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
@@ -1182,6 +1194,148 @@ public class BlobServiceTest {
             .then()
             .statusCode(404)
             .header("x-ms-error-code", "PathNotFound");
+    }
+
+    @Test
+    void dataLakeCustomerProvidedKeyIsRequiredToGetEncryptedPathStatus() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().put("/{container}/encrypted.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/encrypted.txt", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=")
+            .header("x-ms-encryption-algorithm", "AES256")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/encrypted.txt", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/encrypted.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .queryParam("action", "getStatus")
+            .when().head("/{container}/encrypted.txt", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256);
+    }
+
+    @Test
+    void dataLakeCustomerProvidedKeyIsRequiredToUpdateEncryptedPath() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().put("/{container}/encrypted.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .body(BLOB_CONTENT)
+            .when().patch("/{container}/encrypted.txt?action=append&position=0", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=")
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(BLOB_CONTENT)
+            .when().patch("/{container}/encrypted.txt?action=append&position=0", CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(BLOB_CONTENT)
+            .when().patch("/{container}/encrypted.txt?action=append&position=0", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().patch("/{container}/encrypted.txt?action=flush&position={position}",
+                    CONTAINER, BLOB_CONTENT.length())
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=")
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().patch("/{container}/encrypted.txt?action=flush&position={position}",
+                    CONTAINER, BLOB_CONTENT.length())
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().patch("/{container}/encrypted.txt?action=flush&position={position}",
+                    CONTAINER, BLOB_CONTENT.length())
+            .then().statusCode(200);
+    }
+
+    @Test
+    void dataLakeGetStatusRestoresLegacyDirectoryMetadata() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        storageFactory.create("blob").put(
+                ACCOUNT + "/" + CONTAINER + "/legacy",
+                new StoredObject(
+                        "legacy",
+                        new byte[0],
+                        Map.of("Name", "legacy", "DataLakeResourceType", "directory"),
+                        Instant.now(),
+                        "legacy-etag"));
+
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().head("/{container}/legacy", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("x-ms-resource-type", "directory")
+            .header("x-ms-meta-hdi_isfolder", "true");
     }
 
     @Test
@@ -2432,6 +2586,47 @@ public class BlobServiceTest {
     }
 
     @Test
+    void listBlobsHonorsStartFrom() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String name : new String[] {"a.txt", "b.txt", "c.txt"}) {
+            given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .body(name)
+                .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, name);
+        }
+
+        given()
+            .queryParam("startFrom", "b.txt")
+            .when().get("/{account}/{container}?restype=container&comp=list", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(containsString("<Blob><Name>b.txt</Name>"))
+            .body(containsString("<Blob><Name>c.txt</Name>"))
+            .body(not(containsString("<Blob><Name>a.txt</Name>")));
+    }
+
+    @Test
+    void listBlobsStartFromFiltersBlobPrefixes() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        for (String name : new String[] {"a/one", "b.txt", "c/one"}) {
+            given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .body(name)
+                .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, name);
+        }
+
+        given()
+            .queryParam("delimiter", "/")
+            .queryParam("startFrom", "b")
+            .when().get("/{account}/{container}?restype=container&comp=list", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(containsString("<Blob><Name>b.txt</Name>"))
+            .body(containsString("<BlobPrefix><Name>c/</Name></BlobPrefix>"))
+            .body(not(containsString("<BlobPrefix><Name>a/</Name></BlobPrefix>")));
+    }
+
+    @Test
     void rangeRequestReturnsPartialContent() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
@@ -2504,6 +2699,24 @@ public class BlobServiceTest {
     }
 
     @Test
+    void emptyBlobSdkFallbackRangeReturnsEmptyBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-range", "bytes=0--1")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Length", "0")
+            .header("Content-Range", nullValue())
+            .body(equalTo(""));
+    }
+
+    @Test
     void getBlobReturnsMandatoryHeaders() {
         putTestBlob(BLOB_CONTENT);
 
@@ -2529,6 +2742,219 @@ public class BlobServiceTest {
             .header("x-ms-lease-status", "unlocked")
             .header("x-ms-lease-state", "available")
             .header("x-ms-server-encrypted", "true");
+    }
+
+    @Test
+    void customerProvidedKeyIsRequiredToReadEncryptedBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=")
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidHeaderValue");
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void customerProvidedKeyIsRequiredToCommitEncryptedBlocks() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+        String blockList = "<BlockList><Latest>" + blockId + "</Latest></BlockList>";
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, BLOB, blockId)
+            .then().statusCode(201);
+
+        given()
+            .body(blockList)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .header("x-ms-encryption-key", Base64.getEncoder().encodeToString(new byte[32]))
+            .header("x-ms-encryption-key-sha256", "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=")
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(blockList)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(blockList)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void customerProvidedKeyMustMatchStagedBlocks() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String firstBlockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+        String secondBlockId = Base64.getEncoder().encodeToString("block-2".getBytes(StandardCharsets.UTF_8));
+        String wrongKey = Base64.getEncoder().encodeToString(new byte[32]);
+        String wrongKeySha256 = "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=";
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body("block-one")
+            .when().put("/{account}/{container}/keyed?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, firstBlockId)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-encryption-key", wrongKey)
+            .header("x-ms-encryption-key-sha256", wrongKeySha256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body("block-two")
+            .when().put("/{account}/{container}/keyed?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, secondBlockId)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobCustomerSpecifiedEncryptionMismatch");
+
+        given()
+            .body("block-two")
+            .when().put("/{account}/{container}/keyed?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, secondBlockId)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobUsesCustomerSpecifiedEncryption");
+
+        given()
+            .body("block-one")
+            .when().put("/{account}/{container}/keyless?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, firstBlockId)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body("block-two")
+            .when().put("/{account}/{container}/keyless?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, secondBlockId)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobDoesNotUseCustomerSpecifiedEncryption");
+
+        given()
+            .header("x-ms-encryption-key", wrongKey)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body("block-one")
+            .when().put("/{account}/{container}/forged?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, firstBlockId)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidHeaderValue");
+    }
+
+    @Test
+    void customerProvidedKeyCannotBeAddedToKeylessStagedBlocks() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+        String blockList = "<BlockList><Latest>" + blockId + "</Latest></BlockList>";
+
+        given()
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                    ACCOUNT, CONTAINER, BLOB, blockId)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(blockList)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobDoesNotUseCustomerSpecifiedEncryption");
+
+        given()
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(blockList)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(equalTo(BLOB_CONTENT));
+
+        given()
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobDoesNotUseCustomerSpecifiedEncryption");
     }
 
     @Test

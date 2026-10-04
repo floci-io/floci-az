@@ -1,5 +1,7 @@
 package io.floci.az.compat;
 
+import com.azure.core.http.rest.PagedResponse;
+import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobClientBuilder;
 import com.azure.storage.blob.BlobContainerClient;
@@ -14,18 +16,26 @@ import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobServiceProperties;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.models.CustomerProvidedKey;
 import com.azure.storage.blob.models.LeaseStateType;
 import com.azure.storage.blob.models.LeaseStatusType;
 import com.azure.storage.blob.models.ListBlobsOptions;
+import com.azure.storage.blob.options.BlobInputStreamOptions;
+import com.azure.storage.blob.sas.BlobSasPermission;
+import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
 import com.azure.storage.blob.specialized.BlobLeaseClient;
 import com.azure.storage.blob.specialized.BlobLeaseClientBuilder;
 import com.azure.storage.blob.specialized.BlockBlobClient;
-import com.azure.core.util.Context;
+import com.azure.storage.common.StorageSharedKeyCredential;
 import org.junit.jupiter.api.*;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -113,6 +123,206 @@ class BlobCompatibilityTest {
         assertEquals(props.getCreationTime(), blob.getProperties().getCreationTime());
 
         client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("customer-provided key: encrypted blob reads require the matching key")
+    void customerProvidedKeyIsRequiredForEncryptedBlobReads() throws Exception {
+        EmulatorConfig.installEmulatorTlsCert();
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        String endpoint = EmulatorConfig.httpBase().replace("http://", "https://")
+                + "/" + EmulatorConfig.ACCOUNT + "/" + name + "/encrypted.txt";
+        StorageSharedKeyCredential credential =
+                new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY);
+        CustomerProvidedKey key = new CustomerProvidedKey(
+                "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
+        CustomerProvidedKey wrongKey = new CustomerProvidedKey(new byte[32]);
+        BlobClient encryptedBlob = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .customerProvidedKey(key)
+                .buildClient();
+        BlobClient blobWithoutKey = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .buildClient();
+        BlobClient blobWithWrongKey = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .customerProvidedKey(wrongKey)
+                .buildClient();
+        byte[] content = "customer-provided key".getBytes(StandardCharsets.UTF_8);
+        encryptedBlob.upload(new ByteArrayInputStream(content), content.length, true);
+
+        BlobStorageException missingKeyDownload = assertThrows(
+                BlobStorageException.class, blobWithoutKey::downloadContent);
+        assertEquals(409, missingKeyDownload.getStatusCode());
+        assertEquals(BlobErrorCode.BLOB_USES_CUSTOMER_SPECIFIED_ENCRYPTION,
+                missingKeyDownload.getErrorCode());
+
+        BlobStorageException missingKeyProperties = assertThrows(
+                BlobStorageException.class, blobWithoutKey::getProperties);
+        assertEquals(409, missingKeyProperties.getStatusCode());
+        assertEquals(BlobErrorCode.BLOB_USES_CUSTOMER_SPECIFIED_ENCRYPTION,
+                missingKeyProperties.getErrorCode());
+
+        BlobStorageException wrongKeyDownload = assertThrows(
+                BlobStorageException.class, blobWithWrongKey::downloadContent);
+        assertEquals(409, wrongKeyDownload.getStatusCode());
+        assertEquals(BlobErrorCode.fromString("BlobCustomerSpecifiedEncryptionMismatch"),
+                wrongKeyDownload.getErrorCode());
+
+        assertArrayEquals(content, encryptedBlob.downloadContent().toBytes());
+        assertEquals(key.getKeySha256(), encryptedBlob.getProperties().getEncryptionKeySha256());
+
+        container.delete();
+    }
+
+    @Test
+    @DisplayName("customer-provided key: encrypted block commits require the matching key")
+    void customerProvidedKeyIsRequiredForEncryptedBlockCommit() throws Exception {
+        EmulatorConfig.installEmulatorTlsCert();
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        String endpoint = EmulatorConfig.httpBase().replace("http://", "https://")
+                + "/" + EmulatorConfig.ACCOUNT + "/" + name + "/encrypted-blocks.bin";
+        StorageSharedKeyCredential credential =
+                new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY);
+        CustomerProvidedKey key = new CustomerProvidedKey(
+                "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
+        CustomerProvidedKey wrongKey = new CustomerProvidedKey(new byte[32]);
+        BlockBlobClient encryptedBlob = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .customerProvidedKey(key)
+                .buildClient()
+                .getBlockBlobClient();
+        BlockBlobClient blobWithoutKey = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .buildClient()
+                .getBlockBlobClient();
+        BlockBlobClient blobWithWrongKey = new BlobClientBuilder()
+                .endpoint(endpoint)
+                .credential(credential)
+                .customerProvidedKey(wrongKey)
+                .buildClient()
+                .getBlockBlobClient();
+        byte[] content = "customer-provided block".getBytes(StandardCharsets.UTF_8);
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+
+        try {
+            encryptedBlob.stageBlock(blockId, new ByteArrayInputStream(content), content.length);
+
+            BlobStorageException missingKey = assertThrows(
+                    BlobStorageException.class, () -> blobWithoutKey.commitBlockList(List.of(blockId)));
+            assertEquals(409, missingKey.getStatusCode());
+            assertEquals(BlobErrorCode.BLOB_USES_CUSTOMER_SPECIFIED_ENCRYPTION,
+                    missingKey.getErrorCode());
+
+            BlobStorageException mismatchedKey = assertThrows(
+                    BlobStorageException.class, () -> blobWithWrongKey.commitBlockList(List.of(blockId)));
+            assertEquals(409, mismatchedKey.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("BlobCustomerSpecifiedEncryptionMismatch"),
+                    mismatchedKey.getErrorCode());
+
+            encryptedBlob.commitBlockList(List.of(blockId));
+            assertArrayEquals(content, encryptedBlob.downloadContent().toBytes());
+        } finally {
+            container.delete();
+        }
+    }
+
+    @Test
+    @DisplayName("customer-provided key: staged blocks use one encryption state")
+    void customerProvidedKeyMustMatchStagedBlocks() throws Exception {
+        EmulatorConfig.installEmulatorTlsCert();
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        String endpoint = EmulatorConfig.httpBase().replace("http://", "https://")
+                + "/" + EmulatorConfig.ACCOUNT + "/" + name;
+        StorageSharedKeyCredential credential =
+                new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT, EmulatorConfig.DEV_KEY);
+        CustomerProvidedKey key = new CustomerProvidedKey(
+                "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=");
+        CustomerProvidedKey wrongKey = new CustomerProvidedKey(new byte[32]);
+        byte[] content = "customer-provided block".getBytes(StandardCharsets.UTF_8);
+        String firstBlockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+        String secondBlockId = Base64.getEncoder().encodeToString("block-2".getBytes(StandardCharsets.UTF_8));
+
+        try {
+            BlockBlobClient keyedBlob = new BlobClientBuilder()
+                    .endpoint(endpoint + "/keyed-blocks.bin")
+                    .credential(credential)
+                    .customerProvidedKey(key)
+                    .buildClient()
+                    .getBlockBlobClient();
+            BlockBlobClient wrongKeyBlob = new BlobClientBuilder()
+                    .endpoint(endpoint + "/keyed-blocks.bin")
+                    .credential(credential)
+                    .customerProvidedKey(wrongKey)
+                    .buildClient()
+                    .getBlockBlobClient();
+            BlockBlobClient keyedBlobWithoutKey = new BlobClientBuilder()
+                    .endpoint(endpoint + "/keyed-blocks.bin")
+                    .credential(credential)
+                    .buildClient()
+                    .getBlockBlobClient();
+
+            keyedBlob.stageBlock(firstBlockId, new ByteArrayInputStream(content), content.length);
+
+            BlobStorageException mismatchedKey = assertThrows(BlobStorageException.class,
+                    () -> wrongKeyBlob.stageBlock(secondBlockId,
+                            new ByteArrayInputStream(content), content.length));
+            assertEquals(409, mismatchedKey.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("BlobCustomerSpecifiedEncryptionMismatch"),
+                    mismatchedKey.getErrorCode());
+
+            BlobStorageException missingKey = assertThrows(BlobStorageException.class,
+                    () -> keyedBlobWithoutKey.stageBlock(secondBlockId,
+                            new ByteArrayInputStream(content), content.length));
+            assertEquals(409, missingKey.getStatusCode());
+            assertEquals(BlobErrorCode.BLOB_USES_CUSTOMER_SPECIFIED_ENCRYPTION,
+                    missingKey.getErrorCode());
+
+            BlockBlobClient keylessBlob = new BlobClientBuilder()
+                    .endpoint(endpoint + "/keyless-blocks.bin")
+                    .credential(credential)
+                    .buildClient()
+                    .getBlockBlobClient();
+            BlockBlobClient keylessBlobWithKey = new BlobClientBuilder()
+                    .endpoint(endpoint + "/keyless-blocks.bin")
+                    .credential(credential)
+                    .customerProvidedKey(key)
+                    .buildClient()
+                    .getBlockBlobClient();
+            keylessBlob.stageBlock(firstBlockId, new ByteArrayInputStream(content), content.length);
+
+            BlobStorageException addedKey = assertThrows(BlobStorageException.class,
+                    () -> keylessBlobWithKey.stageBlock(secondBlockId,
+                            new ByteArrayInputStream(content), content.length));
+            assertEquals(409, addedKey.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("BlobDoesNotUseCustomerSpecifiedEncryption"),
+                    addedKey.getErrorCode());
+
+            BlobStorageException keyedCommit = assertThrows(BlobStorageException.class,
+                    () -> keylessBlobWithKey.commitBlockList(List.of(firstBlockId)));
+            assertEquals(409, keyedCommit.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("BlobDoesNotUseCustomerSpecifiedEncryption"),
+                    keyedCommit.getErrorCode());
+
+            keylessBlob.commitBlockList(List.of(firstBlockId));
+            assertArrayEquals(content, keylessBlob.downloadContent().toBytes());
+
+            BlobStorageException keyedRead = assertThrows(
+                    BlobStorageException.class, keylessBlobWithKey::downloadContent);
+            assertEquals(409, keyedRead.getStatusCode());
+            assertEquals(BlobErrorCode.fromString("BlobDoesNotUseCustomerSpecifiedEncryption"),
+                    keyedRead.getErrorCode());
+        } finally {
+            container.delete();
+        }
     }
 
     @Test
@@ -216,6 +426,45 @@ class BlobCompatibilityTest {
         client.deleteBlobContainer(name);
     }
 
+    @Test
+    @DisplayName("blob listing startFrom: starts at the inclusive blob name")
+    void blobListingStartsFromInclusiveName() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+        for (String blobName : List.of("a.txt", "b.txt", "c.txt")) {
+            container.getBlobClient(blobName).upload(new ByteArrayInputStream(data), data.length, true);
+        }
+
+        List<String> blobs = container.listBlobs(new ListBlobsOptions().setStartFrom("b.txt"), null).stream()
+                .map(BlobItem::getName)
+                .toList();
+        assertEquals(List.of("b.txt", "c.txt"), blobs);
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("hierarchical blob listing startFrom: applies to prefixes and blobs")
+    void hierarchicalBlobListingStartsFromInclusiveName() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        byte[] data = "data".getBytes(StandardCharsets.UTF_8);
+        for (String blobName : List.of("a/one", "b.txt", "c/one", "d.txt")) {
+            container.getBlobClient(blobName).upload(new ByteArrayInputStream(data), data.length, true);
+        }
+
+        Iterator<PagedResponse<BlobItem>> pages = container.listBlobsByHierarchy(
+                        "/", new ListBlobsOptions().setStartFrom("b").setMaxResultsPerPage(2), null)
+                .iterableByPage()
+                .iterator();
+        assertEquals(List.of("b.txt", "c/"),
+                pages.next().getElements().stream().map(BlobItem::getName).toList());
+        assertEquals(List.of("d.txt"), pages.next().getElements().stream().map(BlobItem::getName).toList());
+
+        client.deleteBlobContainer(name);
+    }
+
     // --- Error cases ---
 
     @Test
@@ -252,6 +501,97 @@ class BlobCompatibilityTest {
         assertEquals(403, ex.getStatusCode());
 
         client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("service SAS: SDK-generated read token downloads blob")
+    void serviceSasDownloadsBlob() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("sas.txt");
+        byte[] content = "service sas".getBytes(StandardCharsets.UTF_8);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
+
+        OffsetDateTime start = OffsetDateTime.now();
+        String sas = blob.generateSas(new BlobServiceSasSignatureValues(
+                start.plusHours(1),
+                new BlobSasPermission().setReadPermission(true))
+                .setStartTime(start));
+        BlobClient sasBlob = new BlobClientBuilder()
+                .endpoint(blob.getBlobUrl())
+                .sasToken(sas)
+                .buildClient();
+        assertArrayEquals(content, sasBlob.downloadContent().toBytes());
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("development storage: SDK default key signs a valid service SAS")
+    void developmentStorageKeySignsServiceSas() {
+        BlobServiceClient developmentClient = new BlobServiceClientBuilder()
+                .connectionString("UseDevelopmentStorage=true")
+                .endpoint(EmulatorConfig.httpBase() + "/" + EmulatorConfig.ACCOUNT)
+                .buildClient();
+        BlobContainerClient container = developmentClient.createBlobContainer(containerName());
+        try {
+            BlobClient blob = container.getBlobClient("sas.txt");
+            byte[] content = "development storage sas".getBytes(StandardCharsets.UTF_8);
+            blob.upload(new ByteArrayInputStream(content), content.length, true);
+            BlobServiceSasSignatureValues values = new BlobServiceSasSignatureValues(
+                    OffsetDateTime.now().plusHours(1), new BlobSasPermission().setReadPermission(true));
+            BlobClient sasBlob = new BlobClientBuilder()
+                    .endpoint(blob.getBlobUrl())
+                    .sasToken(blob.generateSas(values))
+                    .buildClient();
+            assertArrayEquals(content, sasBlob.downloadContent().toBytes());
+
+            byte[] wrongKey = Base64.getDecoder().decode(EmulatorConfig.DEV_KEY);
+            wrongKey[wrongKey.length - 1] ^= 1;
+            BlobClient signer = new BlobClientBuilder()
+                    .endpoint(blob.getBlobUrl())
+                    .credential(new StorageSharedKeyCredential(EmulatorConfig.ACCOUNT,
+                            Base64.getEncoder().encodeToString(wrongKey)))
+                    .buildClient();
+            BlobClient invalid = new BlobClientBuilder()
+                    .endpoint(blob.getBlobUrl())
+                    .sasToken(signer.generateSas(values))
+                    .buildClient();
+            BlobStorageException failure = assertThrows(BlobStorageException.class, invalid::downloadContent);
+            assertEquals(403, failure.getStatusCode());
+            assertEquals(BlobErrorCode.AUTHENTICATION_FAILED, failure.getErrorCode());
+        } finally {
+            container.delete();
+        }
+    }
+
+    @Test
+    @DisplayName("flat namespace service SAS: SDK-generated read token downloads blob")
+    void flatNamespaceServiceSasDownloadsBlob() {
+        String account = "flataccount";
+        BlobServiceClient flatClient = new BlobServiceClientBuilder()
+                .connectionString(String.format(
+                        "DefaultEndpointsProtocol=http;AccountName=%s;AccountKey=%s;BlobEndpoint=%s/%s;",
+                        account, EmulatorConfig.DEV_KEY, EmulatorConfig.httpBase(), account))
+                .buildClient();
+        String name = containerName();
+        BlobContainerClient container = flatClient.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("sas.txt");
+        byte[] content = "flat service sas".getBytes(StandardCharsets.UTF_8);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
+
+        OffsetDateTime start = OffsetDateTime.now();
+        String sas = blob.generateSas(new BlobServiceSasSignatureValues(
+                start.plusHours(1),
+                new BlobSasPermission().setReadPermission(true))
+                .setStartTime(start));
+        BlobClient sasBlob = new BlobClientBuilder()
+                .endpoint(blob.getBlobUrl())
+                .sasToken(sas)
+                .buildClient();
+        assertArrayEquals(content, sasBlob.downloadContent().toBytes());
+
+        flatClient.deleteBlobContainer(name);
     }
 
     @Test
@@ -346,6 +686,65 @@ class BlobCompatibilityTest {
         assertEquals(BlobErrorCode.INVALID_RANGE, ex.getErrorCode());
         assertEquals(416, ex.getStatusCode());
         assertEquals("bytes */0", ex.getResponse().getHeaders().getValue("Content-Range"));
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("empty blob stream: reads to end without an error")
+    void emptyBlobInputStreamReadsToEnd() throws Exception {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        BlobClient blob = container.getBlobClient("empty-stream.txt");
+        blob.upload(new ByteArrayInputStream(new byte[0]), 0, true);
+
+        try (InputStream input = blob.openInputStream(
+                new BlobInputStreamOptions().setRange(new BlobRange(0)))) {
+            assertEquals(-1, input.read());
+        }
+
+        client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("hierarchical namespace: container root exists as a blob path")
+    void hierarchicalNamespaceRootExistsAsBlobPath() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        assertTrue(container.getBlobClient("/").exists());
+        client.deleteBlobContainer(name);
+
+        String account = "flataccount";
+        BlobServiceClient flatClient = new BlobServiceClientBuilder()
+                .endpoint(EmulatorConfig.httpBase() + "/" + account)
+                .credential(new StorageSharedKeyCredential(account, EmulatorConfig.DEV_KEY))
+                .buildClient();
+        BlobContainerClient flatContainer = flatClient.createBlobContainer(containerName());
+        assertFalse(flatContainer.getBlobClient("/").exists());
+        flatContainer.delete();
+    }
+
+    @Test
+    @DisplayName("blob paths: dot segments resolve within the container")
+    void blobPathsResolveDotSegmentsWithinContainer() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+        byte[] content = "normalized".getBytes(StandardCharsets.UTF_8);
+
+        container.getBlobClient("a/../b").upload(
+                new ByteArrayInputStream(content), content.length, true);
+        assertArrayEquals(content, container.getBlobClient("b").downloadContent().toBytes());
+
+        BlobStorageException failure = assertThrows(BlobStorageException.class,
+                () -> container.getBlobClient("../file").upload(
+                        new ByteArrayInputStream(content), content.length, true));
+        assertEquals(400, failure.getStatusCode());
+
+        BlobStorageException rootFailure = assertThrows(BlobStorageException.class,
+                () -> container.getBlobClient("a/..").upload(
+                        new ByteArrayInputStream(content), content.length, true));
+        assertEquals(400, rootFailure.getStatusCode());
+        assertEquals(BlobErrorCode.INVALID_URI, rootFailure.getErrorCode());
 
         client.deleteBlobContainer(name);
     }

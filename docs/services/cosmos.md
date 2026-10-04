@@ -459,7 +459,7 @@ with `AzureNamedKeyCredential`: the **official Cosmos DB for Table pattern**
         .endpoint(endpoint)
         .credential(new AzureNamedKeyCredential(
             "devstoreaccount1",
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0=="))
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="))
         .buildClient();
     ```
 
@@ -470,7 +470,7 @@ with `AzureNamedKeyCredential`: the **official Cosmos DB for Table pattern**
     from azure.core.credentials import AzureNamedKeyCredential
 
     credential = AzureNamedKeyCredential("devstoreaccount1",
-        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMh0==")
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
     client = TableServiceClient(
         endpoint=f"http://{host}:{port}/devstoreaccount1-cosmos-table",
         credential=credential)
