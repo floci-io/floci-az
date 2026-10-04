@@ -30,8 +30,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   properties, append/flush, recursive delete, file/directory rename, POSIX owner/group/permission/ACL
   metadata, `checkAccess`, and the ADLS Path Lease POST API. Hadoop's default conditional-create
   overwrite flow (`409` -> status/ETag -> `If-Match`) is modeled explicitly. Access-control
-  operations require an account listed in `hierarchical-namespace-accounts`; custom account names
-  use a flat namespace by default.
+  operations require an HNS-enabled account. Accounts listed in `hierarchical-namespace-accounts`
+  have HNS enabled by default; ARM-created accounts can also enable it with
+  `properties.isHnsEnabled: true`. Other custom account names use a flat namespace by default.
 - **ADLS filesystem operations** - create/delete a filesystem and get/set filesystem properties via
   `?resource=filesystem`. Root `getAccessControl` is supported so Hadoop can auto-detect HNS and
   resolve `getFileStatus("/")` without forcing `fs.azure.account.hns.enabled=true`.
