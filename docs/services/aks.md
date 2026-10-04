@@ -2,19 +2,19 @@
 
 Compatible with the `azure-mgmt-containerservice` SDK, the `az aks` CLI, Terraform's `azurerm_kubernetes_cluster`, and any ARM-speaking client.
 
-> **Requires Docker** (in real mode) — each AKS cluster maps to one `rancher/k3s` container.
+> **Requires Docker** (in real mode): each AKS cluster maps to one `rancher/k3s` container.
 > Set `FLOCI_AZ_SERVICES_AKS_MOCKED=true` for a lightweight mock that skips Docker entirely.
 
 ---
 
 ## Features
 
-- **Clusters** — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
-- **Agent pools** — List, Get, CreateOrUpdate, Delete
-- **Credentials** — `listClusterAdminCredential`, `listClusterUserCredential` return a base64-encoded kubeconfig
-- **Real k3s mode** — a privileged k3s container starts per cluster; kubeconfig with real CA is extracted and returned
-- **Mocked mode** — clusters transition immediately to `Succeeded` with a synthetic kubeconfig; no Docker required
-- **instanceId-based naming** — each cluster gets an 8-char UUID prefix, preventing container name collisions across resource groups
+- **Clusters**: CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
+- **Agent pools**: List, Get, CreateOrUpdate, Delete
+- **Credentials**: `listClusterAdminCredential`, `listClusterUserCredential` return a base64-encoded kubeconfig
+- **Real k3s mode**: a privileged k3s container starts per cluster; kubeconfig with real CA is extracted and returned
+- **Mocked mode**: clusters transition immediately to `Succeeded` with a synthetic kubeconfig; no Docker required
+- **instanceId-based naming**: each cluster gets an 8-char UUID prefix, preventing container name collisions across resource groups
 
 ---
 
@@ -41,7 +41,7 @@ DELETE .../managedClusters/{name}/agentPools/{poolName}
 
 ## Quickstart
 
-### 1 — Create a cluster
+### 1: Create a cluster
 
 ```bash
 curl -s -X PUT \
@@ -68,7 +68,7 @@ curl -s -X PUT \
 In real mode, `provisioningState` is `"Creating"` until k3s is ready (30–90 s). Poll with GET until `"Succeeded"`.
 In mocked mode, the response immediately shows `"Succeeded"`.
 
-### 2 — Poll until ready (real mode only)
+### 2: Poll until ready (real mode only)
 
 ```bash
 while true; do
@@ -80,7 +80,7 @@ while true; do
 done
 ```
 
-### 3 — Get the kubeconfig
+### 3: Get the kubeconfig
 
 ```bash
 KUBECONFIG_B64=$(curl -s -X POST \
@@ -93,7 +93,7 @@ kubectl --kubeconfig ~/.kube/my-cluster.yaml get nodes
 
 In real mode the kubeconfig points to the live k3s API server. In mocked mode it points to `https://localhost:6443` with `insecure-skip-tls-verify: true`.
 
-### 4 — Delete the cluster
+### 4: Delete the cluster
 
 ```bash
 curl -s -X DELETE \
@@ -211,8 +211,8 @@ curl -s -X DELETE \
 |---|---|---|
 | Docker required | Yes | No |
 | `provisioningState` after create | `Creating` → polled to `Succeeded` | Immediately `Succeeded` |
-| Kubeconfig | Extracted from k3s — real CA, real server URL | Synthetic — `insecure-skip-tls-verify: true` |
-| `kubectl` connectivity | Yes — points at live k3s API server | No — k3s not running |
+| Kubeconfig | Extracted from k3s: real CA, real server URL | Synthetic: `insecure-skip-tls-verify: true` |
+| `kubectl` connectivity | Yes, points at live k3s API server | No: k3s not running |
 | Container | `floci-az-aks-{instanceId}` (privileged k3s) | None |
 | Use case | Local development, integration tests | Unit tests, CI without Docker |
 
@@ -283,4 +283,4 @@ services:
 ```
 
 The management plane (ARM API) goes through floci-az on port 4577.
-The data plane (kubectl, Kubernetes API) connects **directly** to the k3s container on its allocated port — floci-az is not in the data path.
+The data plane (kubectl, Kubernetes API) connects **directly** to the k3s container on its allocated port: floci-az is not in the data path.

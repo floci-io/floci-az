@@ -20,23 +20,23 @@ Compatible with the `azure-mgmt-containerinstance` SDK, the `az container` CLI, 
 
 ## Features
 
-- **Lifecycle** — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
-- **Actions** — `start`, `stop`, `restart` with the spec's exact LRO shapes (`Location`-header
+- **Lifecycle**: CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
+- **Actions**: `start`, `stop`, `restart` with the spec's exact LRO shapes (`Location`-header
   polling); in container-backed mode they map onto the backing containers (the netns-owning
   primary restarts first, then the secondaries)
-- **Container logs** — `GET .../containers/{name}/logs?tail=&timestamps=` (real Docker logs in
+- **Container logs**: `GET .../containers/{name}/logs?tail=&timestamps=` (real Docker logs in
   container-backed mode, empty in mocked mode)
-- **Pod semantics** — multi-container groups share one network namespace: the first container
+- **Pod semantics**: multi-container groups share one network namespace: the first container
   owns the network and the published ports; the rest join it and reach each other on `localhost`
-- **Volumes** — `emptyDir` (named Docker volume) and `secret` (files injected before start)
-- **instanceView** — group state plus per-container `currentState`/`restartCount` on single GETs
+- **Volumes**: `emptyDir` (named Docker volume) and `secret` (files injected before start)
+- **instanceView**: group state plus per-container `currentState`/`restartCount` on single GETs
   (list responses omit it, matching the spec's list model); real Docker state when unmocked
-- **Terraform-safe read-backs** — container `ports` and `resources.requests` are always present
+- **Terraform-safe read-backs**: container `ports` and `resources.requests` are always present
   (server defaults `cpu: 1.0`, `memoryInGB: 1.5` when omitted, matching the `az` CLI's behaviour),
   and enum casing is normalized to canonical Azure values (`Linux`, `Always`, `TCP`, `Public`)
-- **Secret hygiene** — `secureValue` environment variables, `imageRegistryCredentials` passwords,
+- **Secret hygiene**: `secureValue` environment variables, `imageRegistryCredentials` passwords,
   and secret-volume contents are accepted but never echoed back
-- **Resource index** — groups appear in `GET .../resourceGroups/{rg}/resources`, so
+- **Resource index**: groups appear in `GET .../resourceGroups/{rg}/resources`, so
   `terraform destroy` sees them before removing a resource group
 
 ---
@@ -62,7 +62,7 @@ GET    /subscriptions/{sub}/providers/Microsoft.ContainerInstance/locations/{loc
 
 ## Quickstart
 
-### 1 — Create a container group
+### 1: Create a container group
 
 ```bash
 curl -s -X PUT \
@@ -91,7 +91,7 @@ curl -s -X PUT \
 The group is returned with `properties.provisioningState = "Succeeded"`, an IP, and
 `fqdn = "my-app.eastus.azurecontainer.io"`.
 
-### 2 — Read logs and state
+### 2: Read logs and state
 
 ```bash
 BASE="http://localhost:4577/subscriptions/my-sub/resourceGroups/my-rg/providers/Microsoft.ContainerInstance/containerGroups/my-app"
@@ -99,7 +99,7 @@ curl -s "$BASE?api-version=2023-05-01"                              # full resou
 curl -s "$BASE/containers/web/logs?api-version=2023-05-01"          # {"content": "..."}
 ```
 
-### 3 — Actions
+### 3: Actions
 
 ```bash
 curl -si -X POST "$BASE/stop?api-version=2023-05-01"      # 204, synchronous
@@ -132,22 +132,22 @@ floci-az:
 
 ## Notes & limitations
 
-- `exec` and `attach` return an honest **501** — they hand out a live websocket in real Azure,
+- `exec` and `attach` return an honest **501**: they hand out a live websocket in real Azure,
   which the emulator does not provide.
 - `azureFile` and `gitRepo` volumes are rejected with a **400**; `emptyDir` and `secret` volumes
   are supported.
 - Liveness/readiness probes, `identity`, `diagnostics`, `dnsConfig`, `subnetIds`, GPU resources,
   and confidential/spot SKUs are stored and echoed but not enforced. CPU requests are stored but
   not enforced as a Docker limit (memory requests are).
-- `restartPolicy` is stored and echoed but not mapped onto Docker restart policies — an exited
+- `restartPolicy` is stored and echoed but not mapped onto Docker restart policies: an exited
   container stays `Terminated` in the instance view.
 - `containerGroupProfiles` and `ngroups` (2025-09-01 additions) are not implemented.
-- The `ipAddress.fqdn` is cosmetic — nothing resolves `*.azurecontainer.io` locally.
+- The `ipAddress.fqdn` is cosmetic: nothing resolves `*.azurecontainer.io` locally.
 - Secondary (non-first) containers cannot resolve emulated hostnames: Docker rejects DNS options
   in the shared-netns mode they use, so floci-az's embedded DNS is only injected into the primary.
 - `command` replaces the image's entrypoint (real ACI semantics), not just its CMD.
 - When floci-az itself runs inside Docker, images referencing the emulated ACR's `loginServer`
-  (`floci-az-acr-registry:5000/...`) cannot be pulled by the host daemon — pull from the
+  (`floci-az-acr-registry:5000/...`) cannot be pulled by the host daemon: pull from the
   emulated ACR works natively only.
 - Mocked mode reports every container as `Running` without running anything; use
   container-backed mode for real state.

@@ -8,8 +8,8 @@ Floci-AZ is distributed as a multi-arch Docker image (`linux/amd64` and `linux/a
 
 | Tag | Description |
 |---|---|
-| `latest` | Native binary — **<100ms** startup **(recommended)** |
-| `latest-jvm` | JVM image — larger, no GraalVM required |
+| `latest` | Native binary: **<100ms** startup **(recommended)** |
+| `latest-jvm` | JVM image: larger, no GraalVM required |
 | `x.y.z` | Pinned native release |
 | `x.y.z-jvm` | Pinned JVM release |
 | `edge` | Weekly build from `main` |

@@ -4,22 +4,22 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 
 ## Features
 
-- **Databases** — create, get, list, delete (cascade-deletes all containers and documents)
-- **Containers** — create, replace, get, list, delete; configurable partition key path; custom indexing policies with composite indexes (persisted on create/replace and returned on read)
-- **Documents** — create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
-- **Time to live (TTL)** — container `defaultTtl` (set on create or replace) with per-document `ttl` overrides; expired documents disappear from reads, lists, queries, and batches
-- **Queries** — in-process SQL engine with full Cosmos DB SQL dialect support:
+- **Databases**: create, get, list, delete (cascade-deletes all containers and documents)
+- **Containers**: create, replace, get, list, delete; configurable partition key path; custom indexing policies with composite indexes (persisted on create/replace and returned on read)
+- **Documents**: create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
+- **Time to live (TTL)**: container `defaultTtl` (set on create or replace) with per-document `ttl` overrides; expired documents disappear from reads, lists, queries, and batches
+- **Queries**: in-process SQL engine with full Cosmos DB SQL dialect support:
   - `SELECT *`, `SELECT c.field1, c.field2`, `SELECT VALUE c.field`, `SELECT TOP n`
   - `WHERE` with `=`, `!=`, `<>`, `>`, `>=`, `<`, `<=`, `IN`, `BETWEEN`, `NOT`, `AND`, `OR`, and correlated `EXISTS` over arrays
   - Logical precedence follows Cosmos DB: `NOT` binds before `AND`, then `OR`; parentheses override that order
   - `WHERE` functions: `IS_DEFINED`, `IS_NULL`, `IS_STRING`, `IS_NUMBER`, `IS_BOOL`, `IS_ARRAY`, `IS_OBJECT`, `CONTAINS`, `STARTSWITH`, `ENDSWITH`, `ARRAY_CONTAINS`
-  - `ORDER BY field [ASC|DESC]`, multiple fields — like Azure, an `ORDER BY` over two or more properties requires a matching composite index on the container, otherwise the query fails with `400 BadRequest` (error `SC2104`)
+  - `ORDER BY field [ASC|DESC]`, multiple fields: like Azure, an `ORDER BY` over two or more properties requires a matching composite index on the container, otherwise the query fails with `400 BadRequest` (error `SC2104`)
   - `OFFSET n LIMIT m` pagination
   - `SELECT VALUE COUNT(1)` aggregation
   - Named parameters (`@param`), including array values in `ARRAY_CONTAINS(@values, c.field)`;
     both membership arguments may be expressions, and `NOT ARRAY_CONTAINS(...)` excludes matches
-- **System properties** — `_rid`, `_self`, `_etag`, `_ts`, `_attachments` auto-generated on every write
-- **Partition keys** — resolved from `x-ms-documentdb-partitionkey` header or extracted from document body using the container's configured path
+- **System properties**: `_rid`, `_self`, `_etag`, `_ts`, `_attachments` auto-generated on every write
+- **Partition keys**: resolved from `x-ms-documentdb-partitionkey` header or extracted from document body using the container's configured path
 
 Queries with `x-ms-documentdb-partitionkey` (including .NET `QueryRequestOptions.PartitionKey`)
 are scoped to the configured logical partition before SQL filtering, aggregation, ordering and
@@ -105,11 +105,11 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
     ```
 
 > [!TIP]
-> In `dev` auth mode (the default) any key is accepted — the well-known Cosmos DB emulator key above works out of the box with all SDKs.
+> In `dev` auth mode (the default) any key is accepted: the well-known Cosmos DB emulator key above works out of the box with all SDKs.
 
 > [!NOTE]
 > **Port difference by SDK:** The **Java SDK** enforces TLS in gateway mode and cannot use plain HTTP, so it connects
-> to `https://localhost:4578` (HTTPS, bundled self-signed cert — no import required). **Python and Node.js SDKs** accept
+> to `https://localhost:4578` (HTTPS, bundled self-signed cert: no import required). **Python and Node.js SDKs** accept
 > plain HTTP and connect to `http://localhost:4577/...`.
 
 ## API Reference
@@ -136,8 +136,8 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
 #### Indexing policies
 
 A custom `indexingPolicy` (included/excluded paths, composite indexes) supplied on container
-create or replace is normalized the way Azure does — missing fields are filled with defaults
-and composite-index path `order` defaults to `ascending` — then persisted and returned on
+create or replace is normalized the way Azure does: missing fields are filled with defaults
+and composite-index path `order` defaults to `ascending`: then persisted and returned on
 container read. The `id` and `partitionKey` of a container are immutable on replace, matching Azure.
 
 Composite indexes are enforced for queries: an `ORDER BY` over two or more properties is only
@@ -324,7 +324,7 @@ from the document's last modification (`_ts`):
 
 | Container `defaultTtl` | Document `ttl` | Result |
 |---|---|---|
-| absent | anything | TTL disabled — nothing expires |
+| absent | anything | TTL disabled: nothing expires |
 | `-1` | absent or `-1` | never expires |
 | `-1` | `m` | expires `m` seconds after `_ts` |
 | `n` | absent | expires `n` seconds after `_ts` |
@@ -344,8 +344,8 @@ curl -X PUT http://localhost:4577/devstoreaccount1-cosmos/dbs/mydb/colls/audit \
 ```
 
 Expired documents vanish from point reads, lists, queries, and transactional batches
-immediately (and no longer block re-creating the same id). Physical deletion is lazy — an
-expired document is purged when a read next encounters it — mirroring Azure's contract that
+immediately (and no longer block re-creating the same id). Physical deletion is lazy: an
+expired document is purged when a read next encounters it: mirroring Azure's contract that
 expired items leave query results at once while background deletion timing is unspecified.
 
 ## Storage Mode
@@ -362,16 +362,16 @@ environment:
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_COSMOS_ENABLED` | `true` | Enable or disable Cosmos DB |
-| `FLOCI_AZ_SERVICES_COSMOS_MOCKED` | `false` | Master switch — when `true`, no engine containers are started for any API (equivalent to `engines.startup=disabled`). The in-process NoSQL/Table paths are unaffected. |
+| `FLOCI_AZ_SERVICES_COSMOS_MOCKED` | `false` | Master switch: when `true`, no engine containers are started for any API (equivalent to `engines.startup=disabled`). The in-process NoSQL/Table paths are unaffected. |
 
 ## Multi-API engines
 
 The API reference above covers the always-on **SQL / NoSQL** endpoint (`{account}-cosmos` and
 `{account}-cosmos-nosql`). Floci AZ also emulates the other Cosmos DB APIs through API-specific engines.
 
-All engines are **disabled by default** — enable only the APIs your application uses. Four APIs are
-**Docker-backed** (MongoDB, PostgreSQL, Cassandra, Gremlin) — they launch a sidecar container on first
-request. Two APIs are **embedded** (NoSQL and Table) — in-process, no Docker pull, instant startup.
+All engines are **disabled by default**: enable only the APIs your application uses. Four APIs are
+**Docker-backed** (MongoDB, PostgreSQL, Cassandra, Gremlin): they launch a sidecar container on first
+request. Two APIs are **embedded** (NoSQL and Table): in-process, no Docker pull, instant startup.
 
 ### Docker-backed engines
 
@@ -390,7 +390,7 @@ You can override the Docker image or host port for any Docker-backed engine:
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_MONGODB_PORT`       | Override the MongoDB host port    |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_STARTUP`            | `on-demand` (default) or `eager`  |
 
-**docker-compose.yml example — enable MongoDB and PostgreSQL:**
+**docker-compose.yml example (enable MongoDB and PostgreSQL):**
 
 ```yaml
 services:
@@ -419,21 +419,21 @@ curl http://localhost:4577/devstoreaccount1-cosmos-mongo/connect
 > Do not publish engine ports (`27017`, `5432`, etc.) on the `floci-az` service. Engines are launched as
 > sibling containers by the host Docker daemon, so they bind ports directly on the host.
 
-### Embedded engines — NoSQL and Table API (no Docker)
+### Embedded engines: NoSQL and Table API (no Docker)
 
-Both engines run entirely inside floci-az — no Docker pull, no container boot time. Data lives in memory;
+Both engines run entirely inside floci-az: no Docker pull, no container boot time. Data lives in memory;
 restarting floci-az clears it.
 
 | Variable                                              | Default | Backend                                            |
 |-------------------------------------------------------|---------|----------------------------------------------------|
-| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-process SQL engine — full Cosmos DB SQL dialect |
+| `FLOCI_AZ_SERVICES_COSMOS_ENGINES_NOSQL_ENABLED`      | `false` | In-process SQL engine: full Cosmos DB SQL dialect |
 | `FLOCI_AZ_SERVICES_COSMOS_ENGINES_TABLE_ENABLED`      | `false` | In-memory OData engine (ConcurrentHashMap)         |
 
-**NoSQL engine** — activating this endpoint enables the same embedded SQL engine already powering
+**NoSQL engine**: activating this endpoint enables the same embedded SQL engine already powering
 `/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4577` as the connection URL
 (Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`).
 
-**Table engine** — supported operations: create/delete table · insert/get/replace/merge/delete entity ·
+**Table engine**: supported operations: create/delete table · insert/get/replace/merge/delete entity ·
 OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.
 
 ```bash
@@ -446,7 +446,7 @@ curl http://localhost:4577/devstoreaccount1-cosmos-table/connect
 ```
 
 Use the `host` and `port` from the `/connect` response to build the endpoint, then connect
-with `AzureNamedKeyCredential` — the **official Cosmos DB for Table pattern**
+with `AzureNamedKeyCredential`: the **official Cosmos DB for Table pattern**
 ([quickstart](https://learn.microsoft.com/en-us/azure/cosmos-db/table/quickstart-java)):
 
 === "Java"

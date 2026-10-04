@@ -3,9 +3,9 @@
 Compatible with MariaDB Connector/J (JDBC), MySQL Connector/J, `mysqlclient` / `PyMySQL`,
 `MySqlConnector` for .NET, and any client that speaks the MySQL protocol.
 
-> **Requires Docker** — each logical server maps to one `mariadb` container.
+> **Requires Docker**: each logical server maps to one `mariadb` container.
 > The data plane (port 3306) goes **directly** to the container; floci-az only handles
-> the management plane (ARM REST API). There is **no EULA** — the `mariadb` image is
+> the management plane (ARM REST API). There is **no EULA**: the `mariadb` image is
 > GPL-licensed.
 
 > **Single-server model.** Azure Database for MariaDB uses
@@ -16,13 +16,13 @@ Compatible with MariaDB Connector/J (JDBC), MySQL Connector/J, `mysqlclient` / `
 
 ## Features
 
-- **Servers** — create, get, list, update (PATCH), delete; one Docker container per logical server
-- **Databases** — create, get, list, delete (metadata only — see note below)
-- **Firewall rules** — full CRUD; metadata-only (no actual IP filtering in dev mode)
-- **Configurations** — get, list, put (server parameters stored as metadata)
-- **Name availability check** — `POST .../checkNameAvailability`
-- **Connection strings** — convenience endpoint returns JDBC, URI, CLI, and .NET strings
-- **Mocked mode** — management plane only, no Docker, for fast `plan`/CI
+- **Servers**: create, get, list, update (PATCH), delete; one Docker container per logical server
+- **Databases**: create, get, list, delete (metadata only, see note below)
+- **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
+- **Configurations**: get, list, put (server parameters stored as metadata)
+- **Name availability check**: `POST .../checkNameAvailability`
+- **Connection strings**: convenience endpoint returns JDBC, URI, CLI, and .NET strings
+- **Mocked mode**: management plane only, no Docker, for fast `plan`/CI
 
 ---
 
@@ -59,13 +59,13 @@ your application or migration tooling using the connection details from `/connec
 /{account}-mariadb/servers/{serverName}/connect
 ```
 
-The `/connect` endpoint is a **floci-az addition** — it returns all connection string formats in one call.
+The `/connect` endpoint is a **floci-az addition**: it returns all connection string formats in one call.
 
 ---
 
 ## Quickstart
 
-### 1 — Create a server
+### 1: Create a server
 
 ```bash
 curl -X PUT "http://localhost:4577/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-rg/providers/Microsoft.DBforMariaDB/servers/my-server?api-version=2018-06-01" \
@@ -80,7 +80,7 @@ curl -X PUT "http://localhost:4577/subscriptions/00000000-0000-0000-0000-0000000
   }'
 ```
 
-### 2 — Get connection strings
+### 2: Get connection strings
 
 ```bash
 curl "http://localhost:4577/devstoreaccount1-mariadb/servers/my-server/connect"
@@ -105,7 +105,7 @@ resources below, which are metadata only.
 In mocked mode `/connect` still answers, but the server was never started, so `port` is `0`
 and every string points at `localhost:0`.
 
-### 3 — Connect via the mysql CLI
+### 3: Connect via the mysql CLI
 
 ```bash
 mysql -h localhost -P 54322 -u mariaadmin -pStr0ng!Passw0rd floci
@@ -253,7 +253,7 @@ services:
 ```
 
 > **Sidecar ports:** each server binds its own host port, assigned by the OS. Read the
-> actual port from `/connect` — do not assume 3306.
+> actual port from `/connect`: do not assume 3306.
 
 ---
 

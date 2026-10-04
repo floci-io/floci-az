@@ -4,24 +4,24 @@ Compatible with the `azure-storage-queue` SDKs (Java, Python, Node.js), the Azur
 (`az storage queue`), and Azurite-style connection strings. Speaks the Azure Storage Queue REST
 protocol with Shared Key authentication and XML responses.
 
-> **HTTP-only — no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
+> **HTTP-only: no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
 > (`memory` by default; `persistent`, `hybrid`, or `wal` for durability).
 
 ---
 
 ## Features
 
-- **Queues** — Create, Delete, Get/Set metadata; duplicate create is idempotent, missing queue
+- **Queues**: Create, Delete, Get/Set metadata; duplicate create is idempotent, missing queue
   returns the Azure `404 QueueNotFound` shape
-- **Messages** — Enqueue (send), Dequeue (receive), Delete, Peek; multiple in-flight messages
-- **Peek is non-consuming** — `?peekonly=true` returns messages without advancing the dequeue count
+- **Messages**: Enqueue (send), Dequeue (receive), Delete, Peek; multiple in-flight messages
+- **Peek is non-consuming**: `?peekonly=true` returns messages without advancing the dequeue count
   or hiding them
-- **Visibility timeout** — a received message is hidden for its `visibilitytimeout` and reappears
+- **Visibility timeout**: a received message is hidden for its `visibilitytimeout` and reappears
   after it elapses
-- **Pop-receipt validation** — delete/update require the current pop receipt; a stale receipt is
+- **Pop-receipt validation**: delete/update require the current pop receipt; a stale receipt is
   rejected, and updating a message rotates the receipt
-- **Message TTL** — messages expire and are removed after `messagettl`
-- **Update message** — replaces content and resets visibility, returning a fresh pop receipt
+- **Message TTL**: messages expire and are removed after `messagettl`
+- **Update message**: replaces content and resets visibility, returning a fresh pop receipt
 
 ## Endpoint
 
@@ -83,5 +83,5 @@ floci-az:
 ## Intentional deviations
 
 - **Shared Key signatures are accepted but not cryptographically verified.**
-- **No SAS enforcement** — SAS query parameters are parsed but not validated.
+- **No SAS enforcement**: SAS query parameters are parsed but not validated.
 - **Message dequeue count** is tracked but `maxDequeueCount` poison-message handling is not modeled.

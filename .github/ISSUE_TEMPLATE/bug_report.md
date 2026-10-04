@@ -20,7 +20,7 @@ assignees: ''
 
 ## Actual behavior
 
-<!-- What floci-az returns — include the full error message or response body -->
+<!-- What floci-az returns: include the full error message or response body -->
 
 ## Reproduction
 

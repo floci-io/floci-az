@@ -2,22 +2,22 @@
 
 Compatible with the `pgjdbc` (JDBC), `psycopg`, `Npgsql`, and any libpq-speaking client.
 
-> **Requires Docker** — each logical flexible server maps to one `postgres` container.
+> **Requires Docker**: each logical flexible server maps to one `postgres` container.
 > The data plane (port 5432) goes **directly** to the container; floci-az only handles
-> the management plane (ARM REST API). Unlike Azure SQL there is **no EULA** — the
+> the management plane (ARM REST API). Unlike Azure SQL there is **no EULA**: the
 > `postgres` image is PostgreSQL-licensed.
 
 ---
 
 ## Features
 
-- **Flexible servers** — create, get, list, update (PATCH), delete; one Docker container per logical server
-- **Databases** — create, get, list, delete (metadata only — see note below)
-- **Firewall rules** — full CRUD; metadata-only (no actual IP filtering in dev mode)
-- **Configurations** — get, list, put (server parameters stored as metadata)
-- **Name availability check** — `POST .../checkNameAvailability`
-- **Connection strings** — convenience endpoint returns JDBC, libpq URI, `psql`, and Npgsql strings
-- **Mocked mode** — management plane only, no Docker, for fast `plan`/CI
+- **Flexible servers**: create, get, list, update (PATCH), delete; one Docker container per logical server
+- **Databases**: create, get, list, delete (metadata only, see note below)
+- **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
+- **Configurations**: get, list, put (server parameters stored as metadata)
+- **Name availability check**: `POST .../checkNameAvailability`
+- **Connection strings**: convenience endpoint returns JDBC, libpq URI, `psql`, and Npgsql strings
+- **Mocked mode**: management plane only, no Docker, for fast `plan`/CI
 
 ---
 
@@ -57,13 +57,13 @@ always available.
 /{account}-postgres/flexibleServers/{serverName}/connect
 ```
 
-The `/connect` endpoint is a **floci-az addition** — it returns all connection string formats in one call.
+The `/connect` endpoint is a **floci-az addition**: it returns all connection string formats in one call.
 
 ---
 
 ## Quickstart
 
-### 1 — Create a server
+### 1: Create a server
 
 ```bash
 curl -s -X PUT \
@@ -84,7 +84,7 @@ curl -s -X PUT \
 > First call starts the container and waits for PostgreSQL to accept connections
 > (a few seconds with a cached image, longer on the first pull of `postgres:17-alpine`).
 
-### 2 — Get connection strings
+### 2: Get connection strings
 
 ```bash
 curl -s "http://localhost:4577/devstoreaccount1-postgres/flexibleServers/myserver/connect"
@@ -104,7 +104,7 @@ Response:
 }
 ```
 
-### 3 — Connect via psql
+### 3: Connect via psql
 
 ```bash
 psql "host=localhost port=54983 dbname=postgres user=psqladmin password=FlociAz_Strong123! sslmode=disable"
@@ -233,7 +233,7 @@ floci-az:
 ```
 
 In **mocked** mode (`mocked: true`) servers are created in state and report
-`state=Ready` / `provisioningState=Succeeded` with no container — useful for management-plane
+`state=Ready` / `provisioningState=Succeeded` with no container: useful for management-plane
 testing without Docker. The data plane is unavailable (no live endpoint), so the `/connect`
 endpoint returns no usable port.
 
@@ -288,4 +288,4 @@ services:
 ```
 
 The management plane (ARM API) goes through floci-az on port 4577.
-The data plane (PostgreSQL wire protocol) connects **directly** to the container on its dynamic port — floci-az is not in the data path.
+The data plane (PostgreSQL wire protocol) connects **directly** to the container on its dynamic port: floci-az is not in the data path.

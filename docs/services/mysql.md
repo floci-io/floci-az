@@ -3,22 +3,22 @@
 Compatible with MySQL Connector/J (JDBC), `mysqlclient` / `PyMySQL`, `MySqlConnector` for .NET,
 and any client that speaks the MySQL protocol.
 
-> **Requires Docker** — each logical flexible server maps to one `mysql` container.
+> **Requires Docker**: each logical flexible server maps to one `mysql` container.
 > The data plane (port 3306) goes **directly** to the container; floci-az only handles
-> the management plane (ARM REST API). There is **no EULA** — the `mysql` image is
+> the management plane (ARM REST API). There is **no EULA**: the `mysql` image is
 > GPL-licensed.
 
 ---
 
 ## Features
 
-- **Flexible servers** — create, get, list, update (PATCH), delete; one Docker container per logical server
-- **Databases** — create, get, list, delete (metadata only — see note below)
-- **Firewall rules** — full CRUD; metadata-only (no actual IP filtering in dev mode)
-- **Configurations** — get, list, put (server parameters stored as metadata)
-- **Name availability check** — `POST .../checkNameAvailability`
-- **Connection strings** — convenience endpoint returns JDBC, URI, `mysql` CLI, and .NET strings
-- **Mocked mode** — management plane only, no Docker, for fast `plan`/CI
+- **Flexible servers**: create, get, list, update (PATCH), delete; one Docker container per logical server
+- **Databases**: create, get, list, delete (metadata only, see note below)
+- **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
+- **Configurations**: get, list, put (server parameters stored as metadata)
+- **Name availability check**: `POST .../checkNameAvailability`
+- **Connection strings**: convenience endpoint returns JDBC, URI, `mysql` CLI, and .NET strings
+- **Mocked mode**: management plane only, no Docker, for fast `plan`/CI
 
 ---
 
@@ -58,13 +58,13 @@ connection details from the `/connect` endpoint.
 /{account}-mysql/flexibleServers/{serverName}/connect
 ```
 
-The `/connect` endpoint is a **floci-az addition** — it returns all connection string formats in one call.
+The `/connect` endpoint is a **floci-az addition**: it returns all connection string formats in one call.
 
 ---
 
 ## Quickstart
 
-### 1 — Create a server
+### 1: Create a server
 
 ```bash
 curl -X PUT "http://localhost:4577/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/my-rg/providers/Microsoft.DBforMySQL/flexibleServers/my-server?api-version=2023-06-30" \
@@ -79,7 +79,7 @@ curl -X PUT "http://localhost:4577/subscriptions/00000000-0000-0000-0000-0000000
   }'
 ```
 
-### 2 — Get connection strings
+### 2: Get connection strings
 
 ```bash
 curl "http://localhost:4577/devstoreaccount1-mysql/flexibleServers/my-server/connect"
@@ -109,7 +109,7 @@ not allowed".
 In mocked mode `/connect` still answers, but the server was never started, so `port` is `0`
 and every string points at `localhost:0`.
 
-### 3 — Connect via the mysql CLI
+### 3: Connect via the mysql CLI
 
 ```bash
 mysql -h localhost -P 54321 -u mysqladmin -pStr0ng!Passw0rd floci
@@ -254,7 +254,7 @@ services:
 ```
 
 > **Sidecar ports:** each server binds its own host port, assigned by the OS. Read the
-> actual port from `/connect` or from the server's `fullyQualifiedDomainName` — do not
+> actual port from `/connect` or from the server's `fullyQualifiedDomainName`: do not
 > assume 3306.
 
 ---

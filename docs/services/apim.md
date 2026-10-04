@@ -2,7 +2,7 @@
 
 floci-az includes an **in-process API Management emulator** intended for local development, SDK
 compatibility tests, and CI workflows that need APIM-shaped ARM resources plus a lightweight gateway.
-It is **not** a full Azure APIM gateway implementation — no sidecar is started; everything runs
+It is **not** a full Azure APIM gateway implementation: no sidecar is started; everything runs
 in-process.
 
 ## Endpoints
@@ -10,7 +10,7 @@ in-process.
 | Plane | Path |
 |---|---|
 | Management (ARM) | `Microsoft.ApiManagement/service/...` |
-| Gateway | `/{account}-apim/{serviceName}/{apiPath...}` — e.g. `http://localhost:4577/devstoreaccount1-apim/{serviceName}/...` |
+| Gateway | `/{account}-apim/{serviceName}/{apiPath...}`, e.g. `http://localhost:4577/devstoreaccount1-apim/{serviceName}/...` |
 
 ## Supported
 

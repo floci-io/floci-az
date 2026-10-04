@@ -8,15 +8,15 @@ against a real SQL Server 2025 container.
 
 ## Features
 
-- **Servers** — create, get, list, delete; immediate ARM state by default
-- **Databases** — create (with optional collation), get, list, delete; guarded against dropping `master`
-- **Firewall rules** — full CRUD; metadata-only (no actual IP filtering in dev mode)
-- **Connection policy** — GET returns `Default` (read-only)
-- **Name availability check** — `POST .../checkNameAvailability`
-- **Data-plane providers** — `none` (default), `managed`, and reserved `external`
-- **Asynchronous managed provisioning** — server `PUT` returns `202` with Azure `Location` polling
-- **Connection strings** — managed mode returns JDBC, ADO.NET, pyodbc, and EF Core strings
-- **EULA guard** — managed server creation requires `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y`
+- **Servers**: create, get, list, delete; immediate ARM state by default
+- **Databases**: create (with optional collation), get, list, delete; guarded against dropping `master`
+- **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
+- **Connection policy**: GET returns `Default` (read-only)
+- **Name availability check**: `POST .../checkNameAvailability`
+- **Data-plane providers**: `none` (default), `managed`, and reserved `external`
+- **Asynchronous managed provisioning**: server `PUT` returns `202` with Azure `Location` polling
+- **Connection strings**: managed mode returns JDBC, ADO.NET, pyodbc, and EF Core strings
+- **EULA guard**: managed server creation requires `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y`
 
 ---
 
@@ -86,7 +86,7 @@ Without it, managed `PUT /servers/{name}` returns:
 /{account}-sql/servers/{serverName}/databases/{dbName}/connect
 ```
 
-The `/connect` endpoints are a **floci-az addition** — they return all connection string formats in one call.
+The `/connect` endpoints are a **floci-az addition**: they return all connection string formats in one call.
 
 ---
 
@@ -95,7 +95,7 @@ The `/connect` endpoints are a **floci-az addition** — they return all connect
 This data-plane quickstart assumes `data-plane.provider: managed`, Docker access, and accepted EULA.
 For ARM-only use, keep the default `none` provider and stop after creating management resources.
 
-### 1 — Create a server
+### 1: Create a server
 
 ```bash
 curl -s -X PUT \
@@ -113,7 +113,7 @@ curl -s -X PUT \
 > In managed mode, first call returns promptly with `202 Accepted`; image pull and SQL Server startup
 > continue in the background. Follow the `Location` header before requesting connection strings.
 
-### 2 — Get connection strings
+### 2: Get connection strings
 
 ```bash
 curl -s "http://localhost:4577/devstoreaccount1-sql/servers/myserver/connect"
@@ -133,7 +133,7 @@ Response:
 }
 ```
 
-### 3 — Create a database
+### 3: Create a database
 
 ```bash
 curl -s -X PUT \
@@ -142,7 +142,7 @@ curl -s -X PUT \
   -d '{"location": "eastus", "properties": {}}'
 ```
 
-### 4 — Connect via JDBC
+### 4: Connect via JDBC
 
 ```java
 String jdbcUrl = "jdbc:sqlserver://localhost:59743;"
@@ -358,7 +358,7 @@ services:
       FLOCI_AZ_SERVICES_SQL_DATA_PLANE_PROVIDER: managed
       FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA: "Y"
       # SQL Server containers bind a random port directly to the host.
-      # Do NOT add those ports here — floci-az manages them via Docker socket.
+      # Do NOT add those ports here: floci-az manages them via Docker socket.
 ```
 
 > **Sidecar ports:** SQL Server containers bind a host port directly via the Docker daemon;

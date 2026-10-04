@@ -6,7 +6,7 @@ name: Release Cut
 # The tag push then triggers release.yml, which builds and publishes the
 # Docker images.
 #
-# GH_TOKEN must be a PAT (fine-grained, contents: write) — NOT the default
+# GH_TOKEN must be a PAT (fine-grained, contents: write): NOT the default
 # GITHUB_TOKEN. Tags pushed with the default GITHUB_TOKEN do not trigger
 # other workflows (GitHub's recursion guard), so release.yml would silently
 # never run.
@@ -26,9 +26,9 @@ permissions:
   contents: write
 
 # Serialize release cuts: a second dispatch queues behind the first instead of
-# racing it to the same version/tag. No cancel-in-progress — never kill a
+# racing it to the same version/tag. No cancel-in-progress: never kill a
 # mid-flight release. GitHub keeps at most ONE pending run per group, so if
-# several dispatches pile up, only the latest pending one runs — intentional:
+# several dispatches pile up, only the latest pending one runs: intentional:
 # duplicate queued release cuts are redundant by definition (the surviving run
 # re-analyzes main and releases whatever is unreleased).
 concurrency:

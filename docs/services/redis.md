@@ -1,11 +1,11 @@
 # Azure Cache for Redis
 
 Compatible with the `azure-mgmt-redis` SDK, the `az redis` CLI, Terraform's `azurerm_redis_cache`,
-and any ARM-speaking client for the management plane — plus **any standard Redis client**
+and any ARM-speaking client for the management plane: plus **any standard Redis client**
 (redis-py, StackExchange.Redis, Jedis, `redis-cli`, …) for the data plane.
 
 > **Real sidecar (default).** With `mocked=false` (the default), each cache is backed by a real container
-> (`valkey/valkey:8-alpine` — a drop-in, RESP-compatible Redis fork) that clients connect to with
+> (`valkey/valkey:8-alpine`: a drop-in, RESP-compatible Redis fork) that clients connect to with
 > the Redis protocol. Unit-test profiles force `mocked=true` (management plane only, no
 > Docker).
 
@@ -13,12 +13,12 @@ and any ARM-speaking client for the management plane — plus **any standard Red
 
 ## Features
 
-- **Lifecycle** — CreateOrUpdate, Get, Delete, Patch (tags / config), List (by subscription and by resource group)
-- **Access keys** — `listKeys` and `regenerateKey`; the create response embeds `properties.accessKeys`
-- **Real data plane** — a Redis container per cache; the primary access key is the Redis password
+- **Lifecycle**: CreateOrUpdate, Get, Delete, Patch (tags / config), List (by subscription and by resource group)
+- **Access keys**: `listKeys` and `regenerateKey`; the create response embeds `properties.accessKeys`
+- **Real data plane**: a Redis container per cache; the primary access key is the Redis password
   (`--requirepass`), and both the primary and secondary key authenticate via a Redis ACL on the
   `default` user
-- **Async provisioning** — non-mocked caches start as `provisioningState=Creating` and flip to
+- **Async provisioning**: non-mocked caches start as `provisioningState=Creating` and flip to
   `Succeeded` once the container answers `PING`; mocked caches return `Succeeded` immediately
 
 ---
@@ -42,7 +42,7 @@ GET    /subscriptions/{sub}/providers/Microsoft.Cache/redis
 
 ## Quickstart
 
-### 1 — Create a cache
+### 1: Create a cache
 
 ```bash
 curl -s -X PUT \
@@ -74,7 +74,7 @@ The response contains the connection details and keys:
 }
 ```
 
-### 2 — Connect with a Redis client
+### 2: Connect with a Redis client
 
 ```python
 import redis
@@ -87,7 +87,7 @@ print(client.get("greeting"))   # b'hello'
 redis-cli -h localhost -p 6379 -a "<primaryKey>" ping   # PONG
 ```
 
-### 3 — Rotate a key
+### 3: Rotate a key
 
 ```bash
 curl -s -X POST \
@@ -126,13 +126,13 @@ floci-az:
 
 ## Notes & limitations
 
-- **Endpoint resolution.** `hostName` returns the actually-reachable host — `localhost` natively,
-  or the container name when floci-az itself runs in Docker — not the real
+- **Endpoint resolution.** `hostName` returns the actually-reachable host: `localhost` natively,
+  or the container name when floci-az itself runs in Docker, not the real
   `{name}.redis.cache.windows.net` FQDN, so standard Redis clients can connect to the sidecar.
   `port` is the dynamically allocated host port mapped to the container's `6379`.
 - **Non-SSL only (for now).** The data plane is served on the non-SSL port; `sslPort` (6380) is
   reported for API fidelity but TLS termination is not yet wired. Connect over the non-SSL port.
 - **Single node.** Clustering (`shardCount`), geo-replication, private endpoints, firewall rules,
   and patch schedules are accepted on the management plane but not enforced.
-- Mocked mode returns `hostName=localhost` with no backing container — useful for provisioning
+- Mocked mode returns `hostName=localhost` with no backing container: useful for provisioning
   tests, but data-plane connections will fail.

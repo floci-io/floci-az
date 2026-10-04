@@ -18,7 +18,7 @@ floci-az:
     mode: dev
 
   storage:
-    # Global default — applies to every service unless overridden below.
+    # Global default: applies to every service unless overridden below.
     # Supported: memory | persistent | hybrid | wal
     mode: memory
     path: /app/data

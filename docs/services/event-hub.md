@@ -13,7 +13,7 @@ Azure Event Hubs emulation backed by two lightweight sidecar containers managed 
 Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=devkey;UseDevelopmentEmulator=true;
 ```
 
-`UseDevelopmentEmulator=true` tells the SDK to use plain AMQP (no TLS). The `SharedAccessKey` value is ignored — Artemis runs without authentication in dev mode.
+`UseDevelopmentEmulator=true` tells the SDK to use plain AMQP (no TLS). The `SharedAccessKey` value is ignored: Artemis runs without authentication in dev mode.
 
 ## Python SDK
 

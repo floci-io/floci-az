@@ -5,25 +5,25 @@ Compatible with the `azure-identity` `ManagedIdentityCredential` (Java, Python, 
 identities** (with federated identity credentials) and the **IMDS token endpoint** that
 applications use to acquire tokens without secrets.
 
-> **HTTP-only — no Docker.** ARM CRUD state is in-memory; IMDS tokens are minted with the same
+> **HTTP-only: no Docker.** ARM CRUD state is in-memory; IMDS tokens are minted with the same
 > RSA signing key as the [Entra ID](entra.md) emulation, so they verify against the emulator JWKS.
 
 ---
 
 ## Features
 
-- **User-assigned identities** — CreateOrUpdate, Get, Update (tags), Delete, List (by resource
+- **User-assigned identities**: CreateOrUpdate, Get, Update (tags), Delete, List (by resource
   group and by subscription); `principalId` / `clientId` / `tenantId` are server-generated GUIDs
   that stay stable across updates (msi spec `2024-11-30`)
-- **Federated identity credentials** — CreateOrUpdate, Get, Delete, List with
+- **Federated identity credentials**: CreateOrUpdate, Get, Delete, List with
   `issuer` / `subject` / `audiences` (as used by `azurerm_federated_identity_credential`)
-- **System-assigned identity read** — `GET {scope}/providers/Microsoft.ManagedIdentity/identities/default`
+- **System-assigned identity read**: `GET {scope}/providers/Microsoft.ManagedIdentity/identities/default`
   returns deterministic per-scope GUIDs
-- **IMDS token endpoint** — `GET /metadata/identity/oauth2/token` (imds spec `2023-07-01`):
+- **IMDS token endpoint**: `GET /metadata/identity/oauth2/token` (imds spec `2023-07-01`):
   requires the `Metadata: true` header, accepts `resource` plus an optional `client_id` /
   `object_id` / `msi_res_id` selector, and returns the all-string IMDS response shape. Any
   `api-version` is accepted (SDKs send `2018-02-01`)
-- **Verifiable tokens** — v1.0 JWTs (`appid`, `oid`, `idtyp=app`) signed by the Entra key;
+- **Verifiable tokens**: v1.0 JWTs (`appid`, `oid`, `idtyp=app`) signed by the Entra key;
   validate against `GET /common/discovery/v2.0/keys`
 
 ---
@@ -52,7 +52,7 @@ GET    /metadata/identity/oauth2/token?resource={resource}[&client_id=...]   # h
 
 ## Quickstart
 
-### 1 — Create a user-assigned identity
+### 1: Create a user-assigned identity
 
 ```bash
 curl -s -X PUT \
@@ -73,7 +73,7 @@ curl -s -X PUT \
 }
 ```
 
-### 2 — Acquire a token via IMDS (raw HTTP)
+### 2: Acquire a token via IMDS (raw HTTP)
 
 ```bash
 curl -s -H "Metadata: true" \
@@ -96,7 +96,7 @@ IMDS contract:
 }
 ```
 
-### 3 — Use `ManagedIdentityCredential` from the SDKs
+### 3: Use `ManagedIdentityCredential` from the SDKs
 
 The azure-identity SDKs target `http://169.254.169.254` by default. Point them at the emulator
 with `AZURE_POD_IDENTITY_AUTHORITY_HOST` (honored by the Java, Python, and Node.js SDKs):
@@ -158,21 +158,21 @@ Token tenant, issuer, and lifetime follow the [Entra ID](entra.md) settings
 
 ## Intentional deviations
 
-- **`clientSecretUrl` is synthetic** — real Azure returns a Key Vault-backed credential renewal
+- **`clientSecretUrl` is synthetic**: real Azure returns a Key Vault-backed credential renewal
   URL for `identities/default`; the emulator returns a placeholder URL under the emulator base.
 - **Any `api-version` is accepted** on both planes; real IMDS rejects unknown versions.
 - **`isolationScope` is not modeled** on user-assigned identities.
-- **Federated identity credentials are CRUD-only** — no token-exchange semantics.
+- **Federated identity credentials are CRUD-only**: no token-exchange semantics.
 - **Unknown identities return** `400 {"error":"invalid_request","error_description":"Identity not found"}`,
   matching real IMDS behavior for unassigned user identities.
-- **The system-assigned IMDS identity is not tied to a caller resource** — on real Azure, IMDS
+- **The system-assigned IMDS identity is not tied to a caller resource**: on real Azure, IMDS
   runs on the resource and returns that resource's own identity. The emulator is not attached to
   a resource, so system-assigned tokens are seeded from the configured `system-assigned-scope`
   (default: the default subscription). `identities/default` reads for *other* scopes return
   different (deterministic) GUIDs; set `system-assigned-scope` to your resource's scope when
   your code compares an ARM-read `principalId` against the token's `oid`.
-- **Identity state is in-memory only** — like the rest of the ARM control plane, identities and
+- **Identity state is in-memory only**: like the rest of the ARM control plane, identities and
   federated credentials do not persist across restarts, regardless of `storage.mode`.
-- **Resource-group deletion does not cascade** — deleting a resource group leaves its identities
+- **Resource-group deletion does not cascade**: deleting a resource group leaves its identities
   behind (consistent with the other ARM resources in the emulator). Identities do appear in
   `GET .../resourceGroups/{rg}/resources`, so `prevent_deletion_if_contains_resources` works.

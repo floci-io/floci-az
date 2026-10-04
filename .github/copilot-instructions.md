@@ -71,7 +71,7 @@ Floci-Az implements real Azure wire protocols. Review protocol-affecting changes
 Pay extra attention to these cases:
 
 - Error responses must follow Azure's error envelope: `{ "error": { "code": "...", "message": "..." } }`
-- Blob and Queue operations use shared-key HMAC-SHA256 signatures — auth must not be silently skipped in `strict` mode
+- Blob and Queue operations use shared-key HMAC-SHA256 signatures: auth must not be silently skipped in `strict` mode
 - SAS token parsing must respect expiry, permissions, and resource fields
 - Azure Functions must use Docker-in-Docker; do not introduce direct process execution
 
@@ -79,8 +79,8 @@ Pay extra attention to these cases:
 
 Floci-Az supports two auth modes configured via `floci-az.auth.mode`:
 
-- `dev` — accept any credentials without signature validation (default)
-- `strict` — validate HMAC-SHA256 signatures via `SharedKeyAuthVerifier`
+- `dev`: accept any credentials without signature validation (default)
+- `strict`: validate HMAC-SHA256 signatures via `SharedKeyAuthVerifier`
 
 Also supports Bearer tokens (`BearerTokenVerifier`) and SAS tokens (`SasTokenParser`).
 

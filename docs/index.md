@@ -8,7 +8,7 @@
 
 ---
 
-Floci-AZ is a fast, free, and open-source local Azure service emulator — providing Blob Storage, Queues, Tables, Azure Functions, App Configuration, Cosmos DB (all APIs), Key Vault, Event Hubs, API Management, Virtual Network, Virtual Machines, Azure Cache for Redis, and Azure Container Registry in a single native binary.
+Floci-AZ is a fast, free, and open-source local Azure service emulator: providing Blob Storage, Queues, Tables, Azure Functions, App Configuration, Cosmos DB (all APIs), Key Vault, Event Hubs, API Management, Virtual Network, Virtual Machines, Azure Cache for Redis, and Azure Container Registry in a single native binary.
 
 ## Why floci-az?
 
@@ -36,7 +36,7 @@ Floci-AZ is a fast, free, and open-source local Azure service emulator — provi
 flowchart LR
     Client["☁️ Azure SDK / CLI"]
 
-    subgraph floci-az ["floci-az — port 4577"]
+    subgraph floci-az ["floci-az: port 4577"]
         Router["HTTP Router\n(JAX-RS / Vert.x)"]
 
         subgraph Services ["Services"]
@@ -79,7 +79,7 @@ flowchart LR
 | **Table Storage** | `/{account}-table/` | Create/delete tables, insert/get/update/upsert/delete entities, list entities |
 | **Azure Functions** | `/{account}-functions/` | Deploy & invoke HTTP-triggered functions (node, python, java, dotnet); warm-container pool |
 | **App Configuration** | `/{account}-appconfig/` | Key-values, labels, feature flags, snapshots, revisions, locks, ETags |
-| **Cosmos DB (NoSQL)** | `/{account}-cosmos/` | Databases, containers, documents CRUD + full SQL dialect — embedded, always-on, no Docker |
+| **Cosmos DB (NoSQL)** | `/{account}-cosmos/` | Databases, containers, documents CRUD + full SQL dialect: embedded, always-on, no Docker |
 | **Cosmos DB engines** | `/{account}-cosmos-{api}/` | MongoDB · PostgreSQL · Cassandra · Gremlin (Docker-backed, opt-in) · Table · NoSQL (embedded, opt-in) |
 | **Key Vault** | `/{account}-keyvault/` | Secrets CRUD, versioning, soft-delete, properties update |
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |

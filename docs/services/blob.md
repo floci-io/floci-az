@@ -5,24 +5,24 @@ Compatible with the `azure-storage-blob` SDKs (Java, Python, Node.js), focused J
 connection strings. Speaks the Azure Storage Blob REST protocol with Shared Key authentication,
 Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 
-> **HTTP-only — no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
+> **HTTP-only: no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
 > (`memory` by default; `persistent`, `hybrid`, or `wal` for durability).
 
 ---
 
 ## Features
 
-- **Containers** — Create, Get properties, Delete, List (`?comp=list`); duplicate create returns
+- **Containers**: Create, Get properties, Delete, List (`?comp=list`); duplicate create returns
   `409 ContainerAlreadyExists`
-- **Blobs** — Put (upload), Get (download), Delete, List within a container; overwrite semantics
-- **Block blobs** — staged block upload (`?comp=block`) followed by commit (`?comp=blocklist`) for
+- **Blobs**: Put (upload), Get (download), Delete, List within a container; overwrite semantics
+- **Block blobs**: staged block upload (`?comp=block`) followed by commit (`?comp=blocklist`) for
   large payloads, in addition to single-request `Put Blob`
-- **Data Lake Storage Gen2 endpoint alias** — the `{account}.dfs.core.windows.net` host maps to the
+- **Data Lake Storage Gen2 endpoint alias**: the `{account}.dfs.core.windows.net` host maps to the
   Blob backend so ADLS SDK path clients can create, read, write, and delete paths through the same
   local data store
-- **User delegation key vending** — `POST ?restype=service&comp=userdelegationkey` returns
+- **User delegation key vending**: `POST ?restype=service&comp=userdelegationkey` returns
   Azure-shaped XML for SDK-generated user delegation SAS flows
-- **User delegation SAS enforcement** — validates SDK-generated user delegation SAS signatures,
+- **User delegation SAS enforcement**: validates SDK-generated user delegation SAS signatures,
   expiry, signed key validity, permissions, and container/blob/directory resource scope for Blob
   and ADLS path operations
 - **ADLS Gen2 / Hadoop ABFS 3.3.4 path operations** - supports the DFS wire shapes used by
@@ -41,10 +41,10 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   and Hadoop 3.3.4's Base64 HNS `startFrom` continuation token.
 - **ADLS AppendBlob mode** - recognizes Hadoop's `blobType=AppendBlob` create mode and enforces
   sequential append positions, including append requests carrying `flush=true` / `close=true`.
-- **Range download** — `Range: bytes=…` returns `206 Partial Content`
-- **Conditional download** — `If-Match` / `If-None-Match` honored; a stale ETag is rejected
-- **Metadata** — `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
-- **Not-found semantics** — missing blob/container returns the Azure `404 BlobNotFound` /
+- **Range download**: `Range: bytes=…` returns `206 Partial Content`
+- **Conditional download**: `If-Match` / `If-None-Match` honored; a stale ETag is rejected
+- **Metadata**: `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
+- **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 
 ## Endpoint
@@ -111,7 +111,7 @@ floci-az:
 
 ## Intentional deviations
 
-- **Shared Key signatures are accepted but not cryptographically verified** — the emulator is a
+- **Shared Key signatures are accepted but not cryptographically verified**: the emulator is a
   local dev target; any well-formed `Authorization` header (or the Azurite key) is honored.
 - **ADLS large-operation behavior is simplified** - directory rename and recursive delete complete
   atomically in the local backend rather than reproducing Azure's server-side multi-request batching.
@@ -144,6 +144,6 @@ floci-az:
 - **Blob leases and ADLS Path leases** share the emulator's in-memory lease state and support
   acquire/renew/change/release/break. Lease state is intentionally process-local and is lost when
   the emulator restarts.
-- **`x-ms-server-encrypted: true` is reported although no encryption is performed** — blob data is
+- **`x-ms-server-encrypted: true` is reported although no encryption is performed**: blob data is
   stored as-is by the configured storage backend. The header mirrors the
   `x-ms-request-server-encrypted` already returned on upload and exists for SDK compatibility.

@@ -140,14 +140,14 @@ function. Useful for tests and CI environments without a Docker daemon.
 When floci-az is itself running inside Docker, it starts an embedded UDP/53 DNS server and
 injects it into every spawned function container. This lets function containers resolve
 custom hostnames (configured via `floci-az.hostname` or `floci-az.dns.extra-suffixes`) to
-floci-az's Docker-network IP — useful when functions connect to Blob Storage using a
+floci-az's Docker-network IP: useful when functions connect to Blob Storage using a
 hostname-based endpoint rather than a raw IP.
 
 On the host, no DNS setup is needed; the embedded server is a no-op.
 
 ---
 
-## Linux Native Docker — Firewall Note
+## Linux Native Docker: Firewall Note
 
 On native Linux Docker (not Docker Desktop), function containers reach the host via
 `host.docker.internal` (automatically mapped to `host-gateway`). If you run UFW with the

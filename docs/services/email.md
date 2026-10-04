@@ -1,29 +1,29 @@
-# Azure Communication Services — Email
+# Azure Communication Services: Email
 
 Compatible with the `azure-communication-email` SDK, the `Microsoft.Communication` ARM management
 plane, and any HTTP client. Floci AZ emulates the ACS **Email** data plane (`POST /emails:send` plus
-status polling) and **captures every message in-memory** for local inspection — a Mailpit-style
+status polling) and **captures every message in-memory** for local inspection: a Mailpit-style
 mailbox for your tests. No real email is ever delivered.
 
-> **HTTP-only — no Docker.** Sending, status polling, inspection, and ARM resources are all
+> **HTTP-only: no Docker.** Sending, status polling, inspection, and ARM resources are all
 > in-process. There is no sidecar.
 
 ---
 
 ## Features
 
-- **Send email** — `POST /emails:send` accepts the full ACS payload (`senderAddress`, `content`
+- **Send email**: `POST /emails:send` accepts the full ACS payload (`senderAddress`, `content`
   with `subject`/`plainText`/`html`, `recipients` `to`/`cc`/`bcc`, `attachments`, `replyTo`,
   `headers`) and returns `202 Accepted` with `Operation-Location` and `Retry-After` headers for
   polling. A caller-supplied **`Operation-Id`** request header is adopted as the operation id; without
   one the emulator generates a UUID, matching ACS
-- **Operation status** — `GET /emails/operations/{operationId}` reports the long-running operation
+- **Operation status**: `GET /emails/operations/{operationId}` reports the long-running operation
   status as `{"id":…,"status":…,"error":null}`, the same shape ACS returns. The emulator completes
   immediately, so the status is `Succeeded`
-- **Inspection mailbox** — `GET /emailMessages` lists every captured message, `GET
+- **Inspection mailbox**: `GET /emailMessages` lists every captured message, `GET
   /emailMessages/{operationId}` returns one in full (including the original request body), and
   `DELETE /emailMessages` clears the mailbox
-- **ARM management plane** — `Microsoft.Communication/communicationServices`,
+- **ARM management plane**: `Microsoft.Communication/communicationServices`,
   `.../emailServices`, and `.../emailServices/{name}/domains/{domain}` CreateOrUpdate, Get, Delete,
   and List
 
@@ -97,7 +97,7 @@ curl -s "http://localhost:4577/emailMessages/<operationId>"
 curl -s -X DELETE "http://localhost:4577/emailMessages"
 ```
 
-This makes it easy to assert in tests that your code sent the right subject, recipients, and body —
+This makes it easy to assert in tests that your code sent the right subject, recipients, and body,
 without an SMTP server or a real ACS resource.
 
 ---

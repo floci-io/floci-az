@@ -4,23 +4,23 @@ Compatible with `azure-appconfiguration` SDKs (Java, Python, JavaScript, .NET).
 
 ## Features
 
-- **Key-values** — set, get, delete, list with key/label filters
-- **Labels** — independent values per (key, label) pair; list distinct labels
-- **Feature flags** — first-class support via `.appconfig.featureflag/` prefix and `application/vnd.microsoft.appconfig.ff+json` content-type
-- **Revisions** — full revision history on every write; queryable via `GET /revisions`
-- **Locks** — lock/unlock individual key-values to prevent modification
-- **Snapshots** — point-in-time frozen copies of filtered key-value sets; async provisioning + archive/recover lifecycle
-- **ETags** — conditional reads (`If-None-Match`) and conditional writes/deletes (`If-Match`)
-- **Composition types** — `key` (deduplicate by key) and `key_label` (keep all key+label pairs)
-- **Pagination** — `@nextLink` / `Link` header with opaque `after` continuation tokens (100 items per page)
-- **`$select` projection** — return only requested fields (`key`, `value`, `content_type`, `tags`, …)
-- **Tags filtering** — `tags=name=value` (repeatable, AND semantics) on key-value and revision lists
-- **Time-travel** — `Accept-Datetime` returns the historical value/list as of a point in time
-- **Sync-Token** — consistency token returned on every response
+- **Key-values**: set, get, delete, list with key/label filters
+- **Labels**: independent values per (key, label) pair; list distinct labels
+- **Feature flags**: first-class support via `.appconfig.featureflag/` prefix and `application/vnd.microsoft.appconfig.ff+json` content-type
+- **Revisions**: full revision history on every write; queryable via `GET /revisions`
+- **Locks**: lock/unlock individual key-values to prevent modification
+- **Snapshots**: point-in-time frozen copies of filtered key-value sets; async provisioning + archive/recover lifecycle
+- **ETags**: conditional reads (`If-None-Match`) and conditional writes/deletes (`If-Match`)
+- **Composition types**: `key` (deduplicate by key) and `key_label` (keep all key+label pairs)
+- **Pagination**: `@nextLink` / `Link` header with opaque `after` continuation tokens (100 items per page)
+- **`$select` projection**: return only requested fields (`key`, `value`, `content_type`, `tags`, …)
+- **Tags filtering**: `tags=name=value` (repeatable, AND semantics) on key-value and revision lists
+- **Time-travel**: `Accept-Datetime` returns the historical value/list as of a point in time
+- **Sync-Token**: consistency token returned on every response
 
 ## Filtering, pagination & consistency
 
-These behaviors are exercised transparently by the SDKs — the notes below describe the wire behavior.
+These behaviors are exercised transparently by the SDKs: the notes below describe the wire behavior.
 
 - **Pagination.** Lists return at most 100 items. When more exist the response body carries a relative
   `@nextLink` (`/kv?api-version=2024-09-01&...&after=<token>`) and a matching `Link: <...>; rel="next"`
@@ -248,7 +248,7 @@ Labels let you maintain environment-specific variants of the same key:
 
 ## Snapshots
 
-Snapshots capture a frozen, point-in-time copy of filtered key-values. They are immutable after creation — changes to live key-values do not affect an existing snapshot.
+Snapshots capture a frozen, point-in-time copy of filtered key-values. They are immutable after creation: changes to live key-values do not affect an existing snapshot.
 
 ### Create a snapshot
 
@@ -390,7 +390,7 @@ All endpoints sit under `/{accountName}-appconfig/` with an `api-version` query 
 Every key-value response includes an `ETag` header. Use `If-Match` for optimistic concurrency:
 
 ```bash
-# Conditional update — only succeeds if ETag matches
+# Conditional update: only succeeds if ETag matches
 curl -X PUT "http://localhost:4577/devstoreaccount1-appconfig/kv/my-key" \
   -H "If-Match: \"<etag>\"" \
   -H "Content-Type: application/json" \

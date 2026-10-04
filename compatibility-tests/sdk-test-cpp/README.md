@@ -41,7 +41,7 @@ make compat-docker
 
 vcpkg compiles OpenSSL, libxml2, libcurl and the SDK from source, so the **cold build takes roughly 6 minutes**. Dependencies are installed before the test sources are copied, so editing a test rebuilds in seconds.
 
-The build stage is ~2.7 GB, but the SDK is static-linked and the runtime stage copies only the test binary — the final image is ~130 MB.
+The build stage is ~2.7 GB, but the SDK is static-linked and the runtime stage copies only the test binary: the final image is ~130 MB.
 
 ## Docker
 

@@ -4,23 +4,23 @@ Compatible with the `azure-data-tables` SDKs (Java, Python, Node.js) and Azurite
 strings. Speaks the Azure Table REST protocol with OData/JSON payloads and Shared Key
 authentication.
 
-> **HTTP-only — no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
+> **HTTP-only: no Docker.** Data is held by the configured [storage backend](../configuration/storage.md)
 > (`memory` by default; `persistent`, `hybrid`, or `wal` for durability).
 
 ---
 
 ## Features
 
-- **Tables** — Create, Delete, List; duplicate create returns `409 TableAlreadyExists`
-- **Entities** — Insert, Update (replace/merge), Upsert, Delete, Get by
+- **Tables**: Create, Delete, List; duplicate create returns `409 TableAlreadyExists`
+- **Entities**: Insert, Update (replace/merge), Upsert, Delete, Get by
   `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape
-- **Query** — `$filter` OData expressions: equality on `PartitionKey`/`RowKey`, numeric
+- **Query**: `$filter` OData expressions: equality on `PartitionKey`/`RowKey`, numeric
   comparisons, and combinations; `$select` projects a subset of properties
-- **Pagination** — large result sets are paged with continuation tokens
+- **Pagination**: large result sets are paged with continuation tokens
   (`x-ms-continuation-Next*` headers)
-- **Optimistic concurrency** — `ETag` / `If-Match` on update and delete; a stale ETag is rejected
-- **Batch transactions** — `$batch` multipart change sets are applied atomically
-- **Service properties** — `restype=service&comp=properties` returns a static
+- **Optimistic concurrency**: `ETag` / `If-Match` on update and delete; a stale ETag is rejected
+- **Batch transactions**: `$batch` multipart change sets are applied atomically
+- **Service properties**: `restype=service&comp=properties` returns a static
   `<StorageServiceProperties>` document (logging and metrics disabled); Set is accepted as a no-op
 
 ## Endpoint
@@ -73,7 +73,7 @@ floci-az:
 ## Intentional deviations
 
 - **Shared Key signatures are accepted but not cryptographically verified.**
-- **The `$filter` grammar is a practical subset** — equality, numeric comparison, and basic
+- **The `$filter` grammar is a practical subset**: equality, numeric comparison, and basic
   boolean composition are supported; full OData functions (`substringof`, `startswith`, datetime
   arithmetic) are not.
-- **No SAS enforcement** — SAS query parameters are parsed but not validated.
+- **No SAS enforcement**: SAS query parameters are parsed but not validated.

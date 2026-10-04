@@ -8,7 +8,7 @@ and override it per service if needed.
 | **`memory`** | Entirely in-RAM. Data is lost when the container stops. | Speed, ephemeral testing, CI pipelines. |
 | **`persistent`** | Loaded at startup, flushed to disk on graceful shutdown. | Simple local dev with state preservation. |
 | **`hybrid`** | In-memory with periodic async flush every 5 s. | Best balance of speed and safety. |
-| **`wal`** | Write-Ahead Log — every mutation is written to disk before responding. | Maximum durability. |
+| **`wal`** | Write-Ahead Log: every mutation is written to disk before responding. | Maximum durability. |
 
 ## Global mode
 
@@ -43,7 +43,7 @@ environment:
 ```
 
 The default path inside the container is `/app/data`, so the volume mount above is
-enough — you only need `FLOCI_AZ_STORAGE_PERSISTENT_PATH` when using a non-default path.
+enough: you only need `FLOCI_AZ_STORAGE_PERSISTENT_PATH` when using a non-default path.
 
 ## Tuning WAL and Hybrid
 

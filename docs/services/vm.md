@@ -15,13 +15,13 @@ Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azur
 
 ## Features
 
-- **Lifecycle** — CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
-- **Power actions** — `start`, `powerOff`, `deallocate`, `restart`, `redeploy`, `reapply`
-- **instanceView** — reports `ProvisioningState/*` and `PowerState/*` statuses
-- **Network integration** — VM ARM resources can reference `Microsoft.Network` network
+- **Lifecycle**: CreateOrUpdate, Get, Delete, List (by subscription and by resource group), UpdateTags
+- **Power actions**: `start`, `powerOff`, `deallocate`, `restart`, `redeploy`, `reapply`
+- **instanceView**: reports `ProvisioningState/*` and `PowerState/*` statuses
+- **Network integration**: VM ARM resources can reference `Microsoft.Network` network
   interfaces. The Network emulator supplies VNet, subnet, NIC, public IP, and NSG ARM resources
   so `azurerm_linux_virtual_machine` and its dependencies apply end-to-end.
-- **Long-running operations** — power actions return `202` with an `Azure-AsyncOperation` header
+- **Long-running operations**: power actions return `202` with an `Azure-AsyncOperation` header
   pointing at an operation-status endpoint, so SDK pollers complete cleanly.
 
 ---
@@ -51,7 +51,7 @@ Use `?$expand=instanceView` on a Get to embed the instance view under `propertie
 
 ## Quickstart
 
-### 1 — Create a VM
+### 1: Create a VM
 
 ```bash
 curl -s -X PUT \
@@ -79,7 +79,7 @@ curl -s -X PUT \
 The VM is returned with `properties.provisioningState = "Succeeded"` and starts in the
 `PowerState/running` state.
 
-### 2 — Power actions
+### 2: Power actions
 
 ```bash
 BASE="http://localhost:4577/subscriptions/my-sub/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachines/my-vm"
@@ -88,7 +88,7 @@ curl -s -X POST "$BASE/start?api-version=2024-11-01"        # -> PowerState/runn
 curl -s -X POST "$BASE/deallocate?api-version=2024-11-01"   # -> PowerState/deallocated
 ```
 
-### 3 — Read power state
+### 3: Read power state
 
 ```bash
 curl -s "$BASE/instanceView?api-version=2024-11-01"
@@ -119,9 +119,9 @@ floci-az:
 
 ## Notes & limitations
 
-- Mocked mode does not run a real OS — there is no SSH, no guest agent, and `runCommand` is not executed.
+- Mocked mode does not run a real OS: there is no SSH, no guest agent, and `runCommand` is not executed.
 - Container-backed mode (`mocked=false`) runs a stock base image kept alive with `tail -f /dev/null`;
-  it is a real Linux container, not a true VM/hypervisor — there is no separate kernel, no cloud-init,
+  it is a real Linux container, not a true VM/hypervisor: there is no separate kernel, no cloud-init,
   and `osProfile.customData` / SSH key injection are not applied.
 - Network dependency shells echo submitted properties with `provisioningState = "Succeeded"`;
   NIC private IPs and public IPs are synthesized, not allocated from a real address pool.

@@ -1,6 +1,6 @@
 # Terraform / OpenTofu (azurerm provider)
 
-You can run the `hashicorp/azurerm` provider against floci-az for local-first IaC —
+You can run the `hashicorp/azurerm` provider against floci-az for local-first IaC:
 `plan` / `apply` / `destroy` against the emulator instead of real Azure.
 
 > **TLS is required.** The azurerm provider discovers the cloud over **HTTPS**
@@ -10,7 +10,7 @@ You can run the `hashicorp/azurerm` provider against floci-az for local-first Ia
 
 ---
 
-## 1 — Start floci-az with TLS enabled
+## 1: Start floci-az with TLS enabled
 
 ```yaml
 # docker-compose.yml
@@ -29,7 +29,7 @@ services:
 floci-az serves HTTP and HTTPS on the **same** port (4577) via a protocol-sniffing proxy.
 A self-signed certificate is generated at startup and served at `GET /_floci/tls-cert`.
 
-## 2 — Trust the certificate
+## 2: Trust the certificate
 
 The provider validates the TLS chain, so the self-signed cert must be trusted by the machine
 running `tofu`/`terraform`:
@@ -42,7 +42,7 @@ sudo cp floci-az.crt /usr/local/share/ca-certificates/ && sudo update-ca-certifi
 
 (Adjust for your OS trust store; on a CI runner you typically install it the same way.)
 
-## 3 — Configure the provider
+## 3: Configure the provider
 
 ```hcl
 terraform {

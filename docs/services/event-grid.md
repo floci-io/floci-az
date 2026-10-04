@@ -2,27 +2,27 @@
 
 Compatible with the `azure-messaging-eventgrid` publisher SDK, the
 `azure-resourcemanager-eventgrid` / ARM management plane, and any HTTP client. Event Grid is the
-Azure counterpart of an event router (publish/subscribe with webhook fan-out) — a **Custom Topic**
+Azure counterpart of an event router (publish/subscribe with webhook fan-out): a **Custom Topic**
 receives events and pushes them to subscriber **webhook** endpoints.
 
-> **HTTP-only — no Docker.** Topics, subscriptions, publishing, and delivery are all in-process.
+> **HTTP-only: no Docker.** Topics, subscriptions, publishing, and delivery are all in-process.
 > There is no sidecar.
 
 ---
 
 ## Features
 
-- **Custom Topics** — CreateOrUpdate, Get, Delete, List (by resource group and by subscription),
+- **Custom Topics**: CreateOrUpdate, Get, Delete, List (by resource group and by subscription),
   with `properties.endpoint` and `inputSchema` (`EventGridSchema` default, or `CloudEventSchemaV1_0`)
-- **Access keys** — `listKeys` returns `{key1, key2}`; `regenerateKey` rotates one of them
-- **Event subscriptions** — classic scoped `eventSubscriptions` with a **WebHook** destination,
+- **Access keys**: `listKeys` returns `{key1, key2}`; `regenerateKey` rotates one of them
+- **Event subscriptions**: classic scoped `eventSubscriptions` with a **WebHook** destination,
   `filter` (`subjectBeginsWith`, `subjectEndsWith`, `includedEventTypes`, `isSubjectCaseSensitive`),
   and `retryPolicy`
-- **Publish** — `POST /api/events` accepts a JSON array of events in the **Event Grid** or
+- **Publish**: `POST /api/events` accepts a JSON array of events in the **Event Grid** or
   **CloudEvents 1.0** schema
-- **Delivery** — events are fanned out asynchronously to matching subscribers, retried per the
+- **Delivery**: events are fanned out asynchronously to matching subscribers, retried per the
   subscription's `retryPolicy` with exponential backoff
-- **Validation handshake** — creating a webhook subscription triggers a
+- **Validation handshake**: creating a webhook subscription triggers a
   `Microsoft.EventGrid.SubscriptionValidationEvent` (or, for CloudEvents, the `OPTIONS`
   abuse-protection probe)
 
@@ -53,7 +53,7 @@ POST   /{name}-eventgrid/api/events            # data-plane publish (topic endpo
 
 ## Quickstart
 
-### 1 — Create a topic
+### 1: Create a topic
 
 ```bash
 curl -s -X PUT \
@@ -78,7 +78,7 @@ The response carries the data-plane endpoint:
 
 Fetch the keys with `POST .../topics/my-topic/listKeys` → `{"key1":"…","key2":"…"}`.
 
-### 2 — Subscribe a webhook
+### 2: Subscribe a webhook
 
 ```bash
 curl -s -X PUT \
@@ -95,7 +95,7 @@ curl -s -X PUT \
 The emulator immediately runs the validation handshake against the webhook (a
 `SubscriptionValidationEvent`; the subscriber must echo `{"validationResponse": "<code>"}`).
 
-### 3 — Publish events
+### 3: Publish events
 
 ```python
 from azure.core.credentials import AzureKeyCredential

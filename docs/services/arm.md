@@ -1,12 +1,12 @@
 # Azure Resource Manager (ARM)
 
-The central management-plane handler. It serves the generic ARM surface —
-subscriptions, resource groups, and the resource/provider listings — that the
+The central management-plane handler. It serves the generic ARM surface
+(subscriptions, resource groups, and the resource/provider listings) that the
 `hashicorp/azurerm` Terraform provider, OpenTofu, and the Azure CLI expect, and it acts as the
 fallthrough for management-plane paths not claimed by a more specific handler (AKS, SQL, Redis,
 Managed Identity, and the other `Microsoft.*` providers).
 
-> **HTTP-only — no Docker.** All ARM resource state is in-memory and ephemeral; it does not persist
+> **HTTP-only: no Docker.** All ARM resource state is in-memory and ephemeral; it does not persist
 > across restarts regardless of `storage.mode`, matching how the other control-plane resources
 > behave.
 
@@ -25,17 +25,17 @@ Managed Identity, and the other `Microsoft.*` providers).
 - **Locations**: `GET /subscriptions/{sub}/locations`, the public-cloud region catalog read by
   `az account list-locations`, the CLI's display-name location translation (`-l "East US"`), and
   Terraform's `data.azurerm_location`
-- **Resource groups** — CreateOrUpdate, Get, Delete, List
+- **Resource groups**: CreateOrUpdate, Get, Delete, List
   (`/subscriptions/{sub}/resourceGroups/{rg}`), scoped per subscription; accepts both `resourceGroups` and the lowercase
   `resourcegroups` spelling
-- **Storage accounts** — an ARM shell that bridges `Microsoft.Storage/storageAccounts` to the live
+- **Storage accounts**: an ARM shell that bridges `Microsoft.Storage/storageAccounts` to the live
   [Blob](blob.md) and [Queue](queue.md) backends, returning the well-known development account key
-- **Key vaults** — an ARM shell for `Microsoft.KeyVault/vaults` whose `vaultUri` points at the
+- **Key vaults**: an ARM shell for `Microsoft.KeyVault/vaults` whose `vaultUri` points at the
   live [Key Vault](key-vault.md) handler
-- **Resource & provider listing** — `GET /subscriptions/{sub}/resources`,
+- **Resource & provider listing**: `GET /subscriptions/{sub}/resources`,
   `GET /subscriptions/{sub}/providers[/{namespace}]`, and
   `POST .../{namespace}/checkNameAvailability`
-- **Provider fallthrough** — management-plane paths for providers without a dedicated handler are
+- **Provider fallthrough**: management-plane paths for providers without a dedicated handler are
   answered here so Terraform reads and dependency lookups resolve
 
 ## Endpoints
@@ -73,7 +73,7 @@ Point Terraform at the emulator with a minimal `azurerm` provider block (see the
 provider "azurerm" {
   features {}
   skip_provider_registration = true
-  # metadata_host / endpoints redirected at localhost:4577 — see the Terraform guide
+  # metadata_host / endpoints redirected at localhost:4577: see the Terraform guide
 }
 
 resource "azurerm_resource_group" "example" {
@@ -159,9 +159,9 @@ servers is not publicly documented either; `409` is the likeliest.
   `latitude`, `longitude`, `physicalLocation` and `pairedRegion` are omitted. There are no edge zones,
   so `includeExtendedLocations=true` returns the same list. Location values on resources are echoed,
   not validated.
-- **ARM state is in-memory** — resource groups and the ARM shells do not persist across restarts.
-- **Resource-group deletion does not cascade** — deleting a group leaves resources created under it
+- **ARM state is in-memory**: resource groups and the ARM shells do not persist across restarts.
+- **Resource-group deletion does not cascade**: deleting a group leaves resources created under it
   behind (they still appear in `GET .../resources`, so Terraform's
   `prevent_deletion_if_contains_resources` works).
-- **Shared Key / ARM auth is accepted but not verified** — any bearer token or Shared Key is
+- **Shared Key / ARM auth is accepted but not verified**: any bearer token or Shared Key is
   honored, consistent with the rest of the emulator's permissive dev auth.

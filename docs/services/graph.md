@@ -2,7 +2,7 @@
 
 A narrow slice of Microsoft Graph at `/v1.0/...`, added alongside
 [Entra ID phase 2](entra.md) ([#120](https://github.com/floci-io/floci-az/issues/120)): service
-principal discovery (used by the azurerm provider) and group-membership management — not a
+principal discovery (used by the azurerm provider) and group-membership management, not a
 general-purpose Graph emulator. Directory data (users, groups, membership) is shared with
 [Microsoft Entra ID](entra.md): a token's `oid` claim and a Graph lookup resolve to the same
 directory identity, and the [dev seed](entra.md#default-tenant--dev-credentials) (dev user + dev
@@ -18,7 +18,7 @@ group) is available here too.
 | `DELETE /v1.0/groups/{id}/members/{id}/$ref` | Remove a member from a group |
 
 `{id}` in `users/{id}` accepts either the user's object id or its userPrincipalName, as real Graph
-does. Only **direct** membership is modeled — there is no nested-group transitivity.
+does. Only **direct** membership is modeled: there is no nested-group transitivity.
 
 ### `getMemberGroups`
 
@@ -42,7 +42,7 @@ dev group is security-enabled). A user id/UPN that does not resolve to a directo
 ### `members/$ref`
 
 The request body's `@odata.id` points at *real* Graph
-(`https://graph.microsoft.com/v1.0/directoryObjects/{id}`) — the emulator parses the trailing id
+(`https://graph.microsoft.com/v1.0/directoryObjects/{id}`): the emulator parses the trailing id
 rather than validating the host, since that URL shape is what SDKs/tools send regardless of which
 Graph endpoint they're pointed at:
 

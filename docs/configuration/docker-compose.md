@@ -1,6 +1,6 @@
 # Docker Compose Configuration
 
-Most users configure floci-az entirely through environment variables — no config files needed.
+Most users configure floci-az entirely through environment variables: no config files needed.
 Every `floci-az.*` setting maps to a `FLOCI_AZ_*` env var (replace `.` with `_`, uppercase).
 
 ---
@@ -9,7 +9,7 @@ Every `floci-az.*` setting maps to a `FLOCI_AZ_*` env var (replace `.` with `_`,
 
 ### Storage only (no Functions)
 
-The simplest setup — skips the Docker socket mount entirely:
+The simplest setup: skips the Docker socket mount entirely:
 
 ```yaml
 services:
@@ -71,10 +71,10 @@ services:
       # FLOCI_AZ_SERVICES_SQL_IMAGE: "mcr.microsoft.com/mssql/server:2025-latest"
 ```
 
-> SQL Server containers bind a random host port directly via Docker — do **not** add those ports
+> SQL Server containers bind a random host port directly via Docker: do **not** add those ports
 > to the `floci-az` service's `ports:` block. Use the `/connect` endpoint to discover the port.
 
-### CI / Ephemeral — maximum speed
+### CI / Ephemeral: maximum speed
 
 Pure in-memory, no socket required, fastest startup:
 
@@ -128,7 +128,7 @@ services:
 
 Docker-backed engines (Cosmos MongoDB/PostgreSQL/Cassandra/Gremlin) and Event Hubs sidecars
 (Artemis, Redpanda) are launched as **sibling containers** by floci-az via the Docker socket.
-They bind their ports directly on the host — **do not** publish those ports on the `floci-az` service:
+They bind their ports directly on the host; **do not** publish those ports on the `floci-az` service:
 
 ```yaml
 services:
@@ -136,7 +136,7 @@ services:
     image: floci/floci-az:latest
     ports:
       - "4577:4577"
-      - "4578:4578"   # Cosmos DB — Java SDK (HTTPS)
+      - "4578:4578"   # Cosmos DB: Java SDK (HTTPS)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -174,7 +174,7 @@ services:
         BlobEndpoint=http://floci-az:4577/devstoreaccount1;
         QueueEndpoint=http://floci-az:4577/devstoreaccount1-queue;
         TableEndpoint=http://floci-az:4577/devstoreaccount1-table;
-      # App Configuration — https:// required by the SDK; use ForceHttp transport in your client
+      # App Configuration: https:// required by the SDK; use ForceHttp transport in your client
       AZURE_APPCONFIG_ENDPOINT: https://floci-az:4577/devstoreaccount1-appconfig
     depends_on:
       - floci-az
@@ -198,7 +198,7 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_PORT` | `4577` | Port the emulator listens on |
 | `FLOCI_AZ_BASE_URL` | `http://localhost:4577` | Base URL embedded in API responses |
 | `FLOCI_AZ_HOSTNAME` | _(unset)_ | Override the hostname in SAS and invoke URLs (useful behind a reverse proxy) |
-| `FLOCI_AZ_AUTH_MODE` | `dev` | `dev` — accept any credentials; `strict` — validate HMAC-SHA256 signatures |
+| `FLOCI_AZ_AUTH_MODE` | `dev` | `dev`: accept any credentials; `strict`: validate HMAC-SHA256 signatures |
 
 ### Storage
 
@@ -247,7 +247,7 @@ All variables are optional; the default applies when unset.
 
 | Variable | Default | Description |
 |---|---|---|
-| `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | `true` — fresh container per invocation; `false` — reuse warm containers |
+| `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | `true`: fresh container per invocation; `false`: reuse warm containers |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CONTAINER_IDLE_TIMEOUT_SECONDS` | `300` | Evict warm containers idle longer than this; `0` disables eviction |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Where extracted function code is stored on the host |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_DOCKER_HOST_OVERRIDE` | _(unset)_ | Override the hostname function containers use to reach floci-az |
@@ -256,7 +256,7 @@ All variables are optional; the default applies when unset.
 
 | Variable | Default | Description |
 |---|---|---|
-| `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket — unix socket or `tcp://host:port` |
+| `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket, unix socket or `tcp://host:port` |
 | `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed, by floci-az and in the host/port reported to clients. `auto`: container name/IP and internal port when floci-az runs in a container, `localhost` and the published port otherwise. `published`: always the Docker daemon's host (from `docker-host`) and the published port. Use it for remote daemons such as docker-in-docker or kubedock, whose containers aren't directly reachable |
 | `FLOCI_AZ_DOCKER_LOG_MAX_SIZE` | `10m` | Max log file size per function container |
 | `FLOCI_AZ_DOCKER_LOG_MAX_FILE` | `3` | Max rotated log files per function container |
@@ -294,7 +294,7 @@ Labels are written when a container is created, so they apply to containers floc
 ## Docker Socket Access
 
 The Docker socket mount (`/var/run/docker.sock`) is required for Azure Functions. The container
-entrypoint automatically detects the socket's group ID at runtime and adjusts permissions — this
+entrypoint automatically detects the socket's group ID at runtime and adjusts permissions: this
 works on both Docker Desktop (macOS/Windows) and native Linux Docker with no manual configuration.
 
 If you don't need Functions, omit the socket mount and set `FLOCI_AZ_SERVICES_FUNCTIONS_ENABLED=false`.

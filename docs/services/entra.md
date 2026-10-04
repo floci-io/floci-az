@@ -8,21 +8,21 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 > credentials** and **resource-owner password / ROPC**). **Phase 2**
 > ([#120](https://github.com/floci-io/floci-az/issues/120)) adds the **authorization code + PKCE**
 > grant for interactive (browser SPA) sign-in, plus a narrow Microsoft Graph slice for group
-> membership — see [`services/graph.md`](graph.md). App-registration management and full Graph
+> membership: see [`services/graph.md`](graph.md). App-registration management and full Graph
 > CRUD remain open ([#23](https://github.com/floci-io/floci-az/issues/23)).
 
 ## Features
 
-- **Signed tokens** — RS256 JWTs with a stable signing key persisted across restarts; app-only
+- **Signed tokens**: RS256 JWTs with a stable signing key persisted across restarts; app-only
   tokens carry `idtyp=app`, and every token carries a unique `uti`, matching real Entra
-- **Discovery** — `/.well-known/openid-configuration` derived from the request base URL
-- **JWKS** — `/discovery/v2.0/keys` exposing the public signing key (`kty`, `use`, `alg`, `kid`,
+- **Discovery**: `/.well-known/openid-configuration` derived from the request base URL
+- **JWKS**: `/discovery/v2.0/keys` exposing the public signing key (`kty`, `use`, `alg`, `kid`,
   `n`, `e`) plus the self-signed cert chain (`x5c`, `x5t`)
-- **Grants** — `client_credentials`, `password` (ROPC), and `authorization_code` (auth code + PKCE),
+- **Grants**: `client_credentials`, `password` (ROPC), and `authorization_code` (auth code + PKCE),
   v1.0 and v2.0 token shapes
-- **Azure-shaped errors** — token errors return `error`, `error_description` (with the `AADSTS`
+- **Azure-shaped errors**: token errors return `error`, `error_description` (with the `AADSTS`
   code), `error_codes`, `trace_id`, `correlation_id`, `timestamp`, and `error_uri`
-- **Dev seed** — a default tenant and a well-known dev app registration, so
+- **Dev seed**: a default tenant and a well-known dev app registration, so
   `ClientSecretCredential` works with zero setup
 
 ## Endpoints
@@ -53,7 +53,7 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 
 There is no real interactive consent screen: `GET /{tenant}/oauth2/v2.0/authorize` auto-approves
 against the seeded dev user (or a different seeded user, selected via `login_hint`) and redirects
-straight back to `redirect_uri` with a `code` — no login form, nothing to click through. This keeps
+straight back to `redirect_uri` with a `code`: no login form, nothing to click through. This keeps
 the flow fully scriptable while still exercising the real auth-code+PKCE wire protocol that MSAL
 (`@azure/msal-browser`, `@azure/msal-react`, `@azure/msal-node`) speaks.
 
@@ -72,7 +72,7 @@ GET /{tenant}/oauth2/v2.0/authorize
 ```
 
 `302`s to `{redirect_uri}?code=...&state=...` (or `#code=...&state=...` for `response_mode=fragment`).
-The issued code is bound to the tenant, `client_id`, and `redirect_uri` from this request — redemption
+The issued code is bound to the tenant, `client_id`, and `redirect_uri` from this request: redemption
 must repeat the same `client_id`/`redirect_uri` and happen against the same tenant, or it fails with
 `invalid_grant`. Redeem the code with `grant_type=authorization_code`:
 
@@ -86,19 +86,19 @@ curl -s http://localhost:4577/00000000-0000-0000-0000-000000000002/oauth2/v2.0/t
 ```
 
 The response carries both `access_token` and `id_token`. The ID token's `aud` is always the client
-id (per OIDC, regardless of v1.0/v2.0), and it echoes the `nonce` from the `/authorize` request —
+id (per OIDC, regardless of v1.0/v2.0), and it echoes the `nonce` from the `/authorize` request:
 MSAL rejects an ID token whose nonce doesn't match. PKCE verification (`S256` or `plain`) is
-skipped when `/authorize` was called without a `code_challenge` — `client_id` is still required and
+skipped when `/authorize` was called without a `code_challenge`: `client_id` is still required and
 bound to the code, so an omitted challenge no longer hands a usable code to a caller who doesn't
 know the client. There is no app-registration redirect-URI allow-list yet ([#23](https://github.com/floci-io/floci-az/issues/23)),
 so any `client_id` is accepted at `/authorize`, matching this phase's permissive client validation
 elsewhere (`client_credentials` is likewise accepted without strict validation).
 
-**Not yet supported:** `grant_type=refresh_token` — MSAL's silent token renewal via
+**Not yet supported:** `grant_type=refresh_token`: MSAL's silent token renewal via
 `offline_access` will not work against this emulator yet.
 
 **Group membership** for the signed-in user is *not* embedded in the token (no `groups` claim, matching
-real Entra's default behavior) — call the Graph `getMemberGroups` endpoint instead, see
+real Entra's default behavior): call the Graph `getMemberGroups` endpoint instead, see
 [`services/graph.md`](graph.md).
 
 ## Acquiring a token

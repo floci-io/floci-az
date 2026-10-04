@@ -1,7 +1,7 @@
 # Ports Reference
 
 Floci-AZ uses a **single HTTP port** for all management APIs, plus one HTTPS port for the Cosmos Java SDK.
-Sidecar services (Event Hubs, Cosmos engines) bind their own ports directly on the host — they are not
+Sidecar services (Event Hubs, Cosmos engines) bind their own ports directly on the host: they are not
 proxied through floci-az.
 
 ## floci-az ports
@@ -9,7 +9,7 @@ proxied through floci-az.
 | Port | Protocol | Purpose |
 |---|---|---|
 | `4577` | HTTP | All REST services (Blob, Queue, Table, Functions, App Config, Cosmos, Key Vault) |
-| `4578` | HTTPS | Cosmos DB — Java SDK only (enforces TLS in gateway mode) |
+| `4578` | HTTPS | Cosmos DB: Java SDK only (enforces TLS in gateway mode) |
 
 Both ports are exposed by floci-az itself. Only publish these two in your `docker-compose.yml`.
 
@@ -35,7 +35,7 @@ All services share port 4577 and are routed by URL path prefix:
 ## Sidecar container ports (dynamic)
 
 Services that spin up Docker containers bind an **OS-assigned random port** directly to the host.
-These ports are resolved at runtime via the Docker daemon — you never configure them manually.
+These ports are resolved at runtime via the Docker daemon: you never configure them manually.
 
 | Service | Sidecar container | Protocol | How to discover port |
 |---|---|---|---|
@@ -85,7 +85,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # required for SQL, Functions, Cosmos engines
 
     # Sidecar ports (SQL Server, MongoDB, Postgres, etc.) bind directly to the host
-    # via the Docker daemon — do NOT list them here.
+    # via the Docker daemon: do NOT list them here.
 ```
 
 Always update `FLOCI_AZ_BASE_URL` together with `FLOCI_AZ_PORT` so URLs embedded in API responses

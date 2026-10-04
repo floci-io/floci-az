@@ -7,30 +7,30 @@ Self-signed certificate issuance also supports the Key Vault Certificates SDK.
 
 ### Secrets
 
-- **Secrets CRUD** — set, get, delete, list secrets
-- **Versioning** — each `set_secret` creates a new immutable version; latest pointer tracks the most recent
-- **Soft-delete lifecycle** — delete moves a secret to the deleted namespace; recover or purge it
-- **Properties update** — update `content_type`, `tags`, `enabled`, `nbf`, `exp` without changing the value
-- **Attributes** — `enabled`, `not_before`, `expires_on`; disabled secrets return 403 on get
-- **Optional timestamps** — unset `nbf` and `exp` attributes are omitted from responses; supplied values remain numeric Unix timestamps
-- **List operations** — list active secrets, deleted secrets, or versions of a specific secret
-- **Optional trailing slash** — fixed routes (`/secrets`, `/deletedsecrets`, `/certificates/contacts`) accept a trailing slash, including .NET `AddAzureKeyVault` configuration loading
-- **Backup** — backup a secret (base64-encoded blob)
-- **32-char hex version IDs** — matches Azure's version ID format
+- **Secrets CRUD**: set, get, delete, list secrets
+- **Versioning**: each `set_secret` creates a new immutable version; latest pointer tracks the most recent
+- **Soft-delete lifecycle**: delete moves a secret to the deleted namespace; recover or purge it
+- **Properties update**: update `content_type`, `tags`, `enabled`, `nbf`, `exp` without changing the value
+- **Attributes**: `enabled`, `not_before`, `expires_on`; disabled secrets return 403 on get
+- **Optional timestamps**: unset `nbf` and `exp` attributes are omitted from responses; supplied values remain numeric Unix timestamps
+- **List operations**: list active secrets, deleted secrets, or versions of a specific secret
+- **Optional trailing slash**: fixed routes (`/secrets`, `/deletedsecrets`, `/certificates/contacts`) accept a trailing slash, including .NET `AddAzureKeyVault` configuration loading
+- **Backup**: backup a secret (base64-encoded blob)
+- **32-char hex version IDs**: matches Azure's version ID format
 
 ### Keys & Cryptography
 
-- **Keys CRUD** — create/import RSA (`RSA`, `RSA-HSM`), EC (`EC`, `EC-HSM`, P-256/P-384/P-521), and
+- **Keys CRUD**: create/import RSA (`RSA`, `RSA-HSM`), EC (`EC`, `EC-HSM`, P-256/P-384/P-521), and
   oct (`oct`, `oct-HSM`) keys; get/list/list-versions; PATCH attributes
-- **Soft-delete lifecycle** — delete → `deletedkeys` namespace → recover or purge
+- **Soft-delete lifecycle**: delete → `deletedkeys` namespace → recover or purge
 - **Optional timestamps**: unset `nbf` and `exp` attributes are omitted from key responses; supplied values remain numeric Unix timestamps
 - **Optional trailing slash**: `/keys` and `/deletedkeys` accept a trailing slash, which the .NET `KeyClient` always sends when listing
-- **Backup/restore** — `POST /keys/{name}/backup` and `POST /keys/restore` (see deviations below)
-- **Rotation** — `POST /keys/{name}/rotate` and rotation-policy management (`/keys/{name}/rotationpolicy`)
-- **Crypto ops** — `encrypt`/`decrypt` (RSA-OAEP, RSA-OAEP-256, RSA1_5; AES-GCM A128/A192/A256),
+- **Backup/restore**: `POST /keys/{name}/backup` and `POST /keys/restore` (see deviations below)
+- **Rotation**: `POST /keys/{name}/rotate` and rotation-policy management (`/keys/{name}/rotationpolicy`)
+- **Crypto ops**: `encrypt`/`decrypt` (RSA-OAEP, RSA-OAEP-256, RSA1_5; AES-GCM A128/A192/A256),
   `sign`/`verify` (RS256/384/512, PS256/384/512, ES256/384/512), `wrapkey`/`unwrapkey`
-- **`/rng`** — random bytes for client-side key material (see deviations)
-- **Managed HSM** — the same data plane served under the `/{account}-managedhsm/` suffix
+- **`/rng`**: random bytes for client-side key material (see deviations)
+- **Managed HSM**: the same data plane served under the `/{account}-managedhsm/` suffix
 
 ### Certificates
 
@@ -346,7 +346,7 @@ All endpoints sit under `/{accountName}-keyvault/` with an `api-version` query p
 
 ## Intentional deviations
 
-These are deliberate differences from real Azure Key Vault. They are stable, documented behavior — not bugs:
+These are deliberate differences from real Azure Key Vault. They are stable, documented behavior, not bugs:
 
 - **Backup blobs are unencrypted plaintext.** Real Azure returns HSM-encrypted opaque blobs that can only be
   restored into the same vault. floci-az emits a readable JSON snapshot (JWK + metadata) so backups are

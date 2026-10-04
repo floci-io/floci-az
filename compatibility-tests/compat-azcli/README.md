@@ -16,7 +16,7 @@ Tests are [bats](https://github.com/bats-core/bats-core) scripts that call `az` 
 
 ## Requirements
 
-- Azure CLI (`az`) — provided by the `mcr.microsoft.com/azure-cli` base image
+- Azure CLI (`az`): provided by the `mcr.microsoft.com/azure-cli` base image
 - bash
 - jq
 - bats-core (cloned into the image at build time)

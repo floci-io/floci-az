@@ -20,7 +20,7 @@ assignees: ''
 
 ## Why is this needed?
 
-<!-- Describe your use case — what breaks without it? -->
+<!-- Describe your use case: what breaks without it? -->
 
 ## Are you willing to contribute a PR?
 

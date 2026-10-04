@@ -11,7 +11,7 @@ managed automatically by floci-az.
 
 Entity topology is created dynamically through the management API (or auto-created on first use by
 the SDK), and can additionally be **pre-provisioned declaratively** from a `Config.json` file in the
-official Service Bus emulator's format — see [Declarative topology](#declarative-topology-configjson).
+official Service Bus emulator's format: see [Declarative topology](#declarative-topology-configjson).
 
 > **Mocked mode (default).** With `mocked: true` the Artemis sidecar is not started: the management
 > API responds, but the AMQP data plane is unavailable. Set `mocked: false` (and expose the AMQP
@@ -43,12 +43,12 @@ Entity CRUD is served over HTTP at `/{account}-servicebus/`:
 ## Declarative topology (Config.json)
 
 At startup, floci-az applies a declarative topology file in the
-[official Service Bus emulator's `Config.json` format](https://learn.microsoft.com/azure/service-bus-messaging/test-locally-with-service-bus-emulator)
-— the same file .NET Aspire's Service Bus hosting integration writes from the AppHost model. The
+[official Service Bus emulator's `Config.json` format](https://learn.microsoft.com/azure/service-bus-messaging/test-locally-with-service-bus-emulator),
+the same file .NET Aspire's Service Bus hosting integration writes from the AppHost model. The
 file location is resolved in order:
 
 1. `floci-az.services.service-bus.topology-file` (env `FLOCI_AZ_SERVICES_SERVICE_BUS_TOPOLOGY_FILE`)
-2. `/ServiceBus_Emulator/ConfigFiles/Config.json` — the official emulator's mount path, so a volume
+2. `/ServiceBus_Emulator/ConfigFiles/Config.json`: the official emulator's mount path, so a volume
    prepared for the official emulator works unchanged
 
 ```yaml
@@ -61,14 +61,14 @@ services:
 ```
 
 Namespaces, queues, topics, subscriptions, and rules from the file are created through the same
-code paths as the management API, before any client connects — useful for apps whose consumers
+code paths as the management API, before any client connects: useful for apps whose consumers
 attach to pre-provisioned entities and never create them. Semantics:
 
 - The first namespace binds the configured AMQP ports (`amqp-port`/`amqp-tls-port`); the official
   emulator supports a single namespace, and additional namespaces get dynamic ports.
 - A discovered topology file takes precedence over `start-on-boot`; its first namespace owns the
   configured ports, and no separate `default` namespace is started.
-- A subscription with declared `Rules` gets exactly those rules — the implicit `$Default`
+- A subscription with declared `Rules` gets exactly those rules: the implicit `$Default`
   TrueFilter is removed, as in the official emulator. A subscription with no rules keeps `$Default`.
 - Rule replacement is atomic. If a reload of an existing subscription contains an invalid rule,
   its previous complete rule set remains active; a new subscription keeps only valid declarations.
@@ -84,27 +84,27 @@ Subscriptions filter which topic messages they receive through named **rules**, 
 semantics:
 
 - Every new subscription starts with the implicit **`$Default`** rule (a `TrueFilter` that accepts
-  everything). The usual SDK flow — add your real rule, then delete `$Default` — works as on Azure,
+  everything). The usual SDK flow (add your real rule, then delete `$Default`) works as on Azure,
   as does passing a `DefaultRuleDescription` in the subscription create body
   (`CreateSubscriptionAsync(subscriptionOptions, ruleOptions)`).
-- **`CorrelationFilter`** — exact-match (case-sensitive) AND-combination over `CorrelationId`,
+- **`CorrelationFilter`**: exact-match (case-sensitive) AND-combination over `CorrelationId`,
   `Label`/`Subject`, `SessionId`, and application properties.
-- **`SqlFilter`** — SQL92 expressions over application properties and `sys.CorrelationId`,
+- **`SqlFilter`**: SQL92 expressions over application properties and `sys.CorrelationId`,
   `sys.Label`, `sys.Subject`, `sys.SessionId` (including `LIKE`, `IN`, `BETWEEN`, `IS NULL`,
   `EXISTS(prop)`, arithmetic and boolean operators).
-- **`TrueFilter`** / **`FalseFilter`** — accept-all / accept-none.
+- **`TrueFilter`** / **`FalseFilter`**: accept-all / accept-none.
 - Multiple rules combine as a logical **OR** and deliver a **single** copy of a matching message.
   A subscription whose rules have all been deleted receives nothing.
 
 Filters compile to [Artemis queue selectors](https://activemq.apache.org/components/artemis/documentation/latest/filter-expressions.html),
-so evaluation happens inside the broker at routing time — messages that don't match a
+so evaluation happens inside the broker at routing time: messages that don't match a
 subscription's rules are never routed to it (no delivery-count inflation, no spurious
 dead-lettering).
 
 **Emulator deviations from Azure:**
 
 - Filters on `MessageId`, `To`, `ReplyTo`, `ReplyToSessionId`, or `ContentType` (and their `sys.*`
-  forms) are **rejected with HTTP 400** — these AMQP fields have no broker-side selector mapping.
+  forms) are **rejected with HTTP 400**: these AMQP fields have no broker-side selector mapping.
 - **Rule actions** (`SqlRuleAction`) are stored and echoed back by the management API but are
   **not applied** to delivered messages, and rules with actions do not produce extra message
   copies.
@@ -149,13 +149,13 @@ Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;Share
 ```
 
 `UseDevelopmentEmulator=true` tells the SDK to use plain AMQP (no TLS). The `SharedAccessKey` value is
-ignored — Artemis runs without authentication in dev mode.
+ignored: Artemis runs without authentication in dev mode.
 
 ## Deterministic endpoint for orchestrators
 
 The AMQP data plane always binds the configured host ports (`amqp-port`, default `5673`;
 `amqp-tls-port`, default `5674`), so an orchestrator that starts floci-az knows the Service Bus
-endpoint up front — there is no dynamic port to discover. Two more pieces complete the story:
+endpoint up front; there is no dynamic port to discover. Two more pieces complete the story:
 
 - **`start-on-boot: true`** starts the `default` namespace (and its Artemis sidecar) together with
   the emulator, instead of on the first entity-management call. Without it, nothing listens on the
