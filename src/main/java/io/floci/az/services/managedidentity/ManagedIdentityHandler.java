@@ -36,6 +36,9 @@ import java.util.UUID;
  *       (imds spec 2023-07-01), reached by azure-identity {@code ManagedIdentityCredential}
  *       when {@code AZURE_POD_IDENTITY_AUTHORITY_HOST} points at the emulator. Tokens are
  *       minted with the Entra signing key, so they verify against the emulator JWKS.</li>
+ *   <li>Data plane — App Service Managed Identity token endpoint {@code GET {appServicePath}}
+ *       (header {@code X-IDENTITY-HEADER}), reached by azidentity/azure_identity credential
+ *       chains in App Service mode via {@code IDENTITY_ENDPOINT}/{@code IDENTITY_HEADER}.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -105,6 +108,13 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
                 return imdsError(405, "method_not_allowed", "Method not allowed: " + method);
             }
             return handleImdsToken(req);
+        }
+
+        if (path.equalsIgnoreCase(config.services().managedIdentity().appServicePath())) {
+            if (!"GET".equals(method)) {
+                return imdsError(405, "method_not_allowed", "Method not allowed: " + method);
+            }
+            return handleAppServiceToken(req);
         }
 
         // Children of another provider scoped to an identity (role assignments, locks, ...)
@@ -361,37 +371,17 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         String clientId = param(req, "client_id");
         String objectId = param(req, "object_id");
         String msiResId = param(req, "msi_res_id");
-        int selectors = (clientId != null ? 1 : 0) + (objectId != null ? 1 : 0) + (msiResId != null ? 1 : 0);
-        if (selectors > 1) {
-            return imdsError(400, "invalid_request",
-                    "client_id, object_id and msi_res_id are mutually exclusive");
-        }
 
-        String principalId;
-        String appId;
-        if (clientId != null || objectId != null || msiResId != null) {
-            Optional<Map<String, Object>> selected;
-            if (clientId != null) {
-                selected = store.findByClientId(clientId);
-            } else if (objectId != null) {
-                selected = store.findByPrincipalId(objectId);
-            } else {
-                selected = store.findByResourceId(msiResId);
-            }
-            Map<String, Object> identity = selected.orElse(null);
-            if (identity == null) {
-                return imdsError(400, "invalid_request", "Identity not found");
-            }
-            principalId = identityProperty(identity, "principalId");
-            appId = identityProperty(identity, "clientId");
-        } else {
-            // System-assigned: same deterministic GUIDs as identities/default for the
-            // configured scope. The emulator is not attached to a real resource, so the
-            // "own" identity scope is a config knob rather than the caller's VM.
-            String scope = config.services().managedIdentity().systemAssignedScope();
-            principalId = systemPrincipalId(scope);
-            appId = systemClientId(scope);
+        PrincipalResolution resolution = resolvePrincipal(clientId, objectId, msiResId);
+        if (resolution instanceof PrincipalResolution.Failure failure) {
+            return failure == PrincipalResolution.Failure.MULTIPLE_SELECTORS
+                    ? imdsError(400, "invalid_request",
+                            "client_id, object_id and msi_res_id are mutually exclusive")
+                    : imdsError(400, "invalid_request", "Identity not found");
         }
+        PrincipalResolution.Found found = (PrincipalResolution.Found) resolution;
+        String principalId = found.principalId();
+        String appId = found.appId();
 
         String tenantId = config.services().entra().defaultTenantId();
         String issuer = config.services().entra().issuer()
@@ -422,7 +412,97 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         return Response.ok(body).type(MediaType.APPLICATION_JSON).build();
     }
 
+    // ── App Service Managed Identity token endpoint ─────────────────────────────
+
+    private Response handleAppServiceToken(AzureRequest req) {
+        String header = req.headers() == null ? null : req.headers().getHeaderString("X-IDENTITY-HEADER");
+        if (header == null || header.isBlank()
+                || !config.services().managedIdentity().appServiceHeaderSecret().equals(header)) {
+            return imdsError(401, "invalid_request", "Invalid or missing X-IDENTITY-HEADER");
+        }
+
+        String resource = param(req, "resource");
+        if (resource == null) {
+            return imdsError(400, "invalid_request", "Required query parameter 'resource' is missing");
+        }
+
+        String clientId = param(req, "client_id");
+        String objectId = param(req, "object_id");
+        // The ARM-resource-id selector has two spellings: Go/MSAL use mi_res_id, Rust uses msi_res_id.
+        String miResId = param(req, "mi_res_id");
+        String msiResId = param(req, "msi_res_id");
+        String resId = miResId != null ? miResId : msiResId;
+
+        PrincipalResolution resolution = resolvePrincipal(clientId, objectId, resId);
+        if (resolution instanceof PrincipalResolution.Failure failure) {
+            return failure == PrincipalResolution.Failure.MULTIPLE_SELECTORS
+                    ? imdsError(400, "invalid_request", "Multiple identity selectors specified")
+                    : imdsError(400, "invalid_request", "Identity not found");
+        }
+        PrincipalResolution.Found found = (PrincipalResolution.Found) resolution;
+
+        String tenantId = config.services().entra().defaultTenantId();
+        String issuer = config.services().entra().issuer()
+                .orElse(resolveBaseUrl(req) + "/" + tenantId + "/");
+        long lifetime = config.services().entra().tokenLifetimeSeconds();
+        long now = Instant.now().getEpochSecond();
+
+        String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
+                tenantId, issuer, resource, found.principalId(), found.principalId(), found.appId(), null,
+                "1.0", "app", lifetime));
+
+        // App Service MI contract: every value is a string; expires_on is quoted epoch seconds.
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("access_token", token);
+        body.put("client_id", found.appId());
+        body.put("expires_in", String.valueOf(lifetime));
+        body.put("expires_on", String.valueOf(now + lifetime));
+        body.put("resource", resource);
+        body.put("token_type", "Bearer");
+        return Response.ok(body).type(MediaType.APPLICATION_JSON).build();
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────────
+
+    private sealed interface PrincipalResolution {
+        record Found(String principalId, String appId) implements PrincipalResolution {}
+        enum Failure implements PrincipalResolution { MULTIPLE_SELECTORS, NOT_FOUND }
+    }
+
+    /**
+     * Resolves a token's principal/app ids from the selector set. A null/blank selector is "absent";
+     * at most one may be present. No selector resolves to the system-assigned identity seeded from
+     * {@code systemAssignedScope()}.
+     */
+    private PrincipalResolution resolvePrincipal(String clientId, String objectId, String resId) {
+        int selectors = (clientId != null ? 1 : 0) + (objectId != null ? 1 : 0) + (resId != null ? 1 : 0);
+        if (selectors > 1) {
+            return PrincipalResolution.Failure.MULTIPLE_SELECTORS;
+        }
+
+        if (clientId != null || objectId != null || resId != null) {
+            Optional<Map<String, Object>> selected;
+            if (clientId != null) {
+                selected = store.findByClientId(clientId);
+            } else if (objectId != null) {
+                selected = store.findByPrincipalId(objectId);
+            } else {
+                selected = store.findByResourceId(resId);
+            }
+            Map<String, Object> identity = selected.orElse(null);
+            if (identity == null) {
+                return PrincipalResolution.Failure.NOT_FOUND;
+            }
+            return new PrincipalResolution.Found(
+                    identityProperty(identity, "principalId"), identityProperty(identity, "clientId"));
+        }
+
+        // System-assigned: same deterministic GUIDs as identities/default for the configured scope.
+        // The emulator is not attached to a real resource, so the "own" identity scope is a config
+        // knob rather than the caller's VM.
+        String scope = config.services().managedIdentity().systemAssignedScope();
+        return new PrincipalResolution.Found(systemPrincipalId(scope), systemClientId(scope));
+    }
 
     private String resolveBaseUrl(AzureRequest request) {
         return RequestUrls.resolveBaseUrl(request, config);

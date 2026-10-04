@@ -12,6 +12,7 @@ import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.spec.RSAPublicKeySpec;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,8 @@ class ManagedIdentityTest {
             "/subscriptions/" + SUB + "/resourceGroups/" + RG
                     + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities";
     private static final String IMDS = "/metadata/identity/oauth2/token";
+    private static final String APP_SERVICE = "/msi/token";
+    private static final String APP_SERVICE_SECRET = "floci-az-msi-secret";
     private static final String UUID_PATTERN =
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
@@ -364,5 +367,158 @@ class ManagedIdentityTest {
         verifier.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.US_ASCII));
         assertTrue(verifier.verify(URL_DECODER.decode(parts[2])),
                 "IMDS token must verify against the emulator JWKS");
+    }
+
+    // ── App Service MI ──────────────────────────────────────────────────────────
+
+    @Test
+    void appServiceHappyPathReturnsStringTokenBody() {
+        long before = Instant.now().getEpochSecond();
+        Map<String, Object> body = given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().get(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01")
+                .then().statusCode(200)
+                .body("token_type", equalTo("Bearer"))
+                .body("resource", equalTo("https://vault.azure.net"))
+                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+
+        // expires_on must be a quoted string: the Rust azure_identity SDK rejects a JSON number.
+        for (String field : List.of("access_token", "expires_on", "token_type", "resource", "client_id")) {
+            assertTrue(body.get(field) instanceof String, field + " must be a string");
+        }
+        long expiresOn = Long.parseLong((String) body.get("expires_on"));
+        assertTrue(expiresOn > before, "expires_on must be in the future");
+    }
+
+    @Test
+    void appServiceRejectsMissingIdentityHeader() {
+        given().when().get(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01")
+                .then().statusCode(401)
+                .body("error", equalTo("invalid_request"));
+    }
+
+    @Test
+    void appServiceRejectsWrongIdentityHeader() {
+        given().header("X-IDENTITY-HEADER", "nope")
+                .when().get(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01")
+                .then().statusCode(401)
+                .body("error", equalTo("invalid_request"));
+    }
+
+    @Test
+    void appServiceRejectsMissingResource() {
+        given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().get(APP_SERVICE + "?api-version=2019-08-01")
+                .then().statusCode(400)
+                .body("error", equalTo("invalid_request"));
+    }
+
+    @Test
+    void appServiceUserAssignedByClientId() throws Exception {
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(BASE + "/app-id" + API)
+                .then().statusCode(201);
+
+        Map<String, String> identity = given().when().get(BASE + "/app-id" + API)
+                .then().statusCode(200).extract().path("properties");
+        String clientId = identity.get("clientId");
+        String principalId = identity.get("principalId");
+
+        Map<String, Object> body = given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().get(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01"
+                        + "&client_id=" + clientId)
+                .then().statusCode(200)
+                .body("client_id", equalTo(clientId))
+                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+
+        Map<?, ?> claims = mapper.readValue(
+                URL_DECODER.decode(((String) body.get("access_token")).split("\\.")[1]), Map.class);
+        assertEquals(principalId, claims.get("oid"));
+    }
+
+    @Test
+    void appServiceUserAssignedByResourceId() throws Exception {
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(BASE + "/res-id" + API)
+                .then().statusCode(201);
+
+        Map<String, String> identity = given().when().get(BASE + "/res-id" + API)
+                .then().statusCode(200).extract().path("properties");
+        String clientId = identity.get("clientId");
+        String principalId = identity.get("principalId");
+        String resourceId = BASE + "/res-id";
+
+        Map<String, Object> body = given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .queryParam("resource", "https://vault.azure.net")
+                .queryParam("api-version", "2019-08-01")
+                .queryParam("mi_res_id", resourceId)
+                .when().get(APP_SERVICE)
+                .then().statusCode(200)
+                .body("client_id", equalTo(clientId))
+                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+
+        Map<?, ?> claims = mapper.readValue(
+                URL_DECODER.decode(((String) body.get("access_token")).split("\\.")[1]), Map.class);
+        assertEquals(principalId, claims.get("oid"));
+    }
+
+    @Test
+    void appServiceRejectsMultipleSelectors() {
+        given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().get(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01"
+                        + "&client_id=a&object_id=b")
+                .then().statusCode(400)
+                .body("error", equalTo("invalid_request"));
+    }
+
+    @Test
+    void appServiceTokenVerifiesAgainstJwks() throws Exception {
+        given().contentType("application/json").body("{\"location\": \"eastus\"}")
+                .when().put(BASE + "/app-jwks-id" + API)
+                .then().statusCode(201);
+
+        Map<String, String> identity = given().when().get(BASE + "/app-jwks-id" + API)
+                .then().statusCode(200).extract().path("properties");
+        String clientId = identity.get("clientId");
+        String principalId = identity.get("principalId");
+
+        String accessToken = given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().get(APP_SERVICE + "?resource=https://vault.azure.net"
+                        + "&client_id=" + clientId + "&api-version=2019-08-01")
+                .then().statusCode(200)
+                .body("client_id", equalTo(clientId))
+                .extract().path("access_token");
+
+        String[] parts = accessToken.split("\\.");
+        assertEquals(3, parts.length);
+
+        Map<?, ?> claims = mapper.readValue(URL_DECODER.decode(parts[1]), Map.class);
+        assertEquals("https://vault.azure.net", claims.get("aud"));
+        assertEquals(clientId, claims.get("appid"), "v1.0 tokens carry appid");
+        assertEquals(principalId, claims.get("oid"));
+        assertEquals("1.0", claims.get("ver"));
+        assertEquals("app", claims.get("idtyp"));
+
+        Map<String, Object> jwks = given().when().get("/common/discovery/v2.0/keys")
+                .then().statusCode(200)
+                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+        @SuppressWarnings("unchecked")
+        Map<String, Object> key = ((List<Map<String, Object>>) jwks.get("keys")).get(0);
+        BigInteger n = new BigInteger(1, URL_DECODER.decode((String) key.get("n")));
+        BigInteger e = new BigInteger(1, URL_DECODER.decode((String) key.get("e")));
+        PublicKey pub = KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(n, e));
+
+        Signature verifier = Signature.getInstance("SHA256withRSA");
+        verifier.initVerify(pub);
+        verifier.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.US_ASCII));
+        assertTrue(verifier.verify(URL_DECODER.decode(parts[2])),
+                "App Service MI token must verify against the emulator JWKS");
+    }
+
+    @Test
+    void appServiceRejectsNonGet() {
+        given().header("X-IDENTITY-HEADER", APP_SERVICE_SECRET)
+                .when().post(APP_SERVICE + "?resource=https://vault.azure.net&api-version=2019-08-01")
+                .then().statusCode(405)
+                .body("error", equalTo("method_not_allowed"));
     }
 }

@@ -207,7 +207,7 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
-    /** Microsoft.ManagedIdentity — user-assigned identities + IMDS token endpoint. */
+    /** Microsoft.ManagedIdentity — user-assigned identities + IMDS/App Service token endpoints. */
     interface ManagedIdentityConfig {
         @WithDefault("true")
         boolean enabled();
@@ -220,6 +220,23 @@ public interface EmulatorConfig {
          */
         @WithDefault("subscriptions/00000000-0000-0000-0000-000000000001")
         String systemAssignedScope();
+
+        /**
+         * Enables the App Service Managed Identity token endpoint (header {@code X-IDENTITY-HEADER},
+         * path {@link #appServicePath()}). Used by azidentity/azure_identity credential chains in
+         * App Service mode via the {@code IDENTITY_ENDPOINT}/{@code IDENTITY_HEADER} environment
+         * variables.
+         */
+        @WithDefault("true")
+        boolean appServiceEnabled();
+
+        /** Data-plane token path for App Service Managed Identity, stored with no leading slash. */
+        @WithDefault("msi/token")
+        String appServicePath();
+
+        /** Secret value that the {@code X-IDENTITY-HEADER} header must carry. */
+        @WithDefault("floci-az-msi-secret")
+        String appServiceHeaderSecret();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

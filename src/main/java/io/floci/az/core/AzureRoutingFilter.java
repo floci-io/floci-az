@@ -1,5 +1,6 @@
 package io.floci.az.core;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.ServiceRoutes.SuffixRoute;
 import io.floci.az.core.auth.AuthPipeline;
 import io.floci.az.services.arm.ArmHandler;
@@ -38,6 +39,7 @@ public class AzureRoutingFilter {
     private final AzureServiceRegistry serviceRegistry;
     private final ArmHandler armHandler;
     private final Vertx vertx;
+    private final EmulatorConfig config;
 
     /**
      * The routing chain, in priority order. Each stage either handles the request, hands it to
@@ -49,15 +51,17 @@ public class AzureRoutingFilter {
 
     @Inject
     public AzureRoutingFilter(AuthPipeline authPipeline, AzureServiceRegistry serviceRegistry,
-            ArmHandler armHandler, Vertx vertx) {
+            ArmHandler armHandler, Vertx vertx, EmulatorConfig config) {
         this.authPipeline = authPipeline;
         this.serviceRegistry = serviceRegistry;
         this.armHandler = armHandler;
         this.vertx = vertx;
+        this.config = config;
         this.stages = List.of(
             this::routeByHostSuffix,
             this::routeByHostServiceMarker,
             this::routeImds,
+            this::routeAppServiceManagedIdentity,
             this::routeEntra,
             this::routeArmMetadataEndpoints,
             this::routeMicrosoftGraph,
@@ -476,6 +480,27 @@ public class AzureRoutingFilter {
         }
         // Managed Identity disabled: fall through to JAX-RS (404) rather than misrouting the path.
         return dispatchWithoutAuth(ctx, "managedidentity", "IMDS");
+    }
+
+    /**
+     * App Service Managed Identity token endpoint: {@code {appServicePath}?resource=...} (header
+     * {@code X-IDENTITY-HEADER: {appServiceHeaderSecret}}).
+     *
+     * <p>Reached by azidentity/azure_identity credential chains in App Service mode, which read
+     * {@code IDENTITY_ENDPOINT}/{@code IDENTITY_HEADER} and GET the endpoint with that header. Runs
+     * before the account-suffix fallback so the literal {@code msi/token} path is not read as a
+     * storage account. Skips the auth pipeline: App Service MI requests carry no Authorization
+     * header, exactly like IMDS.
+     */
+    private Outcome routeAppServiceManagedIdentity(RoutingContext ctx) {
+        if (!ctx.path().equalsIgnoreCase(config.services().managedIdentity().appServicePath())) {
+            return Fallthrough.TO_NEXT_STAGE;
+        }
+        if (!config.services().managedIdentity().enabled()
+                || !config.services().managedIdentity().appServiceEnabled()) {
+            return Fallthrough.TO_JAX_RS;
+        }
+        return dispatchWithoutAuth(ctx, "managedidentity", "AppServiceMI");
     }
 
     /**

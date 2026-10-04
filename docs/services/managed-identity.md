@@ -23,6 +23,11 @@ applications use to acquire tokens without secrets.
   requires the `Metadata: true` header, accepts `resource` plus an optional `client_id` /
   `object_id` / `msi_res_id` selector, and returns the all-string IMDS response shape. Any
   `api-version` is accepted (SDKs send `2018-02-01`)
+- **App Service token endpoint**: `GET /msi/token` (the `IDENTITY_ENDPOINT` /
+  `IDENTITY_HEADER` protocol used by Go `azidentity` and Rust `azure_identity` in App Service
+  mode): requires the `X-IDENTITY-HEADER` header and `resource`, accepts `client_id` /
+  `object_id` / `mi_res_id` / `msi_res_id` selectors, and returns an all-string response
+  (including a quoted `expires_on`)
 - **Verifiable tokens**: v1.0 JWTs (`appid`, `oid`, `idtyp=app`) signed by the Entra key;
   validate against `GET /common/discovery/v2.0/keys`
 
@@ -46,6 +51,8 @@ GET    .../userAssignedIdentities/{name}/federatedIdentityCredentials
 GET    /{scope}/providers/Microsoft.ManagedIdentity/identities/default
 
 GET    /metadata/identity/oauth2/token?resource={resource}[&client_id=...]   # header: Metadata: true
+
+GET    /msi/token?resource={resource}[&client_id=...]                        # header: X-IDENTITY-HEADER: {secret}
 ```
 
 ---
@@ -134,6 +141,50 @@ export AZURE_POD_IDENTITY_AUTHORITY_HOST=http://localhost:4577
     const token = await credential.getToken("https://management.azure.com/.default");
     ```
 
+### 4: Acquire a token via App Service Managed Identity (raw HTTP)
+
+The Go (`azidentity`) and Rust (`azure_identity`) credential chains use a different protocol in
+App Service mode. They read `IDENTITY_ENDPOINT` and `IDENTITY_HEADER`, then `GET` the endpoint
+with the `X-IDENTITY-HEADER` header. floci-az serves that protocol natively at `/msi/token`:
+
+```bash
+curl -s -H "X-IDENTITY-HEADER: floci-az-msi-secret" \
+  "http://localhost:4577/msi/token?resource=https://vault.azure.net&api-version=2019-08-01"
+```
+
+The consumer, not floci-az, sets `IDENTITY_ENDPOINT` and `IDENTITY_HEADER`. For the defaults
+above:
+
+```bash
+export IDENTITY_ENDPOINT=http://localhost:4577/msi/token
+export IDENTITY_HEADER=floci-az-msi-secret
+```
+
+The request contract:
+
+- `X-IDENTITY-HEADER` (required) must equal the configured secret (`app-service-header-secret`).
+- `resource` (required) is echoed back in the response.
+- `api-version` is accepted but any value is allowed; the canonical value is `2019-08-01`.
+- Selectors are optional and mutually exclusive: `client_id`, `object_id`, and the ARM-resource-id
+  selector which has two spellings (`mi_res_id` and `msi_res_id`; both are accepted, and supplying
+  both is treated as the single resource-id selector). Omitting all selectors yields a
+  system-assigned token.
+
+The response is all strings, and `expires_on` is a **quoted epoch-seconds string** (never a JSON
+number, never a datetime): the Rust `azure_identity` SDK parses it with a custom deserializer that
+accepts only a JSON string of integer epoch-seconds.
+
+```json
+{
+  "access_token": "eyJ0…",
+  "client_id": "9f86d081-…",
+  "expires_in": "3599",
+  "expires_on": "1767225599",
+  "resource": "https://vault.azure.net",
+  "token_type": "Bearer"
+}
+```
+
 ---
 
 ## Configuration
@@ -144,12 +195,18 @@ floci-az:
     managed-identity:
       enabled: true
       system-assigned-scope: subscriptions/${floci-az.services.arm.default-subscription-id}
+      app-service-enabled: true
+      app-service-path: msi/token
+      app-service-header-secret: floci-az-msi-secret
 ```
 
 | Property | Env var | Default | Description |
 |---|---|---|---|
-| `enabled` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_ENABLED` | `true` | Enables the ARM provider and the IMDS endpoint |
+| `enabled` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_ENABLED` | `true` | Enables the ARM provider and both token endpoints |
 | `system-assigned-scope` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_SYSTEM_ASSIGNED_SCOPE` | `subscriptions/` + the [ARM](arm.md) `default-subscription-id` | ARM scope that seeds the system-assigned IMDS identity's `principalId`/`clientId`. Set it to your resource's scope (e.g. `subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{vm}`) so IMDS tokens match `GET {scope}/.../identities/default` reads |
+| `app-service-enabled` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_ENABLED` | `true` | Enables the App Service Managed Identity token endpoint at `app-service-path` |
+| `app-service-path` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_PATH` | `msi/token` | Data-plane token path for App Service Managed Identity, stored with no leading slash |
+| `app-service-header-secret` | `FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_HEADER_SECRET` | `floci-az-msi-secret` | Secret value the `X-IDENTITY-HEADER` header must carry |
 
 Token tenant, issuer, and lifetime follow the [Entra ID](entra.md) settings
 (`floci-az.services.entra.*`).

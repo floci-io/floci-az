@@ -268,10 +268,14 @@ floci-az:
       default-region: eastus
       max-delivery-attempts: 30
     managed-identity:
-      enabled: true       # Microsoft.ManagedIdentity — user-assigned identities + IMDS token endpoint (tokens signed with the entra key)
+      enabled: true       # Microsoft.ManagedIdentity — user-assigned identities + IMDS/App Service token endpoints (tokens signed with the entra key)
       # ARM scope that seeds the system-assigned IMDS identity; set it to your resource's
       # scope so IMDS tokens match GET {scope}/.../identities/default reads.
       system-assigned-scope: subscriptions/${floci-az.services.arm.default-subscription-id}
+      # App Service Managed Identity token endpoint (IDENTITY_ENDPOINT/IDENTITY_HEADER protocol).
+      app-service-enabled: true              # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_ENABLED
+      app-service-path: msi/token            # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_PATH
+      app-service-header-secret: floci-az-msi-secret   # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_HEADER_SECRET
 
   auth:
     # dev: accept any credentials without signature validation
