@@ -131,4 +131,41 @@ public class TableServiceTest {
             .body("'odata.error'.code", equalTo("ResourceNotFound"))
             .body("'odata.error'.message.value", containsString("does not exist"));
     }
+
+    @Test
+    void entitiesWhoseKeysConcatenateIdenticallyStayDistinct() {
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"Collide\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/json")
+            .body("{\"who\":\"first\"}")
+            .when().put("/{account}/Collide(PartitionKey='a_b',RowKey='c')", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .contentType("application/json")
+            .body("{\"who\":\"second\"}")
+            .when().put("/{account}/Collide(PartitionKey='a',RowKey='b_c')", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/Collide(PartitionKey='a_b',RowKey='c')", ACCOUNT)
+            .then().statusCode(200).body("who", equalTo("first"));
+        given()
+            .when().get("/{account}/Collide(PartitionKey='a',RowKey='b_c')", ACCOUNT)
+            .then().statusCode(200).body("who", equalTo("second"));
+        given()
+            .when().get("/{account}/Collide()", ACCOUNT)
+            .then().statusCode(200).body("value.size()", equalTo(2));
+
+        given()
+            .when().delete("/{account}/Collide(PartitionKey='a',RowKey='b_c')", ACCOUNT)
+            .then().statusCode(204);
+        given()
+            .when().get("/{account}/Collide(PartitionKey='a_b',RowKey='c')", ACCOUNT)
+            .then().statusCode(200).body("who", equalTo("first"));
+    }
 }

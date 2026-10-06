@@ -99,6 +99,22 @@ class TableCompatibilityTest {
     // --- Error cases ---
 
     @Test
+    @DisplayName("entities whose keys concatenate identically stay distinct")
+    void keysContainingUnderscoresDoNotCollide() {
+        String name = tableName();
+        TableClient table = client.createTable(name);
+
+        table.upsertEntity(new TableEntity("a_b", "c").addProperty("Who", "first"));
+        table.upsertEntity(new TableEntity("a", "b_c").addProperty("Who", "second"));
+
+        assertEquals(2, table.listEntities().stream().count());
+        assertEquals("first", table.getEntity("a_b", "c").getProperty("Who"));
+        assertEquals("second", table.getEntity("a", "b_c").getProperty("Who"));
+
+        client.deleteTable(name);
+    }
+
+    @Test
     @DisplayName("get missing entity → TableServiceException (404)")
     void entityNotFound() {
         String name = tableName();

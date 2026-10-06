@@ -61,6 +61,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     public TableServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
         this.config = config;
         this.store = storageFactory.create("table");
+        TableEntityKeys.migrateLegacyKeys(store, NS_PREFIX, objectMapper);
     }
 
     @Override
@@ -251,7 +252,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                         "PartitionKey and RowKey are required.")
                         .toODataResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
-            String key = pk + "_" + rk;
+            String key = TableEntityKeys.entityKey(pk, rk);
             String etag = UUID.randomUUID().toString();
             entity.put("Timestamp", ISO_TIMESTAMP.format(Instant.now()));
 
@@ -281,7 +282,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private Response getEntity(AzureRequest request, String tableName, String pkRkPart) {
         String pk = extractValue(pkRkPart, "PartitionKey");
         String rk = extractValue(pkRkPart, "RowKey");
-        Optional<StoredObject> object = store.get(objKey(request.accountName(), tableName, pk + "_" + rk));
+        Optional<StoredObject> object = store.get(objKey(request.accountName(), tableName, TableEntityKeys.entityKey(pk, rk)));
 
         if (object.isEmpty()) {
             return new AzureErrorResponse("ResourceNotFound", "The specified resource does not exist.")
@@ -456,7 +457,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private Response deleteEntity(AzureRequest request, String tableName, String pkRkPart) {
         String pk = extractValue(pkRkPart, "PartitionKey");
         String rk = extractValue(pkRkPart, "RowKey");
-        String storeKey = objKey(request.accountName(), tableName, pk + "_" + rk);
+        String storeKey = objKey(request.accountName(), tableName, TableEntityKeys.entityKey(pk, rk));
 
         Optional<StoredObject> existing = store.get(storeKey);
         if (existing.isEmpty()) {
@@ -493,7 +494,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                         "PartitionKey and RowKey are required.")
                         .toODataResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
-            String key = pk + "_" + rk;
+            String key = TableEntityKeys.entityKey(pk, rk);
             String storeKey = objKey(request.accountName(), tableName, key);
 
             Optional<StoredObject> existing = store.get(storeKey);
@@ -726,14 +727,14 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                     String pk = extractValue(op.pkRkPart(), "PartitionKey");
                     String rk = extractValue(op.pkRkPart(), "RowKey");
                     if (!pk.isEmpty() && !rk.isEmpty()) {
-                        String storeKey = objKey(op.accountName(), op.tableName(), pk + "_" + rk);
+                        String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
                         originals.putIfAbsent(storeKey, store.get(storeKey));
                     }
                 } else if (op.entityBody() != null) {
                     String pk = (String) op.entityBody().get("PartitionKey");
                     String rk = (String) op.entityBody().get("RowKey");
                     if (pk != null && rk != null) {
-                        String storeKey = objKey(op.accountName(), op.tableName(), pk + "_" + rk);
+                        String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
                         originals.putIfAbsent(storeKey, store.get(storeKey));
                     }
                 }
@@ -814,7 +815,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 return new AzureErrorResponse("PropertiesNeedValue", "PartitionKey and RowKey are required.")
                         .toODataResponse(400);
             }
-            String key = pk + "_" + rk;
+            String key = TableEntityKeys.entityKey(pk, rk);
             String etag = UUID.randomUUID().toString();
             entity.put("Timestamp", ISO_TIMESTAMP.format(Instant.now()));
 
@@ -851,7 +852,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 return new AzureErrorResponse("PropertiesNeedValue", "PartitionKey and RowKey are required.")
                         .toODataResponse(400);
             }
-            String key = pk + "_" + rk;
+            String key = TableEntityKeys.entityKey(pk, rk);
             String storeKey = objKey(accountName, tableName, key);
             Optional<StoredObject> existing = store.get(storeKey);
 
@@ -891,7 +892,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private Response deleteEntityDirect(String accountName, String tableName, String pkRkPart, String ifMatch) {
         String pk = extractValue(pkRkPart, "PartitionKey");
         String rk = extractValue(pkRkPart, "RowKey");
-        String storeKey = objKey(accountName, tableName, pk + "_" + rk);
+        String storeKey = objKey(accountName, tableName, TableEntityKeys.entityKey(pk, rk));
 
         Optional<StoredObject> existing = store.get(storeKey);
         if (existing.isEmpty()) {
