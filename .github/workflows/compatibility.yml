@@ -2,6 +2,9 @@ name: Compatibility Tests
 
 on:
   pull_request:
+    # ready_for_review is not a default type: without it, marking a draft ready
+    # would not start the run the draft skipped.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/**'
       - 'pom.xml'
@@ -23,8 +26,18 @@ jobs:
     name: Build native floci-az image
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    # Drafts skip the suites to spare runners; they run once the PR is ready for review.
+    # Written on the root job rather than as a gate job so it costs no runner, and
+    # native-compat-test needs this job, so it skips with it. `closed` and `edited` are
+    # excluded so widening the trigger types cannot let those events through.
+    if: >-
+      github.event_name != 'pull_request' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.state != 'closed' &&
+        github.event.action != 'edited'
+      )
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173 # v1
         with:
@@ -41,14 +54,16 @@ jobs:
       # Partial-hit caveat: ci.yml runs x64 and this runs arm64, but `runner.os` is Linux
       # for both and Maven artifacts are arch-neutral, so only classifier-based natives
       # re-download. `-Dnative` also pulls native-image plugins `mvn test` never fetches.
-      - uses: actions/cache/restore@v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
           restore-keys: maven-${{ runner.os }}-
 
       - name: Build native executable (quick build)
-        run: ./mvnw clean package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-Ob"
+        # maven.test.skip rather than skipTests: skipTests only stops surefire, so the build still
+        # compiled all of src/test for a native image that never uses it.
+        run: ./mvnw clean package -Dnative -Dmaven.test.skip=true -B -Dquarkus.native.additional-build-args-append="-Ob"
 
       - name: Stage native binary for packaging
         run: |
@@ -56,10 +71,10 @@ jobs:
           cp target/*-runner native/arm64/application
           cp target/*.so native/arm64/ 2>/dev/null || true
 
-      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build native Docker image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile.native-package
@@ -77,7 +92,7 @@ jobs:
         run: gzip /tmp/floci-az-native-image.tar
 
       - name: Upload native floci-az image
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: floci-az-native-image
           path: /tmp/floci-az-native-image.tar.gz
@@ -135,7 +150,7 @@ jobs:
 
     steps:
       - name: Download native floci-az image
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: floci-az-native-image
           path: /tmp
@@ -157,8 +172,28 @@ jobs:
             ${{ matrix.emulator_env }} \
             floci-az:test-native
 
-      - name: Wait for floci-az to be ready
-        run: timeout 60 bash -c 'until curl -sf http://localhost:4577/health >/dev/null 2>&1; do sleep 1; done'
+      # Waits on Docker's health status rather than curling the port so the image's
+      # HEALTHCHECK runs under CI: the native image has no curl and probes over bash's
+      # /dev/tcp, and a malformed probe would otherwise leave the container "unhealthy"
+      # while the suites pass against the open port. Healthy takes one interval (5 s);
+      # unhealthy takes retries x interval (50 s) and fails fast here.
+      - name: Wait for floci-az to be healthy
+        run: |
+          health=starting
+          for _ in $(seq 1 90); do
+            health=$(docker inspect -f '{{.State.Health.Status}}' floci-az)
+            if [ "$health" = healthy ]; then
+              exit 0
+            fi
+            if [ "$health" = unhealthy ]; then
+              break
+            fi
+            sleep 1
+          done
+          echo "::error::floci-az did not report healthy (last status: $health)"
+          docker inspect -f '{{json .State.Health}}' floci-az
+          docker logs --tail 50 floci-az
+          exit 1
 
       # A static initializer runs at native build time, where FLOCI_AZ_VERSION is unset, so a
       # regression there reports "dev" from every release binary; JVM-mode tests cannot see it.
@@ -166,14 +201,14 @@ jobs:
         run: curl -sf http://localhost:4577/_floci/health | jq -e --arg v "ci-${{ github.sha }}" '.version == $v'
 
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: compatibility-tests
 
-      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build test image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: compatibility-tests/${{ matrix.test }}
           load: true
@@ -196,10 +231,12 @@ jobs:
 
       - name: Generate test summary
         if: always() && steps.tests.outcome != 'skipped'
-        uses: test-summary/action@v2
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
           paths: test-results/*.xml
 
       - name: Dump floci-az logs
-        if: failure()
+        # A job cancelled at timeout-minutes is not a failure, but a hung suite is the case
+        # where the server log matters most.
+        if: failure() || cancelled()
         run: docker logs floci-az

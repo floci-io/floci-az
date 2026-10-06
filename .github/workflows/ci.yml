@@ -12,6 +12,9 @@ on:
       - 'mvnw.cmd'
       - '.github/workflows/ci.yml'
   pull_request:
+    # ready_for_review is not a default type: without it, marking a draft ready
+    # would not start the run the draft skipped.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/**'
       - 'pom.xml'
@@ -32,10 +35,20 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Drafts skip the suite to spare runners; it runs once the PR is ready for review.
+    # Written on the job rather than as a gate job so it costs no runner. Pushes to main
+    # always run; `closed` and `edited` are excluded so widening the trigger types cannot
+    # let those events through.
+    if: >-
+      github.event_name != 'pull_request' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.state != 'closed' &&
+        github.event.action != 'edited'
+      )
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -53,7 +66,7 @@ jobs:
       # `hashFiles('pom.xml')`, not '**/pom.xml': the glob would also hash
       # compatibility-tests/sdk-test-java/pom.xml, a project this workflow never builds,
       # and an unrelated change there would bust the key.
-      - uses: actions/cache/restore@v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('pom.xml') }}
@@ -65,7 +78,7 @@ jobs:
 
       # `on.push.branches` is [main] only in this workflow, so `push` means main.
       # `always()` so a failed test run still saves the dependencies it resolved.
-      - uses: actions/cache/save@v6.1.0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always() && github.event_name == 'push'
         with:
           path: ~/.m2/repository
