@@ -263,7 +263,9 @@ public class TableServiceTest {
                         "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":2}"))
             .then()
             .statusCode(202)
-            .body(not(containsString("409")));
+            .body(containsString("HTTP/1.1 201 Created"))
+            .body(containsString("HTTP/1.1 204 No Content"))
+            .body(not(containsString("HTTP/1.1 409")));
 
         given()
             .when().get("/{account}/BatchUpsert(PartitionKey='p',RowKey='new')", ACCOUNT)
