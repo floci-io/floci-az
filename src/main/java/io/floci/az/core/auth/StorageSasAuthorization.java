@@ -26,6 +26,9 @@ import java.util.Optional;
 @ApplicationScoped
 public class StorageSasAuthorization {
 
+    public static final String DEFAULT_STORAGE_ACCOUNT_KEY =
+            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+
     private static final String HMAC_SHA256 = "HmacSHA256";
 
     private final UserDelegationKeyMaterial keyMaterial;
@@ -133,10 +136,7 @@ public class StorageSasAuthorization {
         String canonicalName = canonicalName(request.accountName(), container, signedPath(token, path));
         String key = token.isUserDelegation()
                 ? keyMaterial.signingKeyForAccount(request.accountName())
-                : storageAccountKeys.get(request.accountName());
-        if (key == null) {
-            return false;
-        }
+                : storageAccountKeys.getOrDefault(request.accountName(), DEFAULT_STORAGE_ACCOUNT_KEY);
         String signedFields = token.isUserDelegation()
                 ? stringToSign(request, token, canonicalName)
                 : serviceStringToSign(token, canonicalName);

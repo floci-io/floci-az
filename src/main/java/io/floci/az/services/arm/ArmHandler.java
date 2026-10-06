@@ -38,6 +38,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
+import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCOUNT_KEY;
+
 /**
  * ARM management-plane handler for Azure Resource Manager paths that are not
  * served by more-specific handlers (AKS, SQL).
@@ -57,9 +59,6 @@ import java.util.function.Predicate;
 public class ArmHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(ArmHandler.class);
-
-    static final String FAKE_STORAGE_KEY =
-            "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 
     private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
 
@@ -668,8 +667,8 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     private Response listKeys(String account) {
         return Response.ok(Map.of("keys", List.of(
-                Map.of("keyName", "key1", "value", FAKE_STORAGE_KEY, "permissions", "FULL"),
-                Map.of("keyName", "key2", "value", FAKE_STORAGE_KEY, "permissions", "FULL")
+                Map.of("keyName", "key1", "value", DEFAULT_STORAGE_ACCOUNT_KEY, "permissions", "FULL"),
+                Map.of("keyName", "key2", "value", DEFAULT_STORAGE_ACCOUNT_KEY, "permissions", "FULL")
         ))).build();
     }
 

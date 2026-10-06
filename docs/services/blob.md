@@ -125,8 +125,8 @@ floci-az:
   immediately visible, but Azure Event Grid/change-notification side effects are not emulated.
 - **SAS enforcement supports shared-key service SAS and user delegation SAS.** Service SAS
   signatures use `floci-az.auth.storage-account-keys`, a map from account names to base64 keys.
-  The default `devstoreaccount1` entry is the standard Azurite key; override it when clients use a
-  different key. Unknown accounts and invalid signatures are rejected, including in dev mode,
+  Accounts without an explicit entry use the standard Azurite key, including ARM-created accounts.
+  Explicit entries take precedence. Invalid signatures are rejected, including in dev mode,
   as are expired tokens and operations outside the granted permissions. This is separate from
   the permissive Shared Key `Authorization` header behavior above.
   Shared-key service SAS supports directory scope (`sr=d`). Directory service SAS requires

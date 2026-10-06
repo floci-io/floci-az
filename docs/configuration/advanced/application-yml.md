@@ -120,3 +120,6 @@ floci-az:
 environment override is `FLOCI_AZ_AUTH_STORAGE_ACCOUNT_KEYS_DEVSTOREACCOUNT1`.
 Use YAML to declare additional account names. User delegation SAS keeps its separate,
 process-local signing keys.
+
+Accounts without an explicit entry use the standard Azurite account key, including accounts
+created through ARM. Explicit account entries take precedence over this fallback.

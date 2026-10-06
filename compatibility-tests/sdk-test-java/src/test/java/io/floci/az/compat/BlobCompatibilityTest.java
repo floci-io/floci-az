@@ -27,11 +27,16 @@ import com.azure.storage.blob.specialized.BlobLeaseClient;
 import com.azure.storage.blob.specialized.BlobLeaseClientBuilder;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.storage.common.StorageSharedKeyCredential;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Base64;
@@ -562,6 +567,63 @@ class BlobCompatibilityTest {
             assertEquals(BlobErrorCode.AUTHENTICATION_FAILED, failure.getErrorCode());
         } finally {
             container.delete();
+        }
+    }
+
+    @Test
+    @DisplayName("ARM account: returned key signs a valid service SAS")
+    void armAccountKeySignsServiceSas() throws Exception {
+        String account = "sas" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        String armUrl = EmulatorConfig.httpBase()
+                + "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/sas-compat"
+                + "/providers/Microsoft.Storage/storageAccounts/" + account;
+        String api = "?api-version=2023-01-01";
+        try (HttpClient http = HttpClient.newHttpClient()) {
+            HttpResponse<String> created = http.send(HttpRequest.newBuilder(URI.create(armUrl + api))
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString("""
+                            {"location":"eastus","sku":{"name":"Standard_LRS"},"kind":"StorageV2"}
+                            """))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, created.statusCode(), created.body());
+            try {
+                HttpResponse<String> keys = http.send(HttpRequest.newBuilder(URI.create(armUrl + "/listKeys" + api))
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, keys.statusCode(), keys.body());
+                String key = new ObjectMapper().readTree(keys.body()).path("keys").get(0).path("value").asText();
+                BlobServiceClient accountClient = new BlobServiceClientBuilder()
+                        .endpoint(EmulatorConfig.httpBase() + "/" + account)
+                        .credential(new StorageSharedKeyCredential(account, key))
+                        .buildClient();
+                BlobContainerClient container = accountClient.createBlobContainer(containerName());
+                try {
+                    BlobClient blob = container.getBlobClient("sas.txt");
+                    byte[] content = "account key sas".getBytes(StandardCharsets.UTF_8);
+                    blob.upload(new ByteArrayInputStream(content), content.length);
+                    BlobServiceSasSignatureValues values = new BlobServiceSasSignatureValues(
+                            OffsetDateTime.now().plusHours(1), new BlobSasPermission().setReadPermission(true));
+                    BlobClient reader = new BlobClientBuilder().endpoint(blob.getBlobUrl())
+                            .sasToken(blob.generateSas(values)).buildClient();
+                    assertArrayEquals(content, reader.downloadContent().toBytes());
+
+                    byte[] wrongKey = Base64.getDecoder().decode(key);
+                    wrongKey[0] ^= 1;
+                    BlobClient signer = new BlobClientBuilder().endpoint(blob.getBlobUrl())
+                            .credential(new StorageSharedKeyCredential(account, Base64.getEncoder().encodeToString(wrongKey)))
+                            .buildClient();
+                    BlobClient invalid = new BlobClientBuilder().endpoint(blob.getBlobUrl())
+                            .sasToken(signer.generateSas(values)).buildClient();
+                    BlobStorageException failure = assertThrows(BlobStorageException.class, invalid::downloadContent);
+                    assertEquals(403, failure.getStatusCode());
+                    assertEquals(BlobErrorCode.AUTHENTICATION_FAILED, failure.getErrorCode());
+                } finally {
+                    container.delete();
+                }
+            } finally {
+                HttpResponse<String> deleted = http.send(HttpRequest.newBuilder(URI.create(armUrl + api))
+                        .DELETE().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, deleted.statusCode(), deleted.body());
+            }
         }
     }
 
