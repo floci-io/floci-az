@@ -104,7 +104,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
         // Feature 6: $batch routing
         if ("$batch".equals(path) && "POST".equalsIgnoreCase(method)) {
-            Response batchResponse = mutate(() -> executeBatch(request));
+            Response batchResponse = executeBatch(request);
             return Response.fromResponse(batchResponse)
                     .header("x-ms-request-id", UUID.randomUUID().toString())
                     .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
@@ -174,8 +174,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
     /**
      * Runs a write under the handler's write lock. Each write is a read-check-write against the
-     * store (existence for Insert, ETag for If-Match, a snapshot for batch rollback), and the store
-     * offers no compare-and-set, so concurrent writers must be serialised for those checks to hold.
+     * store (existence for Insert, ETag for If-Match), and the store offers no compare-and-set, so
+     * concurrent writers must be serialised for those checks to hold. {@code $batch} takes the same
+     * lock itself, after parsing, around its snapshot, execution and rollback.
      */
     private Response mutate(Supplier<Response> write) {
         synchronized (writeLock) {
@@ -745,60 +746,64 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 }
             }
 
-            // Execute atomically: save originals before starting
-            Map<String, Optional<StoredObject>> originals = new LinkedHashMap<>();
-            for (BatchOp op : ops) {
-                if (!op.pkRkPart().isEmpty()) {
-                    String pk = extractValue(op.pkRkPart(), "PartitionKey");
-                    String rk = extractValue(op.pkRkPart(), "RowKey");
-                    if (!pk.isEmpty() && !rk.isEmpty()) {
-                        String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
-                        originals.putIfAbsent(storeKey, store.get(storeKey));
-                    }
-                } else if (op.entityBody() != null) {
-                    String pk = (String) op.entityBody().get("PartitionKey");
-                    String rk = (String) op.entityBody().get("RowKey");
-                    if (pk != null && rk != null) {
-                        String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
-                        originals.putIfAbsent(storeKey, store.get(storeKey));
-                    }
-                }
-            }
-
-            // Execute all operations, collecting results
-            List<Response> results = new ArrayList<>();
-            boolean failed = false;
-            int failedIdx = -1;
-            Response failedResponse = null;
-
-            for (int i = 0; i < ops.size(); i++) {
-                BatchOp op = ops.get(i);
-                Response opResponse = executeBatchOp(op.accountName(), op.tableName(),
-                        op.method(), op.pkRkPart(), op.entityBody(), op.ifMatch());
-                results.add(opResponse);
-                if (opResponse.getStatus() >= 400) {
-                    failed = true;
-                    failedIdx = i;
-                    failedResponse = opResponse;
-                    break;
-                }
-            }
-
-            if (failed) {
-                // Restore all originals
-                for (Map.Entry<String, Optional<StoredObject>> entry : originals.entrySet()) {
-                    if (entry.getValue().isPresent()) {
-                        store.put(entry.getKey(), entry.getValue().get());
-                    } else {
-                        store.delete(entry.getKey());
+            // Parsing above needs no lock; snapshot, execution and rollback must not interleave
+            // with other writes, or a rollback could overwrite them.
+            synchronized (writeLock) {
+                // Execute atomically: save originals before starting
+                Map<String, Optional<StoredObject>> originals = new LinkedHashMap<>();
+                for (BatchOp op : ops) {
+                    if (!op.pkRkPart().isEmpty()) {
+                        String pk = extractValue(op.pkRkPart(), "PartitionKey");
+                        String rk = extractValue(op.pkRkPart(), "RowKey");
+                        if (!pk.isEmpty() && !rk.isEmpty()) {
+                            String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
+                            originals.putIfAbsent(storeKey, store.get(storeKey));
+                        }
+                    } else if (op.entityBody() != null) {
+                        String pk = (String) op.entityBody().get("PartitionKey");
+                        String rk = (String) op.entityBody().get("RowKey");
+                        if (pk != null && rk != null) {
+                            String storeKey = objKey(op.accountName(), op.tableName(), TableEntityKeys.entityKey(pk, rk));
+                            originals.putIfAbsent(storeKey, store.get(storeKey));
+                        }
                     }
                 }
-                // Return error batch response
-                return buildErrorBatchResponse(failedIdx, failedResponse);
-            }
 
-            // Build successful multipart response
-            return buildBatchResponse(ops.stream().map(BatchOp::method).toList(), results);
+                // Execute all operations, collecting results
+                List<Response> results = new ArrayList<>();
+                boolean failed = false;
+                int failedIdx = -1;
+                Response failedResponse = null;
+
+                for (int i = 0; i < ops.size(); i++) {
+                    BatchOp op = ops.get(i);
+                    Response opResponse = executeBatchOp(op.accountName(), op.tableName(),
+                            op.method(), op.pkRkPart(), op.entityBody(), op.ifMatch());
+                    results.add(opResponse);
+                    if (opResponse.getStatus() >= 400) {
+                        failed = true;
+                        failedIdx = i;
+                        failedResponse = opResponse;
+                        break;
+                    }
+                }
+
+                if (failed) {
+                    // Restore all originals
+                    for (Map.Entry<String, Optional<StoredObject>> entry : originals.entrySet()) {
+                        if (entry.getValue().isPresent()) {
+                            store.put(entry.getKey(), entry.getValue().get());
+                        } else {
+                            store.delete(entry.getKey());
+                        }
+                    }
+                    // Return error batch response
+                    return buildErrorBatchResponse(failedIdx, failedResponse);
+                }
+
+                // Build successful multipart response
+                return buildBatchResponse(ops.stream().map(BatchOp::method).toList(), results);
+            }
 
         } catch (Exception e) {
             LOGGER.errorf(e, "Error executing batch");
