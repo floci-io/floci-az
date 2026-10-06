@@ -1,6 +1,8 @@
 package io.floci.az.services.table;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureErrorResponse;
 import io.floci.az.core.AzureRequest;
@@ -253,10 +255,14 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                         .toODataResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
             String key = TableEntityKeys.entityKey(pk, rk);
+            String storeKey = objKey(request.accountName(), tableName, key);
+            if (store.get(storeKey).isPresent()) {
+                return entityAlreadyExists();
+            }
             String etag = UUID.randomUUID().toString();
             entity.put("Timestamp", ISO_TIMESTAMP.format(Instant.now()));
 
-            store.put(objKey(request.accountName(), tableName, key),
+            store.put(storeKey,
                     new StoredObject(key, objectMapper.writeValueAsBytes(entity), Map.of(), Instant.now(), etag));
 
             // Feature 5: Prefer header handling
@@ -277,6 +283,11 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         } catch (IOException e) {
             return Response.serverError().build();
         }
+    }
+
+    private static Response entityAlreadyExists() {
+        return new AzureErrorResponse("EntityAlreadyExists", "The specified entity already exists.")
+                .toODataResponse(Response.Status.CONFLICT.getStatusCode());
     }
 
     private Response getEntity(AzureRequest request, String tableName, String pkRkPart) {
@@ -816,10 +827,14 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                         .toODataResponse(400);
             }
             String key = TableEntityKeys.entityKey(pk, rk);
+            String storeKey = objKey(accountName, tableName, key);
+            if (store.get(storeKey).isPresent()) {
+                return entityAlreadyExists();
+            }
             String etag = UUID.randomUUID().toString();
             entity.put("Timestamp", ISO_TIMESTAMP.format(Instant.now()));
 
-            store.put(objKey(accountName, tableName, key),
+            store.put(storeKey,
                     new StoredObject(key, objectMapper.writeValueAsBytes(entity), Map.of(), Instant.now(), etag));
 
             return Response.status(201)
@@ -980,6 +995,27 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     /**
      * Build an error batch response for a failed operation.
      */
+    /**
+     * Azure prefixes the OData error message of a failed changeset with the failing operation's
+     * index ("1:The specified entity already exists."); the SDKs parse it to report which action failed.
+     */
+    private String withFailedIndex(int failedIdx, Object entity) {
+        if (entity == null) {
+            return "";
+        }
+        try {
+            JsonNode body = entity instanceof String s ? objectMapper.readTree(s) : objectMapper.valueToTree(entity);
+            JsonNode message = body.path("odata.error").path("message");
+            if (message instanceof ObjectNode messageNode && message.path("value").isTextual()) {
+                messageNode.put("value", failedIdx + ":" + message.path("value").asText());
+            }
+            return objectMapper.writeValueAsString(body);
+        } catch (IOException | IllegalArgumentException e) {
+            LOGGER.debugv("Batch error body is not an OData error, returning it unchanged: {0}", e.getMessage());
+            return entity.toString();
+        }
+    }
+
     private Response buildErrorBatchResponse(int failedIdx, Response failedResponse) {
         String batchId = UUID.randomUUID().toString().replace("-", "");
         String changesetId = UUID.randomUUID().toString().replace("-", "");
@@ -989,19 +1025,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         int status = failedResponse.getStatus();
         String statusText = statusText(status);
 
-        Object entity = failedResponse.getEntity();
-        String bodyStr = "";
-        if (entity != null) {
-            if (entity instanceof String s) {
-                bodyStr = s;
-            } else {
-                try {
-                    bodyStr = objectMapper.writeValueAsString(entity);
-                } catch (Exception e) {
-                    bodyStr = entity.toString();
-                }
-            }
-        }
+        String bodyStr = withFailedIndex(failedIdx, failedResponse.getEntity());
 
         StringBuilder sb = new StringBuilder();
         sb.append("--").append(batchBoundary).append("\r\n");

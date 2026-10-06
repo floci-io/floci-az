@@ -1,8 +1,11 @@
 package io.floci.az.services;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -133,12 +136,102 @@ public class TableServiceTest {
     }
 
     @Test
-    void entitiesWhoseKeysConcatenateIdenticallyStayDistinct() {
+    void insertExistingEntityReturnsConflictAndKeepsStoredEntity() {
+        createTable("InsertDup");
+        String etag = insertEntity("InsertDup", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":1}")
+            .then().statusCode(201)
+            .extract().header("ETag");
+
+        insertEntity("InsertDup", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":2}")
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "EntityAlreadyExists")
+            .contentType(containsString("odata=minimalmetadata"))
+            .body("'odata.error'.code", equalTo("EntityAlreadyExists"))
+            .body("'odata.error'.message.value", containsString("already exists"));
+
+        given()
+            .when().get("/{account}/InsertDup(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .header("ETag", etag)
+            .body("v", equalTo(1));
+    }
+
+    @Test
+    void upsertOfExistingEntityStillOverwrites() {
+        createTable("UpsertKeep");
+        insertEntity("UpsertKeep", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":1}")
+            .then().statusCode(201);
+
         given()
             .contentType("application/json")
-            .body("{\"TableName\":\"Collide\"}")
-            .when().post("/{account}/Tables", ACCOUNT)
+            .body("{\"v\":2}")
+            .when().put("/{account}/UpsertKeep(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .contentType("application/json")
+            .body("{\"w\":3}")
+            .when().request("MERGE", "/{account}/UpsertKeep(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/UpsertKeep(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("v", equalTo(2))
+            .body("w", equalTo(3));
+    }
+
+    @Test
+    void batchInsertOfExistingEntityRollsBackWholeChangeset() {
+        createTable("BatchDup");
+        insertEntity("BatchDup", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":1}")
             .then().statusCode(201);
+
+        submitBatch(
+                batchOperation("POST", "BatchDup", "{\"PartitionKey\":\"p\",\"RowKey\":\"new\"}"),
+                batchOperation("POST", "BatchDup", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":2}"))
+            .then()
+            .statusCode(202)
+            .body(containsString("HTTP/1.1 409 Conflict"))
+            .body(containsString("EntityAlreadyExists"))
+            .body(containsString("\"value\":\"1:The specified entity already exists.\""));
+
+        given()
+            .when().get("/{account}/BatchDup(PartitionKey='p',RowKey='new')", ACCOUNT)
+            .then().statusCode(404);
+        given()
+            .when().get("/{account}/BatchDup(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200).body("v", equalTo(1));
+    }
+
+    @Test
+    void batchUpsertOfExistingEntityStillCommits() {
+        createTable("BatchUpsert");
+        insertEntity("BatchUpsert", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":1}")
+            .then().statusCode(201);
+
+        submitBatch(
+                batchOperation("POST", "BatchUpsert", "{\"PartitionKey\":\"p\",\"RowKey\":\"new\"}"),
+                batchOperation("PUT", "BatchUpsert(PartitionKey='p',RowKey='r')",
+                        "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"v\":2}"))
+            .then()
+            .statusCode(202)
+            .body(not(containsString("409")));
+
+        given()
+            .when().get("/{account}/BatchUpsert(PartitionKey='p',RowKey='new')", ACCOUNT)
+            .then().statusCode(200);
+        given()
+            .when().get("/{account}/BatchUpsert(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200).body("v", equalTo(2));
+    }
+
+    @Test
+    void entitiesWhoseKeysConcatenateIdenticallyStayDistinct() {
+        createTable("Collide");
 
         given()
             .contentType("application/json")
@@ -167,5 +260,44 @@ public class TableServiceTest {
         given()
             .when().get("/{account}/Collide(PartitionKey='a_b',RowKey='c')", ACCOUNT)
             .then().statusCode(200).body("who", equalTo("first"));
+    }
+
+    private static void createTable(String name) {
+        given()
+            .contentType("application/json")
+            .body("{\"TableName\":\"" + name + "\"}")
+            .when().post("/{account}/Tables", ACCOUNT)
+            .then().statusCode(201);
+    }
+
+    private static Response insertEntity(String table, String entityJson) {
+        return given()
+            .contentType("application/json")
+            .body(entityJson)
+            .when().post("/{account}/{table}", ACCOUNT, table);
+    }
+
+    private static String batchOperation(String method, String path, String entityJson) {
+        return "Content-Type: application/http\r\n"
+            + "Content-Transfer-Encoding: binary\r\n\r\n"
+            + method + " http://localhost/" + ACCOUNT + "/" + path + " HTTP/1.1\r\n"
+            + "Content-Type: application/json\r\n\r\n"
+            + entityJson + "\r\n";
+    }
+
+    private static Response submitBatch(String... operations) {
+        String changeset = "changeset_test";
+        StringBuilder body = new StringBuilder()
+            .append("--batch_test\r\n")
+            .append("Content-Type: multipart/mixed; boundary=").append(changeset).append("\r\n\r\n");
+        for (String operation : operations) {
+            body.append("--").append(changeset).append("\r\n").append(operation);
+        }
+        body.append("--").append(changeset).append("--\r\n")
+            .append("--batch_test--\r\n");
+        return given()
+            .contentType("multipart/mixed; boundary=batch_test")
+            .body(body.toString().getBytes(StandardCharsets.UTF_8))
+            .when().post("/{account}/$batch", ACCOUNT);
     }
 }
