@@ -6,8 +6,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static io.restassured.RestAssured.given;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -156,6 +163,43 @@ public class TableServiceTest {
             .statusCode(200)
             .header("ETag", etag)
             .body("v", equalTo(1));
+    }
+
+    @Test
+    void concurrentInsertsOfOneKeyLetExactlyOneSucceed() throws Exception {
+        createTable("InsertRace");
+        int writers = 16;
+        ExecutorService pool = Executors.newFixedThreadPool(writers);
+        try {
+            for (int round = 0; round < 10; round++) {
+                String rowKey = "r" + round;
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<Integer>> statuses = new ArrayList<>();
+                for (int writer = 0; writer < writers; writer++) {
+                    String entity = "{\"PartitionKey\":\"p\",\"RowKey\":\"" + rowKey + "\",\"writer\":" + writer + "}";
+                    statuses.add(pool.submit(() -> {
+                        start.await();
+                        return insertEntity("InsertRace", entity).statusCode();
+                    }));
+                }
+                start.countDown();
+
+                int created = 0;
+                int conflicts = 0;
+                for (Future<Integer> status : statuses) {
+                    int code = status.get();
+                    if (code == 201) {
+                        created++;
+                    } else if (code == 409) {
+                        conflicts++;
+                    }
+                }
+                assertEquals(1, created, "round " + round + " created");
+                assertEquals(writers - 1, conflicts, "round " + round + " conflicts");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

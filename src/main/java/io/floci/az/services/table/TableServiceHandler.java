@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -57,6 +58,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final EmulatorConfig config;
+    private final Object writeLock = new Object();
 
 
     @Inject
@@ -102,7 +104,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
 
         // Feature 6: $batch routing
         if ("$batch".equals(path) && "POST".equalsIgnoreCase(method)) {
-            Response batchResponse = executeBatch(request);
+            Response batchResponse = mutate(() -> executeBatch(request));
             return Response.fromResponse(batchResponse)
                     .header("x-ms-request-id", UUID.randomUUID().toString())
                     .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
@@ -127,9 +129,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             if ("GET".equalsIgnoreCase(method)) {
                 response = listTables(request);
             } else if ("POST".equalsIgnoreCase(method)) {
-                response = createTable(request);
+                response = mutate(() -> createTable(request));
             } else if ("DELETE".equalsIgnoreCase(method)) {
-                response = deleteTable(request, extractTableNameFromTablesPath(path));
+                response = mutate(() -> deleteTable(request, extractTableNameFromTablesPath(path)));
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toODataResponse(501);
@@ -143,19 +145,20 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             } else {
                 tableName = path;
             }
+            String entityPart = pkRkPart;
 
             if ("POST".equalsIgnoreCase(method)) {
-                response = pkRkPart.isEmpty()
+                response = mutate(() -> entityPart.isEmpty()
                         ? insertEntity(request, tableName)
-                        : updateEntity(request, tableName, pkRkPart);
+                        : updateEntity(request, tableName, entityPart));
             } else if ("GET".equalsIgnoreCase(method)) {
                 response = pkRkPart.isEmpty()
                         ? queryEntities(request, tableName)
                         : getEntity(request, tableName, pkRkPart);
             } else if ("DELETE".equalsIgnoreCase(method)) {
-                response = deleteEntity(request, tableName, pkRkPart);
+                response = mutate(() -> deleteEntity(request, tableName, entityPart));
             } else if ("PUT".equalsIgnoreCase(method) || "MERGE".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) {
-                response = updateEntity(request, tableName, pkRkPart);
+                response = mutate(() -> updateEntity(request, tableName, entityPart));
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toODataResponse(501);
@@ -167,6 +170,17 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("DataServiceVersion", "3.0;")
                 .build();
+    }
+
+    /**
+     * Runs a write under the handler's write lock. Each write is a read-check-write against the
+     * store (existence for Insert, ETag for If-Match, a snapshot for batch rollback), and the store
+     * offers no compare-and-set, so concurrent writers must be serialised for those checks to hold.
+     */
+    private Response mutate(Supplier<Response> write) {
+        synchronized (writeLock) {
+            return write.get();
+        }
     }
 
     private Response getTableServiceProperties() {
