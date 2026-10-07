@@ -19,4 +19,4 @@
 - [ ] `./mvnw test` passes locally
 - [ ] New or updated integration test added
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
-- [ ] I have no more than 2 open, non-draft pull requests in this repository (maintainers and dependency bots are exempt).
+- [ ] I have no more than 2 open, non-draft pull requests and no more than 4 open pull requests in total (drafts included) in this repository (maintainers and dependency bots are exempt).

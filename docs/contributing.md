@@ -73,7 +73,7 @@ Azure Functions invocation tests.
 
 ## Pull Requests
 
-Please keep **no more than 2 open, non-draft pull requests** at a time. A bot labels your 3rd and later open PRs `over-pr-limit`, and starting 2026-10-08 it closes new ones from your 5th onward. See [CONTRIBUTING.md](https://github.com/floci-io/floci-az/blob/main/CONTRIBUTING.md#pull-request-limits-and-review-bandwidth) for details.
+Please keep **no more than 4 open pull requests**, drafts included, and **no more than 2 of them ready for review**. A bot turns a 3rd ready PR back into a draft and closes new ones opened while you already have 4 open. See [CONTRIBUTING.md](https://github.com/floci-io/floci-az/blob/main/CONTRIBUTING.md#pull-request-limits-and-review-bandwidth) for details.
 
 ## Releases
 
