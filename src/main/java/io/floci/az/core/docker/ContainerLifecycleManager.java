@@ -57,7 +57,6 @@ public class ContainerLifecycleManager {
     private final DockerClient dockerClient;
     private final ImageCacheService imageCacheService;
     private final ContainerDetector containerDetector;
-    private final PortAllocator portAllocator;
     private final EmulatorConfig config;
 
     /** Volumes whose shared-ownership root has already been initialised this process (run-once guard). */
@@ -70,12 +69,10 @@ public class ContainerLifecycleManager {
     public ContainerLifecycleManager(DockerClient dockerClient,
                                      ImageCacheService imageCacheService,
                                      ContainerDetector containerDetector,
-                                     PortAllocator portAllocator,
                                      EmulatorConfig config) {
         this.dockerClient = dockerClient;
         this.imageCacheService = imageCacheService;
         this.containerDetector = containerDetector;
-        this.portAllocator = portAllocator;
         this.config = config;
     }
 
@@ -896,10 +893,15 @@ public class ContainerLifecycleManager {
             Ports ports = new Ports();
             for (Map.Entry<Integer, Integer> entry : spec.portBindings().entrySet()) {
                 int containerPort = entry.getKey();
-                int hostPort = entry.getValue() == 0 ? portAllocator.allocateAny() : entry.getValue();
-                ports.bind(ExposedPort.tcp(containerPort), Ports.Binding.bindPort(hostPort));
-                LOG.debugv("Port binding: {0} -> {1}",
-                        String.valueOf(containerPort), String.valueOf(hostPort));
+                int hostPort = entry.getValue();
+                // 0 leaves the choice to Docker, which assigns a free host port atomically when it
+                // binds; the bound port is read back from the inspected container after start.
+                // Probing for one here would look in floci-az's own network namespace, not the
+                // Docker host's, and reserve nothing between the probe and the bind.
+                Ports.Binding binding = hostPort == 0 ? Ports.Binding.empty() : Ports.Binding.bindPort(hostPort);
+                ports.bind(ExposedPort.tcp(containerPort), binding);
+                LOG.debugv("Port binding: {0} -> {1}", String.valueOf(containerPort),
+                        hostPort == 0 ? "any" : String.valueOf(hostPort));
             }
             hostConfig.withPortBindings(ports);
         }

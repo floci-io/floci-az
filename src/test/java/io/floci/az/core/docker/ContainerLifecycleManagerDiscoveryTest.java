@@ -76,7 +76,6 @@ class ContainerLifecycleManagerDiscoveryTest {
                 dockerClient,
                 mock(ImageCacheService.class),
                 mock(ContainerDetector.class),
-                mock(PortAllocator.class),
                 mock(EmulatorConfig.class));
     }
 }
