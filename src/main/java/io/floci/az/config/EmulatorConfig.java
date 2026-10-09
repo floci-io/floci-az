@@ -144,6 +144,7 @@ public interface EmulatorConfig {
         EventGridConfig        eventGrid();
         ManagedIdentityConfig  managedIdentity();
         ContainerAppsConfig    containerApps();
+        PolicyConfig           policy();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -237,6 +238,15 @@ public interface EmulatorConfig {
         /** Secret value that the {@code X-IDENTITY-HEADER} header must carry. */
         @WithDefault("floci-az-msi-secret")
         String appServiceHeaderSecret();
+    }
+
+    /**
+     * Azure Policy control plane under Microsoft.Authorization: policy definitions, set definitions,
+     * assignments and exemptions. Control plane only; rules are stored, never evaluated.
+     */
+    interface PolicyConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

@@ -182,6 +182,9 @@ public class BannerLogger {
             sb.append(String.format("   %-9s [%s]  %s\n", "apim", "enabled ",
                     "Microsoft.ApiManagement (services, apis, products, subscriptions) + /{account}-apim/ gateway"));
         }
+        sb.append(String.format("   %-9s [%s]  %s\n", "policy",
+                config.services().policy().enabled() ? "enabled " : "disabled",
+                "Microsoft.Authorization policy (definitions, set definitions, assignments, exemptions)"));
         if (config.services().eventGrid().enabled()) {
             sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
         }
