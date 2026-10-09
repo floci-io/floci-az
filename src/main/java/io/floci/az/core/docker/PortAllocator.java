@@ -187,6 +187,11 @@ public class PortAllocator {
                     continue;
                 }
                 for (ContainerPort port : ports) {
+                    // Every sidecar binding is TCP. A UDP-only binding on the same number leaves
+                    // the TCP port free, so it must not take that port out of a small range.
+                    if ("udp".equalsIgnoreCase(port.getType())) {
+                        continue;
+                    }
                     Integer publicPort = port.getPublicPort();
                     if (publicPort != null) {
                         published.add(publicPort);

@@ -83,6 +83,31 @@ class PortAllocatorDockerAwareTest {
     }
 
     @Test
+    void aUdpOnlyBindingDoesNotTakeTheTcpPort() {
+        int base = freeBasePort();
+        PortAllocator allocator = new PortAllocator(dockerPublishing(
+                new ContainerPort().withPublicPort(base).withType("udp")));
+
+        // Sidecar bindings are TCP, so a sibling publishing UDP on base leaves base usable.
+        int allocated = allocator.allocate(base, base + 50);
+
+        assertEquals(base, allocated, "a UDP-only binding must not block the TCP port with the same number");
+        allocator.release(allocated);
+    }
+
+    @Test
+    void aTcpBindingStillTakesThePort() {
+        int base = freeBasePort();
+        PortAllocator allocator = new PortAllocator(dockerPublishing(
+                new ContainerPort().withPublicPort(base).withType("tcp")));
+
+        int allocated = allocator.allocate(base, base + 50);
+
+        assertNotEquals(base, allocated);
+        allocator.release(allocated);
+    }
+
+    @Test
     void claimOrZeroFallsBackForAPortAnotherContainerPublishes() {
         int port = freeBasePort();
         DockerClient dockerClient = dockerReporting(port);
@@ -109,15 +134,19 @@ class PortAllocatorDockerAwareTest {
     }
 
     private static DockerClient dockerReporting(int... publishedPorts) {
+        ContainerPort[] ports = new ContainerPort[publishedPorts.length];
+        for (int i = 0; i < publishedPorts.length; i++) {
+            ports[i] = new ContainerPort().withPublicPort(publishedPorts[i]);
+        }
+        return dockerPublishing(ports);
+    }
+
+    private static DockerClient dockerPublishing(ContainerPort... ports) {
         DockerClient dockerClient = mock(DockerClient.class);
         ListContainersCmd listCmd = mock(ListContainersCmd.class);
         when(dockerClient.listContainersCmd()).thenReturn(listCmd);
         when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
 
-        ContainerPort[] ports = new ContainerPort[publishedPorts.length];
-        for (int i = 0; i < publishedPorts.length; i++) {
-            ports[i] = new ContainerPort().withPublicPort(publishedPorts[i]);
-        }
         Container sibling = mock(Container.class);
         when(sibling.getPorts()).thenReturn(ports);
         when(listCmd.exec()).thenReturn(List.of(sibling));

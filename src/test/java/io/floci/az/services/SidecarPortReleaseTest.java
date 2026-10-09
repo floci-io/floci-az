@@ -17,12 +17,15 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -88,6 +91,32 @@ class SidecarPortReleaseTest {
 
         assertThrows(RuntimeException.class, () -> aks().startCluster(cluster()));
 
+        verify(portAllocator).release(HOST_PORT);
+    }
+
+    @Test
+    void aksReleasesItsPortWhenTheVolumeSetupFails() {
+        RuntimeException volumeFailure = new RuntimeException("volume create timed out");
+        doThrow(volumeFailure).when(lifecycleManager).ensureVolume(anyString());
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () -> aks().startCluster(cluster()));
+
+        assertSame(volumeFailure, thrown);
+        verify(lifecycleManager, never()).createAndStart(any());
+        verify(portAllocator).release(HOST_PORT);
+    }
+
+    @Test
+    void aksReleasesItsPortWhenTheFailedStartCleanupAlsoFails() {
+        RuntimeException startFailure = new RuntimeException("port is already allocated");
+        when(lifecycleManager.createAndStart(any())).thenThrow(startFailure);
+        when(lifecycleManager.volumeExists(anyString())).thenReturn(false);
+        doThrow(new RuntimeException("daemon gone")).when(lifecycleManager).removeVolume(anyString());
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () -> aks().startCluster(cluster()));
+
+        assertSame(startFailure, thrown);
+        assertEquals(1, thrown.getSuppressed().length);
         verify(portAllocator).release(HOST_PORT);
     }
 
