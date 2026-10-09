@@ -97,15 +97,6 @@ public class PortAllocator {
     }
 
     /**
-     * Marks a port as reserved without probing whether it is free. Used on restart to
-     * re-reserve host ports already held by surviving containers so the allocator does
-     * not hand them out again.
-     */
-    public synchronized void markReserved(int port) {
-        reserved.add(port);
-    }
-
-    /**
      * Reserves one specific port without probing whether it is free here. For ports a remote
      * Docker daemon binds: whether they're free on floci-az's own host says nothing about the
      * daemon, which rejects a taken port itself when the container binds it.
