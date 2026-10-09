@@ -24,6 +24,8 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -41,6 +43,11 @@ public class AksClusterManager {
     private final ContainerDetector containerDetector;
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
+
+    // Host port each running container was given by the allocator, keyed by container id, so it
+    // goes back to the pool when the container is removed. Without it the range drains over the
+    // process lifetime.
+    private final Map<String, Integer> hostPorts = new ConcurrentHashMap<>();
 
     @Inject
     public AksClusterManager(ContainerBuilder containerBuilder,
@@ -65,6 +72,7 @@ public class AksClusterManager {
 
         LOG.infov("Starting k3s container for AKS cluster: {0} using image {1}", cluster.getName(), image);
 
+        releaseHostPort(cluster.getContainerId());
         int hostPort = portAllocator.allocate(
                 config.services().aks().apiServerBasePort(),
                 config.services().aks().apiServerMaxPort());
@@ -102,8 +110,10 @@ public class AksClusterManager {
             if (volumeCreatedByThisStart) {
                 lifecycleManager.removeVolume(volumeName);
             }
+            portAllocator.release(hostPort);
             throw e;
         }
+        hostPorts.put(info.containerId(), hostPort);
         cluster.setContainerId(info.containerId());
 
         if (lifecycleManager.publishedEndpoints()) {
@@ -196,7 +206,18 @@ public class AksClusterManager {
         }
         lifecycleManager.stopAndRemove(cluster.getContainerId(), null);
         lifecycleManager.removeVolume(containerName(cluster));
+        releaseHostPort(cluster.getContainerId());
         LOG.infov("Stopped k3s container for AKS cluster {0}", cluster.getName());
+    }
+
+    private void releaseHostPort(String containerId) {
+        if (containerId == null) {
+            return;
+        }
+        Integer hostPort = hostPorts.remove(containerId);
+        if (hostPort != null) {
+            portAllocator.release(hostPort);
+        }
     }
 
     private String containerName(ManagedCluster cluster) {

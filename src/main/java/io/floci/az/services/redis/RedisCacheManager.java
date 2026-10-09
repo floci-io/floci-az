@@ -24,6 +24,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -41,6 +43,11 @@ public class RedisCacheManager {
     private final ContainerDetector containerDetector;
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
+
+    // Host port each running container was given by the allocator, keyed by container id, so it
+    // goes back to the pool when the container is removed. Without it the range drains over the
+    // process lifetime.
+    private final Map<String, Integer> hostPorts = new ConcurrentHashMap<>();
 
     @Inject
     public RedisCacheManager(ContainerBuilder containerBuilder,
@@ -67,6 +74,7 @@ public class RedisCacheManager {
 
         LOG.infov("Starting Redis container for cache: {0} using image {1}", cache.getName(), image);
 
+        releaseHostPort(cache.getContainerId());
         int hostPort = portAllocator.allocate(redisConfig.basePort(), redisConfig.maxPort());
 
         lifecycleManager.removeIfExists(containerName);
@@ -87,7 +95,14 @@ public class RedisCacheManager {
                 .withLogRotation()
                 .build();
 
-        ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
+        ContainerLifecycleManager.ContainerInfo info;
+        try {
+            info = lifecycleManager.createAndStart(spec);
+        } catch (RuntimeException e) {
+            portAllocator.release(hostPort);
+            throw e;
+        }
+        hostPorts.put(info.containerId(), hostPort);
         cache.setContainerId(info.containerId());
 
         ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REDIS_PORT);
@@ -177,7 +192,18 @@ public class RedisCacheManager {
             return;
         }
         lifecycleManager.stopAndRemove(cache.getContainerId(), null);
+        releaseHostPort(cache.getContainerId());
         LOG.infov("Stopped Redis container for cache {0}", cache.getName());
+    }
+
+    private void releaseHostPort(String containerId) {
+        if (containerId == null) {
+            return;
+        }
+        Integer hostPort = hostPorts.remove(containerId);
+        if (hostPort != null) {
+            portAllocator.release(hostPort);
+        }
     }
 
     private String containerName(RedisCache cache) {
