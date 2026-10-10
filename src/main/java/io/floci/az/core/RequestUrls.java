@@ -30,16 +30,31 @@ public final class RequestUrls {
     }
 
     /**
-     * Base URL as seen by the caller: Host header when present, configured base URL otherwise.
-     * The scheme comes from {@link #resolveScheme}, so a URL generated behind a TLS-terminating
-     * proxy keeps the client's https rather than the plaintext proxy-to-emulator hop. Clients that
-     * refuse to send credentials over http, the az CLI among them, cannot follow a downgraded URL.
+     * The {@code host[:port]} the caller addressed, or {@code null} when the request carries none.
+     * The authority captured from the transport comes first: HTTP/2 sends it as {@code :authority}
+     * and no {@code Host} header, so reading only {@code Host} loses it. Requests built without a
+     * transport fall back to the {@code Host} header.
+     */
+    public static String resolveAuthority(AzureRequest request) {
+        if (request.authority() != null && !request.authority().isBlank()) {
+            return request.authority();
+        }
+        String host = request.headers() == null ? null : request.headers().getHeaderString("Host");
+        return host == null || host.isBlank() ? null : host;
+    }
+
+    /**
+     * Base URL as seen by the caller: the request authority when present, configured base URL
+     * otherwise. The scheme comes from {@link #resolveScheme}, so a URL generated behind a
+     * TLS-terminating proxy keeps the client's https rather than the plaintext proxy-to-emulator
+     * hop. Clients that refuse to send credentials over http, the az CLI among them, cannot follow
+     * a downgraded URL.
      */
     public static String resolveBaseUrl(AzureRequest request, EmulatorConfig config) {
-        String host = request.headers() == null ? null : request.headers().getHeaderString("Host");
-        if (host == null || host.isBlank()) {
+        String authority = resolveAuthority(request);
+        if (authority == null) {
             return config.effectiveBaseUrl();
         }
-        return resolveScheme(request) + "://" + host;
+        return resolveScheme(request) + "://" + authority;
     }
 }

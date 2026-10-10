@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
@@ -173,7 +174,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
      * the client just wrote to.
      */
     private String resourceLocation(AzureRequest request, String armId) {
-        String host = request.headers().getHeaderString("Host");
+        String host = RequestUrls.resolveAuthority(request);
         if (host == null || host.isBlank()) host = "localhost:" + config.port();
         String scheme = request.headers().getHeaderString("X-Forwarded-Proto");
         if (scheme == null || scheme.isBlank()) scheme = request.secure() ? "https" : "http";

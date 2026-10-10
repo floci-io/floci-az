@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
@@ -212,10 +213,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private Response getAccountInfo(AzureRequest req) {
         String account = req.accountName();
 
-        // Derive the scheme+host from the Host header and whether the connection is TLS.
+        // Derive the scheme+host from the request authority and whether the connection is TLS.
         // The Java Cosmos SDK validates that the endpoint in writableLocations uses the
         // same transport it connected with.
-        String host   = req.headers().getHeaderString("Host");
+        String host   = RequestUrls.resolveAuthority(req);
         if (host == null || host.isBlank()) host = "localhost:4577";
         String scheme = req.headers().getHeaderString("X-Forwarded-Proto");
         if (scheme == null || scheme.isBlank()) {

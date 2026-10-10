@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
@@ -323,7 +324,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private String operationLocation(AzureRequest request,
                                      SqlProvisioningService.SqlProvisioningOperation operation) {
-        String host = request.headers().getHeaderString("Host");
+        String host = RequestUrls.resolveAuthority(request);
         if (host == null || host.isBlank()) {
             host = "localhost:" + config.port();
         }
