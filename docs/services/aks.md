@@ -93,6 +93,8 @@ kubectl --kubeconfig ~/.kube/my-cluster.yaml get nodes
 
 In real mode the kubeconfig points to the live k3s API server. In mocked mode it points to `https://localhost:6443` with `insecure-skip-tls-verify: true`.
 
+In real mode the credential operations answer `409 OperationNotAllowed` until the cluster reaches `Succeeded` and its kubeconfig has been extracted from k3s (for example while it is `Creating`, or after it `Failed`), rather than returning a kubeconfig that cannot reach a server.
+
 ### 4: Delete the cluster
 
 ```bash

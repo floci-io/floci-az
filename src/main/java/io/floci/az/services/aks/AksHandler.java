@@ -344,6 +344,9 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
         ManagedCluster cluster = found.get();
         String kubeconfig = cluster.getKubeconfig();
         if (kubeconfig == null || kubeconfig.isBlank()) {
+            if (!config.services().aks().mocked()) {
+                return credentialsNotAvailable(cluster);
+            }
             kubeconfig = mockKubeconfig(cluster);
         }
         Map<String, Object> result = new LinkedHashMap<>();
@@ -351,6 +354,19 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 "name", "clusterAdmin",
                 "value", kubeconfig)));
         return Response.ok(result).type("application/json").build();
+    }
+
+    /**
+     * Real mode only: the k3s kubeconfig has not been extracted, because the cluster is still
+     * {@code Creating}, it {@code Failed}, or extraction failed. Answering with a synthetic
+     * kubeconfig would hand the caller a server and token that do not work, so report the
+     * cluster state instead, with the code AKS uses for operations its current state forbids.
+     */
+    private static Response credentialsNotAvailable(ManagedCluster cluster) {
+        return ArmErrors.error(409, "OperationNotAllowed",
+                "Managed cluster '" + cluster.getName() + "' is in Provisioning State("
+                        + cluster.getProvisioningState() + "), listing credentials cannot be performed"
+                        + " because the cluster has no kubeconfig yet.");
     }
 
     private Response handleListAgentPools(String sub, String rg, String clusterName) {
