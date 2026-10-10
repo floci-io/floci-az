@@ -51,6 +51,7 @@ public final class SignedIdentifiers {
             String expiry = null;
             String permission = null;
             boolean hasPolicy = false;
+            boolean inEntry = false;
             while (r.hasNext()) {
                 int event = r.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
@@ -64,6 +65,10 @@ public final class SignedIdentifiers {
                     }
                     switch (name) {
                         case ENTRY -> {
+                            if (inEntry) {
+                                throw new XMLStreamException(ENTRY + " elements must not be nested");
+                            }
+                            inEntry = true;
                             id = null;
                             start = null;
                             expiry = null;
@@ -82,6 +87,7 @@ public final class SignedIdentifiers {
                             ? new AccessPolicy(start, expiry, permission)
                             : null;
                     identifiers.add(new SignedIdentifier(id, policy));
+                    inEntry = false;
                 }
             }
             if (!sawRoot) {

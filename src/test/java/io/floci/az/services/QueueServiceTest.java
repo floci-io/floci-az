@@ -482,6 +482,33 @@ public class QueueServiceTest {
     }
 
     @Test
+    void setQueueAclWithNestedSignedIdentifierIsRejectedAndKeepsStoredPolicies() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(204);
+
+        given()
+            .contentType("application/xml")
+            .body("<SignedIdentifiers><SignedIdentifier><Id>outer</Id>"
+                + "<SignedIdentifier><Id>inner</Id></SignedIdentifier>"
+                + "</SignedIdentifier></SignedIdentifiers>")
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body("SignedIdentifiers.SignedIdentifier.size()", equalTo(1))
+            .body("SignedIdentifiers.SignedIdentifier[0].Id", equalTo("policy-0"));
+    }
+
+    @Test
     void queueAclOnMissingQueueReturnsQueueNotFoundAndCreatesNothing() {
         given()
             .contentType("application/xml")

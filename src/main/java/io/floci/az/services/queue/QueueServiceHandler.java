@@ -60,7 +60,8 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private final EmulatorConfig config;
     // Set Queue Metadata and Set Queue ACL each rewrite one half of the queue record; serialise them
-    // so neither drops the other's half.
+    // so neither drops the other's half. Create and delete take the same lock, so a rewrite cannot
+    // bring back a queue deleted between its read and its write.
     private final Object queueRecordLock = new Object();
 
 
@@ -202,16 +203,20 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response createQueue(AzureRequest request, String queueName) {
         String key = nsKey(request.accountName(), queueName);
-        if (store.get(key).isPresent()) {
-            return Response.status(Response.Status.NO_CONTENT).build();
+        synchronized (queueRecordLock) {
+            if (store.get(key).isPresent()) {
+                return Response.status(Response.Status.NO_CONTENT).build();
+            }
+            store.put(key,
+                    new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
         }
-        store.put(key,
-                new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
         return Response.status(Response.Status.CREATED).build();
     }
 
     private Response deleteQueue(AzureRequest request, String queueName) {
-        store.delete(nsKey(request.accountName(), queueName));
+        synchronized (queueRecordLock) {
+            store.delete(nsKey(request.accountName(), queueName));
+        }
         String msgPrefix = request.accountName() + "/" + queueName + "/";
         store.keys().stream()
                 .filter(k -> k.startsWith(msgPrefix))
@@ -670,8 +675,10 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     /** Creates the queue if it does not exist; an existing queue keeps its metadata and access policies. */
     public void ensureQueue(String accountName, String queueName) {
         String key = nsKey(accountName, queueName);
-        if (store.get(key).isEmpty()) {
-            store.put(key, NS_SENTINEL);
+        synchronized (queueRecordLock) {
+            if (store.get(key).isEmpty()) {
+                store.put(key, NS_SENTINEL);
+            }
         }
     }
 
