@@ -73,6 +73,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     private static final String COMPUTE_MARKER = "/providers/Microsoft.Compute/";
     private static final String API_VERSION = "2024-11-01";
     private static final String TYPE = "Microsoft.Compute/virtualMachines";
+    private static final String FAILED = "Failed";
 
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
@@ -215,18 +216,10 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
                 if (isNew || vm.getPowerState() == null) {
                     vm.setPowerState(PowerState.RUNNING.code());
                 }
-            } else if (isNew) {
+            } else if (isNew || FAILED.equals(vm.getProvisioningState())) {
                 // Real mode: launch a backing container; the readiness poller flips the VM to
-                // Succeeded once it is running. Docker failures degrade to mocked-style state.
-                vm.setProvisioningState("Creating");
-                vm.setPowerState(PowerState.STARTING.code());
-                try {
-                    containerManager.startVm(vm);
-                } catch (Exception e) {
-                    LOG.errorf(e, "Failed to start container for VM %s; degrading to mocked state", vmName);
-                    vm.setProvisioningState("Succeeded");
-                    vm.setPowerState(PowerState.RUNNING.code());
-                }
+                // Succeeded once it is running. A PUT on a Failed VM retries provisioning.
+                provisionContainer(vm);
             } else {
                 // Real mode update: keep the existing container and power state.
                 vm.setProvisioningState("Succeeded");
@@ -240,6 +233,24 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         } catch (Exception e) {
             LOG.errorf(e, "Error creating/updating VM %s", vmName);
             return badRequest("Invalid request: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Starts the backing container. A start failure leaves the VM {@code Failed} with no power
+     * state, as the other container-backed services do, so pollers on the create stop with an
+     * error instead of reporting a VM that does not exist as running.
+     */
+    private void provisionContainer(VirtualMachine vm) {
+        vm.setProvisioningState("Creating");
+        vm.setPowerState(PowerState.STARTING.code());
+        try {
+            containerManager.startVm(vm);
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to start container for VM %s", vm.getName());
+            vm.setProvisioningState(FAILED);
+            vm.setPowerState(null);
+            vm.setContainerId(null);
         }
     }
 
@@ -374,18 +385,27 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     private Map<String, Object> instanceViewBody(VirtualMachine vm) {
-        PowerState power = PowerState.fromCode(vm.getPowerState());
         String computerName = osProfileComputerName(vm);
 
         List<Map<String, Object>> statuses = new ArrayList<>();
-        statuses.add(Map.of(
-                "code", "ProvisioningState/" + lower(vm.getProvisioningState()),
-                "level", "Info",
-                "displayStatus", "Provisioning succeeded"));
-        statuses.add(Map.of(
-                "code", power.statusCode(),
-                "level", "Info",
-                "displayStatus", power.displayStatus()));
+        if (FAILED.equals(vm.getProvisioningState())) {
+            // A VM whose provisioning failed has no power state to report.
+            statuses.add(Map.of(
+                    "code", "ProvisioningState/failed",
+                    "level", "Error",
+                    "displayStatus", "Provisioning failed",
+                    "message", "The backing container for the virtual machine could not be started."));
+        } else {
+            PowerState power = PowerState.fromCode(vm.getPowerState());
+            statuses.add(Map.of(
+                    "code", "ProvisioningState/" + lower(vm.getProvisioningState()),
+                    "level", "Info",
+                    "displayStatus", "Provisioning succeeded"));
+            statuses.add(Map.of(
+                    "code", power.statusCode(),
+                    "level", "Info",
+                    "displayStatus", power.displayStatus()));
+        }
 
         Map<String, Object> view = new LinkedHashMap<>();
         if (computerName != null) {
