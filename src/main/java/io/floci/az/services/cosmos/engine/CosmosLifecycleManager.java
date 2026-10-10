@@ -5,6 +5,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
+import io.floci.az.core.docker.EphemeralPostgres;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -169,6 +170,8 @@ public class CosmosLifecycleManager {
             builder.withEnv("POSTGRES_PASSWORD", "mypassword")
                    .withEnv("POSTGRES_USER", "citus")
                    .withEnv("POSTGRES_DB", "citus");
+            // No data volume: the engine container is removed before create and on shutdown.
+            EphemeralPostgres.apply(builder);
         }
 
         // ScyllaDB needs smp flag for single-core dev mode
