@@ -100,7 +100,75 @@ public class TableServiceTest {
             .then()
             .statusCode(404)
             .contentType(containsString("json"))
-            .body(containsString("ResourceNotFound"));
+            .body(containsString("TableNotFound"));
+    }
+
+    @Test
+    void entityOperationsOnMissingTableReturnTableNotFound() {
+        insertEntity("NeverCreated", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}")
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "TableNotFound")
+            .contentType(containsString("odata=minimalmetadata"))
+            .body("'odata.error'.code", equalTo("TableNotFound"))
+            .body("'odata.error'.message.value", equalTo("The table specified does not exist."));
+
+        given()
+            .when().get("/{account}/NeverCreated()", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+        given()
+            .when().get("/{account}/NeverCreated(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+        given()
+            .contentType("application/json")
+            .body("{\"v\":1}")
+            .when().put("/{account}/NeverCreated(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+        given()
+            .contentType("application/json")
+            .body("{\"v\":1}")
+            .when().request("MERGE", "/{account}/NeverCreated(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+        given()
+            .header("If-Match", "*")
+            .when().delete("/{account}/NeverCreated(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(404).body("'odata.error'.code", equalTo("TableNotFound"));
+
+        // Nothing was written for the missing table, so creating it afterwards starts empty.
+        createTable("NeverCreated");
+        given()
+            .when().get("/{account}/NeverCreated()", ACCOUNT)
+            .then().statusCode(200).body("value.size()", equalTo(0));
+    }
+
+    @Test
+    void entityOperationsAfterDeleteTableReturnTableNotFound() {
+        createTable("Dropped");
+        insertEntity("Dropped", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}").then().statusCode(201);
+        given()
+            .when().delete("/{account}/Tables('Dropped')", ACCOUNT)
+            .then().statusCode(204);
+
+        insertEntity("Dropped", "{\"PartitionKey\":\"p\",\"RowKey\":\"r2\"}")
+            .then().statusCode(404).header("x-ms-error-code", "TableNotFound");
+        given()
+            .when().get("/{account}/Dropped()", ACCOUNT)
+            .then().statusCode(404).header("x-ms-error-code", "TableNotFound");
+    }
+
+    @Test
+    void batchOnMissingTableFailsWithTableNotFound() {
+        submitBatch(batchOperation("POST", "NoBatchTable", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}"))
+            .then()
+            .statusCode(202)
+            .body(containsString("HTTP/1.1 404 Not Found"))
+            .body(containsString("TableNotFound"))
+            .body(containsString("\"value\":\"0:The table specified does not exist.\""));
+
+        createTable("NoBatchTable");
+        given()
+            .when().get("/{account}/NoBatchTable()", ACCOUNT)
+            .then().statusCode(200).body("value.size()", equalTo(0));
     }
 
     @Test

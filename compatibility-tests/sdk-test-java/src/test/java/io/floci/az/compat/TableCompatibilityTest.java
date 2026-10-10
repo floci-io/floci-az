@@ -1,5 +1,6 @@
 package io.floci.az.compat;
 
+import com.azure.core.exception.HttpResponseException;
 import com.azure.data.tables.TableClient;
 import com.azure.data.tables.TableServiceClient;
 import com.azure.data.tables.TableServiceClientBuilder;
@@ -146,6 +147,23 @@ class TableCompatibilityTest {
         assertEquals("original", table.getEntity("p1", "r1").getProperty("Value"));
 
         client.deleteTable(name);
+    }
+
+    @Test
+    @DisplayName("entity insert and query on a missing table → TableServiceException (404 TableNotFound)")
+    void entityOperationsOnMissingTable() {
+        TableClient table = client.getTableClient(tableName());
+
+        TableServiceException insert = assertThrows(TableServiceException.class,
+            () -> table.createEntity(new TableEntity("p1", "r1")));
+        assertEquals(404, insert.getResponse().getStatusCode());
+        assertEquals(TableErrorCode.TABLE_NOT_FOUND, insert.getValue().getErrorCode());
+
+        // listEntities surfaces the SDK's internal JSON error type rather than TableServiceException.
+        HttpResponseException query = assertThrows(HttpResponseException.class,
+            () -> table.listEntities().stream().toList());
+        assertEquals(404, query.getResponse().getStatusCode());
+        assertEquals("TableNotFound", query.getResponse().getHeaderValue("x-ms-error-code"));
     }
 
     @Test

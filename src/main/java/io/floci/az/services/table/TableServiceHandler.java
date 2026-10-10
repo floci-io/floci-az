@@ -149,22 +149,10 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             } else {
                 tableName = path;
             }
-            String entityPart = pkRkPart;
-
             if ("acl".equals(query.get("comp")) && !path.contains("(")) {
                 response = handleTableAcl(request, tableName);
-            } else if ("POST".equalsIgnoreCase(method)) {
-                response = mutate(() -> entityPart.isEmpty()
-                        ? insertEntity(request, tableName)
-                        : updateEntity(request, tableName, entityPart));
-            } else if ("GET".equalsIgnoreCase(method)) {
-                response = pkRkPart.isEmpty()
-                        ? queryEntities(request, tableName)
-                        : getEntity(request, tableName, pkRkPart);
-            } else if ("DELETE".equalsIgnoreCase(method)) {
-                response = mutate(() -> deleteEntity(request, tableName, entityPart));
-            } else if ("PUT".equalsIgnoreCase(method) || "MERGE".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) {
-                response = mutate(() -> updateEntity(request, tableName, entityPart));
+            } else if (isEntityMethod(method)) {
+                response = handleEntity(request, tableName, pkRkPart);
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toODataResponse(501);
@@ -176,6 +164,48 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("DataServiceVersion", "3.0;")
                 .build();
+    }
+
+    private static boolean isEntityMethod(String method) {
+        return switch (method.toUpperCase(Locale.ROOT)) {
+            case "POST", "GET", "DELETE", "PUT", "MERGE", "PATCH" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Entity operations against a table that does not exist answer 404 TableNotFound, as Azure does.
+     * Writes check inside the write lock so a concurrent Delete Table cannot slip between the check
+     * and the write.
+     */
+    private Response handleEntity(AzureRequest request, String tableName, String pkRkPart) {
+        String method = request.method();
+        if ("GET".equalsIgnoreCase(method)) {
+            if (!tableExists(request.accountName(), tableName)) {
+                return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            return pkRkPart.isEmpty()
+                    ? queryEntities(request, tableName)
+                    : getEntity(request, tableName, pkRkPart);
+        }
+        return mutate(() -> {
+            if (!tableExists(request.accountName(), tableName)) {
+                return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            if ("POST".equalsIgnoreCase(method)) {
+                return pkRkPart.isEmpty()
+                        ? insertEntity(request, tableName)
+                        : updateEntity(request, tableName, pkRkPart);
+            }
+            if ("DELETE".equalsIgnoreCase(method)) {
+                return deleteEntity(request, tableName, pkRkPart);
+            }
+            return updateEntity(request, tableName, pkRkPart);
+        });
+    }
+
+    private boolean tableExists(String accountName, String tableName) {
+        return store.get(nsKey(accountName, tableName)).isPresent();
     }
 
     /**
@@ -876,6 +906,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
      */
     private Response executeBatchOp(String accountName, String tableName, String method,
                                      String pkRkPart, Map<String, Object> entityBody, String ifMatch) {
+        if (!tableExists(accountName, tableName)) {
+            return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
         if ("POST".equalsIgnoreCase(method) || ("PUT".equalsIgnoreCase(method) && pkRkPart.isEmpty())) {
             // INSERT
             return insertEntityDirect(accountName, tableName, entityBody);

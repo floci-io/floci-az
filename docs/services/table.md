@@ -13,7 +13,9 @@ authentication.
 
 - **Tables**: Create, Delete, List; duplicate create returns `409 TableAlreadyExists`
 - **Entities**: Insert, Update (replace/merge), Upsert, Delete, Get by
-  `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape
+  `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape, and
+  any entity operation or `$batch` change against a table that was never created (or was deleted)
+  returns `404 TableNotFound`
 - **Query**: `$filter` OData expressions: equality on `PartitionKey`/`RowKey`, numeric
   comparisons, and combinations; `$select` projects a subset of properties
 - **Pagination**: large result sets are paged with continuation tokens

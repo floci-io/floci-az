@@ -101,6 +101,18 @@ def test_table_already_exists(table_service_client):
     table_service_client.delete_table(name)
 
 
+def test_entity_operations_on_missing_table(table_service_client):
+    table = table_service_client.get_table_client(make_table_name())
+
+    with pytest.raises(ResourceNotFoundError) as created:
+        table.create_entity({"PartitionKey": "p1", "RowKey": "r1"})
+    assert created.value.response.headers["x-ms-error-code"] == "TableNotFound"
+
+    with pytest.raises(ResourceNotFoundError) as queried:
+        list(table.list_entities())
+    assert queried.value.response.headers["x-ms-error-code"] == "TableNotFound"
+
+
 # --- Query / filter tests ---
 
 def test_filter_by_partition_key(table_service_client):
