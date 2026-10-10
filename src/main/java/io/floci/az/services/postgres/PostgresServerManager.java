@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.EphemeralPostgres;
 import io.floci.az.core.docker.PortAllocator;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -85,7 +86,7 @@ public class PostgresServerManager {
                 + "to an OS-assigned host port for server=%s", configuredPort, entry.serverName());
         }
 
-        ContainerSpec spec = containerBuilder.newContainer(image)
+        ContainerSpec spec = EphemeralPostgres.apply(containerBuilder.newContainer(image)
             .withName(containerName)
             .withLabels(ContainerStorageHelper.resourceIdentityLabels("postgres", entry.serverName(),
                 entry.subscriptionId(), entry.resourceGroupName(), entry.location()))
@@ -94,7 +95,7 @@ public class PostgresServerManager {
             .withEnv("POSTGRES_USER", entry.administratorLogin())
             .withEnv("POSTGRES_PASSWORD", entry.administratorLoginPassword())
             .withEnv("POSTGRES_DB", "postgres")
-            .withLogRotation()
+            .withLogRotation())   // no data volume: the container is removed before create and on stop
             .build();
 
         // Everything from here to the hand-off is inside the claim's ownership window: if it ends
