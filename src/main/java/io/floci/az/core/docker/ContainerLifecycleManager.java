@@ -57,7 +57,6 @@ public class ContainerLifecycleManager {
     private final DockerClient dockerClient;
     private final ImageCacheService imageCacheService;
     private final ContainerDetector containerDetector;
-    private final PortAllocator portAllocator;
     private final EmulatorConfig config;
 
     /** Volumes whose shared-ownership root has already been initialised this process (run-once guard). */
@@ -70,12 +69,10 @@ public class ContainerLifecycleManager {
     public ContainerLifecycleManager(DockerClient dockerClient,
                                      ImageCacheService imageCacheService,
                                      ContainerDetector containerDetector,
-                                     PortAllocator portAllocator,
                                      EmulatorConfig config) {
         this.dockerClient = dockerClient;
         this.imageCacheService = imageCacheService;
         this.containerDetector = containerDetector;
-        this.portAllocator = portAllocator;
         this.config = config;
     }
 
@@ -481,24 +478,26 @@ public class ContainerLifecycleManager {
 
     /**
      * Reads the host port a container's internal port is published on, independent of
-     * whether floci-az itself runs inside a container. Unlike {@link #resolveEndpoint} —
-     * which switches to container-IP + internal port in container mode — this always
-     * reads the port binding, for URIs consumed by the host-side Docker daemon.
+     * whether floci-az itself runs inside a container. Unlike {@link #resolveEndpoint}, which
+     * switches to container IP and internal port in container mode, this always reads the port
+     * binding, for URIs consumed by the host-side Docker daemon.
      */
     private static OptionalInt readPublishedHostPort(InspectContainerResponse inspect, int containerPort) {
-        Ports ports = inspect.getNetworkSettings().getPorts();
-        if (ports != null) {
-            Ports.Binding[] binding = ports.getBindings().get(ExposedPort.tcp(containerPort));
-            if (binding != null && binding.length > 0) {
-                try {
-                    return OptionalInt.of(Integer.parseInt(binding[0].getHostPortSpec()));
-                } catch (NumberFormatException e) {
-                    LOG.debugv("Unparseable host port binding for container port {0}: {1}",
-                            String.valueOf(containerPort), binding[0].getHostPortSpec());
-                }
-            }
+        if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getPorts() == null) {
+            return OptionalInt.empty();
         }
-        return OptionalInt.empty();
+        Map<ExposedPort, Ports.Binding[]> bindings = inspect.getNetworkSettings().getPorts().getBindings();
+        Ports.Binding[] binding = bindings == null ? null : bindings.get(ExposedPort.tcp(containerPort));
+        if (binding == null || binding.length == 0 || binding[0].getHostPortSpec() == null) {
+            return OptionalInt.empty();
+        }
+        try {
+            return OptionalInt.of(Integer.parseInt(binding[0].getHostPortSpec()));
+        } catch (NumberFormatException e) {
+            LOG.debugv("Unparseable host port binding for container port {0}: {1}",
+                    String.valueOf(containerPort), binding[0].getHostPortSpec());
+            return OptionalInt.empty();
+        }
     }
 
     /**
@@ -894,10 +893,15 @@ public class ContainerLifecycleManager {
             Ports ports = new Ports();
             for (Map.Entry<Integer, Integer> entry : spec.portBindings().entrySet()) {
                 int containerPort = entry.getKey();
-                int hostPort = entry.getValue() == 0 ? portAllocator.allocateAny() : entry.getValue();
-                ports.bind(ExposedPort.tcp(containerPort), Ports.Binding.bindPort(hostPort));
-                LOG.debugv("Port binding: {0} -> {1}",
-                        String.valueOf(containerPort), String.valueOf(hostPort));
+                int hostPort = entry.getValue();
+                // 0 leaves the choice to Docker, which assigns a free host port atomically when it
+                // binds; the bound port is read back from the inspected container after start.
+                // Probing for one here would look in floci-az's own network namespace, not the
+                // Docker host's, and reserve nothing between the probe and the bind.
+                Ports.Binding binding = hostPort == 0 ? Ports.Binding.empty() : Ports.Binding.bindPort(hostPort);
+                ports.bind(ExposedPort.tcp(containerPort), binding);
+                LOG.debugv("Port binding: {0} -> {1}", String.valueOf(containerPort),
+                        hostPort == 0 ? "any" : String.valueOf(hostPort));
             }
             hostConfig.withPortBindings(ports);
         }
@@ -941,7 +945,7 @@ public class ContainerLifecycleManager {
     private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort,
                                          String preferredNetwork) {
         if (publishedEndpoints()) {
-            OptionalInt hostPort = publishedHostPort(inspect, containerPort);
+            OptionalInt hostPort = readPublishedHostPort(inspect, containerPort);
             if (hostPort.isPresent()) {
                 return new EndpointInfo(daemonHost(), hostPort.getAsInt());
             }
@@ -1034,22 +1038,6 @@ public class ContainerLifecycleManager {
             }
         }
         return "localhost";
-    }
-
-    private static OptionalInt publishedHostPort(InspectContainerResponse inspect, int containerPort) {
-        if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getPorts() == null) {
-            return OptionalInt.empty();
-        }
-        Map<ExposedPort, Ports.Binding[]> bindings = inspect.getNetworkSettings().getPorts().getBindings();
-        Ports.Binding[] binding = bindings == null ? null : bindings.get(ExposedPort.tcp(containerPort));
-        if (binding == null || binding.length == 0 || binding[0].getHostPortSpec() == null) {
-            return OptionalInt.empty();
-        }
-        try {
-            return OptionalInt.of(Integer.parseInt(binding[0].getHostPortSpec()));
-        } catch (NumberFormatException e) {
-            return OptionalInt.empty();
-        }
     }
 
     private String resolveContainerIp(InspectContainerResponse inspect, String preferredNetwork) {

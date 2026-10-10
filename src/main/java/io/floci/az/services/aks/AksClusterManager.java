@@ -24,6 +24,8 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -41,6 +43,11 @@ public class AksClusterManager {
     private final ContainerDetector containerDetector;
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
+
+    // Host port each running container was given by the allocator, keyed by container id, so it
+    // goes back to the pool when the container is removed. Without it the range drains over the
+    // process lifetime.
+    private final Map<String, Integer> hostPorts = new ConcurrentHashMap<>();
 
     @Inject
     public AksClusterManager(ContainerBuilder containerBuilder,
@@ -65,45 +72,55 @@ public class AksClusterManager {
 
         LOG.infov("Starting k3s container for AKS cluster: {0} using image {1}", cluster.getName(), image);
 
+        releaseHostPort(cluster.getContainerId());
         int hostPort = portAllocator.allocate(
                 config.services().aks().apiServerBasePort(),
                 config.services().aks().apiServerMaxPort());
 
-        lifecycleManager.removeIfExists(containerName);
-
         // Named volume for k3s data — prevents macOS APFS chmod(EINVAL) that crashes kine.
         // Created explicitly (not implicitly by the mount) so it carries the emulator labels.
         String volumeName = containerName;
-        boolean volumeCreatedByThisStart = !lifecycleManager.volumeExists(volumeName);
-        lifecycleManager.ensureVolume(volumeName);
-        ContainerSpec spec = containerBuilder.newContainer(image)
-                .withName(containerName)
-                .withLabels(ContainerStorageHelper.resourceIdentityLabels("aks", cluster.getName(),
-                        cluster.getSubscriptionId(), cluster.getResourceGroup(), cluster.getLocation()))
-                .withCmd(k3sServerArgs())
-                .withEnv("K3S_KUBECONFIG_MODE", "644")
-                .withPortBinding(K3S_API_SERVER_PORT, hostPort)
-                .withNamedVolume(volumeName, "/var/lib/rancher/k3s")
-                .withDockerNetwork(config.services().dockerNetwork())
-                .withPrivileged(true)
-                .withLogRotation()
-                .build();
-
+        boolean volumeCreatedByThisStart = false;
         ContainerLifecycleManager.ContainerInfo info;
         try {
+            // Everything after the allocation runs inside this block, so a failure in the
+            // stale-container cleanup or the volume setup also gives the port back.
+            lifecycleManager.removeIfExists(containerName);
+            volumeCreatedByThisStart = !lifecycleManager.volumeExists(volumeName);
+            lifecycleManager.ensureVolume(volumeName);
+            ContainerSpec spec = containerBuilder.newContainer(image)
+                    .withName(containerName)
+                    .withLabels(ContainerStorageHelper.resourceIdentityLabels("aks", cluster.getName(),
+                            cluster.getSubscriptionId(), cluster.getResourceGroup(), cluster.getLocation()))
+                    .withCmd(k3sServerArgs())
+                    .withEnv("K3S_KUBECONFIG_MODE", "644")
+                    .withPortBinding(K3S_API_SERVER_PORT, hostPort)
+                    .withNamedVolume(volumeName, "/var/lib/rancher/k3s")
+                    .withDockerNetwork(config.services().dockerNetwork())
+                    .withPrivileged(true)
+                    .withLogRotation()
+                    .build();
             info = lifecycleManager.createAndStart(spec);
         } catch (RuntimeException e) {
             // Dispose whatever this start managed to create. The container is removed first:
             // a container that started but failed post-start inspection would otherwise keep
             // running and pin the volume. The volume is only removed when THIS start created
             // it — a pre-existing one may hold a previous cluster's k3s state and must
-            // survive a transient start failure.
-            lifecycleManager.removeIfExists(containerName);
-            if (volumeCreatedByThisStart) {
-                lifecycleManager.removeVolume(volumeName);
+            // survive a transient start failure. The port is released even if that cleanup
+            // fails, and a cleanup failure never hides the original cause.
+            try {
+                lifecycleManager.removeIfExists(containerName);
+                if (volumeCreatedByThisStart) {
+                    lifecycleManager.removeVolume(volumeName);
+                }
+            } catch (RuntimeException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            } finally {
+                portAllocator.release(hostPort);
             }
             throw e;
         }
+        hostPorts.put(info.containerId(), hostPort);
         cluster.setContainerId(info.containerId());
 
         if (lifecycleManager.publishedEndpoints()) {
@@ -196,7 +213,18 @@ public class AksClusterManager {
         }
         lifecycleManager.stopAndRemove(cluster.getContainerId(), null);
         lifecycleManager.removeVolume(containerName(cluster));
+        releaseHostPort(cluster.getContainerId());
         LOG.infov("Stopped k3s container for AKS cluster {0}", cluster.getName());
+    }
+
+    private void releaseHostPort(String containerId) {
+        if (containerId == null) {
+            return;
+        }
+        Integer hostPort = hostPorts.remove(containerId);
+        if (hostPort != null) {
+            portAllocator.release(hostPort);
+        }
     }
 
     private String containerName(ManagedCluster cluster) {

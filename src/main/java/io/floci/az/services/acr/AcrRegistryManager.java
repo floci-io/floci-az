@@ -74,6 +74,11 @@ public class AcrRegistryManager {
             started = false;
             containerId = null;
         }
+        // The previous container (dead, or removed just below) no longer holds its port.
+        if (publishedPort > 0) {
+            portAllocator.release(publishedPort);
+            publishedPort = 0;
+        }
         EmulatorConfig.AcrConfig acrConfig = config.services().acr();
         lifecycleManager.removeIfExists(sharedName());
 
@@ -103,6 +108,7 @@ public class AcrRegistryManager {
             this.started = true;
             LOG.infov("Started shared ACR registry {0} on host port {1}", sharedName(), String.valueOf(chosenPort));
         } catch (Exception e) {
+            portAllocator.release(chosenPort);
             throw new RuntimeException("Failed to start shared ACR registry container: " + e.getMessage(), e);
         }
     }
