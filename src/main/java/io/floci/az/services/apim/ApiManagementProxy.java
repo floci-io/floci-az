@@ -1,6 +1,7 @@
 package io.floci.az.services.apim;
 
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmErrors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.core.Response;
 
@@ -11,7 +12,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,20 +29,18 @@ public class ApiManagementProxy {
             return proxy(request, proxyRequest.serviceUrl(), proxyRequest.backendPath(),
                     proxyRequest.headers(), proxyRequest.queryParams());
         }
-        return mock(request, proxyRequest);
+        return noBackend(proxyRequest);
     }
 
-    private Response mock(AzureRequest request, ProxyRequest proxyRequest) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("service", proxyRequest.serviceName());
-        body.put("apiId", proxyRequest.apiId());
-        body.put("method", request.method());
-        body.put("path", "/" + proxyRequest.gatewayPath());
-        body.put("backendPath", "/" + trimSlashes(proxyRequest.backendPath()));
-        body.put("operationId", proxyRequest.operationId());
-        body.put("headers", proxyRequest.headers());
-        body.put("queryParams", proxyRequest.queryParams());
-        return Response.ok(body).build();
+    // Emulator choice: what the real gateway answers when an API has neither a serviceUrl nor a
+    // set-backend-service policy is not documented in any reference we can check, so the request fails
+    // as a server-side configuration error rather than inventing a success. Use a return-response
+    // policy to mock an API without a backend.
+    private Response noBackend(ProxyRequest proxyRequest) {
+        return ArmErrors.error(500, "BackendNotConfigured",
+                "API '" + proxyRequest.apiId() + "' in service '" + proxyRequest.serviceName()
+                        + "' has no backend: set properties.serviceUrl, add a set-backend-service policy,"
+                        + " or answer with a return-response policy.");
     }
 
     private Response proxy(AzureRequest request, String serviceUrl, String suffix, Map<String, String> extraHeaders,
