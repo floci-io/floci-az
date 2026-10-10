@@ -161,6 +161,10 @@ endpoint up front; there is no dynamic port to discover. Two more pieces complet
   the emulator, instead of on the first entity-management call. Without it, nothing listens on the
   AMQP port until a queue, topic, or namespace is created, which breaks health checks and clients
   that connect at startup.
+- **`/health` and `/ready`** return `503` with `"status": "DOWN"` and a `problems` entry when a
+  namespace floci-az was configured to start (start-on-boot or the topology file) failed to start,
+  for example because Docker could not bind its AMQP host port. They return to `UP` once that
+  namespace starts.
 - **`GET /{account}-servicebus/namespaces`** reports each running namespace's actual
   `amqpPort`/`amqpsPort`, for tooling that wants to verify or discover the endpoint at runtime.
 

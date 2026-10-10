@@ -151,6 +151,7 @@ public class ServiceBusTopologyLoader {
             return new NamespaceStartResult(true, false);
         } catch (Exception e) {
             LOG.errorf(e, "Could not start Service Bus namespace '%s' from the topology file", name);
+            namespaceManager.recordStartFailure(name, e);
             boolean portsReleased = e instanceof ServiceBusNamespaceManager.NamespaceStartException startError
                     && startError.portsReleased();
             return new NamespaceStartResult(false, portsReleased);

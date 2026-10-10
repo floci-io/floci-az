@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.ServiceHealth;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
@@ -31,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,7 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * which pre-configures topology in broker.xml.
  */
 @ApplicationScoped
-public class ServiceBusNamespaceManager {
+public class ServiceBusNamespaceManager implements ServiceHealth {
 
     /** Namespace used by SDK spec paths and lazy/boot-time starts when none is named explicitly. */
     public static final String DEFAULT_NAMESPACE = "default";
@@ -121,6 +123,9 @@ public class ServiceBusNamespaceManager {
 
     private final ConcurrentHashMap<String, NamespaceState> namespaces = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ServiceBusCbsResponder> cbsResponders = new ConcurrentHashMap<>();
+    // Namespaces floci-az was configured to start (start-on-boot or the topology file) whose
+    // start failed; cleared once the namespace starts.
+    private final ConcurrentHashMap<String, String> startFailures = new ConcurrentHashMap<>();
 
     private final EmulatorConfig config;
     private final ContainerBuilder containerBuilder;
@@ -236,7 +241,7 @@ public class ServiceBusNamespaceManager {
                     jolokiaEndpoint.host(),
                     jolokiaEndpoint.port(),
                     false);
-            namespaces.put(namespaceName, state);
+            register(namespaceName, state);
 
             LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
                     namespaceName, amqpEndpoint, amqpsEndpoint);
@@ -313,9 +318,31 @@ public class ServiceBusNamespaceManager {
     /** Registers a mocked namespace with no backing broker — management API only. */
     public NamespaceState startMockedNamespace(String namespaceName) {
         NamespaceState state = new NamespaceState(null, 0, 0, "", "", 0, true);
-        namespaces.put(namespaceName, state);
+        register(namespaceName, state);
         LOG.infov("Registered mocked Service Bus namespace ''{0}'' (no AMQP broker)", namespaceName);
         return state;
+    }
+
+    private void register(String namespaceName, NamespaceState state) {
+        namespaces.put(namespaceName, state);
+        startFailures.remove(namespaceName);
+    }
+
+    /**
+     * Records that a namespace floci-az was configured to start could not start, so health
+     * checks report Service Bus as down instead of clients being refused behind an UP status.
+     */
+    void recordStartFailure(String namespaceName, Throwable error) {
+        startFailures.put(namespaceName, rootMessage(error));
+    }
+
+    @Override
+    public Map<String, String> problems() {
+        Map<String, String> problems = new TreeMap<>();
+        startFailures.forEach((namespaceName, message) -> problems.put(
+                "servicebus/" + namespaceName,
+                "Service Bus namespace '" + namespaceName + "' failed to start: " + message));
+        return problems;
     }
 
     public boolean stopNamespace(String namespaceName) {
