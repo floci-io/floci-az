@@ -151,7 +151,7 @@ public class ArtemisConfigGenerator {
                 .start("acceptors")
                   .startAttr("acceptor", "name", "amqp")
                     .raw("tcp://0.0.0.0:5672?protocols=AMQP"
-                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN;maxMessageSize=1048576")
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN")
                   .end("acceptor")
                   .startAttr("acceptor", "name", "amqps")
                     .raw("tcp://0.0.0.0:5671?protocols=AMQP"
@@ -160,8 +160,7 @@ public class ArtemisConfigGenerator {
                         + ";keyStorePassword=" + ArtemisTlsGenerator.KEYSTORE_PASSWORD
                         + ";keyStoreType=PKCS12"
                         + ";needClientAuth=false"
-                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN"
-                        + ";maxMessageSize=1048576")
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN")
                   .end("acceptor")
                 .end("acceptors")
                 .elem("security-enabled", false)

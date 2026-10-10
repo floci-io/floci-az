@@ -37,7 +37,7 @@ public class ServiceBusConfigGenerator {
                   .startAttr("acceptor", "name", "amqp")
                     .raw("tcp://0.0.0.0:" + AMQP_INTERNAL_PORT
                         + "?protocols=AMQP;anycastPrefix=/"
-                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN;maxMessageSize=1048576")
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN")
                   .end("acceptor")
                   .startAttr("acceptor", "name", "amqps")
                     .raw("tcp://0.0.0.0:" + AMQPS_INTERNAL_PORT + "?protocols=AMQP"
@@ -47,8 +47,7 @@ public class ServiceBusConfigGenerator {
                         + ";keyStorePassword=" + ArtemisTlsGenerator.KEYSTORE_PASSWORD
                         + ";keyStoreType=PKCS12"
                         + ";needClientAuth=false"
-                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN"
-                        + ";maxMessageSize=1048576")
+                        + ";saslMechanisms=MSSBCBS,ANONYMOUS,PLAIN")
                   .end("acceptor")
                 .end("acceptors")
                 .start("broker-plugins")
