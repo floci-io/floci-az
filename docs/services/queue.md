@@ -13,6 +13,10 @@ protocol with Shared Key authentication and XML responses.
 
 - **Queues**: Create, Delete, Get/Set metadata; duplicate create is idempotent, missing queue
   returns the Azure `404 QueueNotFound` shape
+- **Queue ACL**: Get and Set Queue ACL (`{queue}?comp=acl`) store up to five stored access
+  policies as `SignedIdentifiers` XML on the queue, alongside its metadata; a sixth policy, or a
+  permission outside `raup`, is rejected with `400 InvalidXmlDocument`. The policies are stored and
+  returned but not enforced (see SAS below)
 - **Messages**: Enqueue (send), Dequeue (receive), Delete, Peek; multiple in-flight messages
 - **Peek is non-consuming**: `?peekonly=true` returns messages without advancing the dequeue count
   or hiding them
@@ -28,6 +32,7 @@ protocol with Shared Key authentication and XML responses.
 ```
 http://localhost:4577/{account}-queue/{queue}                    # queue operations
 http://localhost:4577/{account}-queue/{queue}/messages           # message operations
+http://localhost:4577/{account}-queue/{queue}?comp=acl           # queue ACL
 ```
 
 The account also answers at the host-style address `{account}.queue.core.windows.net` when the

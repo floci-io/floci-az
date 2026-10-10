@@ -387,4 +387,158 @@ public class QueueServiceTest {
             .header("x-ms-error-code", "QueueNotFound")
             .body(containsString("<Code>QueueNotFound</Code>"));
     }
+
+    @Test
+    void getQueueAclOfNewQueueReturnsEmptySignedIdentifiers() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<SignedIdentifiers>"))
+            .body(not(containsString("<SignedIdentifier>")));
+    }
+
+    @Test
+    void setQueueAclThenGetReturnsStoredPolicies() {
+        given().header("x-ms-meta-owner", "sdk").put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(2, "raup"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(204);
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body("SignedIdentifiers.SignedIdentifier.size()", equalTo(2))
+            .body("SignedIdentifiers.SignedIdentifier[0].Id", equalTo("policy-0"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Start", equalTo("2026-01-01T00:00:00.0000000Z"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Expiry", equalTo("2027-01-01T00:00:00.0000000Z"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Permission", equalTo("raup"));
+
+        // Policies and metadata share the queue record; rewriting either keeps the other.
+        given()
+            .header("x-ms-meta-owner", "changed")
+            .when().put("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(204);
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(200).body("SignedIdentifiers.SignedIdentifier.size()", equalTo(2));
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-meta-owner", equalTo("changed"));
+    }
+
+    @Test
+    void setQueueAclWithEmptyBodyClearsPolicies() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(204);
+
+        given()
+            .contentType("application/xml")
+            .body("")
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(200).body(not(containsString("<SignedIdentifier>")));
+    }
+
+    @Test
+    void setQueueAclWithMoreThanFivePoliciesIsRejected() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(6, "r"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument")
+            .body(containsString("<Code>InvalidXmlDocument</Code>"));
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "rd"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(200).body(not(containsString("<SignedIdentifier>")));
+    }
+
+    @Test
+    void setQueueAclWithNestedSignedIdentifierIsRejectedAndKeepsStoredPolicies() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE).then().statusCode(201);
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then().statusCode(204);
+
+        given()
+            .contentType("application/xml")
+            .body("<SignedIdentifiers><SignedIdentifier><Id>outer</Id>"
+                + "<SignedIdentifier><Id>inner</Id></SignedIdentifier>"
+                + "</SignedIdentifier></SignedIdentifiers>")
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body("SignedIdentifiers.SignedIdentifier.size()", equalTo(1))
+            .body("SignedIdentifiers.SignedIdentifier[0].Id", equalTo("policy-0"));
+    }
+
+    @Test
+    void queueAclOnMissingQueueReturnsQueueNotFoundAndCreatesNothing() {
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/{queue}?comp=acl", ACCOUNT, "no-such-queue")
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "QueueNotFound");
+
+        given()
+            .when().get("/{account}/{queue}?comp=acl", ACCOUNT, "no-such-queue")
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "QueueNotFound")
+            .body(containsString("<Code>QueueNotFound</Code>"));
+
+        given()
+            .when().get("/{account}?comp=list", ACCOUNT)
+            .then().statusCode(200).body(not(containsString("no-such-queue")));
+    }
+
+    private static String signedIdentifiers(int count, String permission) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?><SignedIdentifiers>");
+        for (int i = 0; i < count; i++) {
+            xml.append("<SignedIdentifier><Id>policy-").append(i).append("</Id><AccessPolicy>")
+                .append("<Start>2026-01-01T00:00:00.0000000Z</Start>")
+                .append("<Expiry>2027-01-01T00:00:00.0000000Z</Expiry>")
+                .append("<Permission>").append(permission).append("</Permission>")
+                .append("</AccessPolicy></SignedIdentifier>");
+        }
+        return xml.append("</SignedIdentifiers>").toString();
+    }
 }

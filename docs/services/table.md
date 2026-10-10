@@ -13,13 +13,19 @@ authentication.
 
 - **Tables**: Create, Delete, List; duplicate create returns `409 TableAlreadyExists`
 - **Entities**: Insert, Update (replace/merge), Upsert, Delete, Get by
-  `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape
+  `PartitionKey` + `RowKey`; missing entity returns the Azure `404 ResourceNotFound` shape, and
+  any entity operation or `$batch` change against a table that was never created (or was deleted)
+  returns `404 TableNotFound`
 - **Query**: `$filter` OData expressions: equality on `PartitionKey`/`RowKey`, numeric
   comparisons, and combinations; `$select` projects a subset of properties
 - **Pagination**: large result sets are paged with continuation tokens
   (`x-ms-continuation-Next*` headers)
 - **Optimistic concurrency**: `ETag` / `If-Match` on update and delete; a stale ETag is rejected
 - **Batch transactions**: `$batch` multipart change sets are applied atomically
+- **Table ACL**: Get and Set Table ACL (`{table}?comp=acl`) store up to five stored access policies
+  as `SignedIdentifiers` XML on the table; a sixth policy, or a permission outside `raud`, is
+  rejected with `400 InvalidXmlDocument`. The policies are stored and returned but not enforced
+  (see SAS below)
 - **Service properties**: `restype=service&comp=properties` returns a static
   `<StorageServiceProperties>` document (logging and metrics disabled); Set is accepted as a no-op
 
@@ -28,6 +34,7 @@ authentication.
 ```
 http://localhost:4577/{account}-table/Tables                                   # table operations
 http://localhost:4577/{account}-table/{table}(PartitionKey='p',RowKey='r')     # entity operations
+http://localhost:4577/{account}-table/{table}?comp=acl                         # table ACL
 http://localhost:4577/{account}-table/$batch                                   # batch transactions
 ```
 

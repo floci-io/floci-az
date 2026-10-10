@@ -9,6 +9,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.SignedIdentifiers;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.storage.StorageBackend;
@@ -40,6 +41,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import javax.xml.stream.XMLStreamException;
 
 @ApplicationScoped
 public class TableServiceHandler implements AzureServiceHandler, Resettable {
@@ -53,6 +55,8 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .withZone(ZoneId.of("UTC"));
     private static final int DEFAULT_PAGE_SIZE = 1000;
+    // Permission letters a table's stored access policy may grant: query, add, update, delete.
+    private static final String TABLE_SAS_PERMISSIONS = "raud";
 
     private final StorageBackend<String, StoredObject> store;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -145,20 +149,10 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             } else {
                 tableName = path;
             }
-            String entityPart = pkRkPart;
-
-            if ("POST".equalsIgnoreCase(method)) {
-                response = mutate(() -> entityPart.isEmpty()
-                        ? insertEntity(request, tableName)
-                        : updateEntity(request, tableName, entityPart));
-            } else if ("GET".equalsIgnoreCase(method)) {
-                response = pkRkPart.isEmpty()
-                        ? queryEntities(request, tableName)
-                        : getEntity(request, tableName, pkRkPart);
-            } else if ("DELETE".equalsIgnoreCase(method)) {
-                response = mutate(() -> deleteEntity(request, tableName, entityPart));
-            } else if ("PUT".equalsIgnoreCase(method) || "MERGE".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) {
-                response = mutate(() -> updateEntity(request, tableName, entityPart));
+            if ("acl".equals(query.get("comp")) && !path.contains("(")) {
+                response = handleTableAcl(request, tableName);
+            } else if (isEntityMethod(method)) {
+                response = handleEntity(request, tableName, pkRkPart);
             } else {
                 response = new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
                         .toODataResponse(501);
@@ -170,6 +164,48 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .header("x-ms-version", request.headers().getHeaderString("x-ms-version"))
                 .header("DataServiceVersion", "3.0;")
                 .build();
+    }
+
+    private static boolean isEntityMethod(String method) {
+        return switch (method.toUpperCase(Locale.ROOT)) {
+            case "POST", "GET", "DELETE", "PUT", "MERGE", "PATCH" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Entity operations against a table that does not exist answer 404 TableNotFound, as Azure does.
+     * Writes check inside the write lock so a concurrent Delete Table cannot slip between the check
+     * and the write.
+     */
+    private Response handleEntity(AzureRequest request, String tableName, String pkRkPart) {
+        String method = request.method();
+        if ("GET".equalsIgnoreCase(method)) {
+            if (!tableExists(request.accountName(), tableName)) {
+                return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            return pkRkPart.isEmpty()
+                    ? queryEntities(request, tableName)
+                    : getEntity(request, tableName, pkRkPart);
+        }
+        return mutate(() -> {
+            if (!tableExists(request.accountName(), tableName)) {
+                return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            if ("POST".equalsIgnoreCase(method)) {
+                return pkRkPart.isEmpty()
+                        ? insertEntity(request, tableName)
+                        : updateEntity(request, tableName, pkRkPart);
+            }
+            if ("DELETE".equalsIgnoreCase(method)) {
+                return deleteEntity(request, tableName, pkRkPart);
+            }
+            return updateEntity(request, tableName, pkRkPart);
+        });
+    }
+
+    private boolean tableExists(String accountName, String tableName) {
+        return store.get(nsKey(accountName, tableName)).isPresent();
     }
 
     /**
@@ -253,6 +289,60 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .toList()
                 .forEach(store::delete);
         return Response.noContent().build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Table ACL (stored access policies)
+    // -------------------------------------------------------------------------
+
+    private Response handleTableAcl(AzureRequest request, String tableName) {
+        if ("GET".equalsIgnoreCase(request.method())) {
+            return getTableAcl(request, tableName);
+        }
+        if ("PUT".equalsIgnoreCase(request.method())) {
+            return mutate(() -> setTableAcl(request, tableName));
+        }
+        return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
+                .toXmlResponse(501);
+    }
+
+    private Response getTableAcl(AzureRequest request, String tableName) {
+        Optional<StoredObject> table = store.get(nsKey(request.accountName(), tableName));
+        if (table.isEmpty()) {
+            return tableNotFound().toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        byte[] stored = table.get().data();
+        String xml = stored.length == 0
+                ? SignedIdentifiers.emptyXml()
+                : new String(stored, StandardCharsets.UTF_8);
+        return Response.ok(xml, MediaType.APPLICATION_XML).build();
+    }
+
+    private Response setTableAcl(AzureRequest request, String tableName) {
+        List<SignedIdentifiers.SignedIdentifier> identifiers;
+        try {
+            identifiers = SignedIdentifiers.parse(
+                    new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException | XMLStreamException e) {
+            LOGGER.debugv("Rejecting table ACL body for {0}: {1}", tableName, e.getMessage());
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        if (!SignedIdentifiers.isValid(identifiers, TABLE_SAS_PERMISSIONS)) {
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        String key = nsKey(request.accountName(), tableName);
+        if (store.get(key).isEmpty()) {
+            return tableNotFound().toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        byte[] acl = identifiers.isEmpty()
+                ? new byte[0]
+                : SignedIdentifiers.toXml(identifiers).getBytes(StandardCharsets.UTF_8);
+        store.put(key, new StoredObject("", acl, Map.of(), Instant.now(), ""));
+        return Response.noContent().build();
+    }
+
+    private static AzureErrorResponse tableNotFound() {
+        return new AzureErrorResponse("TableNotFound", "The table specified does not exist.");
     }
 
     // -------------------------------------------------------------------------
@@ -816,6 +906,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
      */
     private Response executeBatchOp(String accountName, String tableName, String method,
                                      String pkRkPart, Map<String, Object> entityBody, String ifMatch) {
+        if (!tableExists(accountName, tableName)) {
+            return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
         if ("POST".equalsIgnoreCase(method) || ("PUT".equalsIgnoreCase(method) && pkRkPart.isEmpty())) {
             // INSERT
             return insertEntityDirect(accountName, tableName, entityBody);
