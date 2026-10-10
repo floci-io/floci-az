@@ -185,6 +185,26 @@ class AcrRegistryProxyHttpTest {
     }
 
     @Test
+    void theMetadataCatalogListsTheSameRepositoriesAndPagesOnItsOwnPath() {
+        // GET /acr/v1/_catalog is what the SDK clients' listRepositoryNames calls.
+        AtomicReference<String> receivedQuery = new AtomicReference<>();
+        HttpServer registry = catalogServer(receivedQuery, "myreg/app", "myreg/web", "myreg/zebra");
+
+        try {
+            Response response = proxy(request("GET", "acr/v1/_catalog", null, Map.of(),
+                    Map.of("n", List.of("2"), "api-version", List.of("2021-07-01"))),
+                    registry.getAddress().getPort());
+
+            assertEquals(200, response.getStatus());
+            assertEquals("last=myreg%2F&n=3", receivedQuery.get());
+            assertEquals("{\"repositories\":[\"app\",\"web\"]}", new String((byte[]) response.getEntity()));
+            assertEquals("</acr/v1/_catalog?last=web&n=2>; rel=\"next\"", response.getHeaderString("Link"));
+        } finally {
+            registry.stop(0);
+        }
+    }
+
+    @Test
     void catalogAnswersAnEmptyPageWithoutAskingTheContainer() {
         AtomicReference<String> receivedQuery = new AtomicReference<>();
         HttpServer registry = catalogServer(receivedQuery, "myreg/app", "myreg/web");

@@ -64,6 +64,7 @@ import java.util.function.Consumer;
  * <h2>Data plane</h2>
  * <pre>
  *   GET  {name}.azurecr.io/v2/                      challenge
+ *   GET  {name}.azurecr.io/acr/v1/_catalog          repository catalog (scoped challenge first)
  *   POST {name}.azurecr.io/oauth2/exchange          Entra access token  -> ACR refresh token
  *   *    {name}.azurecr.io/oauth2/token             ACR refresh token   -> scoped access token
  *   *    {name}.azurecr.io/v2/**                    Docker Registry HTTP API V2
@@ -101,6 +102,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     /** The Azure host suffix the registry data plane is served on. */
     public static final String REGISTRY_HOST_SUFFIX = ".azurecr.io";
+
+    private static final String ACR_V1_PREFIX = "acr/v1/";
+    private static final String ACR_V1_CATALOG = ACR_V1_PREFIX + "_catalog";
 
     private final EmulatorConfig config;
     private final AcrRegistryManager registryManager;
@@ -273,6 +277,9 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (path.equals("v2") || path.startsWith("v2/")) {
             return handleRepository(req, registryName, loginServer, path);
         }
+        if (path.startsWith(ACR_V1_PREFIX)) {
+            return handleAcrMetadata(req, registryName, loginServer, path);
+        }
         return AcrErrors.error(404, AcrErrors.NAME_UNKNOWN,
                 "unknown registry path '" + path + "' on " + loginServer);
     }
@@ -283,11 +290,13 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
      * so any {@code Authorization} header satisfies this check.
      */
     private Response handleRepository(AzureRequest req, String registryName, String loginServer, String path) {
-        boolean authenticated = req.headers() != null
-                && req.headers().getHeaderString("Authorization") != null;
-        if (path.equals("v2") && !authenticated) {
+        if (path.equals("v2") && !isAuthenticated(req)) {
             return AcrTokenService.challengeResponse(RequestUrls.resolveScheme(req), loginServer);
         }
+        return proxyToSharedRegistry(req, registryName);
+    }
+
+    private Response proxyToSharedRegistry(AzureRequest req, String registryName) {
         if (config.services().acr().mocked()) {
             return AcrErrors.error(405, AcrErrors.UNSUPPORTED,
                     "the registry data plane is not available in mocked mode; "
@@ -299,6 +308,31 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                     "the shared registry container is not running");
         }
         return registryProxy.proxy(req, registryName, endpoint);
+    }
+
+    /**
+     * The ACR metadata API under {@code /acr/v1/}, which the Azure SDK container-registry clients
+     * call without credentials first and authenticate only when challenged. An unauthenticated
+     * request is therefore answered with a challenge naming the scope it needs, since the clients
+     * start the token exchange only when the challenge carries one. Of the metadata API only the
+     * repository catalog is served, from the same storage as {@code /v2/_catalog}.
+     */
+    private Response handleAcrMetadata(AzureRequest req, String registryName, String loginServer, String path) {
+        if (!isAuthenticated(req)) {
+            String scope = AcrTokenService.scopeFor(req.method(), path);
+            if (scope != null) {
+                return AcrTokenService.challengeResponse(RequestUrls.resolveScheme(req), loginServer, scope);
+            }
+        }
+        if (!path.equals(ACR_V1_CATALOG)) {
+            return AcrErrors.error(404, AcrErrors.NAME_UNKNOWN,
+                    "unknown registry path '" + path + "' on " + loginServer);
+        }
+        return proxyToSharedRegistry(req, registryName);
+    }
+
+    private static boolean isAuthenticated(AzureRequest req) {
+        return req.headers() != null && req.headers().getHeaderString("Authorization") != null;
     }
 
     /** The shared container's endpoint, starting it on first use as the management plane does. */

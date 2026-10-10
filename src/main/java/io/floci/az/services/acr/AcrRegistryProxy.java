@@ -62,6 +62,9 @@ public class AcrRegistryProxy {
 
     private static final String V2 = "v2/";
     private static final String CATALOG = "_catalog";
+    /** The Docker Registry catalog and the ACR metadata catalog: one listing, two paths. */
+    private static final String V2_CATALOG = V2 + CATALOG;
+    private static final String ACR_V1_CATALOG = "acr/v1/" + CATALOG;
     private static final String TAGS_LIST = "/tags/list";
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -150,9 +153,17 @@ public class AcrRegistryProxy {
         }
     }
 
-    /** The {@code Link} advertising the next page, in the shape the registry itself uses. */
+    /** The {@code Link} advertising the next page of {@code /v2/_catalog}. */
     static String nextLink(String last, int pageSize) {
-        return "</" + V2 + CATALOG + "?last=" + encode(last) + "&n=" + pageSize + ">; rel=\"next\"";
+        return nextLink(V2_CATALOG, last, pageSize);
+    }
+
+    /**
+     * The {@code Link} advertising the next page, in the shape the registry itself uses, on the
+     * catalog path the client listed: a client follows it as given.
+     */
+    static String nextLink(String catalogPath, String last, int pageSize) {
+        return "</" + catalogPath + "?last=" + encode(last) + "&n=" + pageSize + ">; rel=\"next\"";
     }
 
     /**
@@ -188,8 +199,8 @@ public class AcrRegistryProxy {
      */
     public Response proxy(AzureRequest request, String registryName, String backendEndpoint) {
         String clientPath = trimLeadingSlash(request.rawPath());
-        if (clientPath.equals(V2 + CATALOG)) {
-            return catalog(request, registryName, backendEndpoint);
+        if (clientPath.equals(V2_CATALOG) || clientPath.equals(ACR_V1_CATALOG)) {
+            return catalog(request, registryName, backendEndpoint, clientPath);
         }
         URI target = URI.create("http://" + backendEndpoint + "/"
                 + backendPath(registryName, clientPath) + queryString(request));
@@ -232,7 +243,8 @@ public class AcrRegistryProxy {
     }
 
     /**
-     * Serves {@code /v2/_catalog} as this registry's own catalog, one backend request per page.
+     * Serves {@code /v2/_catalog} (and {@code /acr/v1/_catalog}, which lists the same repositories
+     * in the same shape) as this registry's own catalog, one backend request per page.
      *
      * <p>The container has no filter parameter: the catalog's whole query vocabulary is {@code n}
      * and {@code last}. The filter is therefore expressed as a range, which works because a
@@ -250,14 +262,15 @@ public class AcrRegistryProxy {
      * nothing. None of this is in the distribution spec, so
      * {@code AcrCatalogPaginationDockerTest} pins it.</p>
      */
-    private Response catalog(AzureRequest request, String registryName, String backendEndpoint) {
+    private Response catalog(AzureRequest request, String registryName, String backendEndpoint,
+                             String catalogPath) {
         String prefix = registryName + "/";
         int pageSize = pageSize(firstQueryValue(request, "n"));
         URI target = catalogTarget(backendEndpoint, prefix, firstQueryValue(request, "last"), pageSize);
         try {
             if (pageSize == 0) {
                 // A page of nothing is what was asked for, so there is nothing to ask the container.
-                return catalogPage(List.of(), false, pageSize);
+                return catalogPage(catalogPath, List.of(), false, pageSize);
             }
             HttpResponse<byte[]> backend = send(request, target,
                     HttpRequest.BodyPublishers.noBody(), HttpResponse.BodyHandlers.ofByteArray());
@@ -267,7 +280,8 @@ public class AcrRegistryProxy {
 
             List<String> repositories = ownRepositories(prefix, backend.body());
             boolean more = pageSize > 0 && repositories.size() > pageSize;
-            return catalogPage(more ? repositories.subList(0, pageSize) : repositories, more, pageSize);
+            return catalogPage(catalogPath, more ? repositories.subList(0, pageSize) : repositories,
+                    more, pageSize);
         } catch (Exception e) {
             return unavailable(target, e);
         }
@@ -285,13 +299,13 @@ public class AcrRegistryProxy {
     }
 
     /** One catalog page, carrying the cursor to the next only when this registry has more. */
-    private static Response catalogPage(List<String> repositories, boolean more, int pageSize)
-            throws JsonProcessingException {
+    private static Response catalogPage(String catalogPath, List<String> repositories, boolean more,
+                                        int pageSize) throws JsonProcessingException {
         Response.ResponseBuilder page = Response
                 .ok(MAPPER.writeValueAsBytes(Map.of("repositories", repositories)))
                 .type(MediaType.APPLICATION_JSON);
         if (more) {
-            page.header("Link", nextLink(repositories.get(repositories.size() - 1), pageSize));
+            page.header("Link", nextLink(catalogPath, repositories.get(repositories.size() - 1), pageSize));
         }
         return page.build();
     }

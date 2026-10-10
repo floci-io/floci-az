@@ -117,6 +117,13 @@ class AcrRegistryProxyTest {
     }
 
     @Test
+    void theMetadataCatalogsNextLinkStaysOnTheMetadataPath() {
+        // The SDK clients follow the Link as given, so it names the catalog they listed.
+        assertEquals("</acr/v1/_catalog?last=team%2Fapi&n=2>; rel=\"next\"",
+                AcrRegistryProxy.nextLink("acr/v1/_catalog", "team/api", 2));
+    }
+
+    @Test
     void tagsListNamesTheRepositoryTheClientAskedAbout() {
         byte[] backend = "{\"name\":\"myreg/team/api\",\"tags\":[\"v1\"]}".getBytes(StandardCharsets.UTF_8);
 

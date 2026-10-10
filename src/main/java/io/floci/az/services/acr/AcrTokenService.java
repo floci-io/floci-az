@@ -26,6 +26,7 @@ import java.util.Optional;
  *
  * <pre>
  *   GET  /v2/                 → 401 + Bearer challenge naming the realm and service
+ *   GET  /acr/v1/**           → 401 + Bearer challenge naming the scope the request needs
  *   POST /oauth2/exchange     → Entra access token  → ACR refresh token
  *   POST /oauth2/token        → ACR refresh token   → scoped ACR access token
  *   GET  /oauth2/token        → the Docker Registry token endpoint form (service + scope)
@@ -73,8 +74,17 @@ public class AcrTokenService {
 
     // ── Challenge ────────────────────────────────────────────────────────────────
 
+    /** The scope a catalog request needs, on both {@code /v2/_catalog} and {@code /acr/v1/_catalog}. */
+    public static final String CATALOG_SCOPE = "registry:catalog:*";
+
+    private static final String V2_PREFIX = "v2/";
+    private static final String ACR_V1_PREFIX = "acr/v1/";
+    /** The Docker Registry V2 route segments that end a repository name. */
+    private static final List<String> V2_ROUTE_SEGMENTS = List.of("/manifests/", "/blobs/", "/tags/");
+
     /**
-     * The {@code WWW-Authenticate} value that starts the flow. The client parses {@code realm} and
+     * The {@code WWW-Authenticate} value that starts the flow, without a scope: the answer to the
+     * {@code GET /v2/} ping, which names no resource. The Azure CLI parses {@code realm} and
      * {@code service} out of it and fails with a connectivity error if either is missing.
      *
      * <p>The realm carries the scheme the caller actually used. TLS is off by default here, and a
@@ -82,20 +92,112 @@ public class AcrTokenService {
      * {@code service} is always the login server itself, as in Azure.</p>
      */
     public static String challenge(String scheme, String loginServer) {
-        return "Bearer realm=\"" + scheme + "://" + loginServer + "/oauth2/token\""
+        return challenge(scheme, loginServer, null);
+    }
+
+    /**
+     * The {@code WWW-Authenticate} value for a request that names a resource: the realm and service
+     * plus the {@code scope} the request needs. The Azure SDK container-registry clients start the
+     * token exchange only when the challenge carries both {@code service} and {@code scope}, and
+     * request a token for exactly that scope.
+     */
+    public static String challenge(String scheme, String loginServer, String scope) {
+        String challenge = "Bearer realm=\"" + scheme + "://" + loginServer + "/oauth2/token\""
                 + ",service=\"" + loginServer + "\"";
+        return scope == null ? challenge : challenge + ",scope=\"" + scope + "\"";
     }
 
     /** {@code GET /v2/} answered before authentication: {@code 401} plus the bearer challenge. */
     public static Response challengeResponse(String scheme, String loginServer) {
+        return challengeResponse(scheme, loginServer, null);
+    }
+
+    /** A request answered before authentication: {@code 401} plus a challenge naming its scope. */
+    public static Response challengeResponse(String scheme, String loginServer, String scope) {
         return Response.status(401)
-                .header("WWW-Authenticate", challenge(scheme, loginServer))
+                .header("WWW-Authenticate", challenge(scheme, loginServer, scope))
                 .header("Docker-Distribution-Api-Version", "registry/2.0")
                 .entity(Map.of("errors", List.of(Map.of(
                         "code", "UNAUTHORIZED",
                         "message", "authentication required"))))
                 .type(MediaType.APPLICATION_JSON)
                 .build();
+    }
+
+    /**
+     * The scope a data-plane request needs, derived from its method and its path (relative to the
+     * login server, without a leading slash), or {@code null} for the {@code /v2/} ping and for
+     * paths that name no registry resource.
+     *
+     * <ul>
+     *   <li>{@code v2/_catalog}, {@code acr/v1/_catalog}: {@code registry:catalog:*}</li>
+     *   <li>{@code v2/{name}/manifests|blobs|tags/...}: {@code repository:{name}:pull} to read,
+     *       {@code pull,push} to write, {@code delete} to delete</li>
+     *   <li>{@code acr/v1/{name}[/_tags|_manifests[/...]]}: {@code repository:{name}:metadata_read}
+     *       to read, {@code metadata_write} to update, {@code delete} to delete</li>
+     * </ul>
+     */
+    public static String scopeFor(String method, String path) {
+        String trimmed = path == null ? "" : path;
+        while (trimmed.startsWith("/")) {
+            trimmed = trimmed.substring(1);
+        }
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        if (trimmed.equals(V2_PREFIX + "_catalog") || trimmed.equals(ACR_V1_PREFIX + "_catalog")) {
+            return CATALOG_SCOPE;
+        }
+        if (trimmed.startsWith(V2_PREFIX)) {
+            String repository = v2Repository(trimmed.substring(V2_PREFIX.length()));
+            return repository == null ? null : repositoryScope(repository, registryActions(method));
+        }
+        if (trimmed.startsWith(ACR_V1_PREFIX)) {
+            String repository = acrV1Repository(trimmed.substring(ACR_V1_PREFIX.length()));
+            return repository == null ? null : repositoryScope(repository, metadataActions(method));
+        }
+        return null;
+    }
+
+    /** The repository in a Docker Registry V2 path: everything before its last route segment. */
+    private static String v2Repository(String tail) {
+        int end = -1;
+        for (String segment : V2_ROUTE_SEGMENTS) {
+            end = Math.max(end, tail.lastIndexOf(segment));
+        }
+        return end > 0 ? tail.substring(0, end) : null;
+    }
+
+    /**
+     * The repository in an ACR metadata path. A repository name component never starts with an
+     * underscore, so the first {@code _tags} or {@code _manifests} segment ends the name.
+     */
+    private static String acrV1Repository(String tail) {
+        if (tail.isEmpty() || tail.startsWith("_")) {
+            return null;
+        }
+        int end = tail.indexOf("/_");
+        return end < 0 ? tail : tail.substring(0, end);
+    }
+
+    private static String registryActions(String method) {
+        return switch (method) {
+            case "GET", "HEAD" -> "pull";
+            case "DELETE" -> "delete";
+            default -> "pull,push";
+        };
+    }
+
+    private static String metadataActions(String method) {
+        return switch (method) {
+            case "GET", "HEAD" -> "metadata_read";
+            case "DELETE" -> "delete";
+            default -> "metadata_write";
+        };
+    }
+
+    private static String repositoryScope(String repository, String actions) {
+        return "repository:" + repository + ":" + actions;
     }
 
     // ── Scope parsing ────────────────────────────────────────────────────────────
