@@ -8,6 +8,7 @@ import io.floci.az.services.monitor.MonitorHandler;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerRequest;
+import io.vertx.core.net.HostAndPort;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -103,7 +104,8 @@ public class AzureRoutingFilter {
         HttpHeaders headers,
         String host,
         boolean secure,
-        String remoteAddress
+        String remoteAddress,
+        String authority
     ) {
         String method() {
             return requestContext.getMethod();
@@ -339,13 +341,12 @@ public class AzureRoutingFilter {
         // Capture the request authority/host now (JAX-RS request scope may not propagate to the
         // blocking thread). Under HTTP/2 the wire protocol uses :authority instead of a Host
         // header, while UriInfo exposes the resolved authority for both HTTP/1.1 and HTTP/2.
+        // The routing host drops the port; the authority keeps it for the URLs handlers generate.
+        String authority = requestAuthority(serverRequest);
         String h = requestContext.getUriInfo().getRequestUri().getHost();
         if (h == null || h.isBlank()) {
             // Fallback for servlet/JAX-RS implementations that do not expose an absolute request URI.
-            h = requestContext.getHeaders().getFirst("Host");
-            if (h == null) {
-                h = requestContext.getHeaders().getFirst("host");
-            }
+            h = authority;
         }
         final String capturedHost = h;
         String remoteAddress = serverRequest.remoteAddress() == null
@@ -353,14 +354,15 @@ public class AzureRoutingFilter {
 
         return Uni.createFrom().completionStage(
             vertx.executeBlocking(() -> doFilter(
-                    requestContext, path0, rawPath0, rawQuery0, headers, capturedHost, remoteAddress))
+                    requestContext, path0, rawPath0, rawQuery0, headers, capturedHost, remoteAddress,
+                    authority))
                  .toCompletionStage()
         );
     }
 
     private Response doFilter(ContainerRequestContext requestContext, String decodedPath, String rawPath,
                               String rawQuery, HttpHeaders headers, String capturedHost,
-                              String remoteAddress) {
+                              String remoteAddress, String authority) {
         // Never trust a client-supplied account-suffix header: only dispatchByAccountSuffix may set it.
         // Header names are case-insensitive on the wire, so match keys case-insensitively.
         for (String header : new ArrayList<>(requestContext.getHeaders().keySet())) {
@@ -378,7 +380,8 @@ public class AzureRoutingFilter {
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
         RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, rawQuery, headers,
-            hostWithoutPort(capturedHost), requestContext.getSecurityContext().isSecure(), remoteAddress);
+            hostWithoutPort(capturedHost), requestContext.getSecurityContext().isSecure(), remoteAddress,
+            authority);
 
         for (Function<RoutingContext, Outcome> stage : stages) {
             Outcome outcome = stage.apply(ctx);
@@ -401,6 +404,24 @@ public class AzureRoutingFilter {
 
     private static String trimLeadingSlash(String path) {
         return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /**
+     * The {@code host[:port]} the client addressed. HTTP/1.1 carries it in {@code Host}, kept verbatim
+     * so every URL built from it stays byte-identical. HTTP/2 carries it in {@code :authority}, which
+     * Vert.x removes from the header map (and with it any {@code Host}) and exposes only through
+     * {@link HttpServerRequest#authority()}.
+     */
+    static String requestAuthority(HttpServerRequest serverRequest) {
+        String host = serverRequest.getHeader("Host");
+        if (host != null && !host.isBlank()) {
+            return host;
+        }
+        HostAndPort authority = serverRequest.authority();
+        if (authority == null || authority.host() == null || authority.host().isBlank()) {
+            return null;
+        }
+        return authority.port() < 0 ? authority.host() : authority.host() + ":" + authority.port();
     }
 
     /**
@@ -789,7 +810,8 @@ public class AzureRoutingFilter {
         }
         AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
             ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
-            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery());
+            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(),
+            ctx.authority());
         LOGGER.infof("Dispatching %s request to %s: %s %s", label,
             handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
         return new Handled(handler.get().handle(request));
@@ -806,7 +828,7 @@ public class AzureRoutingFilter {
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
             ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(),
-            ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery());
+            ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(), ctx.authority());
         return request.withAuthContext(authPipeline.resolve(request));
     }
 

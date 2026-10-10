@@ -19,8 +19,21 @@ public record AzureRequest(
     String host,             // host captured before async/blocking dispatch; may be null for direct/internal requests
     String remoteAddress,    // transport peer address; never derived from forwarded headers
     String rawPath,          // original encoded request path, without a leading slash
-    String rawQuery          // original encoded query string, without the leading "?"; null when absent
+    String rawQuery,         // original encoded query string, without the leading "?"; null when absent
+    String authority         // host[:port] the client addressed (HTTP/1.1 Host, HTTP/2 :authority); null when unknown
 ) {
+
+    /**
+     * Pre-authority canonical form, kept for callers that build a request without a transport (tests,
+     * internal dispatch). {@link RequestUrls} falls back to the {@code Host} header for these.
+     */
+    public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
+                        HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
+                        Map<String, List<String>> queryParamsMulti, AuthContext authContext, boolean secure,
+                        String host, String remoteAddress, String rawPath, String rawQuery) {
+        this(method, accountName, serviceType, resourcePath, headers, bodyStream, queryParams,
+             queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, null);
+    }
 
     public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
                         HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
@@ -67,6 +80,6 @@ public record AzureRequest(
      */
     public AzureRequest withAuthContext(AuthContext resolved) {
         return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery);
+             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery, authority);
     }
 }

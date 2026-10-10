@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
@@ -97,8 +98,8 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
         LOG.debugf("KeyVault %s /%s", method, path);
 
-        // Managed HSM flavor: strip the port from Host so {account}.managedhsm.azure.net:4577 still matches.
-        String host = req.headers().getHeaderString("Host");
+        // Managed HSM flavor: strip the port from the request authority so {account}.managedhsm.azure.net:4577 still matches.
+        String host = RequestUrls.resolveAuthority(req);
         String hostWithoutPort = host != null
                 ? (host.contains(":") ? host.substring(0, host.indexOf(':')) : host) : null;
         String accountSuffix = req.headers().getHeaderString("x-floci-account-suffix");
