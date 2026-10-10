@@ -24,7 +24,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Azure Container Apps** | ARM path (`Microsoft.App`) + FQDN ingress | ✅ Managed environments, apps, revisions, ingress, secrets, min/max replicas; Docker-backed or mocked |
 | **API Management** | ARM path (`Microsoft.ApiManagement`) + `/{account}-apim/` | ✅ APIs, operations, products, subscriptions, named values, backends, OpenAPI import; gateway routing + policy subset |
 | **Virtual Network** | ARM path (`Microsoft.Network`) | ✅ VNets, subnets, NICs, public IPs, NSGs, private DNS zones (+ virtual network links, record sets), private endpoints (+ private DNS zone groups), private link services; in-process ARM state for Terraform/OpenTofu and VM dependencies |
-| **Virtual Machines** | ARM path (`Microsoft.Compute`) | ✅ VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView; mocked (Docker backing planned) |
+| **Virtual Machines** | ARM path (`Microsoft.Compute`) | ✅ VM lifecycle (create/start/stop/deallocate/restart/delete/list), instanceView; mocked by default, optional [container-backed mode](vm.md) (`mocked: false`) |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | ✅ Cache CRUD, listKeys/regenerateKey; real Redis containers (data plane) or mocked |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | ✅ Registry CRUD, admin credentials, checkNameAvailability; `az acr login` via the Entra token exchange on `{name}.azurecr.io`; one shared `registry:2` (Docker Registry V2 push/pull) or mocked |
 | **Azure Container Instances** | ARM path (`Microsoft.ContainerInstance`) | ✅ Container group lifecycle (create/update/delete/list), start/stop/restart, container logs, instanceView; real Docker containers (shared-netns pods) or mocked |
@@ -55,5 +55,6 @@ The following services spin up Docker containers on demand and require the Docke
 | **Azure Database for MariaDB** | `mariadb:10.11` | MySQL wire protocol direct to container port |
 | **Azure Container Apps** | User-provided images | HTTP ingress proxied through port 4577 |
 | **Azure Container Instances** | User-provided images | Shared-netns group, published ports on 7500-7599 (opt in with `mocked: false`) |
+| **Virtual Machines** | `storageProfile.imageReference`, falling back to `ubuntu:22.04` | One keep-alive Linux container per VM (opt in with `mocked: false`) |
 
 > These services **must** have access to the Docker daemon (`/var/run/docker.sock` mount in Docker Compose).

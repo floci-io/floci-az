@@ -85,7 +85,7 @@ flowchart LR
 | **Event Hubs** | AMQP `:5672` / Kafka `:9093` | AMQP 1.0 (Artemis sidecar), Kafka-compatible (Redpanda, opt-in) |
 | **API Management** | ARM path + `/{account}-apim/` | APIs, operations, products, subscriptions, gateway routing, focused policy subset |
 | **Virtual Network** | ARM path (`Microsoft.Network`) | VNets, subnets, NICs, public IPs, NSGs for Terraform/OpenTofu and VM dependencies |
-| **Virtual Machines** | ARM path (`Microsoft.Compute`) | VM lifecycle, power actions, instanceView; mocked control plane |
+| **Virtual Machines** | ARM path (`Microsoft.Compute`) | VM lifecycle, power actions, instanceView; mocked by default, optional container-backed mode |
 | **Azure Cache for Redis** | ARM path (`Microsoft.Cache`) | Cache CRUD, keys, real Redis-compatible containers or mocked mode |
 | **Azure Container Registry** | ARM path (`Microsoft.ContainerRegistry`) | Registry CRUD, credentials, Docker Registry V2 push/pull support |
 
