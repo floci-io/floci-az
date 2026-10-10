@@ -9,7 +9,9 @@ Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azur
 > Linux container. The image is resolved from `storageProfile.imageReference` (falling back to
 > `ubuntu:22.04`), and power actions map onto Docker: `start` → start, `powerOff`/`deallocate` →
 > stop, `restart` → restart, delete → remove. VMs provision asynchronously (`Creating` →
-> `Succeeded` once the container is running).
+> `Succeeded` once the container is running). If the container cannot be started (image pull
+> failure, Docker unavailable), the VM reports `provisioningState: Failed`; see
+> [Container start failures](#container-start-failures).
 
 ---
 
@@ -95,6 +97,24 @@ curl -s "$BASE/instanceView?api-version=2024-11-01"
 # { "computerName": "my-vm", "osName": "Linux",
 #   "statuses": [ {"code":"ProvisioningState/succeeded",...}, {"code":"PowerState/running",...} ] }
 ```
+
+---
+
+## Container start failures
+
+In container-backed mode, a create whose backing container cannot be started keeps the VM
+resource and reports it as failed instead of running:
+
+- `properties.provisioningState` is `Failed`.
+- The instance view carries a single `ProvisioningState/failed` status with level `Error` and no
+  `PowerState/*` status, since there is nothing running.
+- Clients that poll the create on `provisioningState` (Terraform's `azurerm_linux_virtual_machine`
+  among them) stop with an error rather than waiting or treating the VM as created.
+- Another PUT on the failed VM retries provisioning, and DELETE removes it as usual.
+- A power action that turns the VM on (`start`, `restart`, `redeploy`, `reapply`) also retries
+  provisioning. `powerOff` and `deallocate` leave the VM `Failed`, since there is no container to stop.
+
+Mocked mode is unaffected: it never starts a container, so VMs always provision as `Succeeded`.
 
 ---
 
