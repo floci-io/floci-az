@@ -2,6 +2,10 @@ package io.floci.az.compat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
@@ -9,10 +13,18 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,14 +52,69 @@ class ApiManagementCompatibilityTest {
     private static final String NAMED_VALUE_ID = "floci-header";
     private static final String SECRET_NAMED_VALUE_ID = "floci-secret-header";
     private static final String BACKEND_ID = "catalog-backend";
+    private static final String BARE_API_ID = "bare-api";
     private static final String API_VERSION = "2024-05-01";
 
     private static final HttpClient http = HttpClient.newHttpClient();
     private static final ObjectMapper mapper = new ObjectMapper();
 
+    private static HttpServer echoBackend;
+    private static String echoBackendUrl;
+
     @BeforeAll
-    static void setup() {
+    static void setup() throws IOException {
         EmulatorConfig.assumeEmulatorRunning();
+        echoBackend = HttpServer.create(new InetSocketAddress("0.0.0.0", 0), 0);
+        echoBackend.createContext("/", ApiManagementCompatibilityTest::echo);
+        echoBackend.start();
+        echoBackendUrl = "http://" + echoBackendHost() + ":" + echoBackend.getAddress().getPort();
+    }
+
+    @AfterAll
+    static void tearDown() {
+        if (echoBackend != null) {
+            echoBackend.stop(0);
+        }
+    }
+
+    /**
+     * The gateway proxies to a real backend, so this test hosts one that answers with what it received.
+     * A local emulator reaches it on the loopback address; a containerized one through this container's
+     * address on the shared compat network.
+     */
+    private static String echoBackendHost() throws IOException {
+        String endpointHost = URI.create(BASE).getHost();
+        if ("localhost".equals(endpointHost) || "127.0.0.1".equals(endpointHost)) {
+            return "127.0.0.1";
+        }
+        return InetAddress.getLocalHost().getHostAddress();
+    }
+
+    private static void echo(HttpExchange exchange) throws IOException {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("method", exchange.getRequestMethod());
+        body.put("path", exchange.getRequestURI().getPath());
+        ObjectNode query = body.putObject("queryParams");
+        String rawQuery = exchange.getRequestURI().getRawQuery();
+        if (rawQuery != null) {
+            for (String pair : rawQuery.split("&")) {
+                String[] kv = pair.split("=", 2);
+                query.put(decode(kv[0]), kv.length > 1 ? decode(kv[1]) : "");
+            }
+        }
+        ObjectNode headers = body.putObject("headers");
+        for (Map.Entry<String, List<String>> header : exchange.getRequestHeaders().entrySet()) {
+            headers.put(header.getKey().toLowerCase(Locale.ROOT), String.join(",", header.getValue()));
+        }
+        byte[] response = mapper.writeValueAsBytes(body);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        exchange.getResponseBody().write(response);
+        exchange.close();
+    }
+
+    private static String decode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     @Test
@@ -96,10 +163,11 @@ class ApiManagementCompatibilityTest {
                   "properties": {
                     "displayName": "Catalog API",
                     "path": "catalog",
+                    "serviceUrl": "%s",
                     "protocols": ["https"]
                   }
                 }
-                """;
+                """.formatted(echoBackendUrl);
         HttpResponse<String> apiResp = put(apiUrl(), apiBody);
         assertOk(apiResp, "create api");
         JsonNode api = mapper.readTree(apiResp.body());
@@ -151,9 +219,8 @@ class ApiManagementCompatibilityTest {
         HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/openapi/orders/42");
         assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
         JsonNode json = mapper.readTree(gatewayResp.body());
-        assertEquals(OPENAPI_API_ID, json.get("apiId").asText());
-        assertEquals(OPENAPI_GET_OPERATION_ID, json.get("operationId").asText());
-        assertEquals("/orders/42", json.get("backendPath").asText());
+        assertEquals("GET", json.get("method").asText());
+        assertEquals("/orders/42", json.get("path").asText());
 
         HttpResponse<String> updatedApiResp = put(openApiApiUrl(), openApiUpdatedImportBody());
         assertOk(updatedApiResp, "reimport openapi api");
@@ -168,22 +235,21 @@ class ApiManagementCompatibilityTest {
         HttpResponse<String> updatedGatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/openapi/customers/7");
         assertEquals(200, updatedGatewayResp.statusCode(), updatedGatewayResp.body());
         JsonNode updatedJson = mapper.readTree(updatedGatewayResp.body());
-        assertEquals(OPENAPI_API_ID, updatedJson.get("apiId").asText());
-        assertEquals(OPENAPI_UPDATED_OPERATION_ID, updatedJson.get("operationId").asText());
-        assertEquals("/customers/7", updatedJson.get("backendPath").asText());
+        assertEquals("/customers/7", updatedJson.get("path").asText());
     }
 
     @Test
     @Order(6)
-    void gatewayRoute_matchesRegisteredApiAndOperation() throws Exception {
+    void gatewayRoute_forwardsMatchedOperationToServiceUrl() throws Exception {
         HttpResponse<String> resp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
         assertEquals(200, resp.statusCode(), resp.body());
 
         JsonNode json = mapper.readTree(resp.body());
-        assertEquals(SERVICE, json.get("service").asText());
-        assertEquals(API_ID, json.get("apiId").asText());
-        assertEquals(OPERATION_ID, json.get("operationId").asText());
-        assertEquals("/catalog/items/42", json.get("path").asText());
+        assertEquals("GET", json.get("method").asText());
+        assertEquals("/items/42", json.get("path").asText());
+
+        HttpResponse<String> unmatched = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/unknown");
+        assertEquals(404, unmatched.statusCode(), unmatched.body());
     }
 
     @Test
@@ -243,12 +309,11 @@ class ApiManagementCompatibilityTest {
         assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
 
         JsonNode json = mapper.readTree(gatewayResp.body());
-        assertEquals("/catalog/items/42", json.get("path").asText());
-        assertEquals("/backend/items/42", json.get("backendPath").asText());
-        assertEquals("policy-applied", json.get("headers").get("X-Floci-Apim").asText());
-        assertEquals("first", json.get("headers").get("X-Floci-Skip").asText());
-        assertEquals("one,two", json.get("headers").get("X-Floci-Append").asText());
-        assertTrue(json.get("headers").get("X-Floci-Delete") == null);
+        assertEquals("/backend/items/42", json.get("path").asText());
+        assertEquals("policy-applied", json.get("headers").get("x-floci-apim").asText());
+        assertEquals("first", json.get("headers").get("x-floci-skip").asText());
+        assertEquals("one,two", json.get("headers").get("x-floci-append").asText());
+        assertTrue(json.get("headers").get("x-floci-delete") == null);
         assertEquals("test", json.get("queryParams").get("caller").asText());
         assertEquals("compat", json.get("queryParams").get("floci-mode").asText());
         assertTrue(json.get("queryParams").get("remove-me") == null);
@@ -375,8 +440,8 @@ class ApiManagementCompatibilityTest {
         HttpResponse<String> gatewayResp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/catalog/items/42");
         assertEquals(200, gatewayResp.statusCode(), gatewayResp.body());
         JsonNode json = mapper.readTree(gatewayResp.body());
-        assertEquals("named-value-applied", json.get("headers").get("X-Floci-NamedValue").asText());
-        assertEquals("secret-value-applied", json.get("headers").get("X-Floci-SecretNamedValue").asText());
+        assertEquals("named-value-applied", json.get("headers").get("x-floci-namedvalue").asText());
+        assertEquals("secret-value-applied", json.get("headers").get("x-floci-secretnamedvalue").asText());
 
         String backendPolicyXml = """
                 <policies>
@@ -437,8 +502,7 @@ class ApiManagementCompatibilityTest {
         HttpResponse<String> withKey = getWithHeader(gatewayUrl, "Ocp-Apim-Subscription-Key", SUBSCRIPTION_KEY);
         assertEquals(200, withKey.statusCode(), withKey.body());
         JsonNode json = mapper.readTree(withKey.body());
-        assertEquals(API_ID, json.get("apiId").asText());
-        assertEquals("/items/42", json.get("backendPath").asText());
+        assertEquals("/items/42", json.get("path").asText());
 
         HttpResponse<String> withQueryKey = get(gatewayUrl + "?subscription-key=" + SUBSCRIPTION_KEY);
         assertEquals(200, withQueryKey.statusCode(), withQueryKey.body());
@@ -458,6 +522,22 @@ class ApiManagementCompatibilityTest {
 
     @Test
     @Order(11)
+    void apiWithoutBackend_failsInsteadOfAnsweringForTheBackend() throws Exception {
+        String bareApiUrl = BASE + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/" + RG
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE
+                + "/apis/" + BARE_API_ID + "?api-version=" + API_VERSION;
+        assertOk(put(bareApiUrl, "{\"properties\":{\"displayName\":\"Bare API\",\"path\":\"bare\"}}"),
+                "create api without backend");
+
+        HttpResponse<String> resp = get(BASE + "/devstoreaccount1-apim/" + SERVICE + "/bare/anything");
+        assertEquals(500, resp.statusCode(), resp.body());
+        assertEquals("BackendNotConfigured", mapper.readTree(resp.body()).get("error").get("code").asText());
+
+        assertOk(delete(bareApiUrl), "delete api without backend");
+    }
+
+    @Test
+    @Order(12)
     void deleteResources_removesService() throws Exception {
         assertOk(delete(subscriptionUrl()), "delete subscription");
         assertOk(delete(productApiUrl()), "delete product api");
@@ -666,8 +746,8 @@ class ApiManagementCompatibilityTest {
     }
 
     private static String policyBody(String xml) throws Exception {
-        return mapper.writeValueAsString(java.util.Map.of(
-                "properties", java.util.Map.of(
+        return mapper.writeValueAsString(Map.of(
+                "properties", Map.of(
                         "format", "rawxml",
                         "value", xml
                 )
@@ -675,32 +755,33 @@ class ApiManagementCompatibilityTest {
     }
 
     private static String openApiImportBody() throws Exception {
-        String openApi = mapper.writeValueAsString(java.util.Map.of(
+        String openApi = mapper.writeValueAsString(Map.of(
                 "openapi", "3.0.1",
-                "info", java.util.Map.of(
+                "info", Map.of(
                         "title", "Orders API",
                         "version", "1.0"
                 ),
-                "paths", java.util.Map.of(
-                        "/orders/{orderId}", java.util.Map.of(
-                                "get", java.util.Map.of(
+                "paths", Map.of(
+                        "/orders/{orderId}", Map.of(
+                                "get", Map.of(
                                         "operationId", OPENAPI_GET_OPERATION_ID,
                                         "summary", "Get order"
                                 )
                         ),
-                        "/orders", java.util.Map.of(
-                                "post", java.util.Map.of(
+                        "/orders", Map.of(
+                                "post", Map.of(
                                         "operationId", OPENAPI_CREATE_OPERATION_ID,
                                         "summary", "Create order"
                                 )
                         )
                 )
         ));
-        return mapper.writeValueAsString(java.util.Map.of(
-                "properties", java.util.Map.of(
+        return mapper.writeValueAsString(Map.of(
+                "properties", Map.of(
                         "displayName", "Orders API",
                         "path", "openapi",
-                        "protocols", java.util.List.of("https"),
+                        "serviceUrl", echoBackendUrl,
+                        "protocols", List.of("https"),
                         "format", "openapi+json",
                         "value", openApi
                 )
@@ -708,26 +789,27 @@ class ApiManagementCompatibilityTest {
     }
 
     private static String openApiUpdatedImportBody() throws Exception {
-        String openApi = mapper.writeValueAsString(java.util.Map.of(
+        String openApi = mapper.writeValueAsString(Map.of(
                 "openapi", "3.0.1",
-                "info", java.util.Map.of(
+                "info", Map.of(
                         "title", "Customers API",
                         "version", "2.0"
                 ),
-                "paths", java.util.Map.of(
-                        "/customers/{customerId}", java.util.Map.of(
-                                "get", java.util.Map.of(
+                "paths", Map.of(
+                        "/customers/{customerId}", Map.of(
+                                "get", Map.of(
                                         "operationId", OPENAPI_UPDATED_OPERATION_ID,
                                         "summary", "Get customer"
                                 )
                         )
                 )
         ));
-        return mapper.writeValueAsString(java.util.Map.of(
-                "properties", java.util.Map.of(
+        return mapper.writeValueAsString(Map.of(
+                "properties", Map.of(
                         "displayName", "Customers API",
                         "path", "openapi",
-                        "protocols", java.util.List.of("https"),
+                        "serviceUrl", echoBackendUrl,
+                        "protocols", List.of("https"),
                         "format", "openapi+json",
                         "value", openApi
                 )

@@ -25,6 +25,19 @@ in-process.
 - **OpenAPI JSON import** for APIs (operation generation from `paths`); reimport replaces previously generated operations.
 - **Gateway routing** for API paths and operation URL templates, with backend proxying when an API `serviceUrl` or backend policy is configured.
 
+### Gateway requests to an API without a backend
+
+When the matched API has no `serviceUrl`, no `<set-backend-service>` policy applies and no
+`<return-response>` policy answers the request, the gateway responds with `500` and a JSON error body:
+
+```json
+{"error": {"code": "BackendNotConfigured", "message": "API 'catalog-api' in service 'my-apim' has no backend: ..."}}
+```
+
+This status and body are an emulator choice: the response real API Management returns in this case is not
+covered by the references floci-az is checked against. To mock an API without a backend, configure a
+`<return-response>` policy, which is the Azure way to answer from the gateway itself.
+
 ### Supported policy subset
 
 The policy engine intentionally supports a focused subset:
