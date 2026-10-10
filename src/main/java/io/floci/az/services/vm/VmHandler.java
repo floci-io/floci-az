@@ -35,11 +35,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * HTTP handler for Azure Virtual Machines (Microsoft.Compute/virtualMachines) management-plane
@@ -76,14 +75,16 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     private static final String API_VERSION = "2024-11-01";
     private static final String TYPE = "Microsoft.Compute/virtualMachines";
     private static final String FAILED = "Failed";
+    private static final int LOCK_STRIPES = 64;
 
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
     private final StorageBackend<String, StoredObject> storage;
-    // One lock per VM: a create, a retry or a power action reads the record, may replace the backing
-    // container, and writes the record back. Two of those overlapping on one VM would let the slower
-    // one save the id of a container the other already removed.
-    private final ConcurrentMap<String, Object> vmLocks = new ConcurrentHashMap<>();
+    // A create, a retry or a power action reads the VM record, may replace the backing container, and
+    // writes the record back. Two of those overlapping on one VM would let the slower one save the id
+    // of a container the other already removed. A VM always maps to the same lock; the set is fixed
+    // in size so it does not grow with the VM names ever seen.
+    private final Object[] vmLocks = Stream.generate(Object::new).limit(LOCK_STRIPES).toArray();
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "vm-readiness-poller");
         t.setDaemon(true);
@@ -512,7 +513,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     // ── Storage helpers ────────────────────────────────────────────────────────
 
     private Object lockFor(String key) {
-        return vmLocks.computeIfAbsent(key, ignored -> new Object());
+        return vmLocks[Math.floorMod(key.hashCode(), LOCK_STRIPES)];
     }
 
     private Optional<VirtualMachine> getVm(String key) {
