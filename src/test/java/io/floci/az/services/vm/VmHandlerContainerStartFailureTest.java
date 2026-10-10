@@ -103,6 +103,58 @@ class VmHandlerContainerStartFailureTest {
     }
 
     @Test
+    void startOnFailedVmThatStillCannotStartStaysFailed() {
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(VM_PATH + API)
+                .then().statusCode(201);
+
+        given().when().post(VM_PATH + "/start" + API)
+                .then().statusCode(202);
+
+        given().when().get(VM_PATH + "/instanceView" + API)
+                .then().statusCode(200)
+                .body("statuses.code", hasItem("ProvisioningState/failed"))
+                .body("statuses.code", not(hasItem(startsWith("PowerState/"))));
+    }
+
+    @Test
+    void startOnFailedVmRetriesProvisioning() {
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(VM_PATH + API)
+                .then().statusCode(201);
+
+        doNothing().when(containerManager).startVm(any(VirtualMachine.class));
+
+        given().when().post(VM_PATH + "/start" + API)
+                .then().statusCode(202);
+
+        given().when().get(VM_PATH + API)
+                .then().statusCode(200)
+                .body("properties.provisioningState", equalTo("Creating"));
+    }
+
+    @Test
+    void powerOffOnFailedVmLeavesItFailedSoAPutStillRetries() {
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(VM_PATH + API)
+                .then().statusCode(201);
+
+        given().when().post(VM_PATH + "/powerOff" + API)
+                .then().statusCode(202);
+
+        given().when().get(VM_PATH + API)
+                .then().statusCode(200)
+                .body("properties.provisioningState", equalTo("Failed"));
+
+        doNothing().when(containerManager).startVm(any(VirtualMachine.class));
+
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(VM_PATH + API)
+                .then().statusCode(200)
+                .body("properties.provisioningState", equalTo("Creating"));
+    }
+
+    @Test
     void failedVmCanBeDeleted() {
         given().contentType("application/json").body(CREATE_BODY)
                 .when().put(VM_PATH + API)

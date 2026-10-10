@@ -337,6 +337,10 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             default           -> PowerState.RUNNING;  // start, restart, redeploy, reapply
         };
 
+        if (!config.services().vm().mocked() && lacksContainer(vm)) {
+            return handlePowerActionWithoutContainer(key, vm, target);
+        }
+
         if (!config.services().vm().mocked()) {
             // Map the Azure power action onto the backing container. Failures are non-fatal:
             // the recorded power state still transitions so the control plane stays consistent.
@@ -355,6 +359,24 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         vm.setProvisioningState("Succeeded");
         putVm(key, vm);
         return acceptedWithAsync(sub, vm.getLocation());
+    }
+
+    /** A VM whose provisioning failed has no backing container for a power action to act on. */
+    private static boolean lacksContainer(VirtualMachine vm) {
+        return FAILED.equals(vm.getProvisioningState()) && vm.getContainerId() == null;
+    }
+
+    /**
+     * Power action on a {@code Failed} VM. Recording the target power state here would report a
+     * running VM that has no container and hide the failure from the next PUT. An action that
+     * powers the VM on retries provisioning instead; one that powers it off leaves it as it is.
+     */
+    private Response handlePowerActionWithoutContainer(String key, VirtualMachine vm, PowerState target) {
+        if (target == PowerState.RUNNING) {
+            provisionContainer(vm);
+            putVm(key, vm);
+        }
+        return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation());
     }
 
     // ── ARM response builders ────────────────────────────────────────────────────

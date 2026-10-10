@@ -111,6 +111,8 @@ resource and reports it as failed instead of running:
 - Clients that poll the create on `provisioningState` (Terraform's `azurerm_linux_virtual_machine`
   among them) stop with an error rather than waiting or treating the VM as created.
 - Another PUT on the failed VM retries provisioning, and DELETE removes it as usual.
+- A power action that turns the VM on (`start`, `restart`, `redeploy`, `reapply`) also retries
+  provisioning. `powerOff` and `deallocate` leave the VM `Failed`, since there is no container to stop.
 
 Mocked mode is unaffected: it never starts a container, so VMs always provision as `Succeeded`.
 
