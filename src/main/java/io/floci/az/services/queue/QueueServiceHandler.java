@@ -7,6 +7,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.SignedIdentifiers;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
@@ -19,6 +20,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -31,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import javax.xml.stream.XMLStreamException;
 
 @ApplicationScoped
 public class QueueServiceHandler implements AzureServiceHandler, Resettable {
@@ -49,11 +52,16 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     // Below this, a stored _visibleAt predates epoch-millis storage and is in epoch seconds.
     private static final long LEGACY_EPOCH_SECONDS_CEILING = 100_000_000_000L;
     private static final String NEVER_EXPIRES = "Fri, 31 Dec 9999 23:59:59 GMT";
+    // Permission letters a queue's stored access policy may grant: read, add, update, process.
+    private static final String QUEUE_SAS_PERMISSIONS = "raup";
 
     private final StorageBackend<String, StoredObject> store;
     private final XmlMapper xmlMapper = new XmlMapper();
 
     private final EmulatorConfig config;
+    // Set Queue Metadata and Set Queue ACL each rewrite one half of the queue record; serialise them
+    // so neither drops the other's half.
+    private final Object queueRecordLock = new Object();
 
 
     @Inject
@@ -120,7 +128,9 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
             String subPath = parts.length > 1 ? parts[1] : "";
 
             if (subPath.isEmpty()) {
-                if ("PUT".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
+                if ("acl".equals(query.get("comp"))) {
+                    response = handleQueueAcl(request, queueName);
+                } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
                     response = setQueueMetadata(request, queueName);
                 } else if ("GET".equalsIgnoreCase(method) && "metadata".equals(query.get("comp"))) {
                     response = getQueueMetadata(request, queueName);
@@ -249,14 +259,69 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private Response setQueueMetadata(AzureRequest request, String queueName) {
         String key = nsKey(request.accountName(), queueName);
-        Optional<StoredObject> queue = store.get(key);
-        if (queue.isEmpty()) {
-            return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
-                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        synchronized (queueRecordLock) {
+            Optional<StoredObject> queue = store.get(key);
+            if (queue.isEmpty()) {
+                return queueNotFound();
+            }
+            store.put(key, new StoredObject("", queue.get().data(), readMetadataHeaders(request), Instant.now(), ""));
         }
-
-        store.put(key, new StoredObject("", new byte[0], readMetadataHeaders(request), Instant.now(), ""));
         return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    private Response handleQueueAcl(AzureRequest request, String queueName) {
+        String method = request.method();
+        if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+            return getQueueAcl(request, queueName);
+        }
+        if ("PUT".equalsIgnoreCase(method)) {
+            return setQueueAcl(request, queueName);
+        }
+        return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
+                .toXmlResponse(501);
+    }
+
+    private Response getQueueAcl(AzureRequest request, String queueName) {
+        Optional<StoredObject> queue = store.get(nsKey(request.accountName(), queueName));
+        if (queue.isEmpty()) {
+            return queueNotFound();
+        }
+        byte[] stored = queue.get().data();
+        String xml = stored.length == 0
+                ? SignedIdentifiers.emptyXml()
+                : new String(stored, StandardCharsets.UTF_8);
+        return Response.ok(xml, MediaType.APPLICATION_XML).build();
+    }
+
+    private Response setQueueAcl(AzureRequest request, String queueName) {
+        List<SignedIdentifiers.SignedIdentifier> identifiers;
+        try {
+            identifiers = SignedIdentifiers.parse(
+                    new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException | XMLStreamException e) {
+            LOGGER.debugv("Rejecting queue ACL body for {0}: {1}", queueName, e.getMessage());
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        if (!SignedIdentifiers.isValid(identifiers, QUEUE_SAS_PERMISSIONS)) {
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        String key = nsKey(request.accountName(), queueName);
+        synchronized (queueRecordLock) {
+            Optional<StoredObject> queue = store.get(key);
+            if (queue.isEmpty()) {
+                return queueNotFound();
+            }
+            byte[] acl = identifiers.isEmpty()
+                    ? new byte[0]
+                    : SignedIdentifiers.toXml(identifiers).getBytes(StandardCharsets.UTF_8);
+            store.put(key, new StoredObject("", acl, queue.get().metadata(), Instant.now(), ""));
+        }
+        return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    private static Response queueNotFound() {
+        return new AzureErrorResponse("QueueNotFound", "The specified queue does not exist.")
+                .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
     }
 
     private Response getQueue(AzureRequest request, String queueName) {
@@ -602,8 +667,12 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         store.clear();
     }
 
+    /** Creates the queue if it does not exist; an existing queue keeps its metadata and access policies. */
     public void ensureQueue(String accountName, String queueName) {
-        store.put(nsKey(accountName, queueName), NS_SENTINEL);
+        String key = nsKey(accountName, queueName);
+        if (store.get(key).isEmpty()) {
+            store.put(key, NS_SENTINEL);
+        }
     }
 
     private static String nsKey(String accountName, String queueName) {

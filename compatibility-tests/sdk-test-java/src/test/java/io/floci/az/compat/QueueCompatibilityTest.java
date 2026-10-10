@@ -4,9 +4,11 @@ import com.azure.storage.queue.QueueClient;
 import com.azure.storage.queue.QueueServiceClient;
 import com.azure.storage.queue.QueueServiceClientBuilder;
 import com.azure.storage.queue.models.PeekedMessageItem;
+import com.azure.storage.queue.models.QueueAccessPolicy;
 import com.azure.storage.queue.models.QueueItem;
 import com.azure.storage.queue.models.QueueMessageItem;
 import com.azure.storage.queue.models.QueueServiceProperties;
+import com.azure.storage.queue.models.QueueSignedIdentifier;
 import com.azure.storage.queue.models.QueueStorageException;
 import com.azure.storage.queue.models.QueuesSegmentOptions;
 import com.azure.storage.queue.models.UpdateMessageResult;
@@ -14,6 +16,8 @@ import com.azure.core.util.Context;
 import org.junit.jupiter.api.*;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -208,6 +212,46 @@ class QueueCompatibilityTest {
 
         queue.deleteMessage(message.getMessageId(), updated.getPopReceipt());
         client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("access policy: setAccessPolicy then getAccessPolicy round-trips the stored policies")
+    void accessPolicyRoundTrip() {
+        String name = queueName();
+        QueueClient queue = client.createQueue(name);
+
+        assertTrue(queue.getAccessPolicy().stream().toList().isEmpty());
+
+        OffsetDateTime start = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime expiry = OffsetDateTime.of(2027, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        queue.setAccessPolicy(List.of(
+            new QueueSignedIdentifier().setId("read-only").setAccessPolicy(new QueueAccessPolicy()
+                .setStartsOn(start).setExpiresOn(expiry).setPermissions("r")),
+            new QueueSignedIdentifier().setId("full").setAccessPolicy(new QueueAccessPolicy()
+                .setStartsOn(start).setExpiresOn(expiry).setPermissions("raup"))));
+
+        List<QueueSignedIdentifier> identifiers = queue.getAccessPolicy().stream().toList();
+        assertEquals(2, identifiers.size());
+        assertEquals("read-only", identifiers.get(0).getId());
+        assertEquals("r", identifiers.get(0).getAccessPolicy().getPermissions());
+        assertEquals("full", identifiers.get(1).getId());
+        assertEquals("raup", identifiers.get(1).getAccessPolicy().getPermissions());
+        assertEquals(start, identifiers.get(1).getAccessPolicy().getStartsOn());
+        assertEquals(expiry, identifiers.get(1).getAccessPolicy().getExpiresOn());
+
+        client.deleteQueue(name);
+    }
+
+    @Test
+    @DisplayName("access policy on non-existent queue → QueueStorageException (404), queue not created")
+    void accessPolicyOnMissingQueue() {
+        String name = queueName();
+        QueueClient queue = client.getQueueClient(name);
+        QueueStorageException ex = assertThrows(QueueStorageException.class,
+            () -> queue.setAccessPolicy(List.of(new QueueSignedIdentifier().setId("p")
+                .setAccessPolicy(new QueueAccessPolicy().setPermissions("r")))));
+        assertEquals(404, ex.getStatusCode());
+        assertFalse(client.listQueues().stream().anyMatch(q -> q.getName().equals(name)));
     }
 
     // --- Error cases ---
