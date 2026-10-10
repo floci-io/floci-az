@@ -20,6 +20,10 @@ authentication.
   (`x-ms-continuation-Next*` headers)
 - **Optimistic concurrency**: `ETag` / `If-Match` on update and delete; a stale ETag is rejected
 - **Batch transactions**: `$batch` multipart change sets are applied atomically
+- **Table ACL**: Get and Set Table ACL (`{table}?comp=acl`) store up to five stored access policies
+  as `SignedIdentifiers` XML on the table; a sixth policy, or a permission outside `raud`, is
+  rejected with `400 InvalidXmlDocument`. The policies are stored and returned but not enforced
+  (see SAS below)
 - **Service properties**: `restype=service&comp=properties` returns a static
   `<StorageServiceProperties>` document (logging and metrics disabled); Set is accepted as a no-op
 
@@ -28,6 +32,7 @@ authentication.
 ```
 http://localhost:4577/{account}-table/Tables                                   # table operations
 http://localhost:4577/{account}-table/{table}(PartitionKey='p',RowKey='r')     # entity operations
+http://localhost:4577/{account}-table/{table}?comp=acl                         # table ACL
 http://localhost:4577/{account}-table/$batch                                   # batch transactions
 ```
 

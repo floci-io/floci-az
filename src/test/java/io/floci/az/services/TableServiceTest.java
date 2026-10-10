@@ -308,6 +308,135 @@ public class TableServiceTest {
             .then().statusCode(200).body("who", equalTo("first"));
     }
 
+    @Test
+    void getTableAclOfNewTableReturnsEmptySignedIdentifiers() {
+        createTable("AclEmpty");
+        insertEntity("AclEmpty", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\"}").then().statusCode(201);
+
+        given()
+            .when().get("/{account}/AclEmpty?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body(containsString("<SignedIdentifiers>"))
+            .body(not(containsString("<SignedIdentifier>")))
+            .body(not(containsString("\"value\"")));
+    }
+
+    @Test
+    void setTableAclThenGetReturnsStoredPolicies() {
+        createTable("AclRoundTrip");
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(2, "raud"))
+            .when().put("/{account}/AclRoundTrip?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(204);
+
+        given()
+            .when().get("/{account}/AclRoundTrip?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .contentType(containsString("xml"))
+            .body("SignedIdentifiers.SignedIdentifier.size()", equalTo(2))
+            .body("SignedIdentifiers.SignedIdentifier[0].Id", equalTo("policy-0"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Start", equalTo("2026-01-01T00:00:00.0000000Z"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Expiry", equalTo("2027-01-01T00:00:00.0000000Z"))
+            .body("SignedIdentifiers.SignedIdentifier[1].AccessPolicy.Permission", equalTo("raud"));
+
+        // The ACL lives on the table record: entities and the table listing are untouched.
+        given()
+            .when().get("/{account}/Tables", ACCOUNT)
+            .then().statusCode(200).body("value.TableName", hasItem("AclRoundTrip"));
+        given()
+            .when().get("/{account}/AclRoundTrip()", ACCOUNT)
+            .then().statusCode(200).body("value.size()", equalTo(0));
+    }
+
+    @Test
+    void setTableAclWithEmptyBodyClearsPolicies() {
+        createTable("AclClear");
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/AclClear?comp=acl", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .contentType("application/xml")
+            .body("")
+            .when().put("/{account}/AclClear?comp=acl", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/AclClear?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body(not(containsString("<SignedIdentifier>")));
+    }
+
+    @Test
+    void setTableAclWithMoreThanFivePoliciesIsRejected() {
+        createTable("AclTooMany");
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(6, "r"))
+            .when().put("/{account}/AclTooMany?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument")
+            .body(containsString("<Code>InvalidXmlDocument</Code>"));
+
+        given()
+            .when().get("/{account}/AclTooMany?comp=acl", ACCOUNT)
+            .then().statusCode(200).body(not(containsString("<SignedIdentifier>")));
+    }
+
+    @Test
+    void setTableAclWithQueuePermissionIsRejected() {
+        createTable("AclBadPerm");
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "rp"))
+            .when().put("/{account}/AclBadPerm?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(400)
+            .header("x-ms-error-code", "InvalidXmlDocument");
+    }
+
+    @Test
+    void tableAclOnMissingTableReturnsTableNotFound() {
+        given()
+            .when().get("/{account}/AclMissing?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "TableNotFound")
+            .contentType(containsString("xml"));
+
+        given()
+            .contentType("application/xml")
+            .body(signedIdentifiers(1, "r"))
+            .when().put("/{account}/AclMissing?comp=acl", ACCOUNT)
+            .then()
+            .statusCode(404)
+            .header("x-ms-error-code", "TableNotFound");
+    }
+
+    private static String signedIdentifiers(int count, String permission) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?><SignedIdentifiers>");
+        for (int i = 0; i < count; i++) {
+            xml.append("<SignedIdentifier><Id>policy-").append(i).append("</Id><AccessPolicy>")
+                .append("<Start>2026-01-01T00:00:00.0000000Z</Start>")
+                .append("<Expiry>2027-01-01T00:00:00.0000000Z</Expiry>")
+                .append("<Permission>").append(permission).append("</Permission>")
+                .append("</AccessPolicy></SignedIdentifier>");
+        }
+        return xml.append("</SignedIdentifiers>").toString();
+    }
+
     private static void createTable(String name) {
         given()
             .contentType("application/json")

@@ -4,16 +4,20 @@ import com.azure.data.tables.TableClient;
 import com.azure.data.tables.TableServiceClient;
 import com.azure.data.tables.TableServiceClientBuilder;
 import com.azure.data.tables.models.ListEntitiesOptions;
+import com.azure.data.tables.models.TableAccessPolicy;
 import com.azure.data.tables.models.TableEntity;
 import com.azure.data.tables.models.TableErrorCode;
 import com.azure.data.tables.models.TableEntityUpdateMode;
 import com.azure.data.tables.models.TableServiceException;
 import com.azure.data.tables.models.TableServiceProperties;
+import com.azure.data.tables.models.TableSignedIdentifier;
 import com.azure.data.tables.models.TableTransactionAction;
 import com.azure.data.tables.models.TableTransactionActionType;
 import com.azure.data.tables.models.TableTransactionFailedException;
 import org.junit.jupiter.api.*;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -351,6 +355,37 @@ class TableCompatibilityTest {
         TableServiceException ex = assertThrows(TableServiceException.class,
             () -> table.getEntity("p1", "r2"));
         assertEquals(404, ex.getResponse().getStatusCode());
+
+        client.deleteTable(name);
+    }
+
+    @Test
+    @DisplayName("access policies: setAccessPolicies then getAccessPolicies round-trips the stored policies")
+    void accessPoliciesRoundTrip() {
+        String name = tableName();
+        TableClient table = client.createTable(name);
+        table.createEntity(new TableEntity("p1", "r1"));
+
+        // The SDK maps an empty SignedIdentifiers document to a null list.
+        List<TableSignedIdentifier> initial = table.getAccessPolicies().getIdentifiers();
+        assertTrue(initial == null || initial.isEmpty());
+
+        OffsetDateTime start = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime expiry = OffsetDateTime.of(2027, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        table.setAccessPolicies(List.of(
+            new TableSignedIdentifier("read-only").setAccessPolicy(new TableAccessPolicy()
+                .setStartsOn(start).setExpiresOn(expiry).setPermissions("r")),
+            new TableSignedIdentifier("full").setAccessPolicy(new TableAccessPolicy()
+                .setStartsOn(start).setExpiresOn(expiry).setPermissions("raud"))));
+
+        List<TableSignedIdentifier> identifiers = table.getAccessPolicies().getIdentifiers();
+        assertEquals(2, identifiers.size());
+        assertEquals("read-only", identifiers.get(0).getId());
+        assertEquals("r", identifiers.get(0).getAccessPolicy().getPermissions());
+        assertEquals("full", identifiers.get(1).getId());
+        assertEquals("raud", identifiers.get(1).getAccessPolicy().getPermissions());
+        assertEquals(start, identifiers.get(1).getAccessPolicy().getStartsOn());
+        assertEquals(expiry, identifiers.get(1).getAccessPolicy().getExpiresOn());
 
         client.deleteTable(name);
     }

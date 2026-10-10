@@ -9,6 +9,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
+import io.floci.az.core.SignedIdentifiers;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.storage.StorageBackend;
@@ -40,6 +41,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import javax.xml.stream.XMLStreamException;
 
 @ApplicationScoped
 public class TableServiceHandler implements AzureServiceHandler, Resettable {
@@ -53,6 +55,8 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .withZone(ZoneId.of("UTC"));
     private static final int DEFAULT_PAGE_SIZE = 1000;
+    // Permission letters a table's stored access policy may grant: query, add, update, delete.
+    private static final String TABLE_SAS_PERMISSIONS = "raud";
 
     private final StorageBackend<String, StoredObject> store;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -147,7 +151,9 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             }
             String entityPart = pkRkPart;
 
-            if ("POST".equalsIgnoreCase(method)) {
+            if ("acl".equals(query.get("comp")) && !path.contains("(")) {
+                response = handleTableAcl(request, tableName);
+            } else if ("POST".equalsIgnoreCase(method)) {
                 response = mutate(() -> entityPart.isEmpty()
                         ? insertEntity(request, tableName)
                         : updateEntity(request, tableName, entityPart));
@@ -253,6 +259,60 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                 .toList()
                 .forEach(store::delete);
         return Response.noContent().build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Table ACL (stored access policies)
+    // -------------------------------------------------------------------------
+
+    private Response handleTableAcl(AzureRequest request, String tableName) {
+        if ("GET".equalsIgnoreCase(request.method())) {
+            return getTableAcl(request, tableName);
+        }
+        if ("PUT".equalsIgnoreCase(request.method())) {
+            return mutate(() -> setTableAcl(request, tableName));
+        }
+        return new AzureErrorResponse("NotImplemented", "The requested operation is not implemented.")
+                .toXmlResponse(501);
+    }
+
+    private Response getTableAcl(AzureRequest request, String tableName) {
+        Optional<StoredObject> table = store.get(nsKey(request.accountName(), tableName));
+        if (table.isEmpty()) {
+            return tableNotFound().toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        byte[] stored = table.get().data();
+        String xml = stored.length == 0
+                ? SignedIdentifiers.emptyXml()
+                : new String(stored, StandardCharsets.UTF_8);
+        return Response.ok(xml, MediaType.APPLICATION_XML).build();
+    }
+
+    private Response setTableAcl(AzureRequest request, String tableName) {
+        List<SignedIdentifiers.SignedIdentifier> identifiers;
+        try {
+            identifiers = SignedIdentifiers.parse(
+                    new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException | XMLStreamException e) {
+            LOGGER.debugv("Rejecting table ACL body for {0}: {1}", tableName, e.getMessage());
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        if (!SignedIdentifiers.isValid(identifiers, TABLE_SAS_PERMISSIONS)) {
+            return SignedIdentifiers.invalidXmlDocument().toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        String key = nsKey(request.accountName(), tableName);
+        if (store.get(key).isEmpty()) {
+            return tableNotFound().toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        byte[] acl = identifiers.isEmpty()
+                ? new byte[0]
+                : SignedIdentifiers.toXml(identifiers).getBytes(StandardCharsets.UTF_8);
+        store.put(key, new StoredObject("", acl, Map.of(), Instant.now(), ""));
+        return Response.noContent().build();
+    }
+
+    private static AzureErrorResponse tableNotFound() {
+        return new AzureErrorResponse("TableNotFound", "The table specified does not exist.");
     }
 
     // -------------------------------------------------------------------------
