@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -78,6 +80,10 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
     private final StorageBackend<String, StoredObject> storage;
+    // One lock per VM: a create, a retry or a power action reads the record, may replace the backing
+    // container, and writes the record back. Two of those overlapping on one VM would let the slower
+    // one save the id of a container the other already removed.
+    private final ConcurrentMap<String, Object> vmLocks = new ConcurrentHashMap<>();
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "vm-readiness-poller");
         t.setDaemon(true);
@@ -195,41 +201,43 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             Map<String, Object> properties = objectToMap(body.path("properties"));
 
             String key = storageKey(sub, rg, vmName);
-            Optional<VirtualMachine> existing = getVm(key);
-            boolean isNew = existing.isEmpty();
+            synchronized (lockFor(key)) {
+                Optional<VirtualMachine> existing = getVm(key);
+                boolean isNew = existing.isEmpty();
 
-            VirtualMachine vm = existing.orElseGet(VirtualMachine::new);
-            if (isNew) {
-                vm.setSubscriptionId(sub);
-                vm.setResourceGroup(rg);
-                vm.setName(vmName);
-                vm.setVmId(UUID.randomUUID().toString());
-                vm.setTimeCreated(Instant.now());
-            }
-            vm.setLocation(location);
-            vm.setTags(tags.isEmpty() ? null : tags);
-            vm.setProperties(properties);
-
-            if (config.services().vm().mocked()) {
-                // Mocked mode: VM is provisioned and powered on immediately (no Docker).
-                vm.setProvisioningState("Succeeded");
-                if (isNew || vm.getPowerState() == null) {
-                    vm.setPowerState(PowerState.RUNNING.code());
+                VirtualMachine vm = existing.orElseGet(VirtualMachine::new);
+                if (isNew) {
+                    vm.setSubscriptionId(sub);
+                    vm.setResourceGroup(rg);
+                    vm.setName(vmName);
+                    vm.setVmId(UUID.randomUUID().toString());
+                    vm.setTimeCreated(Instant.now());
                 }
-            } else if (isNew || FAILED.equals(vm.getProvisioningState())) {
-                // Real mode: launch a backing container; the readiness poller flips the VM to
-                // Succeeded once it is running. A PUT on a Failed VM retries provisioning.
-                provisionContainer(vm);
-            } else {
-                // Real mode update: keep the existing container and power state.
-                vm.setProvisioningState("Succeeded");
-            }
+                vm.setLocation(location);
+                vm.setTags(tags.isEmpty() ? null : tags);
+                vm.setProperties(properties);
 
-            putVm(key, vm);
-            return Response.status(isNew ? 201 : 200)
-                    .entity(toArmResponse(vm, false))
-                    .type("application/json")
-                    .build();
+                if (config.services().vm().mocked()) {
+                    // Mocked mode: VM is provisioned and powered on immediately (no Docker).
+                    vm.setProvisioningState("Succeeded");
+                    if (isNew || vm.getPowerState() == null) {
+                        vm.setPowerState(PowerState.RUNNING.code());
+                    }
+                } else if (isNew || FAILED.equals(vm.getProvisioningState())) {
+                    // Real mode: launch a backing container; the readiness poller flips the VM to
+                    // Succeeded once it is running. A PUT on a Failed VM retries provisioning.
+                    provisionContainer(vm);
+                } else {
+                    // Real mode update: keep the existing container and power state.
+                    vm.setProvisioningState("Succeeded");
+                }
+
+                putVm(key, vm);
+                return Response.status(isNew ? 201 : 200)
+                        .entity(toArmResponse(vm, false))
+                        .type("application/json")
+                        .build();
+            }
         } catch (Exception e) {
             LOG.errorf(e, "Error creating/updating VM %s", vmName);
             return badRequest("Invalid request: " + e.getMessage());
@@ -263,34 +271,38 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     private Response handleUpdateTags(String sub, String rg, String vmName, AzureRequest req) {
         String key = storageKey(sub, rg, vmName);
-        Optional<VirtualMachine> found = getVm(key);
-        if (found.isEmpty()) {
-            return armNotFound("Virtual machine '" + vmName + "' not found.");
-        }
+        Map<String, String> tags;
         try {
-            JsonNode body = readBody(req.bodyStream());
+            tags = parseTags(readBody(req.bodyStream()).path("tags"));
+        } catch (Exception e) {
+            return badRequest("Invalid request: " + e.getMessage());
+        }
+        synchronized (lockFor(key)) {
+            Optional<VirtualMachine> found = getVm(key);
+            if (found.isEmpty()) {
+                return armNotFound("Virtual machine '" + vmName + "' not found.");
+            }
             VirtualMachine vm = found.get();
-            Map<String, String> tags = parseTags(body.path("tags"));
             vm.setTags(tags.isEmpty() ? null : tags);
             putVm(key, vm);
             return Response.ok(toArmResponse(vm, false)).type("application/json").build();
-        } catch (Exception e) {
-            return badRequest("Invalid request: " + e.getMessage());
         }
     }
 
     private Response handleDelete(String sub, String rg, String vmName) {
         String key = storageKey(sub, rg, vmName);
-        if (!config.services().vm().mocked()) {
-            getVm(key).ifPresent(vm -> {
-                try {
-                    containerManager.removeVm(vm);
-                } catch (Exception e) {
-                    LOG.warnv("Error removing container for VM {0}: {1}", vmName, e.getMessage());
-                }
-            });
+        synchronized (lockFor(key)) {
+            if (!config.services().vm().mocked()) {
+                getVm(key).ifPresent(vm -> {
+                    try {
+                        containerManager.removeVm(vm);
+                    } catch (Exception e) {
+                        LOG.warnv("Error removing container for VM {0}: {1}", vmName, e.getMessage());
+                    }
+                });
+            }
+            storage.delete(key);
         }
-        storage.delete(key);
         // Delete synchronously with 204 No Content. The azurerm provider's virtualmachines
         // DeleteThenPoll treats a 202/200 as a long-running operation and polls the collection
         // forever against the emulator; a terminal 204 signals the delete is complete so
@@ -326,6 +338,12 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     private Response handlePowerAction(String sub, String rg, String vmName, String action) {
         String key = storageKey(sub, rg, vmName);
+        synchronized (lockFor(key)) {
+            return applyPowerAction(key, sub, vmName, action);
+        }
+    }
+
+    private Response applyPowerAction(String key, String sub, String vmName, String action) {
         Optional<VirtualMachine> found = getVm(key);
         if (found.isEmpty()) {
             return armNotFound("Virtual machine '" + vmName + "' not found.");
@@ -465,21 +483,37 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     private void startReadinessPoller() {
         poller.scheduleAtFixedRate(() -> {
             try {
-                scanAll().forEach(vm -> {
-                    if ("Creating".equals(vm.getProvisioningState()) && containerManager.isRunning(vm)) {
-                        vm.setProvisioningState("Succeeded");
-                        vm.setPowerState(PowerState.RUNNING.code());
-                        putVm(vm.storageKey(), vm);
-                        LOG.infov("VM {0} container is running; provisioningState=Succeeded", vm.getName());
-                    }
-                });
+                scanAll().stream()
+                        .filter(vm -> "Creating".equals(vm.getProvisioningState()))
+                        .forEach(vm -> markSucceededOnceRunning(vm.storageKey()));
             } catch (Exception e) {
                 LOG.error("Error in VM readiness poller", e);
             }
         }, 2, 3, TimeUnit.SECONDS);
     }
 
+    /** Re-reads the VM under its lock, so a request that changed it since the scan is not overwritten. */
+    private void markSucceededOnceRunning(String key) {
+        synchronized (lockFor(key)) {
+            Optional<VirtualMachine> found = getVm(key);
+            if (found.isEmpty()) {
+                return;
+            }
+            VirtualMachine vm = found.get();
+            if ("Creating".equals(vm.getProvisioningState()) && containerManager.isRunning(vm)) {
+                vm.setProvisioningState("Succeeded");
+                vm.setPowerState(PowerState.RUNNING.code());
+                putVm(key, vm);
+                LOG.infov("VM {0} container is running; provisioningState=Succeeded", vm.getName());
+            }
+        }
+    }
+
     // ── Storage helpers ────────────────────────────────────────────────────────
+
+    private Object lockFor(String key) {
+        return vmLocks.computeIfAbsent(key, ignored -> new Object());
+    }
 
     private Optional<VirtualMachine> getVm(String key) {
         return storage.get(key).map(so -> {

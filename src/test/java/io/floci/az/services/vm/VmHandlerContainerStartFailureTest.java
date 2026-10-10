@@ -10,10 +10,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 
@@ -131,6 +136,29 @@ class VmHandlerContainerStartFailureTest {
         given().when().get(VM_PATH + API)
                 .then().statusCode(200)
                 .body("properties.provisioningState", equalTo("Creating"));
+    }
+
+    @Test
+    void overlappingStartsOnFailedVmProvisionOnlyOnce() throws Exception {
+        given().contentType("application/json").body(CREATE_BODY)
+                .when().put(VM_PATH + API)
+                .then().statusCode(201);
+
+        AtomicInteger provisions = new AtomicInteger();
+        doAnswer(invocation -> {
+            provisions.incrementAndGet();
+            Thread.sleep(500);
+            return null;
+        }).when(containerManager).startVm(any(VirtualMachine.class));
+
+        CompletableFuture<Integer> first = CompletableFuture.supplyAsync(
+                () -> given().when().post(VM_PATH + "/start" + API).statusCode());
+        CompletableFuture<Integer> second = CompletableFuture.supplyAsync(
+                () -> given().when().post(VM_PATH + "/start" + API).statusCode());
+
+        assertThat(first.get(30, TimeUnit.SECONDS), equalTo(202));
+        assertThat(second.get(30, TimeUnit.SECONDS), equalTo(202));
+        assertThat(provisions.get(), equalTo(1));
     }
 
     @Test
