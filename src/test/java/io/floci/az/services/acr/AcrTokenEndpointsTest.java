@@ -15,7 +15,9 @@ import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.greaterThan;
@@ -86,6 +88,46 @@ public class AcrTokenEndpointsTest {
                 .then().statusCode(401)
                 .header("WWW-Authenticate", is("Bearer realm=\"https://" + LOGIN_SERVER
                         + "/oauth2/token\",service=\"" + LOGIN_SERVER + "\""));
+    }
+
+    @Test
+    void theMetadataCatalogChallengesWithTheRegistryCatalogScope() {
+        // The SDK clients call GET /acr/v1/_catalog unauthenticated and start the token exchange
+        // only when the challenge names both the service and the scope.
+        given().header("Host", LOGIN_SERVER)
+                .when().get("/acr/v1/_catalog?api-version=2021-07-01")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", is("Bearer realm=\"http://" + LOGIN_SERVER
+                        + "/oauth2/token\",service=\"" + LOGIN_SERVER + "\",scope=\"registry:catalog:*\""))
+                .body("errors[0].code", is("UNAUTHORIZED"));
+    }
+
+    @Test
+    void repositoryMetadataChallengesWithTheRepositoryScopeTheMethodNeeds() {
+        given().header("Host", LOGIN_SERVER)
+                .when().get("/acr/v1/team/app/_tags")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("scope=\"repository:team/app:metadata_read\""));
+
+        given().header("Host", LOGIN_SERVER).contentType("application/json").body("{}")
+                .when().patch("/acr/v1/app/_tags/v1")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("scope=\"repository:app:metadata_write\""));
+
+        given().header("Host", LOGIN_SERVER)
+                .when().delete("/acr/v1/app")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", containsString("scope=\"repository:app:delete\""));
+    }
+
+    @Test
+    void thePingChallengeStillCarriesNoScope() {
+        // The Azure CLI splits the challenge on commas, so a pull,push scope on the ping would
+        // break `az acr login`; the ping names no resource anyway.
+        given().header("Host", LOGIN_SERVER)
+                .when().get("/v2/")
+                .then().statusCode(401)
+                .header("WWW-Authenticate", not(containsString("scope=")));
     }
 
     @Test
@@ -260,6 +302,22 @@ public class AcrTokenEndpointsTest {
                 .when().get("/v2/")
                 .then().statusCode(405)
                 .body("errors[0].code", is("UNSUPPORTED"));
+    }
+
+    @Test
+    void anAuthenticatedMetadataCatalogReportsUnsupportedInMockedMode() {
+        given().header("Host", LOGIN_SERVER).header("Authorization", "Bearer a-token")
+                .when().get("/acr/v1/_catalog")
+                .then().statusCode(405)
+                .body("errors[0].code", is("UNSUPPORTED"));
+    }
+
+    @Test
+    void metadataPathsOtherThanTheCatalogAreNotServed() {
+        given().header("Host", LOGIN_SERVER).header("Authorization", "Bearer a-token")
+                .when().get("/acr/v1/app/_tags")
+                .then().statusCode(404)
+                .body("errors[0].code", is("NAME_UNKNOWN"));
     }
 
     @Test

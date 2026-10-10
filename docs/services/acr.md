@@ -12,8 +12,11 @@ either anonymously on the registry container's published port or with an Entra t
 - **Admin credentials**: `listCredentials` / `regenerateCredential` (username + two passwords)
 - **Name availability**: `checkNameAvailability`
 - **Usages**: `listUsages` (static quota report)
-- **Entra token exchange**: the bearer challenge on `GET /v2/`, `POST /oauth2/exchange` and
-  `/oauth2/token`, so `az acr login` and the Azure SDK container-registry clients work
+- **Entra token exchange**: the bearer challenge on `GET /v2/` and on the `/acr/v1/` metadata API,
+  `POST /oauth2/exchange` and `/oauth2/token`, so `az acr login` and the Azure SDK
+  container-registry clients work
+- **Repository catalog**: `GET /acr/v1/_catalog`, which the SDK clients' `listRepositoryNames`
+  calls, lists the same repositories as `/v2/_catalog`
 - **Data plane**: a single shared `registry:2` sidecar exposing the **Docker Registry HTTP API V2**
   (`/v2/…`), so images push and pull with the standard Docker client. All registries are backed by
   one container and isolated by an internal repository prefix (`{registryName}/{repo}`)
@@ -66,6 +69,7 @@ GET       {name}.azurecr.io/v2/                 bearer challenge
 POST      {name}.azurecr.io/oauth2/exchange     Entra access token → ACR refresh token
 GET|POST  {name}.azurecr.io/oauth2/token        ACR refresh token → scoped access token
 *         {name}.azurecr.io/v2/**               Docker Registry HTTP API V2
+GET       {name}.azurecr.io/acr/v1/_catalog     repository catalog (ACR metadata API)
 ```
 
 The registry name is not part of a repository reference here: `{name}.azurecr.io/app` is the
@@ -103,6 +107,14 @@ that refresh token is traded for a scoped access token at `/oauth2/token`. Docke
 the username `00000000-0000-0000-0000-000000000000` and the access token as the password. floci-az
 serves all of it, in both `mocked` modes.
 
+The Azure SDK container-registry clients (Java, Python, .NET) work the other way round: they send
+each request without credentials and authenticate only when it is challenged, and only when that
+challenge carries a `scope` as well as the `service`. A request under `/acr/v1/` that carries no
+`Authorization` header is therefore answered with a challenge naming the scope it needs:
+`registry:catalog:*` for `/acr/v1/_catalog`, and `repository:{name}:metadata_read`,
+`metadata_write` or `delete` for a repository's metadata, by method. The `GET /v2/` ping names no
+resource, so its challenge carries no scope, as `az acr login` expects.
+
 Intentional deviations, all of them a consequence of the emulator's existing stance that ARM and
 Shared Key credentials are accepted without verification:
 
@@ -112,7 +124,9 @@ Shared Key credentials are accepted without verification:
   nothing checks the refresh token presented at `/oauth2/token`.
 - **No authorization is enforced.** The requested scope is recorded in the access token's `access`
   claim and then ignored: any token, and any identity, reaches every repository. Only `GET /v2/`
-  challenges; repository paths are served whether or not a token is presented. Admin credentials
+  and the `/acr/v1/` metadata API challenge; Docker Registry repository paths under `/v2/` are
+  served whether or not a token is presented. Of the metadata API only `/acr/v1/_catalog` is
+  served; its other paths answer `404 NAME_UNKNOWN` once authenticated. Admin credentials
   are accepted at the token endpoint so the `password` grant is truthful, but they are not required.
 - **The shared backing registry runs anonymous** (mirroring the AWS ECR design in the sibling
   emulator), so its published port serves push and pull with no credentials at all.

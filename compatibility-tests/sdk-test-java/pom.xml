@@ -107,6 +107,18 @@
             <artifactId>azure-communication-email</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-containers-containerregistry</artifactId>
+        </dependency>
+        <!-- azure-containers-containerregistry still serializes through azure-core's JacksonAdapter,
+             which needs the XML dataformat at class init; azure-core no longer brings it in.
+             Pinned to the jackson-databind version the Azure BOM resolves. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-xml</artifactId>
+            <version>2.18.4</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-common</artifactId>
             <version>${hadoop.version}</version>

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -97,5 +98,66 @@ class AcrTokenServiceTest {
         assertEquals("Bearer realm=\"http://myregistry.azurecr.io/oauth2/token\","
                 + "service=\"myregistry.azurecr.io\"",
                 AcrTokenService.challenge("http", "myregistry.azurecr.io"));
+    }
+
+    @Test
+    void aScopedChallengeAddsTheScopeTheSdkClientsRequire() {
+        // The Java, Python and .NET container-registry clients start the token exchange only when
+        // the challenge carries both service and scope.
+        assertEquals("Bearer realm=\"https://myregistry.azurecr.io/oauth2/token\","
+                + "service=\"myregistry.azurecr.io\",scope=\"registry:catalog:*\"",
+                AcrTokenService.challenge("https", "myregistry.azurecr.io", "registry:catalog:*"));
+    }
+
+    @Test
+    void thePingNamesNoResourceSoItsChallengeCarriesNoScope() {
+        assertNull(AcrTokenService.scopeFor("GET", "v2"));
+        assertNull(AcrTokenService.scopeFor("GET", "/v2/"));
+    }
+
+    @Test
+    void bothCatalogsNeedTheRegistryCatalogScope() {
+        assertEquals("registry:catalog:*", AcrTokenService.scopeFor("GET", "v2/_catalog"));
+        assertEquals("registry:catalog:*", AcrTokenService.scopeFor("GET", "acr/v1/_catalog"));
+        assertEquals("registry:catalog:*", AcrTokenService.scopeFor("GET", "/acr/v1/_catalog/"));
+    }
+
+    @Test
+    void registryReadsNeedPullWritesNeedPullAndPushDeletesNeedDelete() {
+        assertEquals("repository:app:pull", AcrTokenService.scopeFor("GET", "v2/app/manifests/latest"));
+        assertEquals("repository:app:pull", AcrTokenService.scopeFor("HEAD", "v2/app/blobs/sha256:abc"));
+        assertEquals("repository:app:pull", AcrTokenService.scopeFor("GET", "v2/app/tags/list"));
+        assertEquals("repository:app:pull,push", AcrTokenService.scopeFor("PUT", "v2/app/manifests/v1"));
+        assertEquals("repository:app:pull,push", AcrTokenService.scopeFor("POST", "v2/app/blobs/uploads/"));
+        assertEquals("repository:app:pull,push",
+                AcrTokenService.scopeFor("PATCH", "v2/app/blobs/uploads/abc-123"));
+        assertEquals("repository:app:delete", AcrTokenService.scopeFor("DELETE", "v2/app/manifests/sha256:abc"));
+    }
+
+    @Test
+    void aRegistryPathKeepsTheSlashesInANestedRepositoryName() {
+        assertEquals("repository:team/sub/app:pull",
+                AcrTokenService.scopeFor("GET", "v2/team/sub/app/manifests/latest"));
+        assertEquals("repository:team/app:pull,push",
+                AcrTokenService.scopeFor("PUT", "v2/team/app/blobs/uploads/abc-123"));
+    }
+
+    @Test
+    void metadataReadsNeedMetadataReadUpdatesNeedMetadataWriteDeletesNeedDelete() {
+        assertEquals("repository:app:metadata_read", AcrTokenService.scopeFor("GET", "acr/v1/app"));
+        assertEquals("repository:team/app:metadata_read", AcrTokenService.scopeFor("GET", "acr/v1/team/app/_tags"));
+        assertEquals("repository:app:metadata_read",
+                AcrTokenService.scopeFor("GET", "acr/v1/app/_manifests/sha256:abc"));
+        assertEquals("repository:app:metadata_write", AcrTokenService.scopeFor("PATCH", "acr/v1/app/_tags/v1"));
+        assertEquals("repository:app:delete", AcrTokenService.scopeFor("DELETE", "acr/v1/app"));
+        assertEquals("repository:app:delete", AcrTokenService.scopeFor("DELETE", "acr/v1/app/_tags/v1"));
+    }
+
+    @Test
+    void pathsThatNameNoRegistryResourceHaveNoScope() {
+        assertNull(AcrTokenService.scopeFor("GET", "v2/app"));
+        assertNull(AcrTokenService.scopeFor("GET", "acr/v1/_unknown"));
+        assertNull(AcrTokenService.scopeFor("GET", "oauth2/token"));
+        assertNull(AcrTokenService.scopeFor("GET", null));
     }
 }
