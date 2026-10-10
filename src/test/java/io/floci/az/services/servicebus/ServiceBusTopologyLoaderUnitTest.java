@@ -60,6 +60,9 @@ class ServiceBusTopologyLoaderUnitTest {
         verify(namespaceManager).startNamespace("failed", 5672, 5671);
         verify(namespaceManager).startNamespace("working", 0, 0);
         verify(namespaceManager, never()).startNamespace("working", 5672, 5671);
+        verify(namespaceManager).recordStartFailure(
+                eq("failed"), any(ServiceBusNamespaceManager.NamespaceStartException.class));
+        verify(namespaceManager, never()).recordStartFailure(eq("working"), any());
         verifyNoInteractions(handler);
     }
 

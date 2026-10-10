@@ -2,6 +2,7 @@ package io.floci.az.core;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.tls.TlsConfigSource;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -10,19 +11,22 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.TreeMap;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 public class HealthController {
 
     private final EmulatorConfig config;
+    private final Instance<ServiceHealth> serviceHealth;
     // Resolved per instance, never in a static initializer: native image runs those at build
     // time, where FLOCI_AZ_VERSION is unset, and would bake "dev" into every release binary.
     private final String version;
 
     @Inject
-    public HealthController(EmulatorConfig config) {
+    public HealthController(EmulatorConfig config, Instance<ServiceHealth> serviceHealth) {
         this.config = config;
+        this.serviceHealth = serviceHealth;
         this.version = resolveVersion();
     }
 
@@ -37,17 +41,33 @@ public class HealthController {
     @GET
     @Path("{path:(health|_floci/health)}")
     public Response health() {
-        return Response.ok(Map.of(
-            "status", "UP",
-            "version", version,
-            "edition", "floci-az-always-free"
-        )).build();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("version", version);
+        body.put("edition", "floci-az-always-free");
+        return status(body);
     }
 
     @GET
     @Path("ready")
     public Response ready() {
-        return Response.ok(Map.of("status", "UP")).build();
+        return status(new LinkedHashMap<>());
+    }
+
+    // A service that cannot serve (e.g. a sidecar that failed to start) makes floci-az DOWN, so
+    // orchestrators waiting on health don't hand clients an endpoint that refuses them.
+    private Response status(Map<String, Object> body) {
+        Map<String, String> problems = new TreeMap<>();
+        for (ServiceHealth health : serviceHealth) {
+            problems.putAll(health.problems());
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", problems.isEmpty() ? "UP" : "DOWN");
+        response.putAll(body);
+        if (problems.isEmpty()) {
+            return Response.ok(response).build();
+        }
+        response.put("problems", problems);
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE).entity(response).build();
     }
 
     @GET

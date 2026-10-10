@@ -72,6 +72,7 @@ public class ServiceBusContainerManager {
                             sb.amqpPort(), sb.amqpTlsPort());
                 } catch (Exception e) {
                     LOG.errorf(e, "Could not start the default Service Bus namespace on boot");
+                    namespaceManager.recordStartFailure(ServiceBusNamespaceManager.DEFAULT_NAMESPACE, e);
                 }
             }
         } else if (!mocked) {

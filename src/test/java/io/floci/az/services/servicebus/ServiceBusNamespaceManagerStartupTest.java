@@ -7,8 +7,10 @@ import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -181,5 +183,25 @@ class ServiceBusNamespaceManagerStartupTest {
 
         assertTrue(error.portsReleased());
         verify(lifecycleManager).stopAndRemove("container-id", null);
+    }
+
+    @Test
+    void recordedStartFailureIsAProblemUntilTheNamespaceStarts() {
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                mock(EmulatorConfig.class), mock(ContainerBuilder.class),
+                mock(ContainerLifecycleManager.class), mock(ServiceBusConfigGenerator.class),
+                mock(ArtemisTlsGenerator.class));
+
+        manager.recordStartFailure("default", new IllegalStateException("outer",
+                new IllegalStateException("Bind for 0.0.0.0:5673 failed: port is already allocated")));
+
+        assertEquals(Map.of("servicebus/default",
+                        "Service Bus namespace 'default' failed to start: IllegalStateException: "
+                                + "Bind for 0.0.0.0:5673 failed: port is already allocated"),
+                manager.problems());
+
+        manager.startMockedNamespace("default");
+
+        assertTrue(manager.problems().isEmpty());
     }
 }
