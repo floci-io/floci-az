@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
@@ -192,8 +193,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── checkNameAvailability ──────────────────────────────────────────────
-        // az CLI probes this before creating storage accounts / key vaults / etc.
-        if (path.matches("subscriptions/[^/]+/providers/Microsoft\\.[^/]+/checkNameAvailability([?].*)?")) {
+        // az CLI probes this before creating storage accounts / key vaults / etc. ARM paths are
+        // case-insensitive and clients disagree on the casing: Storage and KeyVault send
+        // checkNameAvailability, the Web provider (azurerm web and function apps) checknameavailability.
+        if (path.toLowerCase(Locale.ROOT)
+                .matches("subscriptions/[^/]+/providers/microsoft\\.[^/]+/checknameavailability([?].*)?")) {
             return checkNameAvailability(req, path);
         }
 
@@ -940,15 +944,17 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      */
     private Response checkNameAvailability(AzureRequest req, String path) {
         String name = bodyString(parseBody(req), "name", "");
-        if (path.contains("/Microsoft.Storage/") && !name.matches("[a-z0-9]{3,24}")) {
+        String namespace = ArmPaths.segmentAfter(path, "providers", "");
+        boolean storage = "Microsoft.Storage".equalsIgnoreCase(namespace);
+        if (storage && !name.matches("[a-z0-9]{3,24}")) {
             return Response.ok(Map.of(
                     "nameAvailable", false,
                     "reason", "AccountNameInvalid",
                     "message", name + " is not a valid storage account name. Storage account name must be between "
                             + "3 and 24 characters in length and use numbers and lower-case letters only.")).build();
         }
-        Map<String, Map<String, Object>> store = path.contains("/Microsoft.Storage/") ? storageAccounts
-                : path.contains("/Microsoft.KeyVault/") ? keyVaults
+        Map<String, Map<String, Object>> store = storage ? storageAccounts
+                : "Microsoft.KeyVault".equalsIgnoreCase(namespace) ? keyVaults
                 : null;
         boolean taken = store != null && store.values().stream()
                 .anyMatch(r -> name.equalsIgnoreCase((String) r.get("name")));
