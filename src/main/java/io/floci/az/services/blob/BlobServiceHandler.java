@@ -160,6 +160,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         } else if (path.isEmpty() || path.equals("/")) {
             if ("GET".equalsIgnoreCase(method) && "list".equals(query.get("comp"))) {
                 response = listContainers(request);
+            } else if ("GET".equalsIgnoreCase(method) && "blobs".equals(query.get("comp"))) {
+                response = findBlobsByTags(request, null);
             } else if ("POST".equalsIgnoreCase(method) && "service".equals(query.get("restype"))
                     && "userdelegationkey".equals(query.get("comp"))) {
                 response = getUserDelegationKey(request);
@@ -250,6 +252,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = setDataLakePathProperties(request, containerName, null);
                 } else if ("GET".equalsIgnoreCase(method) && "list".equals(comp)) {
                     response = listBlobs(request, containerName);
+                } else if ("GET".equalsIgnoreCase(method) && "blobs".equals(comp)) {
+                    response = findBlobsByTags(request, containerName);
                 } else if (comp != null) {
                     // Container ops are multiplexed onto the same URL by `comp` (metadata, acl,
                     // lease, ...). None are implemented. This branch must stay ABOVE the
@@ -310,6 +314,16 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     // (create, rename, append/flush, properties, ACL). An unknown DFS PUT
                     // must fail closed rather than being mistaken for a Blob Put operation.
                     response = dataLakeNotImplemented();
+                } else if ("tags".equals(comp)) {
+                    // Ahead of the snapshot guard: Set Blob Tags accepts a snapshot. Never let it
+                    // fall through to Get Blob, which would answer with the blob content.
+                    if ("GET".equalsIgnoreCase(method)) {
+                        response = getBlobTags(request, containerName, blobName);
+                    } else if ("PUT".equalsIgnoreCase(method)) {
+                        response = setBlobTags(request, containerName, blobName);
+                    } else {
+                        response = notImplemented();
+                    }
                 } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
                         && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
                     response = snapshotIsImmutable();
@@ -590,6 +604,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 metadata.put("Name", blobName);
                 metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
                 metadata.putAll(readUserMetadata(request));
+                Response tagFailure = applyRequestTags(request, metadata);
+                if (tagFailure != null) {
+                    return tagFailure;
+                }
                 String customerProvidedKeySha256 =
                         request.headers().getHeaderString("x-ms-encryption-key-sha256");
                 if (customerProvidedKeySha256 != null) {
@@ -2116,6 +2134,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (customerProvidedKeySha256 != null) {
             rb.header("x-ms-encryption-key-sha256", customerProvidedKeySha256);
         }
+        int tagCount = BlobTags.of(so.metadata()).size();
+        if (tagCount > 0) {
+            rb.header("x-ms-tag-count", tagCount);
+        }
         for (String header : BLOB_HTTP_PROPERTY_HEADERS.values()) {
             String value = so.metadata().get(header);
             if (value != null && !(isRangeRequest && "Content-MD5".equals(header))) {
@@ -2470,6 +2492,221 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .header("ETag", etag)
                     .build();
         });
+    }
+
+    // ── Blob index tags ──────────────────────────────────────────────────────
+
+    /** GET /{container}/{blob}?comp=tags: Get Blob Tags. */
+    private Response getBlobTags(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeTags(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Optional<StoredObject> object = findBlob(request, containerName, blobName);
+        if (object.isEmpty()) {
+            return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        Response conditionFailure = validateTagOperationConditions(request, object);
+        if (conditionFailure != null) {
+            return conditionFailure;
+        }
+        return Response.ok(BlobTags.toXml(BlobTags.of(object.get().metadata())))
+                .type(MediaType.APPLICATION_XML)
+                .build();
+    }
+
+    /**
+     * PUT /{container}/{blob}?comp=tags: Set Blob Tags. Replaces the whole tag set and, unlike
+     * every other write, leaves the blob's ETag and Last-Modified untouched.
+     */
+    private Response setBlobTags(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeTags(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Map<String, String> tags;
+        try {
+            tags = BlobTags.fromXml(new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8));
+        } catch (BlobTagException e) {
+            return e.toResponse();
+        } catch (IOException e) {
+            LOGGER.errorf(e, "setBlobTags I/O error: container=%s blob=%s", containerName, blobName);
+            return Response.serverError().build();
+        }
+        return leaseService.exclusively(() -> {
+            String key = blobKey(request, containerName, blobName);
+            Optional<StoredObject> object = store.get(key);
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response conditionFailure = validateTagOperationConditions(request, object);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            if (!request.queryParams().containsKey("snapshot")) {
+                Response leaseFailure = leaseService.validateWrite(request, key);
+                if (leaseFailure != null) {
+                    return leaseFailure;
+                }
+            }
+            StoredObject so = object.get();
+            Map<String, String> metadata = new HashMap<>(so.metadata());
+            BlobTags.store(metadata, tags);
+            store.put(key, new StoredObject(so.key(), so.data(), metadata, so.lastModified(), so.etag()));
+            return Response.noContent().build();
+        });
+    }
+
+    /**
+     * Get and Set Blob Tags take their ETag conditions as {@code x-ms-blob-if-match} and
+     * {@code x-ms-blob-if-none-match}, not the standard headers, plus {@code x-ms-if-tags}.
+     */
+    private static Response validateTagOperationConditions(AzureRequest request, Optional<StoredObject> object) {
+        String etag = object.map(StoredObject::etag).orElse(null);
+        String ifMatch = request.headers().getHeaderString("x-ms-blob-if-match");
+        String ifNoneMatch = request.headers().getHeaderString("x-ms-blob-if-none-match");
+        if ((ifMatch != null && (etag == null || !etagMatches(ifMatch, etag)))
+                || (ifNoneMatch != null && etag != null && etagMatches(ifNoneMatch, etag))) {
+            return new AzureErrorResponse("ConditionNotMet",
+                    "The condition specified using HTTP conditional header(s) is not met.")
+                    .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+        }
+        return validateIfTags(request, object);
+    }
+
+    /**
+     * Find Blobs by Tags: {@code GET /?comp=blobs} across the account, or
+     * {@code GET /{container}?restype=container&comp=blobs} within one container. Each result
+     * carries the blob's values for the tags the expression names. Snapshots are not indexed.
+     */
+    private Response findBlobsByTags(AzureRequest request, String containerName) {
+        Response authFailure = authorizeFilter(request, containerName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (containerName != null && store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+            return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        }
+        String where = request.queryParams().get("where");
+        String marker = request.queryParams().getOrDefault("marker", "");
+        int maxResults;
+        BlobTagQuery query;
+        try {
+            maxResults = parseFilterMaxResults(request.queryParams().get("maxresults"));
+            query = where == null ? null : BlobTagQuery.where(where);
+        } catch (BlobTagException e) {
+            return e.toResponse();
+        }
+
+        String accountPrefix = request.accountName() + "/";
+        String keyPrefix = containerName == null ? accountPrefix : accountPrefix + containerName + "/";
+        String lowerBound = decodeFilterMarker(marker);
+        List<TaggedBlob> matches = new ArrayList<>();
+        if (query != null) {
+            for (String key : store.keys()) {
+                if (!key.startsWith(keyPrefix)) {
+                    continue;
+                }
+                Optional<StoredObject> object = store.get(key);
+                if (object.isEmpty()) {
+                    continue;
+                }
+                int separator = key.indexOf('/', accountPrefix.length());
+                if (separator < 0) {
+                    continue;
+                }
+                TaggedBlob candidate = new TaggedBlob(key.substring(accountPrefix.length(), separator),
+                        key.substring(separator + 1), BlobTags.of(object.get().metadata()));
+                if (candidate.position().compareTo(lowerBound) >= 0
+                        && query.matches(candidate.tags(), candidate.container())) {
+                    matches.add(new TaggedBlob(candidate.container(), candidate.name(),
+                            query.matchedTags(candidate.tags())));
+                }
+            }
+        }
+        matches.sort(Comparator.comparing(TaggedBlob::position));
+
+        XmlBuilder xml = new XmlBuilder()
+                .raw("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+                .startAttr("EnumerationResults", "ServiceEndpoint", "http://localhost:4577/" + request.accountName())
+                .elem("Where", where == null ? "" : where)
+                .start("Blobs");
+        for (TaggedBlob blob : matches.subList(0, Math.min(maxResults, matches.size()))) {
+            xml.start("Blob")
+                    .elem("Name", blob.name())
+                    .elem("ContainerName", blob.container())
+                    .start("Tags");
+            BlobTags.appendTagSet(xml, blob.tags());
+            xml.end("Tags").end("Blob");
+        }
+        xml.end("Blobs");
+        if (matches.size() > maxResults) {
+            TaggedBlob next = matches.get(maxResults);
+            xml.elem("NextMarker", encodeFilterMarker(next.position()));
+        } else {
+            xml.selfClose("NextMarker");
+        }
+        return Response.ok(xml.end("EnumerationResults").build()).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private record TaggedBlob(String container, String name, Map<String, String> tags) {
+        /**
+         * Sort and continuation key: container, then blob name. NUL sorts below every character a
+         * container name may hold, so the order is by container first.
+         */
+        String position() {
+            return container + '\u0000' + name;
+        }
+    }
+
+    /** Find Blobs by Tags answers at most 5000 results per page, the List Blobs ceiling. */
+    private static int parseFilterMaxResults(String value) {
+        if (value == null || value.isBlank()) {
+            return 5000;
+        }
+        try {
+            int maxResults = Integer.parseInt(value.trim());
+            if (maxResults < 1) {
+                throw new BlobTagException(400, "OutOfRangeQueryParameterValue",
+                        "One of the query parameters specified in the request URI is outside the permissible range.",
+                        Map.of("QueryParameterName", "maxresults", "QueryParameterValue", value));
+            }
+            return Math.min(maxResults, 5000);
+        } catch (NumberFormatException e) {
+            throw new BlobTagException(400, "InvalidQueryParameterValue",
+                    "Value for one of the query parameters specified in the request URI is invalid.",
+                    Map.of("QueryParameterName", "maxresults", "QueryParameterValue", value));
+        }
+    }
+
+    /** The continuation is opaque to clients; it names the first container/blob of the next page. */
+    private static String encodeFilterMarker(String position) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(position.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String decodeFilterMarker(String marker) {
+        if (marker.isEmpty()) {
+            return "";
+        }
+        try {
+            return new String(Base64.getUrlDecoder().decode(marker), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            LOGGER.debugv("Ignoring an unreadable Find Blobs by Tags marker: {0}", marker);
+            return "";
+        }
+    }
+
+    /** Put Blob and Put Block List: replace the blob's tags with {@code x-ms-tags}, if sent. */
+    private static Response applyRequestTags(AzureRequest request, Map<String, String> metadata) {
+        try {
+            BlobTags.store(metadata, BlobTags.fromHeader(request.headers().getHeaderString(BlobTags.HEADER)));
+            return null;
+        } catch (BlobTagException e) {
+            return e.toResponse();
+        }
     }
 
     private Response listBlobs(AzureRequest request, String containerName) {
@@ -2897,6 +3134,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 // Persist committed block list for future GetBlockList calls
                 metadata.put("CommittedBlocks", String.join("|", committedMeta));
                 metadata.putAll(readUserMetadata(request));
+                Response tagFailure = applyRequestTags(request, metadata);
+                if (tagFailure != null) {
+                    return tagFailure;
+                }
                 if (expectedCustomerProvidedKeySha256 != null) {
                     metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, expectedCustomerProvidedKeySha256);
                 }
@@ -3058,6 +3299,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private Response authorizeList(AzureRequest request, String containerName, String path) {
         return storageSas(request)
                 .flatMap(token -> sasAuthorization.authorizeList(request, containerName, path, token))
+                .orElse(null);
+    }
+
+    private Response authorizeTags(AzureRequest request, String containerName, String blobName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeTags(request, containerName, blobName, token))
+                .orElse(null);
+    }
+
+    private Response authorizeFilter(AzureRequest request, String containerName) {
+        return storageSas(request)
+                .flatMap(token -> sasAuthorization.authorizeFilter(request, containerName, token))
                 .orElse(null);
     }
 
@@ -3275,7 +3528,28 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return new AzureErrorResponse("ConditionNotMet", "The condition specified using HTTP conditional header(s) is not met.")
                     .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
         }
-        return null;
+        return validateIfTags(request, object);
+    }
+
+    /**
+     * {@code x-ms-if-tags}: the operation proceeds only when the blob's tags satisfy the expression.
+     * A blob that does not exist yet has no tags to test, so the condition is not evaluated.
+     */
+    private static Response validateIfTags(AzureRequest request, Optional<StoredObject> object) {
+        String ifTags = request.headers().getHeaderString(BlobTagQuery.IF_TAGS_HEADER);
+        if (ifTags == null || object.isEmpty()) {
+            return null;
+        }
+        try {
+            if (!BlobTagQuery.condition(ifTags).matches(BlobTags.of(object.get().metadata()), null)) {
+                return new AzureErrorResponse("ConditionNotMet",
+                        "The condition specified using HTTP conditional header(s) is not met.")
+                        .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+            }
+            return null;
+        } catch (BlobTagException e) {
+            return e.toResponse();
+        }
     }
 
     private static boolean etagMatches(String condition, String etag) {

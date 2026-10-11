@@ -7,7 +7,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 
 /**
  * Guards the blob dispatch against the catch-all {@code PUT} that used to fall through to
@@ -56,7 +58,7 @@ public class BlobCompDispatchTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {
-            "properties", "tier", "tags", "page", "undelete", "expiry", "seal"
+            "properties", "tier", "page", "undelete", "expiry", "seal"
     })
     void unimplementedBlobCompIsNotMistakenForPutBlob(String comp) {
         given()
@@ -64,6 +66,48 @@ public class BlobCompDispatchTest {
                 .then().statusCode(501);
 
         assertBlobIntact();
+    }
+
+    @Test
+    void getBlobTagsIsNotMistakenForGetBlob() {
+        given()
+                .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+                .then()
+                .statusCode(200)
+                .contentType("application/xml")
+                .body(not(containsString(CONTENT)))
+                .body(containsString("<TagSet></TagSet>"));
+    }
+
+    @Test
+    void setBlobTagsIsNotMistakenForPutBlob() {
+        given()
+                .contentType("application/xml")
+                .body("<Tags><TagSet><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tags>")
+                .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+                .then().statusCode(204);
+
+        assertBlobIntact();
+    }
+
+    @Test
+    void findBlobsByTagsInContainerIsNotMistakenForGetContainer() {
+        given()
+                .queryParam("where", "env='prod'")
+                .when().get("/{account}/{container}?restype=container&comp=blobs", ACCOUNT, CONTAINER)
+                .then()
+                .statusCode(200)
+                .body("EnumerationResults.Where", equalTo("env='prod'"));
+    }
+
+    @Test
+    void findBlobsByTagsInAccountIsNotMistakenForAnotherServiceOperation() {
+        given()
+                .queryParam("where", "env='prod'")
+                .when().get("/{account}?comp=blobs", ACCOUNT)
+                .then()
+                .statusCode(200)
+                .body("EnumerationResults.Where", equalTo("env='prod'"));
     }
 
     @Test

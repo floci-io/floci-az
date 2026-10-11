@@ -1,6 +1,7 @@
 package io.floci.az.compat;
 
 import com.azure.core.http.rest.PagedResponse;
+import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobClientBuilder;
@@ -20,7 +21,9 @@ import com.azure.storage.blob.models.CustomerProvidedKey;
 import com.azure.storage.blob.models.LeaseStateType;
 import com.azure.storage.blob.models.LeaseStatusType;
 import com.azure.storage.blob.models.ListBlobsOptions;
+import com.azure.storage.blob.models.TaggedBlobItem;
 import com.azure.storage.blob.options.BlobInputStreamOptions;
+import com.azure.storage.blob.options.BlobParallelUploadOptions;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
 import com.azure.storage.blob.specialized.BlobLeaseClient;
@@ -1011,6 +1014,41 @@ class BlobCompatibilityTest {
 
         String proposed = UUID.randomUUID().toString();
         assertEquals(proposed, lease.changeLease(proposed));
+
+        client.deleteBlobContainer(name);
+    }
+    @Test
+    @DisplayName("blob index tags: set, get, upload with tags, find by tags")
+    void blobIndexTags() {
+        String name = containerName();
+        BlobContainerClient container = client.createBlobContainer(name);
+
+        BlobClient set = container.getBlobClient("set-tags.txt");
+        set.upload(BinaryData.fromString("content"));
+        set.setTags(Map.of("env", "prod", "team", "data eng"));
+        assertEquals(Map.of("env", "prod", "team", "data eng"), set.getTags());
+        assertEquals(2L, set.getProperties().getTagCount());
+        assertEquals("content", set.downloadContent().toString());
+
+        BlobClient uploaded = container.getBlobClient("upload-tags.txt");
+        uploaded.uploadWithResponse(new BlobParallelUploadOptions(BinaryData.fromString("other"))
+            .setTags(Map.of("env", "dev", "team", "data eng")), null, Context.NONE);
+        assertEquals("dev", uploaded.getTags().get("env"));
+
+        List<TaggedBlobItem> inContainer = container.findBlobsByTags("env='prod' AND team='data eng'")
+            .stream().toList();
+        assertEquals(1, inContainer.size());
+        assertEquals("set-tags.txt", inContainer.get(0).getName());
+        assertEquals(name, inContainer.get(0).getContainerName());
+        assertEquals(Map.of("env", "prod", "team", "data eng"), inContainer.get(0).getTags());
+
+        List<String> inAccount = client.findBlobsByTags("@container='" + name + "' AND team='data eng'")
+            .stream().map(TaggedBlobItem::getName).sorted().toList();
+        assertEquals(List.of("set-tags.txt", "upload-tags.txt"), inAccount);
+
+        BlobStorageException invalid = assertThrows(BlobStorageException.class,
+            () -> set.setTags(Map.of("bad*key", "v")));
+        assertEquals(400, invalid.getStatusCode());
 
         client.deleteBlobContainer(name);
     }
