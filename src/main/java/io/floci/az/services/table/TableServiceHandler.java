@@ -57,6 +57,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
     private static final int DEFAULT_PAGE_SIZE = 1000;
     // Permission letters a table's stored access policy may grant: query, add, update, delete.
     private static final String TABLE_SAS_PERMISSIONS = "raud";
+    private static final String X_HTTP_METHOD = "X-HTTP-Method";
 
     private final StorageBackend<String, StoredObject> store;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -179,7 +180,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
      * and the write.
      */
     private Response handleEntity(AzureRequest request, String tableName, String pkRkPart) {
-        String method = request.method();
+        String method = effectiveMethod(request.method(), request.headers().getHeaderString(X_HTTP_METHOD));
         if ("GET".equalsIgnoreCase(method)) {
             if (!tableExists(request.accountName(), tableName)) {
                 return tableNotFound().toODataResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -195,13 +196,30 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
             if ("POST".equalsIgnoreCase(method)) {
                 return pkRkPart.isEmpty()
                         ? insertEntity(request, tableName)
-                        : updateEntity(request, tableName, pkRkPart);
+                        : updateEntity(request, tableName, pkRkPart, method);
             }
             if ("DELETE".equalsIgnoreCase(method)) {
                 return deleteEntity(request, tableName, pkRkPart);
             }
-            return updateEntity(request, tableName, pkRkPart);
+            return updateEntity(request, tableName, pkRkPart, method);
         });
+    }
+
+    /**
+     * The verb an entity request really carries. The Python Tables SDK treats any {@code localhost}
+     * endpoint other than port 10002 as Cosmos and tunnels Merge through {@code POST} with
+     * {@code X-HTTP-Method: MERGE}, inside {@code $batch} changesets too. Azurite honours the same
+     * header for GET, MERGE, PATCH and DELETE.
+     */
+    static String effectiveMethod(String method, String xHttpMethod) {
+        if (xHttpMethod == null) {
+            return method;
+        }
+        String tunnelled = xHttpMethod.trim().toUpperCase(Locale.ROOT);
+        return switch (tunnelled) {
+            case "GET", "MERGE", "PATCH", "DELETE" -> tunnelled;
+            default -> method;
+        };
     }
 
     private boolean tableExists(String accountName, String tableName) {
@@ -593,9 +611,8 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
      * Feature 4: updateEntity with ETag checking.
      * PUT = full replace; MERGE/PATCH = partial merge.
      */
-    private Response updateEntity(AzureRequest request, String tableName, String pkRkPart) {
+    private Response updateEntity(AzureRequest request, String tableName, String pkRkPart, String method) {
         try {
-            String method = request.method();
             Map<String, Object> incoming = new LinkedHashMap<>(objectMapper.readValue(request.bodyStream(), Map.class));
             String pk = (String) incoming.get("PartitionKey");
             String rk = (String) incoming.get("RowKey");
@@ -757,7 +774,6 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                     String[] requestParts = requestLine.split("\\s+", 3);
                     if (requestParts.length < 2) continue;
 
-                    String opMethod = requestParts[0];
                     String opPath = requestParts[1];
 
                     // Parse headers until blank line, then body
@@ -785,6 +801,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
                         embeddedBodySb.append(lines[k]);
                     }
                     String embeddedBody = embeddedBodySb.toString().trim();
+                    String opMethod = effectiveMethod(requestParts[0], embeddedHeaders.get("x-http-method"));
 
                     // Parse path: strip scheme+host (for absolute URLs) + account prefix
                     // Handles both relative (/devstoreaccount1-table/Table) and

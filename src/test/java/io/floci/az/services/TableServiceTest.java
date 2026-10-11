@@ -344,6 +344,88 @@ public class TableServiceTest {
     }
 
     @Test
+    void batchMergeTunnelledThroughPostUpdatesTheExistingEntity() {
+        createTable("PyBatch");
+        insertEntity("PyBatch", "{\"PartitionKey\":\"p1\",\"RowKey\":\"r1\",\"Value\":\"hello\",\"Kept\":\"yes\"}")
+            .then().statusCode(201);
+        insertEntity("PyBatch", "{\"PartitionKey\":\"p1\",\"RowKey\":\"r2\",\"Value\":\"world\"}")
+            .then().statusCode(201);
+
+        // Verbatim shape of azure-data-tables 12.6.0 upsert + delete against a localhost endpoint.
+        String body = "--batch_f1c1e479-22fb-48cf-b7e3-d1b8ed229d25\r\n"
+            + "Content-Type: multipart/mixed; boundary=changeset_cbee0396-e319-4359-aef0-796f098c5f60\r\n"
+            + "\r\n"
+            + "--changeset_cbee0396-e319-4359-aef0-796f098c5f60\r\n"
+            + "Content-Type: application/http\r\n"
+            + "Content-Transfer-Encoding: binary\r\n"
+            + "Content-ID: 0\r\n"
+            + "\r\n"
+            + "POST http://localhost:4577/" + ACCOUNT + "/PyBatch(PartitionKey='p1',RowKey='r1') HTTP/1.1\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: 168\r\n"
+            + "x-ms-version: 2019-02-02\r\n"
+            + "DataServiceVersion: 3.0\r\n"
+            + "Accept: application/json\r\n"
+            + "X-HTTP-Method: MERGE\r\n"
+            + "x-ms-date: Fri, 09 Oct 2026 18:40:01 GMT\r\n"
+            + "Date: Fri, 09 Oct 2026 18:40:01 GMT\r\n"
+            + "\r\n"
+            + "{\"PartitionKey\": \"p1\", \"PartitionKey@odata.type\": \"Edm.String\", \"RowKey\": \"r1\", "
+            + "\"RowKey@odata.type\": \"Edm.String\", \"Value\": \"updated\", \"Value@odata.type\": \"Edm.String\"}\r\n"
+            + "--changeset_cbee0396-e319-4359-aef0-796f098c5f60\r\n"
+            + "Content-Type: application/http\r\n"
+            + "Content-Transfer-Encoding: binary\r\n"
+            + "Content-ID: 1\r\n"
+            + "\r\n"
+            + "DELETE http://localhost:4577/" + ACCOUNT + "/PyBatch(PartitionKey='p1',RowKey='r2') HTTP/1.1\r\n"
+            + "x-ms-version: 2019-02-02\r\n"
+            + "DataServiceVersion: 3.0\r\n"
+            + "Accept: application/json;odata=minimalmetadata\r\n"
+            + "If-Match: *\r\n"
+            + "x-ms-date: Fri, 09 Oct 2026 18:40:01 GMT\r\n"
+            + "Date: Fri, 09 Oct 2026 18:40:01 GMT\r\n"
+            + "\r\n"
+            + "\r\n"
+            + "--changeset_cbee0396-e319-4359-aef0-796f098c5f60--\r\n"
+            + "\r\n"
+            + "--batch_f1c1e479-22fb-48cf-b7e3-d1b8ed229d25--\r\n";
+
+        given()
+            .contentType("multipart/mixed; boundary=batch_f1c1e479-22fb-48cf-b7e3-d1b8ed229d25")
+            .body(body.getBytes(StandardCharsets.UTF_8))
+            .when().post("/{account}/$batch", ACCOUNT)
+            .then()
+            .statusCode(202)
+            .body(not(containsString("EntityAlreadyExists")))
+            .body(containsString("HTTP/1.1 204 No Content"));
+
+        given()
+            .when().get("/{account}/PyBatch(PartitionKey='p1',RowKey='r1')", ACCOUNT)
+            .then().statusCode(200).body("Value", equalTo("updated")).body("Kept", equalTo("yes"));
+        given()
+            .when().get("/{account}/PyBatch(PartitionKey='p1',RowKey='r2')", ACCOUNT)
+            .then().statusCode(404);
+    }
+
+    @Test
+    void mergeTunnelledThroughPostKeepsUnsentProperties() {
+        createTable("PyMerge");
+        insertEntity("PyMerge", "{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"Value\":\"old\",\"Kept\":\"yes\"}")
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/json")
+            .header("X-HTTP-Method", "MERGE")
+            .body("{\"PartitionKey\":\"p\",\"RowKey\":\"r\",\"Value\":\"new\"}")
+            .when().post("/{account}/PyMerge(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/PyMerge(PartitionKey='p',RowKey='r')", ACCOUNT)
+            .then().statusCode(200).body("Value", equalTo("new")).body("Kept", equalTo("yes"));
+    }
+
+    @Test
     void entitiesWhoseKeysConcatenateIdenticallyStayDistinct() {
         createTable("Collide");
 

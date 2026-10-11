@@ -22,6 +22,10 @@ authentication.
   (`x-ms-continuation-Next*` headers)
 - **Optimistic concurrency**: `ETag` / `If-Match` on update and delete; a stale ETag is rejected
 - **Batch transactions**: `$batch` multipart change sets are applied atomically
+- **Verb tunneling**: an `X-HTTP-Method` header (`MERGE`, `PATCH`, `DELETE`, `GET`) overrides the
+  request verb of a single entity request. Inside a `$batch` change set the write overrides (`MERGE`,
+  `PATCH`, `DELETE`) apply; a change set does not serve reads. The Python SDK sends Merge and Upsert as
+  `POST` with `X-HTTP-Method: MERGE` whenever the endpoint host is `localhost`
 - **Table ACL**: Get and Set Table ACL (`{table}?comp=acl`) store up to five stored access policies
   as `SignedIdentifiers` XML on the table; a sixth policy, or a permission outside `raud`, is
   rejected with `400 InvalidXmlDocument`. The policies are stored and returned but not enforced
