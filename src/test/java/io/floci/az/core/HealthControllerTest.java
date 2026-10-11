@@ -38,10 +38,28 @@ class HealthControllerTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static HealthController controllerWith(ServiceHealth health) {
+        return controllerWith(health, true);
+    }
+
+    @Test
+    void notReadyReportsDownOnReadyOnly() {
+        HealthController controller = controllerWith(Map::of, false);
+
+        Response ready = controller.ready();
+        assertEquals(503, ready.getStatus());
+        assertEquals("DOWN", ((Map<?, ?>) ready.getEntity()).get("status"));
+        assertEquals(200, controller.health().getStatus());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HealthController controllerWith(ServiceHealth health, boolean ready) {
         Instance<ServiceHealth> instance = mock(Instance.class);
         when(instance.iterator()).thenAnswer(invocation -> List.of(health).iterator());
-        return new HealthController(mock(EmulatorConfig.class), instance);
+        EmulatorReadiness readiness = new EmulatorReadiness();
+        if (ready) {
+            readiness.markReady();
+        }
+        return new HealthController(mock(EmulatorConfig.class), instance, readiness);
     }
 }

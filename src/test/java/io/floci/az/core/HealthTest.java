@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -9,6 +10,9 @@ import static org.hamcrest.Matchers.containsString;
 
 @QuarkusTest
 public class HealthTest {
+
+    @Inject
+    EmulatorReadiness readiness;
 
     @Test
     public void testHealthEndpoint() {
@@ -31,6 +35,35 @@ public class HealthTest {
 
     @Test
     public void testReadyEndpoint() {
+        given()
+          .when().get("/ready")
+          .then()
+             .statusCode(200)
+             .body("status", is("UP"));
+    }
+
+    @Test
+    public void readyIsUnavailableWhileTheEmulatorIsNotReadyAndHealthStaysUp() {
+        readiness.markNotReady();
+        try {
+            given()
+              .when().get("/ready")
+              .then()
+                 .statusCode(503)
+                 .body("status", is("DOWN"));
+            given()
+              .when().get("/health")
+              .then()
+                 .statusCode(200)
+                 .body("status", is("UP"));
+            given()
+              .when().get("/_floci/health")
+              .then()
+                 .statusCode(200)
+                 .body("status", is("UP"));
+        } finally {
+            readiness.markReady();
+        }
         given()
           .when().get("/ready")
           .then()
