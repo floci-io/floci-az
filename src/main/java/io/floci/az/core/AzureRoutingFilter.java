@@ -1,10 +1,11 @@
 package io.floci.az.core;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.RouteOutcome.Fallthrough;
+import io.floci.az.core.RouteOutcome.Handled;
 import io.floci.az.core.ServiceRoutes.SuffixRoute;
-import io.floci.az.core.auth.AuthPipeline;
-import io.floci.az.services.arm.ArmHandler;
-import io.floci.az.services.monitor.MonitorHandler;
+import io.floci.az.core.cloud.ScopeContext;
+import io.floci.az.core.cloud.ScopeResolver;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerRequest;
@@ -29,16 +30,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 @ApplicationScoped
 public class AzureRoutingFilter {
 
     private static final Logger LOGGER = Logger.getLogger(AzureRoutingFilter.class);
 
-    private final AuthPipeline authPipeline;
     private final AzureServiceRegistry serviceRegistry;
-    private final ArmHandler armHandler;
+    private final RouteDispatcher dispatcher;
+    private final ArmRouter armRouter;
+    private final ScopeResolver scopeResolver;
     private final Vertx vertx;
     private final EmulatorConfig config;
 
@@ -46,16 +47,18 @@ public class AzureRoutingFilter {
      * The routing chain, in priority order. Each stage either handles the request, hands it to
      * JAX-RS, or declines so the next stage can try. Order is behaviour: the ARM stages must run
      * after the more specific provider stages, and the account-suffix terminal runs only once every
-     * stage has declined.
+     * stage has declined. The ARM base URL stages live in {@link ArmRouter}; their position in the
+     * chain is decided here.
      */
-    private final List<Function<RoutingContext, Outcome>> stages;
+    private final List<Function<RoutingContext, RouteOutcome>> stages;
 
     @Inject
-    public AzureRoutingFilter(AuthPipeline authPipeline, AzureServiceRegistry serviceRegistry,
-            ArmHandler armHandler, Vertx vertx, EmulatorConfig config) {
-        this.authPipeline = authPipeline;
+    public AzureRoutingFilter(AzureServiceRegistry serviceRegistry, RouteDispatcher dispatcher, ArmRouter armRouter,
+            ScopeResolver scopeResolver, Vertx vertx, EmulatorConfig config) {
         this.serviceRegistry = serviceRegistry;
-        this.armHandler = armHandler;
+        this.dispatcher = dispatcher;
+        this.armRouter = armRouter;
+        this.scopeResolver = scopeResolver;
         this.vertx = vertx;
         this.config = config;
         this.stages = List.of(
@@ -64,64 +67,16 @@ public class AzureRoutingFilter {
             this::routeImds,
             this::routeAppServiceManagedIdentity,
             this::routeEntra,
-            this::routeArmMetadataEndpoints,
+            armRouter::routeArmMetadataEndpoints,
             this::routeMicrosoftGraph,
-            this::routeMonitor,
-            this::routeKeyVaultAtArmBase,
-            this::routeEmailAtArmBase,
-            this::routeArmProviders,
-            this::routeArmGeneric,
+            armRouter::routeMonitor,
+            armRouter::routeKeyVaultAtArmBase,
+            armRouter::routeEmailAtArmBase,
+            armRouter::routeArmProviders,
+            armRouter::routeArmGeneric,
             this::routeServiceBusAtomPub,
             this::routeCosmosRoot
         );
-    }
-
-    // ── Routing outcome ─────────────────────────────────────────────────────────
-
-    /**
-     * What a routing stage decided. Replaces the overloaded {@code null} return of the original
-     * filter, where "no route matched, keep going" and "matched, but deliberately let JAX-RS answer"
-     * were the same value.
-     */
-    private sealed interface Outcome permits Handled, Fallthrough {}
-
-    /** A handler produced a response; routing stops here. */
-    private record Handled(Response response) implements Outcome {}
-
-    private enum Fallthrough implements Outcome {
-        /** Decline: try the next routing stage. */
-        TO_NEXT_STAGE,
-        /** Stop routing and let JAX-RS answer (normally a 404). */
-        TO_JAX_RS
-    }
-
-    /** Everything a routing stage needs, captured once per request. */
-    private record RoutingContext(
-        ContainerRequestContext requestContext,
-        String path,
-        String rawPath,
-        String rawQuery,
-        HttpHeaders headers,
-        String host,
-        boolean secure,
-        String remoteAddress,
-        String authority
-    ) {
-        String method() {
-            return requestContext.getMethod();
-        }
-
-        /** First path segment ({@code ""} for a root request). */
-        String firstSegment() {
-            int slash = path.indexOf('/');
-            return slash < 0 ? path : path.substring(0, slash);
-        }
-
-        /** Everything after the first path segment, without the separating slash. */
-        String resourcePath() {
-            int slash = path.indexOf('/');
-            return slash < 0 ? "" : path.substring(slash + 1);
-        }
     }
 
     // ── Routing tables ──────────────────────────────────────────────────────────
@@ -141,17 +96,6 @@ public class AzureRoutingFilter {
     private static final Set<String> COSMOS_ROOT_SEGMENTS = Set.of(
         "dbs", "colls", "docs", "pkranges", "offers", "sprocs", "triggers", "udfs"
     );
-
-    /** Well-known Key Vault data-plane path prefixes, as sent to the ARM base URL by azurerm v3. */
-    private static final Set<String> KEY_VAULT_COLLECTIONS = Set.of(
-        "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys", "rng"
-    );
-
-    /**
-     * A resolved ARM provider route: the pre-built {@code /providers/<namespace>/} marker, the service
-     * type of the handler that claimed it, and the handler's guard.
-     */
-    record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {}
 
     // ── Routing tables, assembled from the handlers at startup ──────────────────
 
@@ -174,17 +118,11 @@ public class AzureRoutingFilter {
     private volatile List<SuffixRoute> accountSuffixRoutes = List.of();
 
     /**
-     * ARM provider routes, guarded routes first. Managed Identity is the only guarded route, and it
-     * must be tried before the broader providers: an {@code identities/default} scope may itself be a
-     * Compute/ContainerService resource, and Managed Identity's {@code /providers/} segment is always
-     * the last one. Handler discovery order is arbitrary, so guarded-first is what makes this
-     * deterministic; the namespace tiebreak keeps the rest stable.
+     * Service types dispatched by a stage directly rather than named in a handler's routing table. The
+     * ARM base URL stages declare theirs in {@link ArmRouter#LITERAL_ROUTE_SERVICE_TYPES}.
      */
-    private volatile List<ResolvedProvider> providerRoutes = List.of();
-
-    /** Service types dispatched by a stage directly rather than named in a handler's routing table. */
     private static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of(
-        "managedidentity", "entra", "graph", "monitor", "keyvault", "email", "arm", "servicebus", "cosmos",
+        "managedidentity", "entra", "graph", "servicebus", "cosmos",
         "blob", "queue" // the storage fallback in resolveStorageServiceType
     );
 
@@ -197,7 +135,6 @@ public class AzureRoutingFilter {
     void buildRoutingTables() {
         List<SuffixRoute> hosts = new ArrayList<>();
         List<SuffixRoute> accounts = new ArrayList<>();
-        List<ResolvedProvider> providers = new ArrayList<>();
 
         for (AzureServiceHandler handler : serviceRegistry.handlers()) {
             ServiceRoutes routes = handler.routes();
@@ -205,34 +142,24 @@ public class AzureRoutingFilter {
                 hosts.add(new SuffixRoute(hostSuffix, handler.getServiceType()));
             }
             accounts.addAll(routes.accountSuffixes());
-            for (ServiceRoutes.ProviderRoute provider : routes.providers()) {
-                providers.add(new ResolvedProvider(provider.marker(), handler.getServiceType(), provider.guard()));
-            }
         }
 
         rejectDuplicateSuffixes("host", hosts);
         rejectDuplicateSuffixes("account", accounts);
-        rejectDuplicateProviders(providers);
 
         hosts.sort(LONGEST_SUFFIX_FIRST);
         accounts.sort(LONGEST_SUFFIX_FIRST);
-        providers.sort(GUARDED_FIRST_THEN_MARKER);
 
         this.hostRoutes = List.copyOf(hosts);
         this.accountSuffixRoutes = List.copyOf(accounts);
-        this.providerRoutes = List.copyOf(providers);
         this.hostServiceMarkers = deriveHostServiceMarkers(hosts);
 
         LOGGER.infof("Routing tables: %d host, %d account-suffix, %d ARM provider routes",
-            hostRoutes.size(), accountSuffixRoutes.size(), providerRoutes.size());
+            hostRoutes.size(), accountSuffixRoutes.size(), armRouter.providerRoutesInMatchOrder().size());
     }
 
     private static final Comparator<SuffixRoute> LONGEST_SUFFIX_FIRST =
         Comparator.comparingInt((SuffixRoute route) -> route.suffix().length()).reversed();
-
-    private static final Comparator<ResolvedProvider> GUARDED_FIRST_THEN_MARKER =
-        Comparator.comparing((ResolvedProvider route) -> route.guard() == ServiceRoutes.ProviderRoute.ALWAYS)
-                  .thenComparing(ResolvedProvider::marker);
 
     static void rejectDuplicateSuffixes(String kind, List<SuffixRoute> routes) {
         Map<String, String> claimedBy = new HashMap<>();
@@ -241,22 +168,6 @@ public class AzureRoutingFilter {
             if (previous != null) {
                 throw new IllegalStateException("Two handlers claim the same " + kind + " suffix '"
                     + route.suffix() + "': " + previous + " and " + route.serviceType());
-            }
-        }
-    }
-
-    /**
-     * Fails fast when two handlers claim the same ARM provider namespace — the provider counterpart of
-     * {@link #rejectDuplicateSuffixes}. Without this, a duplicate would resolve silently by the
-     * guarded-first / marker sort order instead of surfacing the wiring bug.
-     */
-    static void rejectDuplicateProviders(List<ResolvedProvider> providers) {
-        Map<String, String> claimedBy = new HashMap<>();
-        for (ResolvedProvider provider : providers) {
-            String previous = claimedBy.putIfAbsent(provider.marker(), provider.serviceType());
-            if (previous != null) {
-                throw new IllegalStateException("Two handlers claim the same ARM provider '"
-                    + provider.marker() + "': " + previous + " and " + provider.serviceType());
             }
         }
     }
@@ -307,22 +218,16 @@ public class AzureRoutingFilter {
         return accountSuffixRoutes;
     }
 
-    /** ARM provider routes as {@code marker → serviceType}, in match order. */
-    List<Map.Entry<String, String>> providerRoutesInMatchOrder() {
-        return providerRoutes.stream()
-                .map(route -> Map.entry(route.marker(), route.serviceType()))
-                .toList();
-    }
-
     /**
      * Every service type the routing tables and stages can produce. Exposed for the drift test that
      * asserts each one actually resolves to a registered handler.
      */
     Set<String> routedServiceTypes() {
         Set<String> types = new TreeSet<>(LITERAL_ROUTE_SERVICE_TYPES);
+        types.addAll(ArmRouter.LITERAL_ROUTE_SERVICE_TYPES);
         hostRoutes.forEach(route -> types.add(route.serviceType()));
         accountSuffixRoutes.forEach(route -> types.add(route.serviceType()));
-        providerRoutes.forEach(route -> types.add(route.serviceType()));
+        types.addAll(armRouter.providerServiceTypes());
         return types;
     }
 
@@ -379,12 +284,13 @@ public class AzureRoutingFilter {
 
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
+        String host = hostWithoutPort(capturedHost);
+        ScopeContext scope = scopeResolver.resolve(path, host);
         RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, rawQuery, headers,
-            hostWithoutPort(capturedHost), requestContext.getSecurityContext().isSecure(), remoteAddress,
-            authority);
+            host, requestContext.getSecurityContext().isSecure(), remoteAddress, authority, scope);
 
-        for (Function<RoutingContext, Outcome> stage : stages) {
-            Outcome outcome = stage.apply(ctx);
+        for (Function<RoutingContext, RouteOutcome> stage : stages) {
+            RouteOutcome outcome = stage.apply(ctx);
             if (outcome instanceof Handled handled) {
                 return handled.response();
             }
@@ -444,7 +350,7 @@ public class AzureRoutingFilter {
      * extracted in {@link #filter} before {@code executeBlocking} because the JAX-RS request scope may
      * not propagate to the Vert.x blocking thread.
      */
-    private Outcome routeByHostSuffix(RoutingContext ctx) {
+    private RouteOutcome routeByHostSuffix(RoutingContext ctx) {
         if (ctx.host() == null) {
             return Fallthrough.TO_NEXT_STAGE;
         }
@@ -466,7 +372,7 @@ public class AzureRoutingFilter {
      * (#267). Path-style callers are unaffected: their hosts carry no service marker as the second
      * label, so they fall through to the account-suffix terminal unchanged.
      */
-    private Outcome routeByHostServiceMarker(RoutingContext ctx) {
+    private RouteOutcome routeByHostServiceMarker(RoutingContext ctx) {
         String host = ctx.host();
         if (host == null) {
             return Fallthrough.TO_NEXT_STAGE;
@@ -495,7 +401,7 @@ public class AzureRoutingFilter {
      * points at the emulator. Must precede {@link #routeEntra} (the path also ends with
      * {@code oauth2/token}). Skips the auth pipeline: IMDS requests carry no Authorization header.
      */
-    private Outcome routeImds(RoutingContext ctx) {
+    private RouteOutcome routeImds(RoutingContext ctx) {
         if (!ctx.path().startsWith("metadata/identity/")) {
             return Fallthrough.TO_NEXT_STAGE;
         }
@@ -513,7 +419,7 @@ public class AzureRoutingFilter {
      * storage account. Skips the auth pipeline: App Service MI requests carry no Authorization
      * header, exactly like IMDS.
      */
-    private Outcome routeAppServiceManagedIdentity(RoutingContext ctx) {
+    private RouteOutcome routeAppServiceManagedIdentity(RoutingContext ctx) {
         if (!ctx.path().equalsIgnoreCase(config.services().managedIdentity().appServicePath())) {
             return Fallthrough.TO_NEXT_STAGE;
         }
@@ -531,13 +437,8 @@ public class AzureRoutingFilter {
      * {@code {tenant}[/v2.0]/.well-known/openid-configuration},
      * where {@code {tenant}} is a tenant id or common/organizations/consumers.
      */
-    private Outcome routeEntra(RoutingContext ctx) {
-        String path = ctx.path();
-        boolean isEntraPath = path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
-            || path.contains("oauth2/v2.0/authorize")
-            || path.endsWith("discovery/v2.0/keys")
-            || path.endsWith(".well-known/openid-configuration");
-        if (!isEntraPath) {
+    private RouteOutcome routeEntra(RoutingContext ctx) {
+        if (!ScopeResolver.isEntraPath(ctx.path())) {
             return Fallthrough.TO_NEXT_STAGE;
         }
         // Entra disabled: fall through to JAX-RS (these paths 404).
@@ -545,111 +446,18 @@ public class AzureRoutingFilter {
     }
 
     /**
-     * ARM metadata endpoint — called by go-azure-sdk for environment discovery. Hand it to JAX-RS so it
-     * 404s and the azurerm provider falls back to defaults. Implementing the metadata response causes
-     * the provider to detect Azure Stack and reject the configuration as an unsupported environment.
-     */
-    private Outcome routeArmMetadataEndpoints(RoutingContext ctx) {
-        return ctx.path().startsWith("metadata/endpoints") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;
-    }
-
-    /**
      * Microsoft Graph API — a narrow slice at {@code /v1.0/...}: service principal discovery (used by
      * the azurerm provider) plus group-membership management ({@code GraphServiceHandler}).
      */
-    private Outcome routeMicrosoftGraph(RoutingContext ctx) {
+    private RouteOutcome routeMicrosoftGraph(RoutingContext ctx) {
         if (!ctx.path().startsWith("v1.0/")) {
             return Fallthrough.TO_NEXT_STAGE;
         }
         return dispatchOrServiceDisabled(ctx, "graph", "graph", ctx.path());
     }
 
-    private Outcome routeMonitor(RoutingContext ctx) {
-        // Diagnostic settings live under an arbitrary resource URI
-        // ({resourceUri}/providers/microsoft.insights/diagnosticSettings), so they must be claimed
-        // here, before routeArmProviders matches the resource's own provider namespace.
-        if (!ctx.path().startsWith("dataCollectionRules/") && !ctx.path().startsWith("v1/workspaces/")
-                && !MonitorHandler.isDiagnosticSettingsPath(ctx.path())) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        return dispatchOrServiceDisabled(ctx, "monitor", "monitor", ctx.path());
-    }
-
-    /**
-     * Key Vault data-plane paths arriving at the ARM base URL. The azurerm v3 provider (when
-     * {@code metadata/endpoints} returns 404) sends all key vault data-plane requests directly to the
-     * ARM base URL rather than to {@code *.vault.azure.net}. Route them to the Key Vault handler with a
-     * fixed account name so both the provider and {@code kv_get} in the BATS tests share a namespace.
-     */
-    private Outcome routeKeyVaultAtArmBase(RoutingContext ctx) {
-        if (!KEY_VAULT_COLLECTIONS.contains(ctx.firstSegment())) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        return dispatchOrServiceDisabled(ctx, armHandler.getDefaultKvAccount(), "keyvault", ctx.path());
-    }
-
-    /**
-     * ACS Email data-plane paths arriving at the ARM base URL. SDKs may POST {@code /emails:send} or GET
-     * {@code /emails/operations/{id}} directly to the configured endpoint rather than via a
-     * {@code *.communication.azure.com} host header. Also handles {@code /emailMessages} inspection.
-     */
-    private Outcome routeEmailAtArmBase(RoutingContext ctx) {
-        String path = ctx.path();
-        if (!path.startsWith("emails:") && !path.startsWith("emails/") && !path.startsWith("emailMessages")) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        return dispatchOrServiceDisabled(ctx, "default", "email", path);
-    }
-
-    /**
-     * ARM management-plane provider routing: {@code subscriptions/{sub}/.../providers/Microsoft.X/...}
-     * and the tenant-rooted {@code providers/Microsoft.X/...} forms (built-in policy definitions,
-     * management-group scopes). Iterated in {@link #providerRoutes} order (guarded first): Managed
-     * Identity is guarded so its provider segment must be the last {@code /providers/} in the path;
-     * identity-scoped children (role assignments, locks, ...) have a later segment and fall through to
-     * {@link #routeArmGeneric}. Azure Policy is guarded so it claims only the policy resource types of
-     * Microsoft.Authorization. All of these must precede the generic ARM stage, which would otherwise
-     * swallow every path.
-     */
-    private Outcome routeArmProviders(RoutingContext ctx) {
-        String path = ctx.path();
-        boolean tenantRooted = path.startsWith("providers/");
-        if (!path.startsWith("subscriptions/") && !tenantRooted) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        // A tenant-rooted path has no segment before "providers/", so the "/providers/<ns>/" marker is
-        // matched against the slash-prefixed path; guards see the same form.
-        String markerPath = tenantRooted ? "/" + path : path;
-        for (ResolvedProvider route : providerRoutes) {
-            if (!markerPath.contains(route.marker()) || !route.guard().test(markerPath)) {
-                continue;
-            }
-            // A disabled provider service declines, letting a later provider (or generic ARM) claim it.
-            Outcome outcome = dispatch(ctx, route.serviceType(), route.serviceType(), ctx.path());
-            if (outcome instanceof Handled) {
-                return outcome;
-            }
-        }
-        return Fallthrough.TO_NEXT_STAGE;
-    }
-
-    /**
-     * ARM general management-plane paths ({@code subscriptions/{sub}/...}, {@code tenants/...}):
-     * resource groups, storage accounts, key vaults, etc. that the more specific provider stages above
-     * did not claim.
-     */
-    private Outcome routeArmGeneric(RoutingContext ctx) {
-        String path = ctx.path();
-        boolean isArmPath = path.startsWith("subscriptions/") || path.equals("subscriptions")
-            || path.startsWith("tenants/") || path.equals("tenants");
-        if (!isArmPath) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        return dispatchOrServiceDisabled(ctx, "arm", "arm", path);
-    }
-
     /** Service Bus root-level spec paths (e.g. {@code $namespaceinfo}, {@code $Resources/...}) or AtomPub XML. */
-    private Outcome routeServiceBusAtomPub(RoutingContext ctx) {
+    private RouteOutcome routeServiceBusAtomPub(RoutingContext ctx) {
         ContainerRequestContext rc = ctx.requestContext();
         String contentType = rc.getHeaderString(HttpHeaders.CONTENT_TYPE);
         String accept = rc.getHeaderString(HttpHeaders.ACCEPT);
@@ -683,13 +491,13 @@ public class AzureRoutingFilter {
      * segments (dbs, colls, docs, …) to the Cosmos handler using the default account so the Java SDK can
      * operate without path-based routing.
      */
-    private Outcome routeCosmosRoot(RoutingContext ctx) {
+    private RouteOutcome routeCosmosRoot(RoutingContext ctx) {
         String firstSegment = ctx.firstSegment();
         if (!firstSegment.isEmpty() && !COSMOS_ROOT_SEGMENTS.contains(firstSegment)) {
             return Fallthrough.TO_NEXT_STAGE;
         }
         LOGGER.infof("Java-SDK cosmos root route: %s %s", ctx.method(), ctx.path());
-        Outcome outcome = dispatch(ctx, "devstoreaccount1", "cosmos", ctx.path());
+        RouteOutcome outcome = dispatch(ctx, "devstoreaccount1", "cosmos", ctx.path());
         if (outcome instanceof Handled) {
             return outcome;
         }
@@ -726,7 +534,7 @@ public class AzureRoutingFilter {
 
         if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {
             LOGGER.warnf("Service disabled: %s", serviceType);
-            return serviceDisabledResponse(serviceType);
+            return RouteDispatcher.serviceDisabledResponse(serviceType);
         }
 
         Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
@@ -737,7 +545,7 @@ public class AzureRoutingFilter {
         }
 
         LOGGER.infof("Dispatching to handler: %s", handler.get().getClass().getSimpleName());
-        return handler.get().handle(buildRequest(ctx, accountName, serviceType, resourcePath));
+        return handler.get().handle(dispatcher.buildRequest(ctx, accountName, serviceType, resourcePath));
     }
 
     /** Distinguishes blob from queue when the account name carries no service suffix. */
@@ -760,81 +568,15 @@ public class AzureRoutingFilter {
 
     // ── Dispatch helpers ────────────────────────────────────────────────────────
 
-    /**
-     * Dispatches a request whose URL <em>unambiguously</em> names its service (a {@code .vault.azure.net}
-     * host, a {@code /emails:send} path, ...). A disabled service answers {@code 503 ServiceDisabled}
-     * rather than declining, because declining would let a later stage reinterpret the URL — a disabled
-     * Key Vault would otherwise see {@code /secrets/foo} fall through to the account-suffix terminal,
-     * which reads {@code secrets} as a storage account name and hands the request to the blob handler.
-     */
-    private Outcome dispatchOrServiceDisabled(RoutingContext ctx, String account, String serviceType, String path) {
-        if (serviceRegistry.isKnown(serviceType) && !serviceRegistry.isEnabled(serviceType)) {
-            LOGGER.warnf("Service disabled: %s (%s %s)", serviceType, ctx.method(), path);
-            return new Handled(serviceDisabledResponse(serviceType));
-        }
-        return dispatch(ctx, account, serviceType, path);
+    private RouteOutcome dispatchOrServiceDisabled(RoutingContext ctx, String account, String serviceType, String path) {
+        return dispatcher.dispatchOrServiceDisabled(ctx, account, serviceType, path);
     }
 
-    /**
-     * Resolves auth and dispatches to the handler for {@code serviceType}. Declines
-     * ({@link Fallthrough#TO_NEXT_STAGE}) when no handler is registered or the service is disabled, so
-     * the caller can try the next route. Use this only where that fallthrough is intended — the ARM
-     * provider stages fall back to the generic {@link ArmHandler}, and the Cosmos root stage must not
-     * claim {@code GET /} for Cosmos when Cosmos is off.
-     */
-    private Outcome dispatch(RoutingContext ctx, String account, String serviceType, String path) {
-        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
-        if (handler.isEmpty()) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        LOGGER.infof("Dispatching %s request to %s: %s %s (account=%s)", serviceType,
-            handler.get().getClass().getSimpleName(), ctx.method(), path, account);
-        return new Handled(handler.get().handle(buildRequest(ctx, account, serviceType, path)));
+    private RouteOutcome dispatch(RoutingContext ctx, String account, String serviceType, String path) {
+        return dispatcher.dispatch(ctx, account, serviceType, path);
     }
 
-    private static Response serviceDisabledResponse(String serviceType) {
-        return new AzureErrorResponse("ServiceDisabled",
-                "The " + serviceType + " service is disabled on this emulator.")
-                .toXmlResponse(Response.Status.SERVICE_UNAVAILABLE.getStatusCode());
-    }
-
-    /**
-     * Dispatches without running the auth pipeline, for endpoints whose callers carry no Authorization
-     * header (IMDS, Entra). A disabled service hands the request to JAX-RS instead of declining: these
-     * paths must 404 rather than be reinterpreted as {@code /{account}/...} by a later stage.
-     */
-    private Outcome dispatchWithoutAuth(RoutingContext ctx, String serviceType, String label) {
-        Optional<AzureServiceHandler> handler = serviceRegistry.resolve(serviceType);
-        if (handler.isEmpty()) {
-            return Fallthrough.TO_JAX_RS;
-        }
-        AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
-            ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
-            Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(),
-            ctx.authority());
-        LOGGER.infof("Dispatching %s request to %s: %s %s", label,
-            handler.get().getClass().getSimpleName(), ctx.method(), ctx.path());
-        return new Handled(handler.get().handle(request));
-    }
-
-    /** Builds an authenticated {@link AzureRequest}: construct, resolve auth, re-stamp. */
-    private AzureRequest buildRequest(RoutingContext ctx, String account, String serviceType, String path) {
-        Map<String, String> queryParams = new HashMap<>();
-        Map<String, List<String>> queryParamsMulti = new HashMap<>();
-        ctx.requestContext().getUriInfo().getQueryParameters().forEach((k, v) -> {
-            queryParams.put(k, v.get(0));
-            queryParamsMulti.put(k, List.copyOf(v));
-        });
-
-        AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
-            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(),
-            ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(), ctx.authority());
-        return request.withAuthContext(authPipeline.resolve(request));
-    }
-
-    private static Map<String, String> singleValueQueryParams(ContainerRequestContext requestContext) {
-        Map<String, String> queryParams = new HashMap<>();
-        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
-        return queryParams;
+    private RouteOutcome dispatchWithoutAuth(RoutingContext ctx, String serviceType, String label) {
+        return dispatcher.dispatchWithoutAuth(ctx, serviceType, label);
     }
 }

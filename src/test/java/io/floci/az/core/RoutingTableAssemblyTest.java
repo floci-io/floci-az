@@ -32,6 +32,9 @@ class RoutingTableAssemblyTest {
     @Inject
     AzureRoutingFilter filter;
 
+    @Inject
+    ArmRouter armRouter;
+
     /** A4's HOST_ROUTES plus routes introduced by later services. */
     private static final Set<Map.Entry<String, String>> GOLDEN_HOST_ROUTES = Set.of(
         Map.entry(".vault.azure.net", "keyvault"),
@@ -116,7 +119,7 @@ class RoutingTableAssemblyTest {
 
     @Test
     void providerRoutesMatchA4() {
-        assertEquals(GOLDEN_PROVIDER_ROUTES, Set.copyOf(filter.providerRoutesInMatchOrder()));
+        assertEquals(GOLDEN_PROVIDER_ROUTES, Set.copyOf(armRouter.providerRoutesInMatchOrder()));
     }
 
     /**
@@ -141,12 +144,12 @@ class RoutingTableAssemblyTest {
     /**
      * The guarded routes (Managed Identity, Azure Policy) must be tried before the broader providers: a
      * path may carry both a Compute/ContainerService segment and a trailing ManagedIdentity or
-     * Authorization segment. Handler discovery order is arbitrary, so the filter's guarded-first sort is
+     * Authorization segment. Handler discovery order is arbitrary, so ArmRouter's guarded-first sort is
      * what guarantees this.
      */
     @Test
     void guardedProvidersAreTriedBeforeUnguardedOnes() {
-        List<Map.Entry<String, String>> providers = filter.providerRoutesInMatchOrder();
+        List<Map.Entry<String, String>> providers = armRouter.providerRoutesInMatchOrder();
         assertEquals(Set.of("managedidentity", "policy"),
             Set.of(providers.get(0).getValue(), providers.get(1).getValue()),
             "the guarded Managed Identity and Azure Policy routes must sort first, got " + providers);
@@ -184,13 +187,13 @@ class RoutingTableAssemblyTest {
     @Test
     void duplicateProviderNamespaceFailsFast() {
         var always = ServiceRoutes.ProviderRoute.ALWAYS;
-        List<AzureRoutingFilter.ResolvedProvider> clashing = List.of(
-            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
-            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "someOtherService", always)
+        List<ArmRouter.ResolvedProvider> clashing = List.of(
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "someOtherService", always)
         );
         IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
             IllegalStateException.class,
-            () -> AzureRoutingFilter.rejectDuplicateProviders(clashing));
+            () -> ArmRouter.rejectDuplicateProviders(clashing));
         assertTrue(failure.getMessage().contains("Microsoft.Cache"), failure.getMessage());
         assertTrue(failure.getMessage().contains("someOtherService"), failure.getMessage());
     }
@@ -199,9 +202,9 @@ class RoutingTableAssemblyTest {
     @Test
     void distinctProvidersPassTheDuplicateCheck() {
         var always = ServiceRoutes.ProviderRoute.ALWAYS;
-        AzureRoutingFilter.rejectDuplicateProviders(List.of(
-            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
-            new AzureRoutingFilter.ResolvedProvider("/providers/Microsoft.Sql/", "sql", always)));
+        ArmRouter.rejectDuplicateProviders(List.of(
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Sql/", "sql", always)));
     }
 
     private static int indexOfSuffix(List<SuffixRoute> routes, String suffix) {

@@ -8,6 +8,7 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ArmRequestGate;
 import io.floci.az.core.arm.ArmResourceFilter;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
@@ -84,12 +85,15 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     /** Services contributing their resources to the resource-group /resources index. */
     private final Instance<ResourceIndexContributor> resourceIndexContributors;
 
+    /** Wraps this handler, its inline providers and its provider lane, for callers that bypass the router. */
+    private final ArmRequestGate gate;
+
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
-                      Instance<ResourceIndexContributor> resourceIndexContributors) {
+                      Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -99,6 +103,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         this.managedIdentityHandler = managedIdentityHandler;
         this.providerServices     = providerServices;
         this.resourceIndexContributors = resourceIndexContributors;
+        this.gate                 = gate;
     }
 
     /**
@@ -130,8 +135,17 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     @Override
     public boolean canHandle(AzureRequest req) { return "arm".equals(req.serviceType()); }
 
+    /**
+     * Serves the request inside the ARM request gate. A request the router dispatched is already inside it
+     * and passes straight through; one that reaches this handler another way enters here, so the inline
+     * providers and the {@link ArmProviderService} lane are never served outside the gate.
+     */
     @Override
     public Response handle(AzureRequest req) {
+        return gate.serve(req, this::handleInsideGate);
+    }
+
+    private Response handleInsideGate(AzureRequest req) {
         // ARM-plane handlers (Network/APIM/Monitor/EventGrid) parse the body strictly; a malformed
         // body surfaces here as the real ARM 400 InvalidRequestContent rather than a lenient no-op.
         try {

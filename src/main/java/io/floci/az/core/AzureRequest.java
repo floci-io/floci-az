@@ -1,6 +1,9 @@
 package io.floci.az.core;
 
+import io.floci.az.core.arm.ArmCall;
+import io.floci.az.core.cloud.ScopeContext;
 import jakarta.ws.rs.core.HttpHeaders;
+
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
@@ -20,19 +23,34 @@ public record AzureRequest(
     String remoteAddress,    // transport peer address; never derived from forwarded headers
     String rawPath,          // original encoded request path, without a leading slash
     String rawQuery,         // original encoded query string, without the leading "?"; null when absent
-    String authority         // host[:port] the client addressed (HTTP/1.1 Host, HTTP/2 :authority); null when unknown
+    String authority,        // host[:port] the client addressed (HTTP/1.1 Host, HTTP/2 :authority); null when unknown
+    ScopeContext scope,      // cloud, tenant, subscription and resource group, resolved once by the routing filter; may be null
+    ArmCall armCall          // set while the request is inside the ARM request gate; null otherwise
 ) {
 
     /**
-     * Pre-authority canonical form, kept for callers that build a request without a transport (tests,
-     * internal dispatch). {@link RequestUrls} falls back to the {@code Host} header for these.
+     * A request built from a transport: it carries the authority the client addressed, but no resolved
+     * scope yet and it is outside the ARM request gate.
+     */
+    public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
+                        HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
+                        Map<String, List<String>> queryParamsMulti, AuthContext authContext, boolean secure,
+                        String host, String remoteAddress, String rawPath, String rawQuery, String authority) {
+        this(method, accountName, serviceType, resourcePath, headers, bodyStream, queryParams, queryParamsMulti,
+             authContext, secure, host, remoteAddress, rawPath, rawQuery, authority, null, null);
+    }
+
+    /**
+     * Pre-authority form, kept for callers that build a request without a transport (tests, internal
+     * dispatch). {@link RequestUrls} falls back to the {@code Host} header for these. No resolved scope,
+     * and outside the ARM request gate.
      */
     public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
                         HttpHeaders headers, InputStream bodyStream, Map<String, String> queryParams,
                         Map<String, List<String>> queryParamsMulti, AuthContext authContext, boolean secure,
                         String host, String remoteAddress, String rawPath, String rawQuery) {
-        this(method, accountName, serviceType, resourcePath, headers, bodyStream, queryParams,
-             queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, null);
+        this(method, accountName, serviceType, resourcePath, headers, bodyStream, queryParams, queryParamsMulti,
+             authContext, secure, host, remoteAddress, rawPath, rawQuery, null, null, null);
     }
 
     public AzureRequest(String method, String accountName, String serviceType, String resourcePath,
@@ -80,6 +98,21 @@ public record AzureRequest(
      */
     public AzureRequest withAuthContext(AuthContext resolved) {
         return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
-             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery, authority);
+             queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery, authority, scope,
+             armCall);
+    }
+
+    /** Returns a copy of this request carrying the scope the routing filter resolved. */
+    public AzureRequest withScope(ScopeContext resolved) {
+        return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
+             queryParams, queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, authority,
+             resolved, armCall);
+    }
+
+    /** Returns a copy of this request marked as inside the ARM request gate with {@code call}. */
+    public AzureRequest withArm(ArmCall call) {
+        return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
+             queryParams, queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, authority,
+             scope, call);
     }
 }
