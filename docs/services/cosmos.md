@@ -7,6 +7,7 @@ Compatible with the `azure-cosmos` SDK (Java, Python, JavaScript, .NET).
 - **Databases**: create, get, list, delete (cascade-deletes all containers and documents)
 - **Containers**: create, replace, get, list, delete; configurable partition key path; custom indexing policies with composite indexes (persisted on create/replace and returned on read)
 - **Documents**: create, get, replace, delete, list; upsert via `x-ms-documentdb-is-upsert` header
+- **Stored procedures, triggers and user-defined functions**: create, get, replace, delete, list and query, stored per container (deleting the container or database removes them). They are stored, never run: see [Server-side scripts](#server-side-scripts)
 - **Time to live (TTL)**: container `defaultTtl` (set on create or replace) with per-document `ttl` overrides; expired documents disappear from reads, lists, queries, and batches
 - **Queries**: in-process SQL engine with full Cosmos DB SQL dialect support:
   - `SELECT *`, `SELECT c.field1, c.field2`, `SELECT VALUE c.field`, `SELECT TOP n`
@@ -177,6 +178,38 @@ so code that would break in production fails locally too.
 ### Queries
 
 `POST /dbs/{dbId}/colls/{collId}/docs` with header `x-ms-documentdb-isquery: True` (or `Content-Type: application/query+json`).
+
+### Server-side scripts
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/dbs/{dbId}/colls/{collId}/{sprocs,triggers,udfs}` | Create a script (`409 Conflict` if the id exists) |
+| `GET` | `/dbs/{dbId}/colls/{collId}/{sprocs,triggers,udfs}` | List scripts (`StoredProcedures`, `Triggers`, `UserDefinedFunctions`) |
+| `POST` | same path, with `x-ms-documentdb-isquery: True` | Query scripts with SQL, for example `SELECT * FROM root r WHERE r.id = @id` |
+| `GET` | `/dbs/{dbId}/colls/{collId}/{sprocs,triggers,udfs}/{id}` | Get a script |
+| `PUT` | `/dbs/{dbId}/colls/{collId}/{sprocs,triggers,udfs}/{id}` | Replace a script (honours `If-Match`) |
+| `DELETE` | `/dbs/{dbId}/colls/{collId}/{sprocs,triggers,udfs}/{id}` | Delete a script |
+| `POST` | `/dbs/{dbId}/colls/{collId}/sprocs/{id}` | Execute a stored procedure: **not supported**, see below |
+
+Every script needs an `id` and a string `body`; a trigger also needs `triggerType` (`Pre` or `Post`)
+and `triggerOperation` (`All`, `Create`, `Update`, `Delete` or `Replace`), matched case-insensitively
+and returned as sent. A missing or invalid field is `400 BadRequest`. Responses carry `_rid`, `_self`,
+`_etag` and `_ts` like any other Cosmos resource, so SDK code that registers scripts through
+`container.getScripts()` (Java), `container.scripts` (Python) or `container.scripts` (JavaScript)
+works unchanged.
+
+**Emulator limitation: scripts are never run.** floci-az has no JavaScript runtime:
+
+- Executing a stored procedure that exists fails with `501` and the Cosmos error body
+  `{"code":"NotImplemented","message":"Executing stored procedure '<id>' is not supported: ..."}`,
+  which every SDK raises as its Cosmos exception (`CosmosException` in Java,
+  `CosmosHttpResponseError` in Python). Executing one that does not exist is `404 NotFound`.
+- Pre- and post-triggers named on a document request (`x-ms-documentdb-pre-trigger-include`,
+  `x-ms-documentdb-post-trigger-include`) are ignored: the write goes ahead without them.
+- User-defined functions cannot be called from a query (`udf.name(...)`).
+
+Any other request the emulator does not implement also answers `501` with a
+`{"code":"NotImplemented","message":"..."}` body, never an empty response.
 
 ## Request / Response Examples
 
@@ -481,7 +514,7 @@ Azure Storage connection string format.
 
 ## Known Limitations
 
-- **Stored procedures, triggers, and UDFs** are not executed.
+- **Stored procedures, triggers, and UDFs** are stored but not executed (see [Server-side scripts](#server-side-scripts)).
 - **JOIN** with nested arrays is not supported.
 - **Change feed** is not emulated.
 - **Full-text search, vector search, and geospatial queries** are not supported.
