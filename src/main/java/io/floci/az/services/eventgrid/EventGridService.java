@@ -6,6 +6,9 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.eventgrid.EventGridModels.DeadLetterDestination;
+import io.floci.az.services.eventgrid.EventGridModels.DeadLetterIdentity;
+import io.floci.az.services.eventgrid.EventGridModels.DeadLetterWithResourceIdentity;
 import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.RetryPolicy;
@@ -202,10 +205,12 @@ public class EventGridService {
         String schema = stringOr(properties.get("eventDeliverySchema"), EventGridModels.SCHEMA_EVENT_GRID);
         Filter filter = parseFilter(cast(properties.get("filter")));
         RetryPolicy retry = parseRetryPolicy(cast(properties.get("retryPolicy")));
-        String deadLetter = parseDeadLetter(cast(properties.get("deadLetterDestination")));
+        DeadLetterDestination deadLetter = parseDeadLetter(cast(properties.get("deadLetterDestination")));
+        DeadLetterWithResourceIdentity deadLetterWithIdentity =
+                parseDeadLetterWithIdentity(cast(properties.get("deadLetterWithResourceIdentity")));
 
         EventSubscription es = new EventSubscription(name, topicResourceId, endpointUrl,
-                schema, filter, retry, deadLetter);
+                schema, filter, retry, deadLetter, deadLetterWithIdentity);
         writeSubscription(es);
 
         boolean validated = delivery.validate(es, topicResourceId);
@@ -231,9 +236,27 @@ public class EventGridService {
         return new RetryPolicy(maxAttempts, ttl);
     }
 
-    private String parseDeadLetter(Map<String, Object> raw) {
+    private DeadLetterDestination parseDeadLetter(Map<String, Object> raw) {
+        if (raw.isEmpty()) {
+            return null;
+        }
         Map<String, Object> props = cast(raw.get("properties"));
-        return stringOr(props.get("endpointUrl"), null);
+        return new DeadLetterDestination(
+                stringOr(raw.get("endpointType"), null),
+                stringOr(props.get("resourceId"), null),
+                stringOr(props.get("blobContainerName"), null));
+    }
+
+    private DeadLetterWithResourceIdentity parseDeadLetterWithIdentity(Map<String, Object> raw) {
+        if (raw.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> identity = cast(raw.get("identity"));
+        DeadLetterIdentity parsedIdentity = identity.isEmpty() ? null : new DeadLetterIdentity(
+                stringOr(identity.get("type"), null),
+                stringOr(identity.get("userAssignedIdentity"), null));
+        return new DeadLetterWithResourceIdentity(parsedIdentity,
+                parseDeadLetter(cast(raw.get("deadLetterDestination"))));
     }
 
     // ── Lookups used by the data plane ──────────────────────────────────────────
@@ -301,6 +324,13 @@ public class EventGridService {
         properties.put("retryPolicy", retry);
         properties.put("eventDeliverySchema", s.eventDeliverySchema());
         properties.put("labels", List.of());
+        if (s.deadLetterDestination() != null) {
+            properties.put("deadLetterDestination", deadLetterJson(s.deadLetterDestination()));
+        }
+        if (s.deadLetterWithResourceIdentity() != null) {
+            properties.put("deadLetterWithResourceIdentity",
+                    deadLetterWithIdentityJson(s.deadLetterWithResourceIdentity()));
+        }
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("id", s.resourceId());
@@ -308,6 +338,32 @@ public class EventGridService {
         resource.put("type", "Microsoft.EventGrid/eventSubscriptions");
         resource.put("properties", properties);
         return resource;
+    }
+
+    private static Map<String, Object> deadLetterJson(DeadLetterDestination d) {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("resourceId", d.resourceId());
+        props.put("blobContainerName", d.blobContainerName());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("endpointType", d.endpointType());
+        out.put("properties", props);
+        return out;
+    }
+
+    private static Map<String, Object> deadLetterWithIdentityJson(DeadLetterWithResourceIdentity d) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (d.identity() != null) {
+            Map<String, Object> identity = new LinkedHashMap<>();
+            identity.put("type", d.identity().type());
+            if (d.identity().userAssignedIdentity() != null) {
+                identity.put("userAssignedIdentity", d.identity().userAssignedIdentity());
+            }
+            out.put("identity", identity);
+        }
+        if (d.destination() != null) {
+            out.put("deadLetterDestination", deadLetterJson(d.destination()));
+        }
+        return out;
     }
 
     private String topicEndpoint(String name) {
