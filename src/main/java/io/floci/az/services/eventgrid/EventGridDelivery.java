@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.floci.az.core.Resettable;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterDestination;
 import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
@@ -31,8 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -44,9 +44,12 @@ import java.util.concurrent.TimeUnit;
  * share the same outbound HTTP machinery. An event that exhausts its attempts is written to the
  * subscription's {@code StorageBlob} dead-letter destination through the in-process blob service,
  * or dropped when there is none.
+ *
+ * <p>Queued and in-flight deliveries are emulator state: {@code POST /_admin/reset} cancels them, so
+ * an event published before a reset is neither retried nor dead-lettered after it.
  */
 @ApplicationScoped
-public class EventGridDelivery {
+public class EventGridDelivery implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(EventGridDelivery.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -58,8 +61,10 @@ public class EventGridDelivery {
     private static final String REASON_MAX_ATTEMPTS = "MaxDeliveryAttemptsExceeded";
 
     private final BlobServiceHandler blobService;
+    private final Object resetLock = new Object();
     private HttpClient httpClient;
-    private ScheduledExecutorService scheduler;
+    private ScheduledThreadPoolExecutor scheduler;
+    private long generation;
 
     @Inject
     public EventGridDelivery(BlobServiceHandler blobService) {
@@ -71,11 +76,31 @@ public class EventGridDelivery {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        this.scheduler = new ScheduledThreadPoolExecutor(1, r -> {
             Thread t = new Thread(r, "eventgrid-delivery");
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /**
+     * Cancels every delivery accepted so far. Queued attempts and retries are discarded, and an
+     * attempt already on the wire belongs to the previous generation, so it neither retries nor
+     * dead-letters. Sharing {@code resetLock} with the dead-letter write means that once this
+     * returns no event from before the reset can still reach a blob container.
+     */
+    @Override
+    public void clear() {
+        synchronized (resetLock) {
+            generation++;
+        }
+        scheduler.getQueue().clear();
+    }
+
+    private long currentGeneration() {
+        synchronized (resetLock) {
+            return generation;
+        }
     }
 
     @PreDestroy
@@ -85,8 +110,12 @@ public class EventGridDelivery {
         }
     }
 
-    /** One event on its way to one subscription, plus the time it was accepted for delivery. */
-    private record Pending(EventSubscription sub, byte[] body, String contentType, Instant publishTime) {
+    /**
+     * One event on its way to one subscription, plus the time it was accepted for delivery and the
+     * reset generation it was accepted in.
+     */
+    private record Pending(EventSubscription sub, byte[] body, String contentType, Instant publishTime,
+                           long generation) {
     }
 
     /** What the last delivery attempt observed: a documented outcome and, when one came back, the HTTP status. */
@@ -99,11 +128,14 @@ public class EventGridDelivery {
      * an array).
      */
     public void deliver(EventSubscription sub, byte[] body, String contentType) {
-        attempt(new Pending(sub, body, contentType, Instant.now()), 1);
+        attempt(new Pending(sub, body, contentType, Instant.now(), currentGeneration()), 1);
     }
 
     private void attempt(Pending p, int attempt) {
         scheduler.execute(() -> {
+            if (p.generation() != currentGeneration()) {
+                return;
+            }
             EventSubscription sub = p.sub();
             int maxAttempts = Math.max(1, sub.retryPolicy().maxDeliveryAttempts());
             Outcome outcome;
@@ -138,6 +170,11 @@ public class EventGridDelivery {
     }
 
     private void reschedule(Pending p, int attempt, int maxAttempts, Outcome outcome) {
+        if (p.generation() != currentGeneration()) {
+            LOG.debugv("Delivery to {0} (subscription {1}) abandoned: the emulator was reset",
+                    p.sub().endpointUrl(), p.sub().name());
+            return;
+        }
         if (attempt >= maxAttempts) {
             deadLetterOrDrop(p, attempt, outcome);
             return;
@@ -173,8 +210,16 @@ public class EventGridDelivery {
         try {
             byte[] payload = deadLetterPayload(p, attempts, outcome);
             String blobName = deadLetterBlobName(sub.name(), outcome.attemptTime());
-            boolean written = blobService.putBlockBlob(account, destination.blobContainerName(), blobName,
-                    payload, "application/json");
+            boolean written;
+            synchronized (resetLock) {
+                if (p.generation() != generation) {
+                    LOG.debugv("Event Grid subscription {0} skipped dead-lettering: the emulator was reset",
+                            sub.name());
+                    return;
+                }
+                written = blobService.putBlockBlob(account, destination.blobContainerName(), blobName,
+                        payload, "application/json");
+            }
             if (written) {
                 LOG.infov("Event Grid subscription {0} dead-lettered an event to {1}/{2}/{3} after {4} attempts",
                         sub.name(), account, destination.blobContainerName(), blobName, attempts);
