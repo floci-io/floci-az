@@ -22,6 +22,9 @@ receives events and pushes them to subscriber **webhook** endpoints.
   **CloudEvents 1.0** schema
 - **Delivery**: events are fanned out asynchronously to matching subscribers, retried per the
   subscription's `retryPolicy` with exponential backoff
+- **Dead-lettering**: a `StorageBlob` `deadLetterDestination` (or `deadLetterWithResourceIdentity`)
+  receives events that exhaust `retryPolicy.maxDeliveryAttempts`, written into the emulated Blob
+  service (see below)
 - **Validation handshake**: creating a webhook subscription triggers a
   `Microsoft.EventGrid.SubscriptionValidationEvent` (or, for CloudEvents, the `OPTIONS`
   abuse-protection probe)
@@ -137,8 +140,20 @@ floci-az:
 - **WebHook destinations only.** Service Bus, Event Hub, Storage Queue, and Azure Function
   destinations, plus Domains, Partner/System Topics, and the Event Grid Namespace (MQTT/pull)
   surface are out of scope.
-- **Dead-lettering is best-effort.** When delivery exhausts `retryPolicy.maxDeliveryAttempts`, the
-  event is logged and dropped; it is not written to a `deadLetterDestination` blob container.
+- **Dead-lettering.** When delivery exhausts `retryPolicy.maxDeliveryAttempts` and the subscription
+  has a `StorageBlob` dead-letter destination, the event is written to that container of the storage
+  account named by `resourceId` (the account name is the blob account, for example
+  `devstoreaccount1`). The blob is named
+  `<SUBSCRIPTION NAME IN UPPER CASE>/<yyyy>/<M>/<d>/<H>/<guid>.json` (UTC hour, not zero-padded) and
+  holds a JSON array with the event plus `deadLetterReason` (`MaxDeliveryAttemptsExceeded`),
+  `deliveryAttempts`, `lastDeliveryOutcome`, `lastHttpStatusCode` (when the endpoint answered),
+  `publishTime` and `lastDeliveryAttemptTime`; CloudEvents subscriptions use the lower-case
+  `deadletterreason`, `deliveryattempts`, `lastdeliveryoutcome` and `publishtime`. The container
+  must already exist. Differences from Azure: the blob is written right after the last attempt
+  (Azure waits about five minutes), `eventTimeToLiveInMinutes` is stored but not enforced, 400 and
+  413 responses are retried like any other failure instead of being dead-lettered at once, and the
+  managed identity of `deadLetterWithResourceIdentity` is echoed but not used. Without a dead-letter
+  destination, or when the container does not exist, the event is logged and dropped, as in Azure.
 - **Auth is permissive.** The `aeg-sas-key` header is accepted but not validated against the topic
   keys (dev mode), matching the rest of the emulator.
 - **`CustomEventSchema`** is accepted but treated as the Event Grid schema.

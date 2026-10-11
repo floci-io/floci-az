@@ -1,5 +1,6 @@
 package io.floci.az.services.eventgrid;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
@@ -15,7 +16,10 @@ import java.util.List;
         EventGridModels.Topic.class,
         EventGridModels.EventSubscription.class,
         EventGridModels.Filter.class,
-        EventGridModels.RetryPolicy.class})
+        EventGridModels.RetryPolicy.class,
+        EventGridModels.DeadLetterDestination.class,
+        EventGridModels.DeadLetterIdentity.class,
+        EventGridModels.DeadLetterWithResourceIdentity.class})
 public final class EventGridModels {
 
     private EventGridModels() {
@@ -41,6 +45,11 @@ public final class EventGridModels {
         }
     }
 
+    /**
+     * Subscriptions persisted before dead-letter support carry a {@code deadLetterEndpointUrl}
+     * field; ignoring unknown properties keeps them readable.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record EventSubscription(
             String name,
             String topicResourceId,
@@ -48,11 +57,38 @@ public final class EventGridModels {
             String eventDeliverySchema,
             Filter filter,
             RetryPolicy retryPolicy,
-            String deadLetterEndpointUrl) {
+            DeadLetterDestination deadLetterDestination,
+            DeadLetterWithResourceIdentity deadLetterWithResourceIdentity) {
 
         public String resourceId() {
             return topicResourceId + "/providers/Microsoft.EventGrid/eventSubscriptions/" + name;
         }
+
+        /**
+         * The dead-letter destination delivery uses: {@code deadLetterDestination}, or failing that
+         * the destination inside {@code deadLetterWithResourceIdentity}. {@code null} when neither is
+         * set, in which case undeliverable events are dropped.
+         */
+        public DeadLetterDestination resolveDeadLetterDestination() {
+            if (deadLetterDestination != null) {
+                return deadLetterDestination;
+            }
+            return deadLetterWithResourceIdentity != null ? deadLetterWithResourceIdentity.destination() : null;
+        }
+    }
+
+    /**
+     * A {@code DeadLetterDestination}. {@code StorageBlob} is the only type the service defines; its
+     * properties name the storage account (ARM id) and the container dead-lettered events go to.
+     */
+    public record DeadLetterDestination(String endpointType, String resourceId, String blobContainerName) {
+    }
+
+    /** The {@code EventSubscriptionIdentity} of a {@code deadLetterWithResourceIdentity}. */
+    public record DeadLetterIdentity(String type, String userAssignedIdentity) {
+    }
+
+    public record DeadLetterWithResourceIdentity(DeadLetterIdentity identity, DeadLetterDestination destination) {
     }
 
     public record Filter(

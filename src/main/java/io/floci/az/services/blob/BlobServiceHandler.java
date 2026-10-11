@@ -44,6 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -3144,6 +3145,32 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     public void ensureContainer(String accountName, String containerName) {
         leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), NS_SENTINEL));
+    }
+
+    /**
+     * Writes a block blob on behalf of another emulated service (for example Event Grid
+     * dead-lettering), with the same stored shape a {@code Put Blob} request produces. Unlike the
+     * data-plane path it never creates the container.
+     *
+     * @return {@code false} when the container does not exist, so nothing was written
+     */
+    public boolean putBlockBlob(String accountName, String containerName, String blobName,
+                                byte[] data, String contentType) {
+        AtomicBoolean written = new AtomicBoolean(false);
+        leaseService.exclusively(() -> {
+            if (store.get(nsKey(accountName, containerName)).isEmpty()) {
+                return;
+            }
+            String key = objKey(accountName, containerName, blobName);
+            Map<String, String> metadata = new HashMap<>();
+            metadata.put("BlobType", "BlockBlob");
+            metadata.put("Content-Type", usableContentType(contentType));
+            metadata.put("Name", blobName);
+            metadata.put(CREATION_TIME_KEY, createdOn(store.get(key)).toString());
+            store.put(key, new StoredObject(blobName, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+            written.set(true);
+        });
+        return written.get();
     }
 
     public void setHierarchicalNamespaceEnabled(String accountName, boolean enabled) {
