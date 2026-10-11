@@ -180,6 +180,9 @@ class CloudCatalogTest {
         CloudProfile cloud = CloudCatalog.forName("AzureCloud").orElseThrow();
         assertEquals(List.of("1", "2", "3"), cloud.location("eastus").orElseThrow().zones().value());
         assertEquals(List.of(), cloud.location("westus").orElseThrow().zones().value());
+        // regions-list.md counts zones still in preview for these two, so the count is not a fact.
+        assertTrue(cloud.location("eastus2").orElseThrow().zones().unsettled());
+        assertTrue(cloud.location("northcentralus").orElseThrow().zones().unsettled());
         CloudProfile gov = CloudCatalog.forName("AzureUSGovernment").orElseThrow();
         assertEquals(List.of(), gov.location("usgovtexas").orElseThrow().zones().value());
         assertTrue(gov.location("usgovvirginia").orElseThrow().zones().unsettled());
@@ -215,6 +218,8 @@ class CloudCatalogTest {
     void metadataPayloadsAreCopies() {
         CloudProfile cloud = CloudCatalog.forNameOrPublic(null);
         ((ObjectNode) cloud.metadataPayload("2022-09-01").orElseThrow()).put("name", "changed");
+        assertEquals("AzureCloud", cloud.metadataPayload("2022-09-01").orElseThrow().path("name").asText());
+        ((ObjectNode) cloud.metadataEndpoints().get("2022-09-01")).put("name", "changed");
         assertEquals("AzureCloud", cloud.metadataPayload("2022-09-01").orElseThrow().path("name").asText());
     }
 

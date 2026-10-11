@@ -224,8 +224,16 @@ def test_a_java_region_before_any_section_is_rejected():
         g.parse_java_regions('public static final Region X = new Region("x", "X");')
 
 
-def test_public_zones_read_the_all_tab_only_and_ignore_icons():
-    assert g.parse_public_zones(REGIONS_LIST) == {"eastus": 3, "eastus2": 4, "westus": 0}
+def test_public_zones_read_the_all_tab_only_and_leave_preview_counts_open():
+    assert g.parse_public_zones(REGIONS_LIST) == {"eastus": 3, "eastus2": None, "westus": 0}
+
+
+def test_a_public_region_with_preview_zones_is_unsettled():
+    regions = [("eastus2", "East US 2", "AzureCloud")]
+    zones = g.parse_public_zones(REGIONS_LIST)
+    (location,) = g.build_locations("AzureCloud", regions, {"eastus2": "East US 2"}, zones, {})
+    assert location["zones"]["value"] is None
+    assert location["zones"]["source"].startswith("UNSETTLED: zone count for eastus2")
 
 
 def test_gov_zones_read_the_check_mark():

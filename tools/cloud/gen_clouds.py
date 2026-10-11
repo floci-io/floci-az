@@ -6,8 +6,8 @@ the Java side (`io.floci.az.core.cloud.CloudCatalog`) reads one vendored file fo
 cloud's endpoints, ARM audiences, login hosts, the DNS suffix of every host-addressed service
 (keyed by the `CloudSuffix` constant names), its locations with their availability zones, and the
 `/metadata/endpoints` payloads for api-versions 2022-09-01, 2019-05-01 and 2018-01-01. Nothing in
-that file is hand-typed; every value is read from a file under `local/azure` (see
-`local/azure/sync-refs.sh` for the checkouts):
+that file is hand-typed; every value is read from a file under `local/azure`, a directory of upstream
+checkouts that is not part of this repository (`tools/cloud/README.md` says how to recreate it):
 
 - azure-cli `cloud.py`: the hardcoded clouds (endpoints, suffixes, audiences) and the
   `ARM_METADATA_INDEX` tables that map them to `/metadata/endpoints` keys.
@@ -19,7 +19,8 @@ that file is hand-typed; every value is read from a file under `local/azure` (se
   from `cloud.py`.
 - Azure SDK for Java `Region.java` (cloud membership from its section comments) and Azure SDK for
   .NET `AzureLocation.cs` (every name and display name must agree): the locations.
-- reliability-docs `regions-list.md` (public zones) and azure-docs
+- reliability-docs `regions-list.md` (public zones; a count that includes preview zones is left
+  unsettled) and azure-docs
   `documentation-government-welcome.md` (US Gov zones).
 - azure-docs `compare-azure-government-global-azure.md`, entra-docs
   `authentication-national-cloud.md`, the azure-cli storage client factory and a few REST spec
@@ -138,6 +139,7 @@ NET_LOCATION_RE = re.compile(r'CreateStaticReference\("([a-z0-9]+)", "([^"]+)"\)
 JAVA_CONSTANT_RE = re.compile(r'public static final String (\w+) = "([^"]+)";')
 TABLE_ROW_RE = re.compile(r"^\|(.*)\|\s*$")
 ICON_RE = re.compile(r":::image[^:]*:::")
+PREVIEW_ZONES_ICON = "icon-region-coming-soon.svg"
 
 
 class SourceError(ValueError):
@@ -307,15 +309,23 @@ def parse_net_locations(text: str) -> dict[str, str]:
     return dict(NET_LOCATION_RE.findall(text))
 
 
-def parse_public_zones(text: str) -> dict[str, int]:
-    """regions-list.md, the "All" tab: programmatic name -> availability zone count (0 for N/A)."""
-    zones: dict[str, int] = {}
+def parse_public_zones(text: str) -> dict[str, int | None]:
+    """regions-list.md, the "All" tab: programmatic name -> availability zone count (0 for N/A).
+
+    A count carrying the coming-soon icon includes zones still in preview, and the file does not say
+    how many are available, so that region maps to None.
+    """
+    zones: dict[str, int | None] = {}
     for row in table_rows(text, "#### [All]"):
         if len(row) < 6:
             continue
         name = row[5]
         count = ICON_RE.sub("", row[1]).strip()
-        if count == "N/A":
+        if PREVIEW_ZONES_ICON in row[1]:
+            if not count.isdigit():
+                raise SourceError(f"{REGIONS_LIST}: unexpected zone cell for {name}: {row[1]!r}")
+            zones[name] = None
+        elif count == "N/A":
             zones[name] = 0
         elif count.isdigit():
             zones[name] = int(count)
@@ -449,7 +459,7 @@ def build_suffixes(cloud: str, cli: dict, go_env: dict, gov_compare: dict[str, t
 
 
 def build_locations(cloud: str, regions: list[tuple[str, str, str | None]], net: dict[str, str],
-                    public_zones: dict[str, int], gov_zones: dict[str, bool]) -> list[dict]:
+                    public_zones: dict[str, int | None], gov_zones: dict[str, bool]) -> list[dict]:
     locations: list[dict] = []
     for name, display, owner in regions:
         if net.get(name) != display:
@@ -457,10 +467,12 @@ def build_locations(cloud: str, regions: list[tuple[str, str, str | None]], net:
         if owner != cloud:
             continue
         if cloud == "AzureCloud":
-            if name in public_zones:
-                zones = cell([str(z) for z in range(1, public_zones[name] + 1)], REGIONS_LIST)
-            else:
+            if name not in public_zones:
                 zones = unsettled(f"zones for {name}; not listed in {REGIONS_LIST}")
+            elif public_zones[name] is None:
+                zones = unsettled(f"zone count for {name}; {REGIONS_LIST} counts zones still in preview")
+            else:
+                zones = cell([str(z) for z in range(1, public_zones[name] + 1)], REGIONS_LIST)
         elif cloud == "AzureUSGovernment":
             if name not in gov_zones:
                 zones = unsettled(f"zones for {name}; not listed in {GOV_WELCOME}")

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,7 +19,7 @@ import java.util.Optional;
  * @param suffixes          one entry per {@link CloudSuffix}; an unsettled entry has a null value
  * @param defaultLocation   the cloud's default location when a source names one; see {@link #effectiveDefaultLocation()}
  * @param locations         the cloud's locations, in the Azure SDK for Java's {@code Region} order
- * @param metadataEndpoints the {@code /metadata/endpoints} payload per api-version; never mutate these
+ * @param metadataEndpoints the {@code /metadata/endpoints} payload per api-version; the accessor returns copies
  * @param metadataUnsettled payload keys left out because no local source settles them
  */
 public record CloudProfile(
@@ -37,6 +38,16 @@ public record CloudProfile(
         locations = List.copyOf(locations);
         metadataEndpoints = Map.copyOf(metadataEndpoints);
         metadataUnsettled = List.copyOf(metadataUnsettled);
+    }
+
+    /** A copy of every {@code /metadata/endpoints} payload, so no caller can change the catalog's own nodes. */
+    @Override
+    public Map<String, JsonNode> metadataEndpoints() {
+        Map<String, JsonNode> copies = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> entry : metadataEndpoints.entrySet()) {
+            copies.put(entry.getKey(), entry.getValue().deepCopy());
+        }
+        return Collections.unmodifiableMap(copies);
     }
 
     /** The DNS suffix of {@code suffix} in this cloud, without a leading dot, or empty when it is unsettled here. */

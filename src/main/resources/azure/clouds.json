@@ -60,13 +60,8 @@
           "displayName": "East US 2",
           "name": "eastus2",
           "zones": {
-            "source": "reliability-docs/articles/reliability/regions-list.md",
-            "value": [
-              "1",
-              "2",
-              "3",
-              "4"
-            ]
+            "source": "UNSETTLED: zone count for eastus2; reliability-docs/articles/reliability/regions-list.md counts zones still in preview",
+            "value": null
           }
         },
         {
@@ -109,12 +104,8 @@
           "displayName": "North Central US",
           "name": "northcentralus",
           "zones": {
-            "source": "reliability-docs/articles/reliability/regions-list.md",
-            "value": [
-              "1",
-              "2",
-              "3"
-            ]
+            "source": "UNSETTLED: zone count for northcentralus; reliability-docs/articles/reliability/regions-list.md counts zones still in preview",
+            "value": null
           }
         },
         {
