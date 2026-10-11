@@ -73,6 +73,16 @@ public class StorageSasAuthorization {
         return authorize(request, container, path, token, Operation.APPEND);
     }
 
+    /** Get and Set Blob Tags: the Tags ({@code t}) permission. */
+    public Optional<Response> authorizeTags(AzureRequest request, String container, String path, StorageSasToken token) {
+        return authorize(request, container, path, token, Operation.TAGS);
+    }
+
+    /** Find Blobs by Tags: the Filter ({@code f}) permission. */
+    public Optional<Response> authorizeFilter(AzureRequest request, String container, StorageSasToken token) {
+        return authorize(request, container, null, token, Operation.FILTER);
+    }
+
     private Optional<Response> authorize(
             AzureRequest request,
             String container,
@@ -401,6 +411,18 @@ public class StorageSasAuthorization {
             @Override
             boolean allowedBy(StorageSasToken token) {
                 return token.hasAnyPermission('a', 'w');
+            }
+        },
+        TAGS {
+            @Override
+            boolean allowedBy(StorageSasToken token) {
+                return token.hasPermission('t');
+            }
+        },
+        FILTER {
+            @Override
+            boolean allowedBy(StorageSasToken token) {
+                return token.hasPermission('f');
             }
         };
 

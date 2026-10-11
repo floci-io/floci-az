@@ -3518,6 +3518,357 @@ public class BlobServiceTest {
             .then().statusCode(200);
     }
 
+    // ── Blob index tags ──────────────────────────────────────────────────────
+
+    private static final String TAGS_BODY = "<?xml version=\"1.0\" encoding=\"utf-8\"?><Tags><TagSet>"
+            + "<Tag><Key>env</Key><Value>prod</Value></Tag>"
+            + "<Tag><Key>team</Key><Value>data eng</Value></Tag>"
+            + "</TagSet></Tags>";
+
+    private void createContainerAndBlob(String container, String blob) {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, container);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, container, blob)
+            .then().statusCode(201);
+    }
+
+    private void putTaggedBlob(String container, String blob, String tagsHeader) {
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-tags", tagsHeader)
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, container, blob)
+            .then().statusCode(201);
+    }
+
+    private static String tagSet(int count) {
+        StringBuilder body = new StringBuilder("<Tags><TagSet>");
+        for (int i = 0; i < count; i++) {
+            body.append("<Tag><Key>k").append(i).append("</Key><Value>v</Value></Tag>");
+        }
+        return body.append("</TagSet></Tags>").toString();
+    }
+
+    @Test
+    void setThenGetBlobTagsRoundTripsWithoutChangingTheEtag() {
+        createContainerAndBlob(CONTAINER, BLOB);
+        String etag = given().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).extract().header("ETag");
+
+        given()
+            .contentType("application/xml")
+            .body(TAGS_BODY)
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(204);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .contentType("application/xml")
+            .body("Tags.TagSet.Tag.size()", equalTo(2))
+            .body("Tags.TagSet.Tag[0].Key", equalTo("env"))
+            .body("Tags.TagSet.Tag[0].Value", equalTo("prod"))
+            .body("Tags.TagSet.Tag[1].Key", equalTo("team"))
+            .body("Tags.TagSet.Tag[1].Value", equalTo("data eng"));
+
+        given().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag))
+            .header("x-ms-tag-count", equalTo("2"));
+    }
+
+    @Test
+    void getBlobTagsOfAnUntaggedBlobIsAnEmptyTagSet() {
+        createContainerAndBlob(CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body(containsString("<Tags><TagSet></TagSet></Tags>"))
+            .body(not(containsString(BLOB_CONTENT)));
+
+        given().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).header("x-ms-tag-count", nullValue());
+    }
+
+    @Test
+    void setBlobTagsWithAnEmptyTagSetRemovesTheTags() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+
+        given()
+            .body("<Tags><TagSet/></Tags>")
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).body(containsString("<TagSet></TagSet>"));
+    }
+
+    @Test
+    void blobTagsOnAMissingBlobAreBlobNotFound() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, "missing")
+            .then().statusCode(404).header("x-ms-error-code", "BlobNotFound");
+        given()
+            .body(TAGS_BODY)
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, "missing")
+            .then().statusCode(404).header("x-ms-error-code", "BlobNotFound");
+    }
+
+    @Test
+    void putBlobStoresTheTagsHeaderAndAnOverwriteReplacesThem() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod&team=data+eng&path=a%2Fb");
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body("Tags.TagSet.Tag.find { it.Key == 'team' }.Value", equalTo("data eng"))
+            .body("Tags.TagSet.Tag.find { it.Key == 'path' }.Value", equalTo("a/b"));
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("replacement")
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).body(containsString("<TagSet></TagSet>"));
+    }
+
+    @Test
+    void putBlockListStoresTheTagsHeader() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String blockId = Base64.getEncoder().encodeToString("block-0".getBytes(StandardCharsets.UTF_8));
+        given()
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}", ACCOUNT, CONTAINER, BLOB, blockId)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-tags", "stage=committed")
+            .body("<BlockList><Latest>" + blockId + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).body("Tags.TagSet.Tag.Value", equalTo("committed"));
+    }
+
+    @Test
+    void setBlobMetadataKeepsTheTags() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+
+        given()
+            .header("x-ms-meta-owner", "me")
+            .when().put("/{account}/{container}/{blob}?comp=metadata", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).body("Tags.TagSet.Tag.Value", equalTo("prod"));
+    }
+
+    @Test
+    void invalidTagSetsAreRejectedWithTheStorageErrorCodes() {
+        createContainerAndBlob(CONTAINER, BLOB);
+        String longValue = "v".repeat(257);
+
+        given().body(tagSet(11))
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "TagsTooLarge");
+        given().body("<Tags><TagSet><Tag><Key>k</Key><Value>" + longValue + "</Value></Tag></TagSet></Tags>")
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "TagsTooLarge");
+        given().body("<Tags><TagSet><Tag><Key></Key><Value>v</Value></Tag></TagSet></Tags>")
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "EmptyTagName");
+        given().body("<Tags><TagSet><Tag><Key>k!</Key><Value>v</Value></Tag></TagSet></Tags>")
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidTag");
+        given().body("<Tags><TagSet>")
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidXmlDocument");
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-tags", "bad*key=v")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "rejected.txt")
+            .then().statusCode(400).header("x-ms-error-code", "InvalidTag");
+        given().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "rejected.txt")
+            .then().statusCode(404);
+    }
+
+    @Test
+    void ifTagsConditionGuardsBlobOperations() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+
+        given().header("x-ms-if-tags", "env='prod'")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+        given().header("x-ms-if-tags", "env='dev' or env='prod'")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+        given().header("x-ms-if-tags", "env<>'prod'")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(412).header("x-ms-error-code", "ConditionNotMet");
+        given().header("x-ms-if-tags", "env='prod")
+            .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidHeaderValue")
+            .body(containsString("<HeaderName>x-ms-if-tags</HeaderName>"));
+
+        given().header("x-ms-if-tags", "env='dev'")
+            .body(TAGS_BODY)
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(412).header("x-ms-error-code", "ConditionNotMet");
+        given().header("x-ms-blob-if-match", "\"not-the-etag\"")
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(412).header("x-ms-error-code", "ConditionNotMet");
+    }
+
+    @Test
+    void findBlobsByTagsInAContainerReturnsTheMatchedTags() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, "a.txt", "env=prod&team=data");
+        putTaggedBlob(CONTAINER, "b.txt", "env=dev&team=data");
+        putTaggedBlob(CONTAINER, "c.txt", "team=web");
+
+        given()
+            .queryParam("where", "env='prod' AND team='data'")
+            .when().get("/{account}/{container}?restype=container&comp=blobs", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .contentType("application/xml")
+            .body("EnumerationResults.@ServiceEndpoint", endsWith("/" + ACCOUNT))
+            .body("EnumerationResults.Where", equalTo("env='prod' AND team='data'"))
+            .body("EnumerationResults.Blobs.Blob.size()", equalTo(1))
+            .body("EnumerationResults.Blobs.Blob.Name", equalTo("a.txt"))
+            .body("EnumerationResults.Blobs.Blob.ContainerName", equalTo(CONTAINER))
+            .body("EnumerationResults.Blobs.Blob.Tags.TagSet.Tag.size()", equalTo(2));
+
+        given()
+            .queryParam("where", "\"team\" = 'data' and env >= 'd' and env < 'e'")
+            .when().get("/{account}/{container}?restype=container&comp=blobs", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.Name", equalTo("b.txt"));
+    }
+
+    @Test
+    void findBlobsByTagsAcrossTheAccountHonoursContainerScopeAndPaging() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, "tags-one");
+        given().put("/{account}/{container}?restype=container", ACCOUNT, "tags-two");
+        putTaggedBlob("tags-one", "x.txt", "kind=report");
+        putTaggedBlob("tags-one", "y.txt", "kind=report");
+        putTaggedBlob("tags-two", "x.txt", "kind=report");
+
+        given()
+            .queryParam("where", "kind='report'")
+            .when().get("/{account}?comp=blobs", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.size()", equalTo(3));
+
+        given()
+            .queryParam("where", "@container='tags-two' AND kind='report'")
+            .when().get("/{account}?comp=blobs", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.ContainerName", equalTo("tags-two"))
+            .body("EnumerationResults.Blobs.Blob.Tags.TagSet.Tag.Key", equalTo("kind"));
+
+        String nextMarker = given()
+            .queryParam("where", "kind='report'")
+            .queryParam("maxresults", 2)
+            .when().get("/{account}?comp=blobs", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.size()", equalTo(2))
+            .body("EnumerationResults.Blobs.Blob[0].ContainerName", equalTo("tags-one"))
+            .body("EnumerationResults.Blobs.Blob[1].Name", equalTo("y.txt"))
+            .extract().path("EnumerationResults.NextMarker");
+        assertThat(nextMarker, not(emptyOrNullString()));
+
+        given()
+            .queryParam("where", "kind='report'")
+            .queryParam("maxresults", 2)
+            .queryParam("marker", nextMarker)
+            .when().get("/{account}?comp=blobs", ACCOUNT)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.size()", equalTo(1))
+            .body("EnumerationResults.Blobs.Blob.ContainerName", equalTo("tags-two"))
+            .body("EnumerationResults.NextMarker", emptyOrNullString());
+    }
+
+    @Test
+    void findBlobsByTagsSkipsSnapshots() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+        given().put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        given()
+            .queryParam("where", "env='prod'")
+            .when().get("/{account}?comp=blobs", ACCOUNT)
+            .then().statusCode(200).body("EnumerationResults.Blobs.Blob.size()", equalTo(1));
+    }
+
+    @Test
+    void findBlobsByTagsRejectsMalformedFilters() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        StringBuilder elevenTags = new StringBuilder("t0='v'");
+        for (int i = 1; i <= 10; i++) {
+            elevenTags.append(" and t").append(i).append("='v'");
+        }
+
+        for (String where : new String[] {"env='a' or env='b'", "env<>'a'", "env='a", "env", "env='a' and env='b'",
+                "@owner='x'", elevenTags.toString()}) {
+            given()
+                .queryParam("where", where)
+                .when().get("/{account}?comp=blobs", ACCOUNT)
+                .then()
+                .statusCode(400)
+                .header("x-ms-error-code", "InvalidQueryParameterValue")
+                .body(containsString("<QueryParameterName>where</QueryParameterName>"));
+        }
+
+        given()
+            .queryParam("where", "env='a'")
+            .when().get("/{account}/{container}?restype=container&comp=blobs", ACCOUNT, "no-such-container")
+            .then().statusCode(404).header("x-ms-error-code", "ContainerNotFound");
+    }
+
+    @Test
+    void blobTagOperationsRequireTheTagsAndFilterSasPermissions() {
+        createContainerAndBlob(CONTAINER, BLOB);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags&{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("r", "b", CONTAINER, BLOB))
+            .then().statusCode(403).header("x-ms-error-code", "AuthorizationPermissionMismatch");
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags&{sas}", ACCOUNT, CONTAINER, BLOB,
+                    sas("t", "b", CONTAINER, BLOB))
+            .then().statusCode(200);
+    }
+
     private static String canonicalName(String container, String blobName) {
         if (blobName == null || blobName.isBlank()) {
             return "/blob/" + ACCOUNT + "/" + container;

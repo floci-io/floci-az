@@ -44,6 +44,17 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **Range download**: `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download**: `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **Metadata**: `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
+- **Blob index tags**: Get and Set Blob Tags (`?comp=tags`, including on a snapshot), `x-ms-tags` on
+  Put Blob and Put Block List, and `x-ms-tag-count` on Get Blob and Get Blob Properties. Tag sets
+  are validated (at most 10 tags, keys of 1 to 128 characters, values of up to 256, letters, digits,
+  space and `+ - . / : = _`). Setting tags leaves the blob's ETag and Last-Modified unchanged
+- **Find Blobs by Tags**: `GET ?comp=blobs&where=...` across the account and
+  `GET /{container}?restype=container&comp=blobs&where=...` within one container, with `=`, `>`,
+  `>=`, `<`, `<=`, `AND`, parentheses and `@container`, and `maxresults`/`marker` paging. Each result
+  lists the blob's values for the tags the expression names. Snapshots are not indexed
+- **`x-ms-if-tags` conditions**: honored on Get Blob, Get Blob Properties, Put Blob, Append Block,
+  Delete Blob, Get/Set Blob Metadata, Snapshot Blob and Get/Set Blob Tags (which also take `x-ms-blob-if-match` and
+  `x-ms-blob-if-none-match`); the expression also accepts `OR` and `<>`
 - **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 
