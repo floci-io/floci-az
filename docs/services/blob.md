@@ -126,7 +126,9 @@ floci-az:
 - **SAS enforcement supports shared-key service SAS and user delegation SAS.** Service SAS
   signatures use `floci-az.auth.storage-account-keys`, a map from account names to base64 keys.
   Accounts without an explicit entry use the standard Azurite key, including ARM-created accounts.
-  Explicit entries take precedence. Invalid signatures are rejected, including in dev mode,
+  Explicit entries take precedence. ARM `listKeys` on a storage account returns the same key
+  (configured or default) as `key1` and `key2`, so a SAS signed with a listed key is accepted.
+  Invalid signatures are rejected, including in dev mode,
   as are expired tokens and operations outside the granted permissions. This is separate from
   the permissive Shared Key `Authorization` header behavior above.
   Shared-key service SAS supports directory scope (`sr=d`). Directory service SAS requires
