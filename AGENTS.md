@@ -293,8 +293,8 @@ from the 6th `COMPAT_SESSION` argument in the Makefile and `emulator_env` in the
 miss, because a var set only there does not appear in any `SUITE_ENV_*` variable.
 
 **One exception on the emulator axis: `compat-docker`.** It starts a single shared emulator with
-`JAVA_SERVICEBUS_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5`)
-and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
+`JAVA_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` and
+`FLOCI_AZ_SERVICES_AKS_MOCKED=true`) and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
 than under their own `test-*-compat` targets or in CI, where they get `SERVICEBUS_EMULATOR_ENV` alone.
 The table below is the per-suite contract that CI and the individual targets honour; `compat-docker` is
 a convenience runner that deliberately shares one emulator, so a Service Bus timing behaviour that only
@@ -326,8 +326,9 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 
 | Suite | Makefile | CI (`compatibility.yml` `emulator_env`) |
 |---|---|---|
-| `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`JAVA_SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`JAVA_EMULATOR_ENV`) | ✓ |
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` | ✓ |
+| `sdk-test-java` | `-e FLOCI_AZ_SERVICES_AKS_MOCKED=true` | ✓ |
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
