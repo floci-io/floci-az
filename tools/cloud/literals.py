@@ -145,7 +145,9 @@ LOCATION_LITERAL = re.compile(r'(?:^|")eastus(?:\\?"|$)')
 SCOPE_PARSE = re.compile(
     r"\bArmPaths\s*\.\s*(?:subscription|resourceGroup)\s*\("
     r"|\bArmScope\s*\.\s*of\s*\("
-    r'|\bsegmentAfter\s*\(\s*[^,;()]+,\s*"(?i:subscriptions|resourcegroups)"'
+    # The path argument may itself be a call (request.resourcePath()), two levels of parentheses deep.
+    r"|\bsegmentAfter\s*\(\s*(?:[^,;()]|\((?:[^()]|\([^()]*\))*\))+,"
+    r'\s*"(?i:subscriptions|resourcegroups)"'
 )
 
 GUARD_NAMES = r"(?:ownedElsewhere|foreignServer|nameClaims)"
@@ -265,7 +267,18 @@ def code_text(text: str) -> str:
 
     Newlines survive, so an offset maps back to its line. Uses the same lexing rules as scan_java.
     """
+    return code_text_and_strings(text)[0]
+
+
+def code_text_and_strings(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """code_text plus the [start, end) offsets of every string and char literal it kept.
+
+    A code pattern that starts inside one of those spans is text, not code: a message that
+    mentions ArmScope.of( parses no scope. A match that starts outside may still run through a
+    string, which is how segmentAfter(path, "subscriptions") is recognised.
+    """
     out: list[str] = []
+    strings: list[tuple[int, int]] = []
     i = 0
     n = len(text)
     while i < n:
@@ -289,11 +302,16 @@ def code_text(text: str) -> str:
                 j += 2 if text[j] == "\\" else 1
             end = j + 1 if j < n and text[j] == quote else j
             out.append(text[i:end])
+            strings.append((i, end))
             i = end
         else:
             out.append(text[i])
             i += 1
-    return "".join(out)
+    return "".join(out), strings
+
+
+def inside_any(offset: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= offset < end for start, end in spans)
 
 
 # --------------------------------------------------------------------------- #
@@ -306,8 +324,22 @@ class AllowRule:
     reason: str
 
 
+def _strip_inline_comment(raw: str) -> str:
+    """Drops a YAML comment: a '#' at the start or after whitespace, outside quotes."""
+    quote: str | None = None
+    for index, char in enumerate(raw):
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or raw[index - 1] in " \t"):
+            return raw[:index]
+    return raw
+
+
 def _scalar(raw: str) -> str:
-    raw = raw.strip()
+    raw = _strip_inline_comment(raw).strip()
     if len(raw) >= 2 and raw[0] == raw[-1] == "'":
         return raw[1:-1].replace("''", "'")
     if len(raw) >= 2 and raw[0] == raw[-1] == '"':
@@ -320,7 +352,8 @@ def parse_allowlist_yaml(text: str) -> dict:
 
     Supports exactly what literals-allowlist.yaml uses: the top-level keys `files` and `patterns`,
     each a list (or `[]`) of mappings whose scalars are plain, single- or double-quoted, and plain
-    scalars continued on more-indented lines. PyYAML is used instead whenever it is installed.
+    scalars continued on more-indented lines, and `#` comments on their own line or after a value.
+    PyYAML is used instead whenever it is installed, so both must read a file the same way.
     """
     data: dict = {}
     current_list: list | None = None
@@ -352,7 +385,8 @@ def parse_allowlist_yaml(text: str) -> dict:
             last_key = match.group(1)
             current_item[last_key] = _scalar(match.group(2) or "")
         elif current_item is not None and last_key is not None:
-            current_item[last_key] = (current_item[last_key] + " " + stripped).strip()
+            continued = _strip_inline_comment(stripped).strip()
+            current_item[last_key] = (current_item[last_key] + " " + continued).strip()
         else:
             raise ValueError(f"allowlist: cannot parse {raw!r}")
     return data
@@ -421,11 +455,12 @@ def collect_findings(source_root: Path, rules: list[AllowRule],
                 if category.scope == "literal":
                     hits += [(category.name, literal.line)] * len(category.regex.findall(literal.text))
         if any(category.scope == "code" for category in applicable):
-            code = code_text(text)
+            code, strings = code_text_and_strings(text)
             for category in applicable:
                 if category.scope == "code":
                     hits += [(category.name, code.count("\n", 0, match.start()) + 1)
-                             for match in category.regex.finditer(code)]
+                             for match in category.regex.finditer(code)
+                             if not inside_any(match.start(), strings)]
         for name, line_number in hits:
             source_line = lines[line_number - 1] if line_number - 1 < len(lines) else ""
             excuse = excuse_for(rel_path, source_line, rules)

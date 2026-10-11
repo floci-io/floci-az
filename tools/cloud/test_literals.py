@@ -182,6 +182,9 @@ def test_location_literal_matches_exactly_eastus(text, expected):
     ("ArmScope.of(request.resourcePath())", True),
     ('ArmPaths.segmentAfter(fullPath, "subscriptions", "default")', True),
     ('segmentAfter(fullPath, "resourcegroups")', True),
+    ('ArmPaths.segmentAfter(request.resourcePath(), "subscriptions", "default")', True),
+    ('segmentAfter(lower(request.resourcePath()), "resourcegroups")', True),
+    ('ArmPaths.segmentAfter(request.resourcePath(), "providers", "x")', False),
     ('ArmPaths.segmentAfter(path, "providers", "x")', False),
     ('ArmPaths.resourceName(path, "vaults")', False),
     ("scope.subscription()", False),
@@ -227,6 +230,19 @@ def test_code_categories_ignore_comments_and_strings_never_split_them(tmp_path):
     ))
     findings = findings_in(tmp_path)
     assert sorted((f.category, f.line) for f in findings) == [("name-guard", 4), ("scope-parse", 6)]
+
+
+def test_code_categories_ignore_patterns_that_start_inside_a_string(tmp_path):
+    write_java(tmp_path, SERVICES + "sql/S.java", (
+        "class S {\n"
+        '    String hint = "call ArmScope.of(path) first";\n'
+        '    String flag = "ownedElsewhere = true";\n'
+        '    char open = \'(\';\n'
+        '    Object scope = ArmPaths.segmentAfter(request.resourcePath(), "subscriptions", "x");\n'
+        "}\n"
+    ))
+    findings = findings_in(tmp_path)
+    assert sorted((f.category, f.line) for f in findings) == [("scope-parse", 5)]
 
 
 def test_cloud_literal_matches_inside_string_literals_only(tmp_path):
@@ -301,22 +317,39 @@ def test_load_allowlist_rejects_an_entry_without_a_reason(tmp_path):
 ALLOWLIST_TEXT = (
     "# comment\n"
     "files:\n"
-    "  - path: a/B.java\n"
+    "  - path: a/B.java # fixture\n"
     "    reason: why it is\n"
-    "      invariant\n"
+    "      invariant   # still the reason\n"
     "patterns:\n"
-    "  - regex: 'x\\.y'\n"
-    "    reason: \"because\"\n"
+    "  - regex: 'x\\.y#z'   # the hash inside the quotes is data\n"
+    "    reason: \"because # of this\"\n"
+    "  - regex: a#b\n"
+    "    reason: a hash with no space before it is data\n"
 )
 
 
 def test_load_allowlist_reads_files_and_patterns(tmp_path):
     allowlist = tmp_path / "allowlist.yaml"
     allowlist.write_text(ALLOWLIST_TEXT)
-    assert l.load_allowlist(allowlist) == [
-        l.AllowRule("file", "a/B.java", "why it is invariant"),
-        l.AllowRule("pattern", "x\\.y", "because"),
-    ]
+    assert l.load_allowlist(allowlist) == EXPECTED_ALLOWLIST_RULES
+
+
+EXPECTED_ALLOWLIST_DATA = {
+    "files": [{"path": "a/B.java", "reason": "why it is invariant"}],
+    "patterns": [
+        {"regex": "x\\.y#z", "reason": "because # of this"},
+        {"regex": "a#b", "reason": "a hash with no space before it is data"},
+    ],
+}
+EXPECTED_ALLOWLIST_RULES = [
+    l.AllowRule("file", "a/B.java", "why it is invariant"),
+    l.AllowRule("pattern", "x\\.y#z", "because # of this"),
+    l.AllowRule("pattern", "a#b", "a hash with no space before it is data"),
+]
+
+
+def test_fallback_parser_drops_inline_comments_outside_quotes():
+    assert l.parse_allowlist_yaml(ALLOWLIST_TEXT) == EXPECTED_ALLOWLIST_DATA
 
 
 def test_fallback_parser_agrees_with_pyyaml():
