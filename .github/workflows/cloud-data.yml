@@ -5,10 +5,17 @@ name: Cloud Data
 # reference checkouts, so the check here is shape-only; a regeneration against local/azure
 # (`make az-data-sync`) is what catches stale values. Python-only, so it is fast and independent
 # of the Java build job.
+#
+# The second job is the cloud literal ratchet: tools/cloud/literals.py inventories the hardcoded
+# cloud hosts, the "eastus" default, ARM scope re-parsing in services and the per-service
+# global-name guards in src/main/java against tools/cloud/literals-baseline.tsv. A new file with an
+# occurrence fails, growth fails, and a drop fails until the baseline is regenerated, so the
+# remaining count stays exact.
 
 on:
   pull_request:
     paths:
+      - 'src/main/java/**'
       - 'src/main/resources/azure/**'
       - 'tools/cloud/**'
       - 'Makefile'
@@ -17,6 +24,7 @@ on:
     branches:
       - main
     paths:
+      - 'src/main/java/**'
       - 'src/main/resources/azure/**'
       - 'tools/cloud/**'
       - 'Makefile'
@@ -50,3 +58,28 @@ jobs:
 
       - name: Check clouds.json
         run: make az-data-check
+
+  cloud-literals:
+    name: Cloud literals match baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      - name: Install tooling deps
+        run: pip install -r tools/cloud/requirements.txt
+
+      - name: Run the ratchet tests
+        run: python -m pytest tools/cloud/test_literals.py -q
+
+      - name: Check cloud literals against the baseline
+        run: make cloud-literals-check
+
+      - name: Print the remaining-literal audit
+        if: always()
+        run: make cloud-literals-audit

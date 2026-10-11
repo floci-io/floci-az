@@ -40,3 +40,30 @@ shape-only path.
 To settle an `UNSETTLED` cell, check out a source that states the value under `local/azure`, add its
 repository to the table above, teach the generator to read it, and regenerate. Do not type the value
 into `clouds.json`.
+
+## Literal ratchet
+
+`literals.py` keeps hardcoded single-cloud and single-scope assumptions in `src/main/java` from
+growing back. It counts four categories per file and gates them against `literals-baseline.tsv`:
+
+| Category | What counts |
+|---|---|
+| `cloud-literal` | a string literal containing a host or DNS suffix of any cloud in `clouds.json` (service suffixes, endpoint and audience hosts, and the parent zones they share except `microsoft.com`), so the patterns follow the catalog |
+| `location-literal` | the literal `"eastus"` |
+| `scope-parse` | under `services/`: `ArmPaths.subscription(`, `ArmPaths.resourceGroup(`, `ArmScope.of(` and `segmentAfter(..., "subscriptions"/"resourcegroups")` |
+| `name-guard` | a declaration (method, field or local) named `ownedElsewhere`, `foreignServer` or `nameClaims`: one per guard copy, never its call sites |
+
+Comments never count. A new file with an occurrence fails, a count that grew fails, and a count that
+dropped also fails until the baseline is regenerated, so the remaining number stays exact and shows
+in the diff. A genuinely cloud-invariant occurrence is excused by an entry with a reason in
+`literals-allowlist.yaml`, or by ending its line with `// cloud-literal: <reason>`; the audit prints
+every escape.
+
+| Command | What it does |
+|---|---|
+| `make cloud-literals-check` | CI gate: fail when any per-file count differs from the baseline. |
+| `make cloud-literals-baseline` | Regenerate `literals-baseline.tsv` after removing occurrences. Commit the result. |
+| `make cloud-literals-audit` | Print the per-package table, the baseline totals, the escapes and the allow-listed hits. |
+
+The unit tests run with `make az-data-test`. PyYAML is optional: without it the script reads the
+allow-list's own simple shape.

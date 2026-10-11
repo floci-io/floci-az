@@ -8,7 +8,8 @@
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean \
         smoke-native-crypto \
-        az-data-sync az-data-check az-data-test
+        az-data-sync az-data-check az-data-test \
+        cloud-literals-check cloud-literals-audit cloud-literals-baseline
 
 MVN            = ./mvnw
 PYTHON        ?= python3
@@ -520,6 +521,23 @@ az-data-check:
 
 az-data-test:
 	$(PYTHON) -m pytest tools/cloud -q
+
+# Ratchet on hardcoded cloud hosts, the "eastus" default, ARM scope re-parsing in services and the
+# per-service global-name guards (see tools/cloud/README.md). az-data-test runs its unit tests.
+
+cloud-literals-check:
+	@$(PYTHON) tools/cloud/literals.py --check || { \
+		echo ""; \
+		echo "error: cloud literals drifted from tools/cloud/literals-baseline.tsv (see above)."; \
+		echo "       Fix the new occurrence, or run 'make cloud-literals-baseline' after removing some."; \
+		exit 1; \
+	}
+
+cloud-literals-baseline:
+	$(PYTHON) tools/cloud/literals.py --write-baseline
+
+cloud-literals-audit:
+	@$(PYTHON) tools/cloud/literals.py --audit
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

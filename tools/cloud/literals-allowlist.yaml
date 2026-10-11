@@ -1,0 +1,10 @@
+# Occurrences tools/cloud/literals.py must not count. Every entry needs a reason a reviewer can
+# check; the audit prints how many occurrences each entry excuses. Prefer a trailing
+# `// cloud-literal: <reason>` comment for a single line.
+#
+# files:    the whole file is exempt (path relative to the repo root)
+# patterns: a Python regex matched against the full source line of the occurrence
+
+files: []
+
+patterns: []
