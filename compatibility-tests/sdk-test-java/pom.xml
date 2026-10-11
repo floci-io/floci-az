@@ -119,6 +119,23 @@
             <version>2.18.4</version>
         </dependency>
         <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-monitor-ingestion</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-monitor-query-logs</artifactId>
+        </dependency>
+        <!--
+          Not in the BOM. 2.57.0 is the release built against azure-core 1.57.0 and
+          azure-core-management 1.19.2, the versions pinned above for appcontainers.
+        -->
+        <dependency>
+            <groupId>com.azure.resourcemanager</groupId>
+            <artifactId>azure-resourcemanager-containerservice</artifactId>
+            <version>2.57.0</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-common</artifactId>
             <version>${hadoop.version}</version>

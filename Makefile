@@ -58,6 +58,9 @@ SUITE_ENV_DOTNET = -e SERVICEBUS_HOST=floci-az-servicebus-default \
 SERVICEBUS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
 JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
+# AksCompatibilityTest drives the mocked AKS control plane; real mode would start a k3s container.
+JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
+	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
 
 # Per-suite build context and image tag, keyed by suite name.
 SUITES = python java dotnet node cpp terraform opentofu azcli
@@ -232,7 +235,7 @@ test-python-compat:
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,$(JAVA_SERVICEBUS_EMULATOR_ENV))
+	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,$(JAVA_EMULATOR_ENV))
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
@@ -414,7 +417,7 @@ test-azcli:
 
 compat-docker:
 	$(MAKE) compat-build
-	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_SERVICEBUS_EMULATOR_ENV)"
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_EMULATOR_ENV)"
 	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/cpp $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
