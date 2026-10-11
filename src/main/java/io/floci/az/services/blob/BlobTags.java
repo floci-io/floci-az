@@ -90,40 +90,66 @@ final class BlobTags {
         return validated(pairs);
     }
 
-    /** Parses a Set Blob Tags body: {@code <Tags><TagSet><Tag><Key/><Value/></Tag>...}. */
+    /**
+     * Parses a Set Blob Tags body: {@code <Tags><TagSet><Tag><Key/><Value/></Tag>...}.
+     *
+     * <p>The {@code Tags} root and its {@code TagSet} are required, so a missing or unrelated body
+     * is rejected instead of being read as "no tags" and wiping the blob's tag set. Clearing the
+     * tags takes an explicit {@code <Tags><TagSet/></Tags>}.
+     */
     static Map<String, String> fromXml(String body) {
         List<Map.Entry<String, String>> pairs = new ArrayList<>();
         if (body == null || body.isBlank()) {
-            return new LinkedHashMap<>();
+            throw invalidDocument();
         }
+        boolean tagSetSeen = false;
         try {
             XMLStreamReader reader = XmlParser.newStreamReader(body);
             String key = null;
             String value = null;
             boolean inTag = false;
+            int depth = 0;
             while (reader.hasNext()) {
                 int event = reader.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
+                    depth++;
                     String name = reader.getLocalName();
-                    if ("Tag".equals(name)) {
+                    if (depth == 1 && !"Tags".equals(name)) {
+                        throw invalidDocument();
+                    }
+                    if (depth == 2 && "TagSet".equals(name)) {
+                        tagSetSeen = true;
+                    } else if ("Tag".equals(name)) {
                         inTag = true;
                         key = null;
                         value = null;
                     } else if (inTag && "Key".equals(name)) {
                         key = reader.getElementText();
+                        depth--;
                     } else if (inTag && "Value".equals(name)) {
                         value = reader.getElementText();
+                        depth--;
                     }
-                } else if (event == XMLStreamConstants.END_ELEMENT && "Tag".equals(reader.getLocalName())) {
-                    inTag = false;
-                    pairs.add(Map.entry(key == null ? "" : key, value == null ? "" : value));
+                } else if (event == XMLStreamConstants.END_ELEMENT) {
+                    depth--;
+                    if ("Tag".equals(reader.getLocalName())) {
+                        inTag = false;
+                        pairs.add(Map.entry(key == null ? "" : key, value == null ? "" : value));
+                    }
                 }
             }
             reader.close();
         } catch (XMLStreamException e) {
-            throw new BlobTagException(400, "InvalidXmlDocument", "XML specified is not syntactically valid.");
+            throw invalidDocument();
+        }
+        if (!tagSetSeen) {
+            throw invalidDocument();
         }
         return validated(pairs);
+    }
+
+    private static BlobTagException invalidDocument() {
+        return new BlobTagException(400, "InvalidXmlDocument", "XML specified is not syntactically valid.");
     }
 
     static String toXml(Map<String, String> tags) {

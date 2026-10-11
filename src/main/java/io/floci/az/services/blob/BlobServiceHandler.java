@@ -313,9 +313,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     // (create, rename, append/flush, properties, ACL). An unknown DFS PUT
                     // must fail closed rather than being mistaken for a Blob Put operation.
                     response = dataLakeNotImplemented();
-                } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
-                        && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
-                    response = snapshotIsImmutable();
                 } else if ("tags".equals(comp)) {
                     // Ahead of the snapshot guard: Set Blob Tags accepts a snapshot. Never let it
                     // fall through to Get Blob, which would answer with the blob content.
@@ -326,6 +323,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     } else {
                         response = notImplemented();
                     }
+                } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
+                        && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
+                    response = snapshotIsImmutable();
                 } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
                     response = leaseBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "snapshot".equals(comp)) {

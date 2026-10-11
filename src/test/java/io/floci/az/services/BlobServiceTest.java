@@ -3613,6 +3613,66 @@ public class BlobServiceTest {
     }
 
     @Test
+    void setBlobTagsWithoutATagsDocumentIsRejectedAndKeepsTheTags() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+
+        given()
+            .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(400).header("x-ms-error-code", "InvalidXmlDocument");
+        for (String body : new String[] {"<Foo/>", "<Tags/>", "<Foo><TagSet/></Foo>",
+                "<TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet>"}) {
+            given()
+                .body(body)
+                .when().put("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+                .then().statusCode(400).header("x-ms-error-code", "InvalidXmlDocument");
+        }
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body("Tags.TagSet.Tag.size()", equalTo(1))
+            .body("Tags.TagSet.Tag[0].Key", equalTo("env"))
+            .body("Tags.TagSet.Tag[0].Value", equalTo("prod"));
+    }
+
+    @Test
+    void blobTagsCanBeSetAndReadOnASnapshotWithoutTouchingTheBaseBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        putTaggedBlob(CONTAINER, BLOB, "env=prod");
+        String snapshot = given()
+            .put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201).extract().header("x-ms-snapshot");
+
+        given()
+            .body("<Tags><TagSet><Tag><Key>state</Key><Value>archived</Value></Tag></TagSet></Tags>")
+            .when().put("/{account}/{container}/{blob}?comp=tags&snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags&snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then()
+            .statusCode(200)
+            .body("Tags.TagSet.Tag.size()", equalTo(1))
+            .body("Tags.TagSet.Tag[0].Key", equalTo("state"))
+            .body("Tags.TagSet.Tag[0].Value", equalTo("archived"));
+        given()
+            .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .body("Tags.TagSet.Tag.size()", equalTo(1))
+            .body("Tags.TagSet.Tag[0].Key", equalTo("env"));
+
+        given()
+            .when().post("/{account}/{container}/{blob}?comp=tags&snapshot={snapshot}",
+                    ACCOUNT, CONTAINER, BLOB, snapshot)
+            .then().statusCode(501);
+    }
+
+    @Test
     void blobTagsOnAMissingBlobAreBlobNotFound() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
