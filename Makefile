@@ -7,9 +7,11 @@
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean \
-        smoke-native-crypto
+        smoke-native-crypto \
+        az-data-sync az-data-check az-data-test
 
 MVN            = ./mvnw
+PYTHON        ?= python3
 PORT           = 4577
 PID_FILE       = emulator.pid
 PYTHON_DIR     = compatibility-tests/sdk-test-python
@@ -497,6 +499,24 @@ smoke-native-crypto:
 	kill $$(cat /tmp/floci-az-native.pid 2>/dev/null) 2>/dev/null || true; \
 	rm -f /tmp/floci-az-native.pid; \
 	exit $$EXIT
+
+# ── Vendored Azure cloud data ─────────────────────────────────────────────────
+# src/main/resources/azure/clouds.json is generated from the local/azure reference checkouts
+# (see tools/cloud/README.md). Without local/ (CI), az-data-check verifies its shape only.
+
+az-data-sync:
+	$(PYTHON) tools/cloud/gen_clouds.py
+
+az-data-check:
+	@$(PYTHON) tools/cloud/gen_clouds.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/azure/clouds.json is out of date or malformed."; \
+		echo "       Run 'make az-data-sync' with local/azure checked out and commit the result."; \
+		exit 1; \
+	}
+
+az-data-test:
+	$(PYTHON) -m pytest tools/cloud -q
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 

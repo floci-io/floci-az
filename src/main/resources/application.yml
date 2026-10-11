@@ -16,7 +16,7 @@ quarkus:
       origins: /.*/
   native:
     resources:
-      includes: artemis/**
+      includes: artemis/**,azure/**
     additional-build-args: >-
       --initialize-at-run-time=org.apache.hc.client5.http.impl.auth.NTLMEngineImpl,
       --initialize-at-run-time=com.github.dockerjava.transport.NamedPipeSocket$Kernel32,

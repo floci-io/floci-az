@@ -1,0 +1,1578 @@
+{
+  "_source": {
+    "files": {
+      "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
+      "azure-cli/src/azure-cli/azure/cli/command_modules/container/tests/latest/test_container_commands.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
+      "azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
+      "azure-docs/articles/azure-government/compare-azure-government-global-azure.md": "bdb58b863b974833d8bfd7b3f5ff3230e594e9c3",
+      "azure-docs/articles/azure-government/documentation-government-welcome.md": "bdb58b863b974833d8bfd7b3f5ff3230e594e9c3",
+      "azure-rest-api-specs/specification/app/resource-manager/Microsoft.App/ContainerApps/stable/2024-03-01/examples/Revisions_Get.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
+      "azure-rest-api-specs/specification/communication/data-plane/Messages/stable/2024-08-30/communicationservicesmessages.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
+      "azure-rest-api-specs/specification/containerservice/resource-manager/Microsoft.ContainerService/aks/stable/2026-02-01/examples/ManagedClustersCreate_Update.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
+      "azure-rest-api-specs/specification/eventgrid/data-plane/EventGrid/stable/2018-01-01/EventGrid.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
+      "azure-rest-api-specs/specification/signalr/resource-manager/Microsoft.SignalRService/SignalRService/stable/2020-05-01/signalr.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
+      "azure-sdk-for-java/sdk/core/azure-core-management/src/main/java/com/azure/core/management/Region.java": "0c8f63d750ab0f468a98cb4677b5999270984c53",
+      "azure-sdk-for-java/sdk/identity/azure-identity/src/main/java/com/azure/identity/AzureAuthorityHosts.java": "0c8f63d750ab0f468a98cb4677b5999270984c53",
+      "azure-sdk-for-net/sdk/core/Azure.Core/src/AzureLocation.cs": "b665dd21a120cbb120357112b44e2b70fc50553b",
+      "entra-docs/docs/identity-platform/authentication-national-cloud.md": "4b04ea80bfb0d97dc2db6f9cd220be16bfb07f05",
+      "go-azure-sdk/sdk/environments/azure_china.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
+      "go-azure-sdk/sdk/environments/azure_gov.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
+      "go-azure-sdk/sdk/environments/azure_public.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
+      "go-azure-sdk/sdk/internal/metadata/client_test.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
+      "reliability-docs/articles/reliability/regions-list.md": "f7ca0e795ae928e68c9a2c20e7b071eeaf577fc7"
+    },
+    "generator": "tools/cloud/gen_clouds.py",
+    "root": "local/azure"
+  },
+  "clouds": [
+    {
+      "audiences": [
+        "https://management.core.windows.net",
+        "https://management.azure.com"
+      ],
+      "defaultLocation": {
+        "source": "UNSETTLED: default location for AzureCloud; no local source names one (CloudCatalog falls back to the first listed location)",
+        "value": null
+      },
+      "endpoints": {
+        "activeDirectory": "https://login.microsoftonline.com",
+        "authorityHosts": [
+          "login.microsoftonline.com"
+        ],
+        "microsoftGraph": "https://graph.microsoft.com",
+        "portal": "https://portal.azure.com",
+        "resourceManager": "https://management.azure.com"
+      },
+      "locations": [
+        {
+          "displayName": "East US",
+          "name": "eastus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "East US 2",
+          "name": "eastus2",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          }
+        },
+        {
+          "displayName": "South Central US",
+          "name": "southcentralus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "West US 2",
+          "name": "westus2",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Central US",
+          "name": "centralus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "North Central US",
+          "name": "northcentralus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "West US",
+          "name": "westus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "West Central US",
+          "name": "westcentralus",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "West US 3",
+          "name": "westus3",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Canada Central",
+          "name": "canadacentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Canada East",
+          "name": "canadaeast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Brazil South",
+          "name": "brazilsouth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Brazil Southeast",
+          "name": "brazilsoutheast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Mexico Central",
+          "name": "mexicocentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "North Europe",
+          "name": "northeurope",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "UK South",
+          "name": "uksouth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "West Europe",
+          "name": "westeurope",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "France Central",
+          "name": "francecentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Germany West Central",
+          "name": "germanywestcentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Norway East",
+          "name": "norwayeast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Switzerland North",
+          "name": "switzerlandnorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Sweden Central",
+          "name": "swedencentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "France South",
+          "name": "francesouth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Germany North",
+          "name": "germanynorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Norway West",
+          "name": "norwaywest",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Switzerland West",
+          "name": "switzerlandwest",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "UK West",
+          "name": "ukwest",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Italy North",
+          "name": "italynorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Spain Central",
+          "name": "spaincentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Poland Central",
+          "name": "polandcentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Australia East",
+          "name": "australiaeast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Southeast Asia",
+          "name": "southeastasia",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Central India",
+          "name": "centralindia",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "East Asia",
+          "name": "eastasia",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Japan East",
+          "name": "japaneast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Korea Central",
+          "name": "koreacentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Australia Central",
+          "name": "australiacentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Australia Central 2",
+          "name": "australiacentral2",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Australia Southeast",
+          "name": "australiasoutheast",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Japan West",
+          "name": "japanwest",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Korea South",
+          "name": "koreasouth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "South India",
+          "name": "southindia",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "West India",
+          "name": "westindia",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Indonesia Central",
+          "name": "indonesiacentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "New Zealand North",
+          "name": "newzealandnorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "UAE North",
+          "name": "uaenorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "UAE Central",
+          "name": "uaecentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "Israel Central",
+          "name": "israelcentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "Qatar Central",
+          "name": "qatarcentral",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "South Africa North",
+          "name": "southafricanorth",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3"
+            ]
+          }
+        },
+        {
+          "displayName": "South Africa West",
+          "name": "southafricawest",
+          "zones": {
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": []
+          }
+        }
+      ],
+      "metadataEndpoints": {
+        "2018-01-01": {
+          "authentication": {
+            "audiences": [
+              "https://management.core.windows.net/",
+              "https://management.azure.com/"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.com/",
+            "tenant": "common"
+          },
+          "cloudEndpoint": {
+            "chinaCloud": {
+              "endpoint": "management.chinacloudapi.cn",
+              "locations": [
+                "chinanorth",
+                "chinaeast",
+                "chinanorth2",
+                "chinaeast2",
+                "chinanorth3",
+                "chinaeast3"
+              ]
+            },
+            "public": {
+              "endpoint": "management.azure.com",
+              "locations": [
+                "eastus",
+                "eastus2",
+                "southcentralus",
+                "westus2",
+                "centralus",
+                "northcentralus",
+                "westus",
+                "westcentralus",
+                "westus3",
+                "canadacentral",
+                "canadaeast",
+                "brazilsouth",
+                "brazilsoutheast",
+                "mexicocentral",
+                "northeurope",
+                "uksouth",
+                "westeurope",
+                "francecentral",
+                "germanywestcentral",
+                "norwayeast",
+                "switzerlandnorth",
+                "swedencentral",
+                "francesouth",
+                "germanynorth",
+                "norwaywest",
+                "switzerlandwest",
+                "ukwest",
+                "italynorth",
+                "spaincentral",
+                "polandcentral",
+                "australiaeast",
+                "southeastasia",
+                "centralindia",
+                "eastasia",
+                "japaneast",
+                "koreacentral",
+                "australiacentral",
+                "australiacentral2",
+                "australiasoutheast",
+                "japanwest",
+                "koreasouth",
+                "southindia",
+                "westindia",
+                "indonesiacentral",
+                "newzealandnorth",
+                "uaenorth",
+                "uaecentral",
+                "israelcentral",
+                "qatarcentral",
+                "southafricanorth",
+                "southafricawest"
+              ]
+            },
+            "usGovCloud": {
+              "endpoint": "management.usgovcloudapi.net",
+              "locations": [
+                "usgovvirginia",
+                "usgoviowa",
+                "usgovarizona",
+                "usgovtexas",
+                "usdodeast",
+                "usdodcentral"
+              ]
+            }
+          },
+          "galleryEndpoint": "https://gallery.azure.com/",
+          "graphAudience": "https://graph.windows.net/",
+          "graphEndpoint": "https://graph.windows.net/",
+          "portalEndpoint": "https://portal.azure.com/"
+        },
+        "2019-05-01": {
+          "activeDirectoryDataLake": "https://datalake.azure.net/",
+          "appInsightsResourceId": "https://api.applicationinsights.io",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.azure.com/v2/track",
+          "attestationResourceId": "https://attest.azure.net",
+          "authentication": {
+            "audiences": [
+              "https://management.core.windows.net/",
+              "https://management.azure.com/"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.com",
+            "tenant": "common"
+          },
+          "batch": "https://batch.core.windows.net/",
+          "gallery": "https://gallery.azure.com/",
+          "graph": "https://graph.windows.net/",
+          "graphAudience": "https://graph.windows.net/",
+          "logAnalyticsResourceId": "https://api.loganalytics.io",
+          "media": "https://rest.media.azure.net",
+          "microsoftGraphResourceId": "https://graph.microsoft.com/",
+          "name": "AzureCloud",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.windows.net",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.windows.net",
+          "portal": "https://portal.azure.com",
+          "resourceManager": "https://management.azure.com/",
+          "sqlManagement": "https://management.core.windows.net:8443/",
+          "suffixes": {
+            "acrLoginServer": "azurecr.io",
+            "attestationEndpoint": "attest.azure.net",
+            "azureDataLakeAnalyticsCatalogAndJob": "azuredatalakeanalytics.net",
+            "azureDataLakeStoreFileSystem": "azuredatalakestore.net",
+            "azureFrontDoorEndpointSuffix": "azurefd.net",
+            "keyVaultDns": "vault.azure.net",
+            "mariadbServerEndpoint": "mariadb.database.azure.com",
+            "mhsmDns": "managedhsm.azure.net",
+            "mysqlServerEndpoint": "mysql.database.azure.com",
+            "postgresqlServerEndpoint": "postgres.database.azure.com",
+            "sqlServerHostname": "database.windows.net",
+            "storage": "core.windows.net",
+            "storageSyncEndpointSuffix": "afs.azure.net",
+            "synapseAnalytics": "dev.azuresynapse.net"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.net",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        },
+        "2022-09-01": {
+          "activeDirectoryDataLake": "https://datalake.azure.net/",
+          "appInsightsResourceId": "https://api.applicationinsights.io",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.azure.com/v2/track",
+          "attestationResourceId": "https://attest.azure.net",
+          "authentication": {
+            "audiences": [
+              "https://management.core.windows.net/",
+              "https://management.azure.com/"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.com",
+            "tenant": "common"
+          },
+          "batch": "https://batch.core.windows.net/",
+          "graph": "https://graph.windows.net/",
+          "graphAudience": "https://graph.windows.net/",
+          "logAnalyticsResourceId": "https://api.loganalytics.io",
+          "media": "https://rest.media.azure.net",
+          "microsoftGraphResourceId": "https://graph.microsoft.com/",
+          "name": "AzureCloud",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.windows.net",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.windows.net",
+          "portal": "https://portal.azure.com",
+          "resourceManager": "https://management.azure.com/",
+          "sqlManagement": "https://management.core.windows.net:8443/",
+          "suffixes": {
+            "acrLoginServer": "azurecr.io",
+            "attestationEndpoint": "attest.azure.net",
+            "azureDataLakeAnalyticsCatalogAndJob": "azuredatalakeanalytics.net",
+            "azureDataLakeStoreFileSystem": "azuredatalakestore.net",
+            "azureFrontDoorEndpointSuffix": "azurefd.net",
+            "keyVaultDns": "vault.azure.net",
+            "mariadbServerEndpoint": "mariadb.database.azure.com",
+            "mhsmDns": "managedhsm.azure.net",
+            "mysqlServerEndpoint": "mysql.database.azure.com",
+            "postgresqlServerEndpoint": "postgres.database.azure.com",
+            "sqlServerHostname": "database.windows.net",
+            "storage": "core.windows.net",
+            "storageSyncEndpointSuffix": "afs.azure.net",
+            "synapseAnalytics": "dev.azuresynapse.net"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.net",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        }
+      },
+      "metadataUnsettled": [],
+      "name": "AzureCloud",
+      "suffixes": {
+        "ACI": {
+          "source": "azure-cli/src/azure-cli/azure/cli/command_modules/container/tests/latest/test_container_commands.py (fqdn {label}.{location}.azurecontainer.io)",
+          "value": "azurecontainer.io"
+        },
+        "ACR": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "azurecr.io"
+        },
+        "AKS": {
+          "source": "azure-rest-api-specs/specification/containerservice/resource-manager/Microsoft.ContainerService/aks/stable/2026-02-01/examples/ManagedClustersCreate_Update.json (fqdn {dnsPrefix}-{hash}.hcp.{location}.azmk8s.io)",
+          "value": "azmk8s.io"
+        },
+        "APPCONFIG": {
+          "source": "go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "azconfig.io"
+        },
+        "BLOB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "blob.core.windows.net"
+        },
+        "COMMUNICATION": {
+          "source": "azure-rest-api-specs/specification/communication/data-plane/Messages/stable/2024-08-30/communicationservicesmessages.json (endpoint https://{resource}.communication.azure.com)",
+          "value": "communication.azure.com"
+        },
+        "CONTAINERAPPS": {
+          "source": "azure-rest-api-specs/specification/app/resource-manager/Microsoft.App/ContainerApps/stable/2024-03-01/examples/Revisions_Get.json (fqdn {app}.{env}.{location}.azurecontainerapps.io)",
+          "value": "azurecontainerapps.io"
+        },
+        "DFS": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "dfs.core.windows.net"
+        },
+        "EVENTGRID": {
+          "source": "azure-rest-api-specs/specification/eventgrid/data-plane/EventGrid/stable/2018-01-01/EventGrid.json (topic host {topic}.{region}-1.eventgrid.azure.net)",
+          "value": "eventgrid.azure.net"
+        },
+        "KEYVAULT": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "vault.azure.net"
+        },
+        "MARIADB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "mariadb.database.azure.com"
+        },
+        "MHSM": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "managedhsm.azure.net"
+        },
+        "MYSQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "mysql.database.azure.com"
+        },
+        "POSTGRES": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "postgres.database.azure.com"
+        },
+        "QUEUE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "queue.core.windows.net"
+        },
+        "REDIS": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure Cache for Redis, Azure Public)",
+          "value": "redis.cache.windows.net"
+        },
+        "SERVICEBUS": {
+          "source": "go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "servicebus.windows.net"
+        },
+        "SIGNALR": {
+          "source": "azure-rest-api-specs/specification/signalr/resource-manager/Microsoft.SignalRService/SignalRService/stable/2020-05-01/signalr.json (FQDN format xxx.service.signalr.net)",
+          "value": "service.signalr.net"
+        },
+        "SQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_public.go",
+          "value": "database.windows.net"
+        },
+        "TABLE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "table.core.windows.net"
+        }
+      }
+    },
+    {
+      "audiences": [
+        "https://management.core.usgovcloudapi.net",
+        "https://management.usgovcloudapi.net"
+      ],
+      "defaultLocation": {
+        "source": "UNSETTLED: default location for AzureUSGovernment; no local source names one (CloudCatalog falls back to the first listed location)",
+        "value": null
+      },
+      "endpoints": {
+        "activeDirectory": "https://login.microsoftonline.us",
+        "authorityHosts": [
+          "login.microsoftonline.us"
+        ],
+        "microsoftGraph": "https://graph.microsoft.us",
+        "portal": "https://portal.azure.us",
+        "resourceManager": "https://management.usgovcloudapi.net"
+      },
+      "locations": [
+        {
+          "displayName": "US Gov Virginia",
+          "name": "usgovvirginia",
+          "zones": {
+            "source": "UNSETTLED: zone count for usgovvirginia; azure-docs/articles/azure-government/documentation-government-welcome.md marks zone support without a count",
+            "value": null
+          }
+        },
+        {
+          "displayName": "US Gov Iowa",
+          "name": "usgoviowa",
+          "zones": {
+            "source": "UNSETTLED: zones for usgoviowa; not listed in azure-docs/articles/azure-government/documentation-government-welcome.md",
+            "value": null
+          }
+        },
+        {
+          "displayName": "US Gov Arizona",
+          "name": "usgovarizona",
+          "zones": {
+            "source": "azure-docs/articles/azure-government/documentation-government-welcome.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "US Gov Texas",
+          "name": "usgovtexas",
+          "zones": {
+            "source": "azure-docs/articles/azure-government/documentation-government-welcome.md",
+            "value": []
+          }
+        },
+        {
+          "displayName": "US DoD East",
+          "name": "usdodeast",
+          "zones": {
+            "source": "UNSETTLED: zones for usdodeast; not listed in azure-docs/articles/azure-government/documentation-government-welcome.md",
+            "value": null
+          }
+        },
+        {
+          "displayName": "US DoD Central",
+          "name": "usdodcentral",
+          "zones": {
+            "source": "UNSETTLED: zones for usdodcentral; not listed in azure-docs/articles/azure-government/documentation-government-welcome.md",
+            "value": null
+          }
+        }
+      ],
+      "metadataEndpoints": {
+        "2018-01-01": {
+          "authentication": {
+            "audiences": [
+              "https://management.core.usgovcloudapi.net",
+              "https://management.usgovcloudapi.net"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.us",
+            "tenant": "common"
+          },
+          "cloudEndpoint": {
+            "chinaCloud": {
+              "endpoint": "management.chinacloudapi.cn",
+              "locations": [
+                "chinanorth",
+                "chinaeast",
+                "chinanorth2",
+                "chinaeast2",
+                "chinanorth3",
+                "chinaeast3"
+              ]
+            },
+            "public": {
+              "endpoint": "management.azure.com",
+              "locations": [
+                "eastus",
+                "eastus2",
+                "southcentralus",
+                "westus2",
+                "centralus",
+                "northcentralus",
+                "westus",
+                "westcentralus",
+                "westus3",
+                "canadacentral",
+                "canadaeast",
+                "brazilsouth",
+                "brazilsoutheast",
+                "mexicocentral",
+                "northeurope",
+                "uksouth",
+                "westeurope",
+                "francecentral",
+                "germanywestcentral",
+                "norwayeast",
+                "switzerlandnorth",
+                "swedencentral",
+                "francesouth",
+                "germanynorth",
+                "norwaywest",
+                "switzerlandwest",
+                "ukwest",
+                "italynorth",
+                "spaincentral",
+                "polandcentral",
+                "australiaeast",
+                "southeastasia",
+                "centralindia",
+                "eastasia",
+                "japaneast",
+                "koreacentral",
+                "australiacentral",
+                "australiacentral2",
+                "australiasoutheast",
+                "japanwest",
+                "koreasouth",
+                "southindia",
+                "westindia",
+                "indonesiacentral",
+                "newzealandnorth",
+                "uaenorth",
+                "uaecentral",
+                "israelcentral",
+                "qatarcentral",
+                "southafricanorth",
+                "southafricawest"
+              ]
+            },
+            "usGovCloud": {
+              "endpoint": "management.usgovcloudapi.net",
+              "locations": [
+                "usgovvirginia",
+                "usgoviowa",
+                "usgovarizona",
+                "usgovtexas",
+                "usdodeast",
+                "usdodcentral"
+              ]
+            }
+          },
+          "portalEndpoint": "https://portal.azure.us"
+        },
+        "2019-05-01": {
+          "appInsightsResourceId": "https://api.applicationinsights.us",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.us/v2/track",
+          "authentication": {
+            "audiences": [
+              "https://management.core.usgovcloudapi.net",
+              "https://management.usgovcloudapi.net"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.us",
+            "tenant": "common"
+          },
+          "batch": "https://batch.core.usgovcloudapi.net",
+          "logAnalyticsResourceId": "https://api.loganalytics.us",
+          "media": "https://rest.media.usgovcloudapi.net",
+          "microsoftGraphResourceId": "https://graph.microsoft.us/",
+          "name": "AzureUSGovernment",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.usgovcloudapi.net",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.usgovcloudapi.net",
+          "portal": "https://portal.azure.us",
+          "resourceManager": "https://management.usgovcloudapi.net",
+          "sqlManagement": "https://management.core.usgovcloudapi.net:8443",
+          "suffixes": {
+            "acrLoginServer": "azurecr.us",
+            "azureFrontDoorEndpointSuffix": "",
+            "keyVaultDns": "vault.usgovcloudapi.net",
+            "mariadbServerEndpoint": "mariadb.database.usgovcloudapi.net",
+            "mhsmDns": "managedhsm.usgovcloudapi.net",
+            "mysqlServerEndpoint": "mysql.database.usgovcloudapi.net",
+            "postgresqlServerEndpoint": "postgres.database.usgovcloudapi.net",
+            "sqlServerHostname": "database.usgovcloudapi.net",
+            "storage": "core.usgovcloudapi.net",
+            "storageSyncEndpointSuffix": "afs.azure.us",
+            "synapseAnalytics": "dev.azuresynapse.usgovcloudapi.net"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.usgovcloudapi.net",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        },
+        "2022-09-01": {
+          "appInsightsResourceId": "https://api.applicationinsights.us",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.us/v2/track",
+          "authentication": {
+            "audiences": [
+              "https://management.core.usgovcloudapi.net",
+              "https://management.usgovcloudapi.net"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.microsoftonline.us",
+            "tenant": "common"
+          },
+          "batch": "https://batch.core.usgovcloudapi.net",
+          "logAnalyticsResourceId": "https://api.loganalytics.us",
+          "media": "https://rest.media.usgovcloudapi.net",
+          "microsoftGraphResourceId": "https://graph.microsoft.us/",
+          "name": "AzureUSGovernment",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.usgovcloudapi.net",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.usgovcloudapi.net",
+          "portal": "https://portal.azure.us",
+          "resourceManager": "https://management.usgovcloudapi.net",
+          "sqlManagement": "https://management.core.usgovcloudapi.net:8443",
+          "suffixes": {
+            "acrLoginServer": "azurecr.us",
+            "azureFrontDoorEndpointSuffix": "",
+            "keyVaultDns": "vault.usgovcloudapi.net",
+            "mariadbServerEndpoint": "mariadb.database.usgovcloudapi.net",
+            "mhsmDns": "managedhsm.usgovcloudapi.net",
+            "mysqlServerEndpoint": "mysql.database.usgovcloudapi.net",
+            "postgresqlServerEndpoint": "postgres.database.usgovcloudapi.net",
+            "sqlServerHostname": "database.usgovcloudapi.net",
+            "storage": "core.usgovcloudapi.net",
+            "storageSyncEndpointSuffix": "afs.azure.us",
+            "synapseAnalytics": "dev.azuresynapse.usgovcloudapi.net"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.usgovcloudapi.net",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        }
+      },
+      "metadataUnsettled": [
+        {
+          "field": "graphAudience",
+          "source": "UNSETTLED: AzureUSGovernment graphAudience: go-azure-sdk/sdk/internal/metadata/client_test.go (2019-05-01) says 'https://graph.windows.net', azure-cli/src/azure-cli-core/azure/cli/core/cloud.py says 'https://graph.microsoftazure.us/'"
+        },
+        {
+          "field": "graph",
+          "source": "UNSETTLED: AzureUSGovernment graph: go-azure-sdk/sdk/internal/metadata/client_test.go (2019-05-01) says 'https://graph.windows.net', azure-cli/src/azure-cli-core/azure/cli/core/cloud.py says 'https://graph.microsoftazure.us/'"
+        },
+        {
+          "field": "suffixes.azureDataLakeStoreFileSystem",
+          "source": "UNSETTLED: AzureUSGovernment suffixes.azureDataLakeStoreFileSystem: no local source"
+        },
+        {
+          "field": "suffixes.azureDataLakeAnalyticsCatalogAndJob",
+          "source": "UNSETTLED: AzureUSGovernment suffixes.azureDataLakeAnalyticsCatalogAndJob: no local source"
+        },
+        {
+          "field": "suffixes.attestationEndpoint",
+          "source": "UNSETTLED: AzureUSGovernment suffixes.attestationEndpoint: no local source"
+        },
+        {
+          "field": "activeDirectoryDataLake",
+          "source": "UNSETTLED: AzureUSGovernment activeDirectoryDataLake: no local source"
+        },
+        {
+          "field": "attestationResourceId",
+          "source": "UNSETTLED: AzureUSGovernment attestationResourceId: no local source"
+        },
+        {
+          "field": "gallery",
+          "source": "UNSETTLED: AzureUSGovernment gallery: go-azure-sdk/sdk/internal/metadata/client_test.go and azure-cli/src/azure-cli-core/azure/cli/core/cloud.py say 'https://gallery.usgovcloudapi.net', azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Gallery URL) says 'gallery.azure.us'"
+        }
+      ],
+      "name": "AzureUSGovernment",
+      "suffixes": {
+        "ACI": {
+          "source": "UNSETTLED: ACI host suffix in AzureUSGovernment; no local source",
+          "value": null
+        },
+        "ACR": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "azurecr.us"
+        },
+        "AKS": {
+          "source": "UNSETTLED: AKS host suffix in AzureUSGovernment; no local source",
+          "value": null
+        },
+        "APPCONFIG": {
+          "source": "go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "azconfig.azure.us"
+        },
+        "BLOB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "blob.core.usgovcloudapi.net"
+        },
+        "COMMUNICATION": {
+          "source": "UNSETTLED: COMMUNICATION host suffix in AzureUSGovernment; no local source",
+          "value": null
+        },
+        "CONTAINERAPPS": {
+          "source": "UNSETTLED: CONTAINERAPPS host suffix in AzureUSGovernment; no local source",
+          "value": null
+        },
+        "DFS": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "dfs.core.usgovcloudapi.net"
+        },
+        "EVENTGRID": {
+          "source": "UNSETTLED: EVENTGRID host suffix in AzureUSGovernment; no local source (the .NET Event Grid WebJobs extension accepts webhook origins eventgrid.azure.us and eventgrid.azure.cn, which is not evidence for the topic endpoint suffix)",
+          "value": null
+        },
+        "KEYVAULT": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "vault.usgovcloudapi.net"
+        },
+        "MARIADB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "mariadb.database.usgovcloudapi.net"
+        },
+        "MHSM": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "managedhsm.usgovcloudapi.net"
+        },
+        "MYSQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "mysql.database.usgovcloudapi.net"
+        },
+        "POSTGRES": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "postgres.database.usgovcloudapi.net"
+        },
+        "QUEUE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "queue.core.usgovcloudapi.net"
+        },
+        "REDIS": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure Cache for Redis, Azure Government)",
+          "value": "redis.cache.usgovcloudapi.net"
+        },
+        "SERVICEBUS": {
+          "source": "go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "servicebus.usgovcloudapi.net"
+        },
+        "SIGNALR": {
+          "source": "UNSETTLED: SIGNALR host suffix in AzureUSGovernment; no local source",
+          "value": null
+        },
+        "SQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_gov.go",
+          "value": "database.usgovcloudapi.net"
+        },
+        "TABLE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "table.core.usgovcloudapi.net"
+        }
+      }
+    },
+    {
+      "audiences": [
+        "https://management.core.chinacloudapi.cn",
+        "https://management.chinacloudapi.cn"
+      ],
+      "defaultLocation": {
+        "source": "UNSETTLED: default location for AzureChinaCloud; no local source names one (CloudCatalog falls back to the first listed location)",
+        "value": null
+      },
+      "endpoints": {
+        "activeDirectory": "https://login.chinacloudapi.cn",
+        "authorityHosts": [
+          "login.chinacloudapi.cn",
+          "login.partner.microsoftonline.cn"
+        ],
+        "microsoftGraph": "https://microsoftgraph.chinacloudapi.cn",
+        "portal": "https://portal.azure.cn",
+        "resourceManager": "https://management.chinacloudapi.cn"
+      },
+      "locations": [
+        {
+          "displayName": "China North",
+          "name": "chinanorth",
+          "zones": {
+            "source": "UNSETTLED: zones for chinanorth; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        },
+        {
+          "displayName": "China East",
+          "name": "chinaeast",
+          "zones": {
+            "source": "UNSETTLED: zones for chinaeast; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        },
+        {
+          "displayName": "China North 2",
+          "name": "chinanorth2",
+          "zones": {
+            "source": "UNSETTLED: zones for chinanorth2; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        },
+        {
+          "displayName": "China East 2",
+          "name": "chinaeast2",
+          "zones": {
+            "source": "UNSETTLED: zones for chinaeast2; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        },
+        {
+          "displayName": "China North 3",
+          "name": "chinanorth3",
+          "zones": {
+            "source": "UNSETTLED: zones for chinanorth3; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        },
+        {
+          "displayName": "China East 3",
+          "name": "chinaeast3",
+          "zones": {
+            "source": "UNSETTLED: zones for chinaeast3; no local source covers AzureChinaCloud zones",
+            "value": null
+          }
+        }
+      ],
+      "metadataEndpoints": {
+        "2018-01-01": {
+          "authentication": {
+            "audiences": [
+              "https://management.core.chinacloudapi.cn",
+              "https://management.chinacloudapi.cn"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.chinacloudapi.cn",
+            "tenant": "common"
+          },
+          "cloudEndpoint": {
+            "chinaCloud": {
+              "endpoint": "management.chinacloudapi.cn",
+              "locations": [
+                "chinanorth",
+                "chinaeast",
+                "chinanorth2",
+                "chinaeast2",
+                "chinanorth3",
+                "chinaeast3"
+              ]
+            },
+            "public": {
+              "endpoint": "management.azure.com",
+              "locations": [
+                "eastus",
+                "eastus2",
+                "southcentralus",
+                "westus2",
+                "centralus",
+                "northcentralus",
+                "westus",
+                "westcentralus",
+                "westus3",
+                "canadacentral",
+                "canadaeast",
+                "brazilsouth",
+                "brazilsoutheast",
+                "mexicocentral",
+                "northeurope",
+                "uksouth",
+                "westeurope",
+                "francecentral",
+                "germanywestcentral",
+                "norwayeast",
+                "switzerlandnorth",
+                "swedencentral",
+                "francesouth",
+                "germanynorth",
+                "norwaywest",
+                "switzerlandwest",
+                "ukwest",
+                "italynorth",
+                "spaincentral",
+                "polandcentral",
+                "australiaeast",
+                "southeastasia",
+                "centralindia",
+                "eastasia",
+                "japaneast",
+                "koreacentral",
+                "australiacentral",
+                "australiacentral2",
+                "australiasoutheast",
+                "japanwest",
+                "koreasouth",
+                "southindia",
+                "westindia",
+                "indonesiacentral",
+                "newzealandnorth",
+                "uaenorth",
+                "uaecentral",
+                "israelcentral",
+                "qatarcentral",
+                "southafricanorth",
+                "southafricawest"
+              ]
+            },
+            "usGovCloud": {
+              "endpoint": "management.usgovcloudapi.net",
+              "locations": [
+                "usgovvirginia",
+                "usgoviowa",
+                "usgovarizona",
+                "usgovtexas",
+                "usdodeast",
+                "usdodcentral"
+              ]
+            }
+          },
+          "galleryEndpoint": "https://gallery.chinacloudapi.cn",
+          "graphAudience": "https://graph.chinacloudapi.cn",
+          "graphEndpoint": "https://graph.chinacloudapi.cn",
+          "portalEndpoint": "https://portal.azure.cn"
+        },
+        "2019-05-01": {
+          "appInsightsResourceId": "https://api.applicationinsights.azure.cn",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.azure.cn/v2/track",
+          "authentication": {
+            "audiences": [
+              "https://management.core.chinacloudapi.cn",
+              "https://management.chinacloudapi.cn"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.chinacloudapi.cn",
+            "tenant": "common"
+          },
+          "batch": "https://batch.chinacloudapi.cn",
+          "gallery": "https://gallery.chinacloudapi.cn",
+          "graph": "https://graph.chinacloudapi.cn",
+          "graphAudience": "https://graph.chinacloudapi.cn",
+          "logAnalyticsResourceId": "https://api.loganalytics.azure.cn",
+          "media": "https://rest.media.chinacloudapi.cn",
+          "microsoftGraphResourceId": "https://microsoftgraph.chinacloudapi.cn",
+          "name": "AzureChinaCloud",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.chinacloudapi.cn",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.chinacloudapi.cn",
+          "portal": "https://portal.azure.cn",
+          "resourceManager": "https://management.chinacloudapi.cn",
+          "sqlManagement": "https://management.core.chinacloudapi.cn:8443",
+          "suffixes": {
+            "acrLoginServer": "azurecr.cn",
+            "azureFrontDoorEndpointSuffix": "",
+            "keyVaultDns": "vault.azure.cn",
+            "mariadbServerEndpoint": "mariadb.database.chinacloudapi.cn",
+            "mhsmDns": "managedhsm.azure.cn",
+            "mysqlServerEndpoint": "mysql.database.chinacloudapi.cn",
+            "postgresqlServerEndpoint": "postgres.database.chinacloudapi.cn",
+            "sqlServerHostname": "database.chinacloudapi.cn",
+            "storage": "core.chinacloudapi.cn",
+            "synapseAnalytics": "dev.azuresynapse.azure.cn"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.azure.cn",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        },
+        "2022-09-01": {
+          "appInsightsResourceId": "https://api.applicationinsights.azure.cn",
+          "appInsightsTelemetryChannelResourceId": "https://dc.applicationinsights.azure.cn/v2/track",
+          "authentication": {
+            "audiences": [
+              "https://management.core.chinacloudapi.cn",
+              "https://management.chinacloudapi.cn"
+            ],
+            "identityProvider": "AAD",
+            "loginEndpoint": "https://login.chinacloudapi.cn",
+            "tenant": "common"
+          },
+          "batch": "https://batch.chinacloudapi.cn",
+          "graph": "https://graph.chinacloudapi.cn",
+          "graphAudience": "https://graph.chinacloudapi.cn",
+          "logAnalyticsResourceId": "https://api.loganalytics.azure.cn",
+          "media": "https://rest.media.chinacloudapi.cn",
+          "microsoftGraphResourceId": "https://microsoftgraph.chinacloudapi.cn",
+          "name": "AzureChinaCloud",
+          "ossrDbmsResourceId": "https://ossrdbms-aad.database.chinacloudapi.cn",
+          "ossrdbmsResourceId": "https://ossrdbms-aad.database.chinacloudapi.cn",
+          "portal": "https://portal.azure.cn",
+          "resourceManager": "https://management.chinacloudapi.cn",
+          "sqlManagement": "https://management.core.chinacloudapi.cn:8443",
+          "suffixes": {
+            "acrLoginServer": "azurecr.cn",
+            "azureFrontDoorEndpointSuffix": "",
+            "keyVaultDns": "vault.azure.cn",
+            "mariadbServerEndpoint": "mariadb.database.chinacloudapi.cn",
+            "mhsmDns": "managedhsm.azure.cn",
+            "mysqlServerEndpoint": "mysql.database.chinacloudapi.cn",
+            "postgresqlServerEndpoint": "postgres.database.chinacloudapi.cn",
+            "sqlServerHostname": "database.chinacloudapi.cn",
+            "storage": "core.chinacloudapi.cn",
+            "synapseAnalytics": "dev.azuresynapse.azure.cn"
+          },
+          "synapseAnalyticsResourceId": "https://dev.azuresynapse.azure.cn",
+          "vmImageAliasDoc": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+        }
+      },
+      "metadataUnsettled": [
+        {
+          "field": "suffixes.azureDataLakeStoreFileSystem",
+          "source": "UNSETTLED: AzureChinaCloud suffixes.azureDataLakeStoreFileSystem: no local source"
+        },
+        {
+          "field": "suffixes.azureDataLakeAnalyticsCatalogAndJob",
+          "source": "UNSETTLED: AzureChinaCloud suffixes.azureDataLakeAnalyticsCatalogAndJob: no local source"
+        },
+        {
+          "field": "suffixes.storageSyncEndpointSuffix",
+          "source": "UNSETTLED: AzureChinaCloud suffixes.storageSyncEndpointSuffix: no local source"
+        },
+        {
+          "field": "suffixes.attestationEndpoint",
+          "source": "UNSETTLED: AzureChinaCloud suffixes.attestationEndpoint: no local source"
+        },
+        {
+          "field": "activeDirectoryDataLake",
+          "source": "UNSETTLED: AzureChinaCloud activeDirectoryDataLake: no local source"
+        },
+        {
+          "field": "attestationResourceId",
+          "source": "UNSETTLED: AzureChinaCloud attestationResourceId: no local source"
+        }
+      ],
+      "name": "AzureChinaCloud",
+      "suffixes": {
+        "ACI": {
+          "source": "UNSETTLED: ACI host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "ACR": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "azurecr.cn"
+        },
+        "AKS": {
+          "source": "UNSETTLED: AKS host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "APPCONFIG": {
+          "source": "go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "azconfig.azure.cn"
+        },
+        "BLOB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "blob.core.chinacloudapi.cn"
+        },
+        "COMMUNICATION": {
+          "source": "UNSETTLED: COMMUNICATION host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "CONTAINERAPPS": {
+          "source": "UNSETTLED: CONTAINERAPPS host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "DFS": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "dfs.core.chinacloudapi.cn"
+        },
+        "EVENTGRID": {
+          "source": "UNSETTLED: EVENTGRID host suffix in AzureChinaCloud; no local source (the .NET Event Grid WebJobs extension accepts webhook origins eventgrid.azure.us and eventgrid.azure.cn, which is not evidence for the topic endpoint suffix)",
+          "value": null
+        },
+        "KEYVAULT": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "vault.azure.cn"
+        },
+        "MARIADB": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "mariadb.database.chinacloudapi.cn"
+        },
+        "MHSM": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "managedhsm.azure.cn"
+        },
+        "MYSQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "mysql.database.chinacloudapi.cn"
+        },
+        "POSTGRES": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "postgres.database.chinacloudapi.cn"
+        },
+        "QUEUE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "queue.core.chinacloudapi.cn"
+        },
+        "REDIS": {
+          "source": "UNSETTLED: Azure Cache for Redis host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "SERVICEBUS": {
+          "source": "go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "servicebus.chinacloudapi.cn"
+        },
+        "SIGNALR": {
+          "source": "UNSETTLED: SIGNALR host suffix in AzureChinaCloud; no local source",
+          "value": null
+        },
+        "SQL": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py; go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "database.chinacloudapi.cn"
+        },
+        "TABLE": {
+          "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
+          "value": "table.core.chinacloudapi.cn"
+        }
+      }
+    }
+  ]
+}
