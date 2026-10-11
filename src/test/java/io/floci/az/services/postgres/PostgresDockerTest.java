@@ -1,18 +1,23 @@
 package io.floci.az.services.postgres;
 
+import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.*;
 
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -25,7 +30,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * client timeout via the handler's own readiness wait.
  *
  * <p>Tests are ordered and share state: the server is created in test 1, its live TCP port is
- * verified in test 2, connection strings are checked in test 3, and it is deleted in test 4.
+ * verified in test 2, connection strings are checked in test 3, an admin password change is
+ * applied to the running container in test 4, and it is deleted in test 5.
  */
 @QuarkusTest
 @TestProfile(PostgresDockerTest.RealModeProfile.class)
@@ -58,7 +64,15 @@ class PostgresDockerTest {
         + "\"version\":\"16\","
         + "\"storage\":{\"storageSizeGB\":32}}}";
 
+    private static final String ROTATED_PASSWORD = "Rotated_Strong456!'\\";
+
     private static int localPort = 0;
+
+    @Inject
+    PostgresState state;
+
+    @Inject
+    ContainerLifecycleManager containers;
 
     /** Pure filesystem check — safe to run before Quarkus is fully ready (mirrors VmDockerTest). */
     @BeforeAll
@@ -123,6 +137,32 @@ class PostgresDockerTest {
 
     @Test
     @Order(4)
+    @DisplayName("PATCH administratorLoginPassword changes the password the running server accepts")
+    void passwordChangeReachesTheContainer() {
+        assumeTrue(localPort > 0, "server was not created, skipping");
+        given().contentType("application/json")
+            .body("{\"properties\":{\"administratorLoginPassword\":\"Rotated_Strong456!'\\\\\"}}")
+            .when().patch(PG_PATH + API)
+            .then().statusCode(202);
+
+        String containerId = state.getServer(NAME).orElseThrow().containerId();
+        assertNotEquals(0, passwordLogin(containerId, "FlociAz_Strong123!").exitCode(),
+            "the old password must stop working");
+        ContainerLifecycleManager.ExecResult login = passwordLogin(containerId, ROTATED_PASSWORD);
+        assertEquals(0, login.exitCode(), login.output());
+    }
+
+    /**
+     * Logs in over TCP on the container's own address, which the image guards with password
+     * authentication (its loopback and socket connections are trusted, so they prove nothing).
+     */
+    private ContainerLifecycleManager.ExecResult passwordLogin(String containerId, String password) {
+        return containers.execInContainer(containerId, List.of("PGPASSWORD=" + password),
+            "sh", "-c", "psql -h \"$(hostname -i | cut -d' ' -f1)\" -U psqladmin -d postgres -tAc 'select 1'");
+    }
+
+    @Test
+    @Order(5)
     @DisplayName("DELETE removes the server and stops its container; subsequent GET returns 404")
     void deleteServer() {
         assumeTrue(localPort > 0, "server was not created — skipping");

@@ -227,6 +227,20 @@ class PostgresHandlerMockedTest {
     }
 
     @Test
+    @DisplayName("PATCH administratorLoginPassword stores the new password without a container")
+    void patchPasswordStoresTheNewValue() {
+        createServer("pwdhost");
+        given().contentType("application/json")
+            .body("{\"properties\":{\"administratorLoginPassword\":\"Rotated_Strong456!\"}}")
+            .when().patch(BASE + "/flexibleServers/pwdhost" + API)
+            .then().statusCode(202)
+            .body("properties", not(hasKey("administratorLoginPassword")));
+        given().when().get("/devstoreaccount1-postgres/flexibleServers/pwdhost/connect")
+            .then().statusCode(200)
+            .body("uri", containsString("Rotated_Strong456!"));
+    }
+
+    @Test
     @DisplayName("convenience /connect returns connection strings")
     void connectReturnsStrings() {
         createServer("connhost");

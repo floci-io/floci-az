@@ -311,23 +311,54 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             }
 
             // Update existing server metadata in place — do NOT restart the container.
-            PostgresState.ServerEntry existing = state.getServer(serverName).get();
             String password = props.path("administratorLoginPassword").asText("");
-            String version  = props.path("version").asText(existing.version());
-            int storageGB   = props.path("storage").path("storageSizeGB").asInt(existing.storageSizeGB());
-            String skuName  = sku.path("name").asText(existing.skuName());
-            String skuTier  = sku.path("tier").asText(existing.skuTier());
-            Map<String, String> mergedTags = body.has("tags") ? tags : existing.tags();
 
-            PostgresState.ServerEntry updated = new PostgresState.ServerEntry(
-                serverName, existing.subscriptionId(), existing.resourceGroupName(),
-                existing.location(), version, existing.administratorLogin(),
-                password.isBlank() ? existing.administratorLoginPassword() : password,
-                skuName, skuTier, storageGB,
-                existing.containerId(), existing.hostPort(), existing.host(), mergedTags,
-                existing.databases(), existing.firewallRules(), existing.configurations(),
-                existing.createdAt());
-            state.putServer(updated);
+            // Rotate-then-commit under the start lock the create holds across startServer and
+            // attachContainer: an update that lands while the container starts waits for it, then
+            // rotates on the live container instead of committing a password the container never
+            // got. Rotation runs before the commit, so a failed ALTER ROLE leaves state holding the
+            // password the container still accepts. A server without a container (mocked, or not
+            // started) only stores the new value.
+            PostgresState.ServerEntry updated;
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
+                if (current.isEmpty()) {
+                    return notFound("Server '" + serverName + "' not found");
+                }
+                // Everything below reads the entry as it is now. The wait for the lock can outlast
+                // a delete and another scope's claim of the name, and an earlier queued update may
+                // have changed the fields this request leaves out.
+                PostgresState.ServerEntry live = current.get();
+                Optional<Response> foreign = foreignEntry(request, live);
+                if (foreign.isPresent()) {
+                    return foreign.get();
+                }
+                String version  = props.path("version").asText(live.version());
+                int storageGB   = props.path("storage").path("storageSizeGB").asInt(live.storageSizeGB());
+                String skuName  = sku.path("name").asText(live.skuName());
+                String skuTier  = sku.path("tier").asText(live.skuTier());
+                Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
+
+                boolean passwordChanged = !password.isBlank()
+                    && !password.equals(live.administratorLoginPassword());
+                if (passwordChanged && !config.services().postgres().mocked() && live.containerId() != null) {
+                    serverManager.rotateAdminPassword(live, password);
+                }
+                updated = new PostgresState.ServerEntry(
+                    serverName, live.subscriptionId(), live.resourceGroupName(),
+                    live.location(), version, live.administratorLogin(),
+                    password.isBlank() ? live.administratorLoginPassword() : password,
+                    skuName, skuTier, storageGB,
+                    live.containerId(), live.hostPort(), live.host(), mergedTags,
+                    live.databases(), live.firewallRules(), live.configurations(),
+                    live.createdAt());
+                // Delete does not take the start lock, so the server can go away while the
+                // rotation runs. Writing it back would resurrect a name another scope may claim.
+                if (!state.replaceServer(live, updated)) {
+                    return notFound("Server '" + serverName + "' not found");
+                }
+            }
             return accepted(request, updated.armId(), serverResponse(updated));
 
         } catch (Exception e) {
@@ -674,6 +705,18 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             .map(s -> createsServer
                 ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
                 : notFound("Server '" + serverName + "' not found"));
+    }
+
+    /** The owner check of {@link #foreignServer}, for a server update against an entry already read. */
+    private Optional<Response> foreignEntry(AzureRequest request, PostgresState.ServerEntry entry) {
+        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        if (scope.isEmpty() || scope.get().owns(entry.subscriptionId(), entry.resourceGroupName())) {
+            return Optional.empty();
+        }
+        boolean createsServer = "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
+        return Optional.of(createsServer
+            ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
+            : notFound("Server '" + entry.serverName() + "' not found"));
     }
 
     private static Response notFound(String message) {

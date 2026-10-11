@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.Socket;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,6 +41,9 @@ public class PostgresServerManager {
     private static final Logger LOG = Logger.getLogger(PostgresServerManager.class);
 
     private static final int PG_CONTAINER_PORT = 5432;
+
+    /** Below the 60 s exec wait, so a blocked ALTER ROLE is cancelled before the wait gives up. */
+    private static final int ROTATION_STATEMENT_TIMEOUT_MS = 30_000;
 
     @Inject EmulatorConfig config;
     @Inject ContainerLifecycleManager containerManager;
@@ -186,6 +190,83 @@ public class PostgresServerManager {
             releaseClaimedPort(claimed);
         }
         containerManager.stopAndRemove(entry.containerId(), null);
+    }
+
+    /**
+     * Changes the admin role's password inside the running container, as Azure does when an
+     * update carries {@code administratorLoginPassword}. Connects over the container's local
+     * socket as the admin role, authenticating with the current password through
+     * {@code PGPASSWORD} rather than a flag. The new password travels only inside the
+     * {@code ALTER ROLE} statement, and both passwords are redacted from the error raised on
+     * failure, so neither ever reaches a log.
+     *
+     * <p>The statement carries a server-side timeout shorter than the exec wait, so one blocked
+     * behind another transaction is cancelled and reported as an ordinary failure instead of
+     * finishing after the caller gave up. If the exec still comes back without an exit code, the
+     * statement may or may not have run: the outcome is then read from the server itself, by
+     * logging in with the new password.
+     *
+     * @throws RuntimeException if the password was not changed, or if it cannot be told whether
+     *                          it was; the caller keeps the old password in both cases
+     */
+    public void rotateAdminPassword(PostgresState.ServerEntry entry, String newPassword) {
+        String login = entry.administratorLogin();
+        String sql = "ALTER ROLE " + quoteIdentifier(login) + " WITH PASSWORD " + quoteLiteral(newPassword);
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + entry.administratorLoginPassword(),
+                "PGOPTIONS=-c statement_timeout=" + ROTATION_STATEMENT_TIMEOUT_MS),
+            "psql", "-v", "ON_ERROR_STOP=1", "-U", login, "-d", "postgres", "-c", sql);
+        if (!result.finished()) {
+            confirmUnfinishedRotation(entry, newPassword);
+        } else if (result.exitCode() != 0) {
+            throw new RuntimeException("Password rotation failed for PostgreSQL server '"
+                + entry.serverName() + "': " + redact(result.output(), newPassword, entry.administratorLoginPassword()));
+        }
+        LOG.infof("Rotated admin password for PostgreSQL server %s", entry.serverName());
+    }
+
+    /**
+     * Settles a rotation whose exec never reported an exit code. Returns when the server accepts
+     * the new password, and throws otherwise. The login goes over TCP on the container's own
+     * address, because the image trusts socket and loopback connections whatever the password.
+     * Only an explicit authentication failure counts as "not changed"; anything else leaves the
+     * outcome unknown, and says so, since the caller is about to keep the old password.
+     */
+    private void confirmUnfinishedRotation(PostgresState.ServerEntry entry, String newPassword) {
+        ContainerLifecycleManager.ExecResult probe = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + newPassword, "PGUSER=" + entry.administratorLogin(), "PGCONNECT_TIMEOUT=10"),
+            "sh", "-c", "psql -h \"$(hostname -i | cut -d' ' -f1)\" -d postgres -tAc 'select 1'");
+        if (probe.finished() && probe.exitCode() == 0) {
+            return;
+        }
+        String output = redact(probe.output(), newPassword, entry.administratorLoginPassword());
+        if (probe.finished() && output.contains("password authentication failed")) {
+            throw new RuntimeException("Password rotation timed out for PostgreSQL server '"
+                + entry.serverName() + "' and was not applied");
+        }
+        throw new RuntimeException("Password rotation timed out for PostgreSQL server '" + entry.serverName()
+            + "' and its outcome is unknown; send the update again to settle it: " + output);
+    }
+
+    static String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    /** A standard SQL string literal; backslashes are literal since standard_conforming_strings is on by default. */
+    static String quoteLiteral(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private static String redact(String output, String... secrets) {
+        String redacted = output == null ? "" : output.strip();
+        for (String secret : secrets) {
+            if (secret != null && !secret.isEmpty()) {
+                redacted = redacted.replace(secret, "***");
+            }
+        }
+        return redacted;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

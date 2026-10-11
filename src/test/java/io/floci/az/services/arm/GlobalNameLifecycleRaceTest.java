@@ -18,10 +18,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -160,7 +162,7 @@ class GlobalNameLifecycleRaceTest {
 
         String server = "/subscriptions/" + SUB + "/resourceGroups/" + RG
                 + "/providers/Microsoft.DBforPostgreSQL/flexibleServers/updated-pg?api-version=2024-08-01";
-        assertUpdateDuringStartupSurvives(server, POSTGRES_BODY,
+        assertUpdateDuringStartupWaitsAndSurvives(server, POSTGRES_BODY,
                 "PUT", "{\"location\":\"eastus\",\"tags\":{\"env\":\"patched\"}}", starting, release);
     }
 
@@ -211,6 +213,31 @@ class GlobalNameLifecycleRaceTest {
         assertTrue(status >= 200 && status < 300, "update during startup failed with " + status);
         release.countDown();
         create.get(20, TimeUnit.SECONDS);
+
+        given().get(url).then().statusCode(200).body("tags.env", equalTo("patched"));
+    }
+
+    /**
+     * For services whose update serialises with the container start (it may have to apply a
+     * password to the started container): the update waits for the start, then lands on top.
+     */
+    private static void assertUpdateDuringStartupWaitsAndSurvives(String url, String body, String updateMethod,
+                                                                  String update, CountDownLatch starting,
+                                                                  CountDownLatch release) throws Exception {
+        createResourceGroup(SUB);
+
+        CompletableFuture<Integer> create = CompletableFuture.supplyAsync(
+                () -> given().contentType("application/json").body(body).put(url).statusCode());
+        assertTrue(starting.await(10, TimeUnit.SECONDS), "container startup never began");
+
+        CompletableFuture<Integer> updated = CompletableFuture.supplyAsync(
+                () -> given().contentType("application/json").body(update).request(updateMethod, url).statusCode());
+        assertThrows(TimeoutException.class, () -> updated.get(500, TimeUnit.MILLISECONDS),
+                "the update must wait for the container start it may have to apply to");
+        release.countDown();
+        create.get(20, TimeUnit.SECONDS);
+        int status = updated.get(20, TimeUnit.SECONDS);
+        assertTrue(status >= 200 && status < 300, "update during startup failed with " + status);
 
         given().get(url).then().statusCode(200).body("tags.env", equalTo("patched"));
     }
