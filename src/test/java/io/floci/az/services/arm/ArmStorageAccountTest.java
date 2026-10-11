@@ -1,8 +1,11 @@
 package io.floci.az.services.arm;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -307,5 +310,64 @@ class ArmStorageAccountTest {
             .body("reason", equalTo("AccountNameInvalid"))
             .body("message", equalTo("FlociUpper1704 is not a valid storage account name. Storage account name "
                     + "must be between 3 and 24 characters in length and use numbers and lower-case letters only."));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Microsoft.Storage/checkNameAvailability", "Microsoft.Storage/checknameavailability",
+            "microsoft.storage/CHECKNAMEAVAILABILITY"})
+    void storageNameCheckIgnoresPathCasing(String operation) {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\"}")
+            .when().put("/subscriptions/sub-case/resourceGroups/rg-case"
+                    + "/providers/Microsoft.Storage/storageAccounts/casecheckstore?api-version=2023-01-01")
+            .then()
+            .statusCode(200);
+
+        checkName(operation, "casecheckstore", "Microsoft.Storage/storageAccounts")
+            .body("nameAvailable", equalTo(false))
+            .body("reason", equalTo("AlreadyExists"))
+            .body("message", equalTo("The storage account named casecheckstore is already taken."));
+        checkName(operation, "casecheckfree", "Microsoft.Storage/storageAccounts")
+            .body("nameAvailable", equalTo(true));
+        checkName(operation, "CaseCheckUpper", "Microsoft.Storage/storageAccounts")
+            .body("nameAvailable", equalTo(false))
+            .body("reason", equalTo("AccountNameInvalid"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Microsoft.KeyVault/checkNameAvailability", "microsoft.keyvault/checkNameAvailability",
+            "Microsoft.KeyVault/checknameavailability"})
+    void vaultNameCheckIgnoresPathCasing(String operation) {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"eastus\",\"properties\":{\"tenantId\":\"00000000-0000-0000-0000-000000000002\","
+                    + "\"sku\":{\"family\":\"A\",\"name\":\"standard\"}}}")
+            .when().put("/subscriptions/sub-case/resourceGroups/rg-case"
+                    + "/providers/Microsoft.KeyVault/vaults/case-check-kv?api-version=2023-07-01")
+            .then()
+            .statusCode(200);
+
+        checkName(operation, "case-check-kv", "Microsoft.KeyVault/vaults")
+            .body("nameAvailable", equalTo(false))
+            .body("reason", equalTo("AlreadyExists"))
+            .body("message", equalTo("The vault name 'case-check-kv' is already in use."));
+        checkName(operation, "case-check-free", "Microsoft.KeyVault/vaults")
+            .body("nameAvailable", equalTo(true));
+    }
+
+    @Test
+    void lowercaseWebNameCheckIsAnswered() {
+        checkName("Microsoft.Web/checknameavailability", "case-check-site", "Microsoft.Web/sites")
+            .body("nameAvailable", equalTo(true));
+    }
+
+    private static ValidatableResponse checkName(String operation, String name, String type) {
+        return given()
+            .contentType("application/json")
+            .body("{\"name\":\"" + name + "\",\"type\":\"" + type + "\"}")
+            .when().post("/subscriptions/sub-case-check/providers/" + operation + "?api-version=2023-01-01")
+            .then()
+            .statusCode(200);
     }
 }
