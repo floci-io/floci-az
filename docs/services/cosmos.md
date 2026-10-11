@@ -193,7 +193,9 @@ so code that would break in production fails locally too.
 
 Every script needs an `id` and a string `body`; a trigger also needs `triggerType` (`Pre` or `Post`)
 and `triggerOperation` (`All`, `Create`, `Update`, `Delete` or `Replace`), matched case-insensitively
-and returned as sent. A missing or invalid field is `400 BadRequest`. Responses carry `_rid`, `_self`,
+and returned as sent. A missing or invalid field is `400 BadRequest`, on create and on replace, where
+the `id` must also match the one in the URL. List and query honour `x-ms-max-item-count` and
+`x-ms-continuation`. Responses carry `_rid`, `_self`,
 `_etag` and `_ts` like any other Cosmos resource, so SDK code that registers scripts through
 `container.getScripts()` (Java), `container.scripts` (Python) or `container.scripts` (JavaScript)
 works unchanged.

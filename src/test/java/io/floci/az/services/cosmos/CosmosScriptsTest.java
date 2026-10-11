@@ -2,17 +2,22 @@ package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.endsWith;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +44,10 @@ class CosmosScriptsTest {
     @BeforeEach
     void reset() {
         given().when().post("/_admin/reset").then().statusCode(204);
+        createDatabaseAndContainer();
+    }
+
+    private void createDatabaseAndContainer() {
         given().contentType("application/json").body("{\"id\":\"" + DB + "\"}")
                 .when().post(BASE + "/dbs").then().statusCode(201);
         given().contentType("application/json")
@@ -174,6 +183,119 @@ class CosmosScriptsTest {
                         + "\"parameters\":[{\"name\":\"@id\",\"value\":\"other\"}]}")
                 .when().post(COLL + "/sprocs")
                 .then().statusCode(200).body("StoredProcedures.id", contains("other"));
+    }
+
+    @Test
+    void scriptQueriesArePagedByMaxItemCountAndContinuation() {
+        for (String id : List.of("a", "b", "c")) {
+            create("sprocs", "{\"id\":\"" + id + "\",\"body\":\"function () {}\"}").then().statusCode(201);
+        }
+        String query = "{\"query\":\"SELECT * FROM root r ORDER BY r.id\"}";
+
+        Response first = given().contentType("application/query+json").header("x-ms-documentdb-isquery", "True")
+                .header("x-ms-max-item-count", "2").body(query)
+                .when().post(COLL + "/sprocs");
+        first.then().statusCode(200)
+                .header("x-ms-item-count", is("2"))
+                .header("x-ms-continuation", notNullValue())
+                .body("_count", is(2))
+                .body("StoredProcedures.id", contains("a", "b"));
+        String continuation = first.header("x-ms-continuation");
+
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "True")
+                .header("x-ms-max-item-count", "2").header("x-ms-continuation", continuation).body(query)
+                .when().post(COLL + "/sprocs")
+                .then().statusCode(200)
+                .header("x-ms-continuation", nullValue())
+                .body("StoredProcedures.id", contains("c"));
+
+        given().contentType("application/query+json").header("x-ms-documentdb-isquery", "True")
+                .header("x-ms-continuation", continuation).body(query)
+                .when().post(COLL + "/udfs")
+                .then().statusCode(400).body("code", is("BadRequest"));
+    }
+
+    @Test
+    void scriptFeedsArePagedByMaxItemCountAndContinuation() {
+        for (String id : List.of("a", "b", "c")) {
+            create("udfs", "{\"id\":\"" + id + "\",\"body\":\"function () {}\"}").then().statusCode(201);
+        }
+        Set<String> seen = new HashSet<>();
+        String continuation = null;
+        int pages = 0;
+        do {
+            RequestSpecification request = given().header("x-ms-max-item-count", "1");
+            if (continuation != null) {
+                request = request.header("x-ms-continuation", continuation);
+            }
+            Response page = request.when().get(COLL + "/udfs");
+            page.then().statusCode(200).body("_count", is(1));
+            seen.addAll(page.jsonPath().getList("UserDefinedFunctions.id", String.class));
+            continuation = page.header("x-ms-continuation");
+            pages++;
+        } while (continuation != null && pages < 10);
+
+        assertEquals(3, pages);
+        assertEquals(Set.of("a", "b", "c"), seen);
+    }
+
+    @Test
+    void scriptIdsContainingTheKeySeparatorStayInTheirOwnContainer() {
+        String other = "items|sprocs|nested";
+        String otherColl = BASE + "/dbs/" + DB + "/colls/" + other;
+        given().contentType("application/json")
+                .body("{\"id\":\"" + other + "\",\"partitionKey\":{\"paths\":[\"/pk\"],\"kind\":\"Hash\"}}")
+                .when().post(BASE + "/dbs/" + DB + "/colls").then().statusCode(201);
+
+        create("sprocs", "{\"id\":\"nested|sprocs|hello\",\"body\":\"function () {}\"}").then().statusCode(201);
+
+        given().when().get(otherColl + "/sprocs/hello").then().statusCode(404);
+        given().when().get(otherColl + "/sprocs").then().statusCode(200).body("StoredProcedures", empty());
+        given().contentType("application/json").body(SPROC)
+                .when().post(otherColl + "/sprocs").then().statusCode(201);
+        given().when().get(COLL + "/sprocs/nested|sprocs|hello")
+                .then().statusCode(200).body("body", is("function () {}"));
+    }
+
+    @Test
+    void deletingAContainerKeepsScriptsOfAContainerWhoseIdExtendsIts() {
+        String backupColl = BASE + "/dbs/" + DB + "/colls/items|backup";
+        given().contentType("application/json")
+                .body("{\"id\":\"items|backup\",\"partitionKey\":{\"paths\":[\"/pk\"],\"kind\":\"Hash\"}}")
+                .when().post(BASE + "/dbs/" + DB + "/colls").then().statusCode(201);
+        given().contentType("application/json").body(SPROC)
+                .when().post(backupColl + "/sprocs").then().statusCode(201);
+
+        given().when().delete(COLL).then().statusCode(204);
+
+        given().when().get(backupColl + "/sprocs/hello").then().statusCode(200).body("id", is("hello"));
+    }
+
+    @Test
+    void deletingTheDatabaseRemovesItsScripts() {
+        create("sprocs", SPROC).then().statusCode(201);
+        given().when().delete(BASE + "/dbs/" + DB).then().statusCode(204);
+        createDatabaseAndContainer();
+        given().when().get(COLL + "/sprocs").then().statusCode(200).body("StoredProcedures", empty());
+    }
+
+    @Test
+    void replacingWithoutAStringIdMatchingTheUrlIsRejected() {
+        create("sprocs", "{\"id\":\"123\",\"body\":\"function () { return 1; }\"}").then().statusCode(201);
+
+        for (String body : List.of(
+                "{\"body\":\"function () {}\"}",
+                "{\"id\":null,\"body\":\"function () {}\"}",
+                "{\"id\":123,\"body\":\"function () {}\"}",
+                "{\"id\":\" \",\"body\":\"function () {}\"}",
+                "{\"id\":\"other\",\"body\":\"function () {}\"}")) {
+            given().contentType("application/json").body(body)
+                    .when().put(COLL + "/sprocs/123")
+                    .then().statusCode(400).body("code", is("BadRequest")).body("message", notNullValue());
+        }
+
+        given().when().get(COLL + "/sprocs/123")
+                .then().statusCode(200).body("body", is("function () { return 1; }"));
     }
 
     @Test

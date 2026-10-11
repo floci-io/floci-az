@@ -325,7 +325,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         // Cascade: remove all containers and documents under this database
         store.scan(k -> k.startsWith(req.accountName() + K_COLL + dbId + "|")).forEach(o -> store.delete(o.key()));
         store.scan(k -> k.startsWith(req.accountName() + K_DOC  + dbId + "|")).forEach(o -> store.delete(o.key()));
-        store.scan(k -> k.startsWith(req.accountName() + K_SCRIPT + dbId + "|")).forEach(o -> store.delete(o.key()));
+        String scriptPrefix = scriptPrefix(req.accountName(), dbId);
+        store.scan(k -> k.startsWith(scriptPrefix)).forEach(o -> store.delete(o.key()));
         store.delete(key);
         return Response.noContent().build();
     }
@@ -609,8 +610,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         store.scan(k -> k.startsWith(req.accountName() + K_DOC + dbId + "|" + collId + "|"))
                 .forEach(o -> store.delete(o.key()));
-        store.scan(k -> k.startsWith(req.accountName() + K_SCRIPT + dbId + "|" + collId + "|"))
-                .forEach(o -> store.delete(o.key()));
+        String scriptPrefix = scriptPrefix(req.accountName(), dbId, collId);
+        store.scan(k -> k.startsWith(scriptPrefix)).forEach(o -> store.delete(o.key()));
         store.delete(key);
         return Response.noContent().build();
     }
@@ -942,8 +943,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
     private Response listScripts(AzureRequest req, String dbId, String collId, CosmosScriptKind kind) {
         if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
-        return listResponse(kind.feedKey(), scripts(req.accountName(), dbId, collId, kind),
-                collRid(req.accountName(), dbId, collId));
+        return scriptPage(req, dbId, collId, kind, "SELECT * FROM root r", List.of());
     }
 
     private Response queryScripts(AzureRequest req, String dbId, String collId, CosmosScriptKind kind) {
@@ -955,14 +955,36 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         List<Map<String, Object>> params = body.get("parameters") instanceof List<?> l
                 ? (List<Map<String, Object>>) l : List.of();
 
-        final CosmosQueryEngine.QueryResult result;
+        return scriptPage(req, dbId, collId, kind, sql, params);
+    }
+
+    /**
+     * One page of a script feed or query, honouring {@code x-ms-max-item-count} and
+     * {@code x-ms-continuation} the way document queries do. The continuation scope names the script
+     * kind, so a token issued for one feed cannot resume another.
+     */
+    private Response scriptPage(AzureRequest req, String dbId, String collId, CosmosScriptKind kind,
+                                String sql, List<Map<String, Object>> params) {
+        String rid = collRid(req.accountName(), dbId, collId);
+        final CosmosQueryEngine.QueryPage page;
+        final String scope;
         try {
-            result = queryEngine.execute(sql, params, scripts(req.accountName(), dbId, collId, kind));
+            CosmosQueryEngine.ParsedQuery parsed = queryEngine.prepare(sql, params);
+            scope = continuationScope(req, dbId, collId + "/" + kind.segment(), Map.of("_rid", rid), sql, params);
+            CosmosQueryEngine.QueryContinuation continuation =
+                    decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"), scope);
+            if (continuation != null && continuation.rid() != null
+                    && continuation.orderValues().size() != parsed.orderBy().size()) {
+                throw new IllegalArgumentException("Continuation does not match query ordering");
+            }
+            page = queryEngine.executePage(parsed, scripts(req.accountName(), dbId, collId, kind), continuation,
+                    parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count")));
         } catch (RuntimeException e) {
             LOG.debugf(e, "Query over %s of %s/%s rejected: %s", kind.segment(), dbId, collId, sql);
             return errorResponse(400, "BadRequest", "The query could not be executed: " + e.getMessage());
         }
-        return listResponse(kind.feedKey(), result.items(), collRid(req.accountName(), dbId, collId));
+        return listResponse(kind.feedKey(), page.result().items(), rid,
+                encodeContinuationToken(page.continuation(), scope));
     }
 
     private List<Map<String, Object>> scripts(String account, String dbId, String collId, CosmosScriptKind kind) {
@@ -1009,8 +1031,10 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         if (conditionFailure != null) return conditionFailure;
 
         Map<String, Object> body = parseBody(req);
-        Object bodyId = body.get("id");
-        if (bodyId != null && !id.equals(String.valueOf(bodyId))) {
+        if (!(body.get("id") instanceof String bodyId) || bodyId.isBlank()) {
+            return errorResponse(400, "BadRequest", "'id' is required.");
+        }
+        if (!id.equals(bodyId)) {
             return errorResponse(400, "BadRequest",
                     "The 'id' in the request body does not match the " + kind.displayName() + " being replaced.");
         }
@@ -1769,17 +1793,24 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response listResponse(String arrayKey, List<?> items, String rid) {
+        return listResponse(arrayKey, items, rid, null);
+    }
+
+    private Response listResponse(String arrayKey, List<?> items, String rid, String continuationToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("_rid",   rid);
         body.put("_count", items.size());
         body.put(arrayKey, items);
         try {
-            return Response.ok(MAPPER.writeValueAsString(body), "application/json")
+            Response.ResponseBuilder rb = Response.ok(MAPPER.writeValueAsString(body), "application/json")
                     .header("x-ms-request-charge", "1")
                     .header("x-ms-item-count",     String.valueOf(items.size()))
                     .header("x-ms-activity-id",    UUID.randomUUID().toString())
-                    .header("x-ms-version",        "2018-12-31")
-                    .build();
+                    .header("x-ms-version",        "2018-12-31");
+            if (continuationToken != null) {
+                rb = rb.header("x-ms-continuation", continuationToken);
+            }
+            return rb.build();
         } catch (JsonProcessingException e) {
             return Response.serverError().build();
         }
@@ -1824,11 +1855,23 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     }
 
     private String scriptKey(String account, String dbId, String collId, CosmosScriptKind kind, String id) {
-        return scriptPrefix(account, dbId, collId, kind) + id;
+        return scriptPrefix(account, dbId, collId, kind) + encodeKey(id);
     }
 
     private String scriptPrefix(String account, String dbId, String collId, CosmosScriptKind kind) {
-        return account + K_SCRIPT + dbId + "|" + collId + "|" + kind.segment() + "|";
+        return scriptPrefix(account, dbId, collId) + kind.segment() + "|";
+    }
+
+    private String scriptPrefix(String account, String dbId, String collId) {
+        return scriptPrefix(account, dbId) + encodeKey(collId) + "|";
+    }
+
+    /**
+     * Cosmos ids may contain {@code '|'}, so each id is encoded before it is joined: a raw join would
+     * let one container's script keys, and its cascade prefix, reach into another container's.
+     */
+    private String scriptPrefix(String account, String dbId) {
+        return account + K_SCRIPT + encodeKey(dbId) + "|";
     }
 
     private String encodeKey(String value) {
