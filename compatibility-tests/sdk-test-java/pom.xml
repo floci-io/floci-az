@@ -76,6 +76,10 @@
         </dependency>
         <dependency>
             <groupId>com.azure.resourcemanager</groupId>
+            <artifactId>azure-resourcemanager-resources</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure.resourcemanager</groupId>
             <artifactId>azure-resourcemanager-appcontainers</artifactId>
             <version>1.2.0</version>
         </dependency>

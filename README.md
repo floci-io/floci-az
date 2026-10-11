@@ -652,7 +652,7 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | Module              | Language / Tool | Coverage |
 |---------------------|-----------------|----------|
 | `sdk-test-python`   | Python 3        | Blob, Queue, Table, Cosmos, App Configuration, Key Vault, ACR, Redis, VM, Managed Identity |
-| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, Container Apps, API Management, SQL, PostgreSQL (Flexible Server), Managed Identity |
+| `sdk-test-java`     | Java 21         | Storage, Cosmos (+ Mongo/PostgreSQL/Cassandra/Gremlin/Table/NoSQL engines), App Config, Key Vault, Event Hubs, Service Bus, Functions, Container Apps, API Management, SQL, PostgreSQL (Flexible Server), Managed Identity, Policy |
 | `sdk-test-node`     | Node.js         | App Configuration, Blob, Cosmos, Event Hubs, Key Vault, Queue, Table, Service Bus, Entra ID, Managed Identity |
 | `sdk-test-dotnet`   | .NET            | Blob service SAS, Cosmos (+ bracket properties, point partition, transactional batch), Key Vault (+ certificates, timestamps), Service Bus (+ lock renewal, metadata, peek-lock), SignalR. The only suite covering SignalR |
 | `sdk-test-cpp` †    | C++ 17          | Blob, Queue: Lifecycle plus the bodyless-error path no other SDK reproduces |
