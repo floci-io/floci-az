@@ -734,10 +734,23 @@ public class ContainerLifecycleManager {
     }
 
     /** Result of a command executed inside a running container. */
-    public record ExecResult(int exitCode, String output) {}
+    public record ExecResult(int exitCode, String output) {
+
+        /**
+         * False when the wait ran out with the command still running. It was not stopped, so its
+         * effect is unknown and may still land: a caller must not read that as a failure.
+         */
+        public boolean finished() {
+            return exitCode != UNFINISHED_EXIT_CODE;
+        }
+    }
+
+    /** Reported when the command has no exit code yet; a real exit code is never negative. */
+    private static final int UNFINISHED_EXIT_CODE = -1;
 
     /**
-     * Runs a command inside a running container and waits for it to finish.
+     * Runs a command inside a running container and waits up to 60 seconds for it to finish;
+     * check {@link ExecResult#finished()} when the command changes state.
      * The command is passed as an argv array directly to the container runtime — no shell
      * is involved, so arguments need no shell quoting.
      */
@@ -771,7 +784,7 @@ public class ContainerLifecycleManager {
                     .awaitCompletion(60, TimeUnit.SECONDS);
 
             Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
-            return new ExecResult(exitCode == null ? -1 : exitCode.intValue(), output.toString());
+            return new ExecResult(exitCode == null ? UNFINISHED_EXIT_CODE : exitCode.intValue(), output.toString());
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted executing command in container " + containerId, ie);

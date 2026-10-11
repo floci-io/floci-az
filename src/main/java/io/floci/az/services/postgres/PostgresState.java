@@ -95,6 +95,19 @@ public class PostgresState {
     }
 
     /**
+     * Stores {@code updated} while the stored server is still the one {@code expected} was read from. False
+     * once that server was deleted, or deleted and claimed again, so an update never writes a server back.
+     */
+    public synchronized boolean replaceServer(ServerEntry expected, ServerEntry updated) {
+        ServerEntry current = servers.get(key(expected.serverName()));
+        if (current == null || !current.createdAt().equals(expected.createdAt())) {
+            return false;
+        }
+        putServer(updated);
+        return true;
+    }
+
+    /**
      * Removes a server this request claimed, but only while the stored entry is still that claim. A failed
      * create must not remove a server another subscription claimed after this one was deleted.
      */

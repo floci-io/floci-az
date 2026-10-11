@@ -4,18 +4,27 @@ import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.RestAssured;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -56,8 +65,13 @@ class PostgresPasswordRotationTest {
         }
     }
 
+    private static final String OTHER_PASSWORD = "Other_Owner789!";
+
     @InjectMock
     PostgresServerManager serverManager;
+
+    @Inject
+    PostgresState state;
 
     @BeforeEach
     void setUp() {
@@ -152,6 +166,110 @@ class PostgresPasswordRotationTest {
                         && OLD_PASSWORD.equals(entry.administratorLoginPassword())),
                 eq(NEW_PASSWORD));
         assertConnectPassword("starting-pg", NEW_PASSWORD);
+    }
+
+    @Test
+    void anUpdateThatWaitedIsRefusedOnceAnotherSubscriptionOwnsTheName() throws Exception {
+        CountDownLatch starting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            starting.countDown();
+            assertTrue(release.await(10, TimeUnit.SECONDS), "startup was never released");
+            return startedEntry(invocation.getArgument(0));
+        }).when(serverManager).startServer(any());
+
+        CompletableFuture<Integer> create = CompletableFuture.supplyAsync(() -> given()
+                .contentType("application/json").body(SERVER_BODY)
+                .put(BASE + "reclaimed-pg" + API).statusCode());
+        assertTrue(starting.await(10, TimeUnit.SECONDS), "container startup never began");
+
+        // Passes the owner check as the first subscription, then parks behind the starting create.
+        CompletableFuture<Integer> update = CompletableFuture.supplyAsync(() -> given()
+                .contentType("application/json").body(PASSWORD_PATCH)
+                .patch(BASE + "reclaimed-pg" + API).statusCode());
+        assertThrows(TimeoutException.class, () -> update.get(500, TimeUnit.MILLISECONDS),
+                "the update must wait for the container start");
+
+        // Straight through the state: the HTTP client holds two connections per route, and both
+        // are parked. This is what a delete and another subscription's create leave behind.
+        assertTrue(state.removeServer("reclaimed-pg"));
+        assertTrue(state.claimServer(new PostgresState.ServerEntry(
+                "reclaimed-pg", "pg-rotation-other-sub", "pg-rotation-rg", "eastus", "16", "pgadmin",
+                OTHER_PASSWORD, "Standard_B1ms", "Burstable", 32, null, 0, "localhost", Map.of(),
+                new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now())));
+
+        release.countDown();
+        assertEquals(202, create.get(20, TimeUnit.SECONDS));
+        assertEquals(404, update.get(20, TimeUnit.SECONDS),
+                "the first owner's update must not land on the next owner's server");
+
+        verify(serverManager, never()).rotateAdminPassword(any(), any());
+        PostgresState.ServerEntry survivor = state.getServer("reclaimed-pg").orElseThrow();
+        assertEquals("pg-rotation-other-sub", survivor.subscriptionId());
+        assertEquals(OTHER_PASSWORD, survivor.administratorLoginPassword());
+    }
+
+    @Test
+    void aServerDeletedWhileItsPasswordRotatesStaysDeleted() throws Exception {
+        createServer("vanishing-pg");
+        CountDownLatch rotating = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            rotating.countDown();
+            assertTrue(release.await(10, TimeUnit.SECONDS), "rotation was never released");
+            return null;
+        }).when(serverManager).rotateAdminPassword(any(), any());
+
+        CompletableFuture<Integer> update = CompletableFuture.supplyAsync(() -> given()
+                .contentType("application/json").body(PASSWORD_PATCH)
+                .patch(BASE + "vanishing-pg" + API).statusCode());
+        assertTrue(rotating.await(10, TimeUnit.SECONDS), "rotation never began");
+
+        given().delete(BASE + "vanishing-pg" + API).then().statusCode(204);
+        release.countDown();
+
+        assertEquals(404, update.get(20, TimeUnit.SECONDS));
+        given().get(BASE + "vanishing-pg" + API).then().statusCode(404);
+    }
+
+    @Test
+    void queuedUpdatesEachKeepWhatTheOtherChanged() throws Exception {
+        CountDownLatch starting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            starting.countDown();
+            assertTrue(release.await(10, TimeUnit.SECONDS), "startup was never released");
+            return startedEntry(invocation.getArgument(0));
+        }).when(serverManager).startServer(any());
+
+        // Three requests parked at once is one more than the RestAssured client keeps per route.
+        HttpClient client = HttpClient.newHttpClient();
+        CompletableFuture<Integer> create = send(client, "PUT", "queued-pg", SERVER_BODY);
+        assertTrue(starting.await(10, TimeUnit.SECONDS), "container startup never began");
+
+        CompletableFuture<Integer> tagUpdate = send(client, "PATCH", "queued-pg", "{\"tags\":{\"env\":\"patched\"}}");
+        CompletableFuture<Integer> storageUpdate = send(client, "PATCH", "queued-pg",
+                "{\"properties\":{\"storage\":{\"storageSizeGB\":64}}}");
+        assertThrows(TimeoutException.class, () -> tagUpdate.get(500, TimeUnit.MILLISECONDS));
+        assertThrows(TimeoutException.class, () -> storageUpdate.get(500, TimeUnit.MILLISECONDS));
+
+        release.countDown();
+        assertEquals(202, create.get(20, TimeUnit.SECONDS));
+        assertEquals(202, tagUpdate.get(20, TimeUnit.SECONDS));
+        assertEquals(202, storageUpdate.get(20, TimeUnit.SECONDS));
+
+        given().get(BASE + "queued-pg" + API).then().statusCode(200)
+                .body("tags.env", equalTo("patched"))
+                .body("properties.storage.storageSizeGB", equalTo(64));
+    }
+
+    private static CompletableFuture<Integer> send(HttpClient client, String method, String name, String body) {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create(RestAssured.baseURI + ":" + RestAssured.port + BASE + name + API))
+                .header("Content-Type", "application/json")
+                .method(method, HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return client.sendAsync(request, HttpResponse.BodyHandlers.discarding()).thenApply(HttpResponse::statusCode);
     }
 
     private static PostgresState.ServerEntry startedEntry(PostgresState.ServerEntry entry) {
