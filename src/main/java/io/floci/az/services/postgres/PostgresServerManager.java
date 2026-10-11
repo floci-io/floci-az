@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.Socket;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -186,6 +187,49 @@ public class PostgresServerManager {
             releaseClaimedPort(claimed);
         }
         containerManager.stopAndRemove(entry.containerId(), null);
+    }
+
+    /**
+     * Changes the admin role's password inside the running container, as Azure does when an
+     * update carries {@code administratorLoginPassword}. Connects over the container's local
+     * socket as the admin role, authenticating with the current password through
+     * {@code PGPASSWORD} rather than a flag. The new password travels only inside the
+     * {@code ALTER ROLE} statement, and both passwords are redacted from the error raised on
+     * failure, so neither ever reaches a log.
+     *
+     * @throws RuntimeException if the statement fails; the caller keeps the old password then
+     */
+    public void rotateAdminPassword(PostgresState.ServerEntry entry, String newPassword) {
+        String login = entry.administratorLogin();
+        String sql = "ALTER ROLE " + quoteIdentifier(login) + " WITH PASSWORD " + quoteLiteral(newPassword);
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + entry.administratorLoginPassword()),
+            "psql", "-v", "ON_ERROR_STOP=1", "-U", login, "-d", "postgres", "-c", sql);
+        if (result.exitCode() != 0) {
+            throw new RuntimeException("Password rotation failed for PostgreSQL server '"
+                + entry.serverName() + "': " + redact(result.output(), newPassword, entry.administratorLoginPassword()));
+        }
+        LOG.infof("Rotated admin password for PostgreSQL server %s", entry.serverName());
+    }
+
+    static String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    /** A standard SQL string literal; backslashes are literal since standard_conforming_strings is on by default. */
+    static String quoteLiteral(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private static String redact(String output, String... secrets) {
+        String redacted = output == null ? "" : output.strip();
+        for (String secret : secrets) {
+            if (secret != null && !secret.isEmpty()) {
+                redacted = redacted.replace(secret, "***");
+            }
+        }
+        return redacted;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

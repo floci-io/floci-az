@@ -319,15 +319,35 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             String skuTier  = sku.path("tier").asText(existing.skuTier());
             Map<String, String> mergedTags = body.has("tags") ? tags : existing.tags();
 
-            PostgresState.ServerEntry updated = new PostgresState.ServerEntry(
-                serverName, existing.subscriptionId(), existing.resourceGroupName(),
-                existing.location(), version, existing.administratorLogin(),
-                password.isBlank() ? existing.administratorLoginPassword() : password,
-                skuName, skuTier, storageGB,
-                existing.containerId(), existing.hostPort(), existing.host(), mergedTags,
-                existing.databases(), existing.firewallRules(), existing.configurations(),
-                existing.createdAt());
-            state.putServer(updated);
+            // Rotate-then-commit under the start lock the create holds across startServer and
+            // attachContainer: an update that lands while the container starts waits for it, then
+            // rotates on the live container instead of committing a password the container never
+            // got. Rotation runs before the commit, so a failed ALTER ROLE leaves state holding the
+            // password the container still accepts. A server without a container (mocked, or not
+            // started) only stores the new value.
+            PostgresState.ServerEntry updated;
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
+                if (current.isEmpty()) {
+                    return notFound("Server '" + serverName + "' not found");
+                }
+                PostgresState.ServerEntry live = current.get();
+                boolean passwordChanged = !password.isBlank()
+                    && !password.equals(live.administratorLoginPassword());
+                if (passwordChanged && !config.services().postgres().mocked() && live.containerId() != null) {
+                    serverManager.rotateAdminPassword(live, password);
+                }
+                updated = new PostgresState.ServerEntry(
+                    serverName, live.subscriptionId(), live.resourceGroupName(),
+                    live.location(), version, live.administratorLogin(),
+                    password.isBlank() ? live.administratorLoginPassword() : password,
+                    skuName, skuTier, storageGB,
+                    live.containerId(), live.hostPort(), live.host(), mergedTags,
+                    live.databases(), live.firewallRules(), live.configurations(),
+                    live.createdAt());
+                state.putServer(updated);
+            }
             return accepted(request, updated.armId(), serverResponse(updated));
 
         } catch (Exception e) {

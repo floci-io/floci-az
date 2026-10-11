@@ -742,9 +742,19 @@ public class ContainerLifecycleManager {
      * is involved, so arguments need no shell quoting.
      */
     public ExecResult execInContainer(String containerId, String... cmd) {
+        return execInContainer(containerId, List.of(), cmd);
+    }
+
+    /**
+     * Like {@link #execInContainer(String, String...)}, with extra {@code NAME=value} environment
+     * entries for the exec'd process only. Use it for secrets the command reads from its
+     * environment, so they never appear in the argv.
+     */
+    public ExecResult execInContainer(String containerId, List<String> env, String... cmd) {
         try {
             String execId = dockerClient.execCreateCmd(containerId)
                     .withCmd(cmd)
+                    .withEnv(env)
                     .withAttachStdout(true)
                     .withAttachStderr(true)
                     .exec()

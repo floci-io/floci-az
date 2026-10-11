@@ -11,7 +11,7 @@ Compatible with the `pgjdbc` (JDBC), `psycopg`, `Npgsql`, and any libpq-speaking
 
 ## Features
 
-- **Flexible servers**: create, get, list, update (PATCH), delete; one Docker container per logical server
+- **Flexible servers**: create, get, list, update (PATCH), delete; one Docker container per logical server. Changing `administratorLoginPassword` through PUT or PATCH runs `ALTER ROLE` in the running container, so the new password works immediately; in mocked mode it is only stored
 - **Databases**: create, get, list, delete (metadata only, see note below)
 - **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
 - **Configurations**: get, list, put (server parameters stored as metadata)
@@ -181,7 +181,7 @@ resource "azurerm_postgresql_flexible_server_database" "db" {
 |---|---|---|
 | `PUT` | `.../flexibleServers/{name}` | Create or update a server |
 | `GET` | `.../flexibleServers/{name}` | Get server properties |
-| `PATCH` | `.../flexibleServers/{name}` | Update server metadata (no container restart) |
+| `PATCH` | `.../flexibleServers/{name}` | Update server metadata (no container restart); a new `administratorLoginPassword` is applied to the running server |
 | `DELETE` | `.../flexibleServers/{name}` | Delete server and stop its container |
 | `GET` | `.../flexibleServers` | List all servers in the resource group |
 | `POST` | `.../locations/{loc}/checkNameAvailability` | Check if a server name is available |
