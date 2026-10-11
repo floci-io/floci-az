@@ -670,9 +670,12 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response listKeys(String account) {
+        // The key the Storage data plane verifies this account's Shared Key SAS with, so a SAS
+        // built from either listed key is accepted.
+        String key = config.auth().storageAccountKeys().getOrDefault(account, DEFAULT_STORAGE_ACCOUNT_KEY);
         return Response.ok(Map.of("keys", List.of(
-                Map.of("keyName", "key1", "value", DEFAULT_STORAGE_ACCOUNT_KEY, "permissions", "FULL"),
-                Map.of("keyName", "key2", "value", DEFAULT_STORAGE_ACCOUNT_KEY, "permissions", "FULL")
+                Map.of("keyName", "key1", "value", key, "permissions", "Full"),
+                Map.of("keyName", "key2", "value", key, "permissions", "Full")
         ))).build();
     }
 
