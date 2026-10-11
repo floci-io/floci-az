@@ -4,6 +4,8 @@ import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosContainer;
 import com.azure.cosmos.CosmosDatabase;
 import com.azure.cosmos.CosmosException;
+import com.azure.cosmos.CosmosScripts;
+import com.azure.cosmos.CosmosStoredProcedure;
 import com.azure.cosmos.models.*;
 import com.azure.cosmos.models.CosmosBatch;
 import com.azure.cosmos.models.CosmosBatchResponse;
@@ -525,6 +527,72 @@ class CosmosCompatibilityTest {
         replace.setDefaultTimeToLiveInSeconds(null);
         container.replace(replace);
         assertNull(container.read().getProperties().getDefaultTimeToLiveInSeconds());
+
+        db.delete();
+    }
+
+    // --- Server-side scripts ---
+
+    @Test
+    @DisplayName("scripts: stored procedure, trigger and UDF create, read, list, replace, delete")
+    void scriptsLifecycle() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosScripts scripts = db.getContainer("items").getScripts();
+
+        CosmosStoredProcedureResponse sproc = scripts.createStoredProcedure(
+            new CosmosStoredProcedureProperties("hello", "function () { getContext().getResponse().setBody('hi'); }"));
+        assertEquals(201, sproc.getStatusCode());
+        assertEquals("hello", sproc.getProperties().getId());
+        assertNotNull(sproc.getProperties().getETag());
+
+        CosmosTriggerProperties triggerProps = new CosmosTriggerProperties("stamp", "function () {}");
+        triggerProps.setTriggerType(TriggerType.PRE);
+        triggerProps.setTriggerOperation(TriggerOperation.CREATE);
+        scripts.createTrigger(triggerProps);
+
+        scripts.createUserDefinedFunction(
+            new CosmosUserDefinedFunctionProperties("tax", "function (x) { return x * 0.1; }"));
+
+        assertEquals(List.of("hello"), scripts.readAllStoredProcedures().stream()
+            .map(CosmosStoredProcedureProperties::getId).toList());
+        assertEquals(List.of("tax"), scripts.readAllUserDefinedFunctions().stream()
+            .map(CosmosUserDefinedFunctionProperties::getId).toList());
+
+        CosmosTriggerProperties trigger = scripts.getTrigger("stamp").read().getProperties();
+        assertEquals(TriggerType.PRE, trigger.getTriggerType());
+        assertEquals(TriggerOperation.CREATE, trigger.getTriggerOperation());
+
+        CosmosStoredProcedure handle = scripts.getStoredProcedure("hello");
+        CosmosStoredProcedureProperties replacement = handle.read().getProperties();
+        replacement.setBody("function () { return 2; }");
+        assertEquals("function () { return 2; }", handle.replace(replacement).getProperties().getBody());
+
+        handle.delete();
+        CosmosException gone = assertThrows(CosmosException.class, handle::read);
+        assertEquals(404, gone.getStatusCode());
+
+        db.delete();
+    }
+
+    @Test
+    @DisplayName("stored procedure execution is unsupported: CosmosException carrying the emulator message")
+    void storedProcedureExecutionUnsupported() {
+        String id = dbId();
+        client.createDatabase(id);
+        CosmosDatabase db = client.getDatabase(id);
+        db.createContainerIfNotExists("items", "/category");
+        CosmosScripts scripts = db.getContainer("items").getScripts();
+        scripts.createStoredProcedure(new CosmosStoredProcedureProperties("hello", "function () {}"));
+
+        CosmosStoredProcedureRequestOptions options = new CosmosStoredProcedureRequestOptions();
+        options.setPartitionKey(new PartitionKey("a"));
+        CosmosException ex = assertThrows(CosmosException.class,
+            () -> scripts.getStoredProcedure("hello").execute(List.of(), options));
+        assertEquals(501, ex.getStatusCode());
+        assertTrue(ex.getMessage().contains("not supported"), ex.getMessage());
 
         db.delete();
     }

@@ -53,6 +53,8 @@ import java.util.stream.Collectors;
  *   Containers — GET/POST /dbs/{dbId}/colls, GET/DELETE /dbs/{dbId}/colls/{collId}
  *   Documents  — GET/POST/PUT/DELETE /dbs/{dbId}/colls/{collId}/docs[/{docId}]
  *   Queries    — POST /dbs/{dbId}/colls/{collId}/docs with x-ms-documentdb-isquery: True
+ *   Scripts    : GET/POST /dbs/{dbId}/colls/{collId}/{sprocs|triggers|udfs}, GET/PUT/DELETE .../{id}
+ *                (stored, never executed)
  */
 @ApplicationScoped
 public class CosmosHandler implements AzureServiceHandler, Resettable {
@@ -64,6 +66,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
     private static final String K_DB   = "|db|";
     private static final String K_COLL = "|coll|";
     private static final String K_DOC  = "|doc|";
+    private static final String K_SCRIPT = "|script|";
 
     /**
      * Configuration advertised by the Cosmos DB gateway for the SDK's client-side query planner.
@@ -173,6 +176,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         if (segs.length >= 5 && "docs".equals(segs[4])) return routeDocs(req, segs, dbId, collId);
         if (segs.length == 5 && "pkranges".equals(segs[4])) return listPartitionKeyRanges(req, dbId, collId);
+        CosmosScriptKind scriptKind = CosmosScriptKind.fromSegment(segs[4]);
+        if (scriptKind != null) return routeScripts(req, segs, dbId, collId, scriptKind);
         return notImplemented();
     }
 
@@ -320,6 +325,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         // Cascade: remove all containers and documents under this database
         store.scan(k -> k.startsWith(req.accountName() + K_COLL + dbId + "|")).forEach(o -> store.delete(o.key()));
         store.scan(k -> k.startsWith(req.accountName() + K_DOC  + dbId + "|")).forEach(o -> store.delete(o.key()));
+        String scriptPrefix = scriptPrefix(req.accountName(), dbId);
+        store.scan(k -> k.startsWith(scriptPrefix)).forEach(o -> store.delete(o.key()));
         store.delete(key);
         return Response.noContent().build();
     }
@@ -603,6 +610,8 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         store.scan(k -> k.startsWith(req.accountName() + K_DOC + dbId + "|" + collId + "|"))
                 .forEach(o -> store.delete(o.key()));
+        String scriptPrefix = scriptPrefix(req.accountName(), dbId, collId);
+        store.scan(k -> k.startsWith(scriptPrefix)).forEach(o -> store.delete(o.key()));
         store.delete(key);
         return Response.noContent().build();
     }
@@ -894,6 +903,224 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
         store.delete(obj.key());
         return Response.noContent().build();
+    }
+
+    // -----------------------------------------------------------------------
+    // Server-side scripts  (/dbs/{db}/colls/{coll}/{sprocs|triggers|udfs}[/{id}])
+    // -----------------------------------------------------------------------
+
+    private static final Set<String> TRIGGER_TYPES = Set.of("pre", "post");
+    private static final Set<String> TRIGGER_OPERATIONS = Set.of("all", "create", "update", "delete", "replace");
+
+    private synchronized Response routeScripts(AzureRequest req, String[] segs, String dbId, String collId,
+                                               CosmosScriptKind kind) {
+        String m = req.method().toUpperCase();
+        boolean query = "True".equalsIgnoreCase(req.headers().getHeaderString("x-ms-documentdb-isquery"))
+                || "application/query+json".equalsIgnoreCase(req.headers().getHeaderString("Content-Type"));
+
+        if (segs.length == 5) {
+            return switch (m) {
+                case "GET"  -> listScripts(req, dbId, collId, kind);
+                case "POST" -> query ? queryScripts(req, dbId, collId, kind) : createScript(req, dbId, collId, kind);
+                default     -> notImplemented();
+            };
+        }
+
+        String scriptId = segs[5];
+        if (segs.length == 6) {
+            return switch (m) {
+                case "GET"    -> getScript(req, dbId, collId, kind, scriptId);
+                case "PUT"    -> replaceScript(req, dbId, collId, kind, scriptId);
+                case "DELETE" -> deleteScript(req, dbId, collId, kind, scriptId);
+                case "POST"   -> kind == CosmosScriptKind.STORED_PROCEDURE
+                        ? executeStoredProcedure(req, dbId, collId, scriptId)
+                        : notImplemented();
+                default       -> notImplemented();
+            };
+        }
+        return notImplemented();
+    }
+
+    private Response listScripts(AzureRequest req, String dbId, String collId, CosmosScriptKind kind) {
+        if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
+        return scriptPage(req, dbId, collId, kind, "SELECT * FROM root r", List.of());
+    }
+
+    private Response queryScripts(AzureRequest req, String dbId, String collId, CosmosScriptKind kind) {
+        if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
+
+        Map<String, Object> body = parseBody(req);
+        String sql = body.get("query") instanceof String value ? value : "SELECT * FROM root r";
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> params = body.get("parameters") instanceof List<?> l
+                ? (List<Map<String, Object>>) l : List.of();
+
+        return scriptPage(req, dbId, collId, kind, sql, params);
+    }
+
+    /**
+     * One page of a script feed or query, honouring {@code x-ms-max-item-count} and
+     * {@code x-ms-continuation} the way document queries do. The continuation scope names the script
+     * kind, so a token issued for one feed cannot resume another.
+     */
+    private Response scriptPage(AzureRequest req, String dbId, String collId, CosmosScriptKind kind,
+                                String sql, List<Map<String, Object>> params) {
+        String rid = collRid(req.accountName(), dbId, collId);
+        final CosmosQueryEngine.QueryPage page;
+        final String scope;
+        try {
+            CosmosQueryEngine.ParsedQuery parsed = queryEngine.prepare(sql, params);
+            scope = continuationScope(req, dbId, collId + "/" + kind.segment(), Map.of("_rid", rid), sql, params);
+            CosmosQueryEngine.QueryContinuation continuation =
+                    decodeContinuationToken(req.headers().getHeaderString("x-ms-continuation"), scope);
+            if (continuation != null && continuation.rid() != null
+                    && continuation.orderValues().size() != parsed.orderBy().size()) {
+                throw new IllegalArgumentException("Continuation does not match query ordering");
+            }
+            page = queryEngine.executePage(parsed, scripts(req.accountName(), dbId, collId, kind), continuation,
+                    parseMaxItemCount(req.headers().getHeaderString("x-ms-max-item-count")));
+        } catch (RuntimeException e) {
+            LOG.debugf(e, "Query over %s of %s/%s rejected: %s", kind.segment(), dbId, collId, sql);
+            return errorResponse(400, "BadRequest", "The query could not be executed: " + e.getMessage());
+        }
+        return listResponse(kind.feedKey(), page.result().items(), rid,
+                encodeContinuationToken(page.continuation(), scope));
+    }
+
+    private List<Map<String, Object>> scripts(String account, String dbId, String collId, CosmosScriptKind kind) {
+        String prefix = scriptPrefix(account, dbId, collId, kind);
+        return store.scan(k -> k.startsWith(prefix)).stream().map(this::parseData).collect(Collectors.toList());
+    }
+
+    private Response createScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind) {
+        if (store.get(collKey(req.accountName(), dbId, collId)).isEmpty()) return notFound(collId);
+
+        Map<String, Object> body = parseBody(req);
+        if (!(body.get("id") instanceof String id) || id.isBlank()) {
+            return errorResponse(400, "BadRequest", "'id' is required.");
+        }
+        Response invalid = invalidScript(kind, body);
+        if (invalid != null) return invalid;
+
+        String key = scriptKey(req.accountName(), dbId, collId, kind, id);
+        if (store.get(key).isPresent()) {
+            return errorResponse(409, "Conflict",
+                    "Resource with specified id or name already exists. ActivityId: " + UUID.randomUUID());
+        }
+
+        Instant now  = Instant.now();
+        String  etag = newEtag();
+        Map<String, Object> script = scriptResource(kind, body, id,
+                scriptRid(collRid(req.accountName(), dbId, collId), kind), dbId, collId, now, etag);
+        store.put(key, stored(key, script, now, etag));
+        return cosmosResponse(script, Response.Status.CREATED, etag, "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    private Response getScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind, String id) {
+        Optional<StoredObject> found = store.get(scriptKey(req.accountName(), dbId, collId, kind, id));
+        if (found.isEmpty()) return notFound(id);
+        return cosmosResponse(parseData(found.get()), Response.Status.OK, found.get().etag());
+    }
+
+    private Response replaceScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind, String id) {
+        String key = scriptKey(req.accountName(), dbId, collId, kind, id);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) return notFound(id);
+
+        Response conditionFailure = itemPreconditionFailure(req, found.get());
+        if (conditionFailure != null) return conditionFailure;
+
+        Map<String, Object> body = parseBody(req);
+        if (!(body.get("id") instanceof String bodyId) || bodyId.isBlank()) {
+            return errorResponse(400, "BadRequest", "'id' is required.");
+        }
+        if (!id.equals(bodyId)) {
+            return errorResponse(400, "BadRequest",
+                    "The 'id' in the request body does not match the " + kind.displayName() + " being replaced.");
+        }
+        Response invalid = invalidScript(kind, body);
+        if (invalid != null) return invalid;
+
+        Instant now  = Instant.now();
+        String  etag = newEtag();
+        Object  rid  = parseData(found.get()).get("_rid");
+        Map<String, Object> script = scriptResource(kind, body, id, String.valueOf(rid), dbId, collId, now, etag);
+        store.put(key, stored(key, script, now, etag));
+        return cosmosResponse(script, Response.Status.OK, etag, "dbs/" + dbId + "/colls/" + collId);
+    }
+
+    private Response deleteScript(AzureRequest req, String dbId, String collId, CosmosScriptKind kind, String id) {
+        String key = scriptKey(req.accountName(), dbId, collId, kind, id);
+        Optional<StoredObject> found = store.get(key);
+        if (found.isEmpty()) return notFound(id);
+
+        Response conditionFailure = itemPreconditionFailure(req, found.get());
+        if (conditionFailure != null) return conditionFailure;
+
+        store.delete(key);
+        return Response.noContent().build();
+    }
+
+    /**
+     * Stored procedures are stored but never run: floci-az has no JavaScript runtime. An execution
+     * of a stored procedure that exists fails in the Cosmos error envelope, with a 501 that no SDK
+     * retries as a write; one that does not exist is a 404, as on Azure.
+     */
+    private Response executeStoredProcedure(AzureRequest req, String dbId, String collId, String id) {
+        if (store.get(scriptKey(req.accountName(), dbId, collId, CosmosScriptKind.STORED_PROCEDURE, id)).isEmpty()) {
+            return notFound(id);
+        }
+        return errorResponse(501, "NotImplemented",
+                "Executing stored procedure '" + id + "' is not supported: the floci-az Cosmos DB emulator "
+                        + "stores stored procedures, triggers and user defined functions but does not run them.");
+    }
+
+    private Response invalidScript(CosmosScriptKind kind, Map<String, Object> body) {
+        if (!(body.get("body") instanceof String)) {
+            return errorResponse(400, "BadRequest", "'body' is required.");
+        }
+        if (kind != CosmosScriptKind.TRIGGER) return null;
+        if (!(body.get("triggerType") instanceof String type)
+                || !TRIGGER_TYPES.contains(type.toLowerCase())) {
+            return errorResponse(400, "BadRequest", "'triggerType' must be one of Pre or Post.");
+        }
+        if (!(body.get("triggerOperation") instanceof String operation)
+                || !TRIGGER_OPERATIONS.contains(operation.toLowerCase())) {
+            return errorResponse(400, "BadRequest",
+                    "'triggerOperation' must be one of All, Create, Update, Delete or Replace.");
+        }
+        return null;
+    }
+
+    private Map<String, Object> scriptResource(CosmosScriptKind kind, Map<String, Object> body, String id,
+                                               String rid, String dbId, String collId, Instant now, String etag) {
+        Map<String, Object> script = new LinkedHashMap<>();
+        script.put("body", body.get("body"));
+        script.put("id",   id);
+        if (kind == CosmosScriptKind.TRIGGER) {
+            script.put("triggerOperation", body.get("triggerOperation"));
+            script.put("triggerType",      body.get("triggerType"));
+        }
+        script.put("_rid",  rid);
+        script.put("_ts",   now.getEpochSecond());
+        script.put("_self", "dbs/" + dbId + "/colls/" + collId + "/" + kind.segment() + "/" + id + "/");
+        script.put("_etag", quoted(etag));
+        return script;
+    }
+
+    /**
+     * A 16-byte collection child {@code _rid}: the container's 8 bytes, then 8 random bytes whose last
+     * byte carries the script kind in its upper nibble, as {@code ResourceId.tryParse} in the Java SDK reads it.
+     */
+    private String scriptRid(String collRid, CosmosScriptKind kind) {
+        byte[] b = new byte[16];
+        new Random().nextBytes(b);
+        if (collRid != null && !collRid.isBlank()) {
+            byte[] parent = Base64.getDecoder().decode(collRid.replace('-', '/'));
+            System.arraycopy(parent, 0, b, 0, Math.min(parent.length, 8));
+        }
+        b[15] = (byte) ((kind.ridTypeNibble() << 4) | (b[15] & 0x0F));
+        return Base64.getEncoder().encodeToString(b).replace('/', '-');
     }
 
     // -----------------------------------------------------------------------
@@ -1565,18 +1792,25 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    private Response listResponse(String arrayKey, List<Map<String, Object>> items, String rid) {
+    private Response listResponse(String arrayKey, List<?> items, String rid) {
+        return listResponse(arrayKey, items, rid, null);
+    }
+
+    private Response listResponse(String arrayKey, List<?> items, String rid, String continuationToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("_rid",   rid);
         body.put("_count", items.size());
         body.put(arrayKey, items);
         try {
-            return Response.ok(MAPPER.writeValueAsString(body), "application/json")
+            Response.ResponseBuilder rb = Response.ok(MAPPER.writeValueAsString(body), "application/json")
                     .header("x-ms-request-charge", "1")
                     .header("x-ms-item-count",     String.valueOf(items.size()))
                     .header("x-ms-activity-id",    UUID.randomUUID().toString())
-                    .header("x-ms-version",        "2018-12-31")
-                    .build();
+                    .header("x-ms-version",        "2018-12-31");
+            if (continuationToken != null) {
+                rb = rb.header("x-ms-continuation", continuationToken);
+            }
+            return rb.build();
         } catch (JsonProcessingException e) {
             return Response.serverError().build();
         }
@@ -1600,7 +1834,9 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-    private Response notImplemented() { return Response.status(501).build(); }
+    private Response notImplemented() {
+        return errorResponse(501, "NotImplemented", "This operation is not supported by the floci-az Cosmos DB emulator.");
+    }
 
     // -----------------------------------------------------------------------
     // Storage key helpers
@@ -1616,6 +1852,26 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
 
     private String docKey(String account, String dbId, String collId, String pkEncoded, String docId) {
         return account + K_DOC + dbId + "|" + collId + "|" + pkEncoded + "|" + docId;
+    }
+
+    private String scriptKey(String account, String dbId, String collId, CosmosScriptKind kind, String id) {
+        return scriptPrefix(account, dbId, collId, kind) + encodeKey(id);
+    }
+
+    private String scriptPrefix(String account, String dbId, String collId, CosmosScriptKind kind) {
+        return scriptPrefix(account, dbId, collId) + kind.segment() + "|";
+    }
+
+    private String scriptPrefix(String account, String dbId, String collId) {
+        return scriptPrefix(account, dbId) + encodeKey(collId) + "|";
+    }
+
+    /**
+     * Cosmos ids may contain {@code '|'}, so each id is encoded before it is joined: a raw join would
+     * let one container's script keys, and its cascade prefix, reach into another container's.
+     */
+    private String scriptPrefix(String account, String dbId) {
+        return account + K_SCRIPT + encodeKey(dbId) + "|";
     }
 
     private String encodeKey(String value) {
