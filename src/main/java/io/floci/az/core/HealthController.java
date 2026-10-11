@@ -19,14 +19,17 @@ public class HealthController {
 
     private final EmulatorConfig config;
     private final Instance<ServiceHealth> serviceHealth;
+    private final EmulatorReadiness readiness;
     // Resolved per instance, never in a static initializer: native image runs those at build
     // time, where FLOCI_AZ_VERSION is unset, and would bake "dev" into every release binary.
     private final String version;
 
     @Inject
-    public HealthController(EmulatorConfig config, Instance<ServiceHealth> serviceHealth) {
+    public HealthController(EmulatorConfig config, Instance<ServiceHealth> serviceHealth,
+                            EmulatorReadiness readiness) {
         this.config = config;
         this.serviceHealth = serviceHealth;
+        this.readiness = readiness;
         this.version = resolveVersion();
     }
 
@@ -50,6 +53,11 @@ public class HealthController {
     @GET
     @Path("ready")
     public Response ready() {
+        if (!readiness.isReady()) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("status", "DOWN"))
+                    .build();
+        }
         return status(new LinkedHashMap<>());
     }
 

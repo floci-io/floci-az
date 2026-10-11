@@ -336,3 +336,8 @@ services:
       floci-az:
         condition: service_healthy
 ```
+
+`/ready` is the readiness probe: it answers `503` with `{"status":"DOWN"}` until every service has finished
+its startup work (for example Service Bus `start-on-boot` or eager Cosmos engines) and again once shutdown
+begins. In between it answers what `/health` (also served at `/_floci/health`) answers: `200` with
+`{"status":"UP"}`, or `503` when a service reports a problem. `/health` does not wait for startup to finish.
