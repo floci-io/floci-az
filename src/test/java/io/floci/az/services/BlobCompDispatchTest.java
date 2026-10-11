@@ -7,7 +7,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 
 /**
  * Guards the blob dispatch against the catch-all {@code PUT} that used to fall through to
@@ -64,6 +66,15 @@ public class BlobCompDispatchTest {
                 .then().statusCode(501);
 
         assertBlobIntact();
+    }
+
+    @Test
+    void getBlobTagsIsNotMistakenForGetBlob() {
+        given()
+                .when().get("/{account}/{container}/{blob}?comp=tags", ACCOUNT, CONTAINER, BLOB)
+                .then()
+                .statusCode(not(200))
+                .body(not(containsString(CONTENT)));
     }
 
     @Test

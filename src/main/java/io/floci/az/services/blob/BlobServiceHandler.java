@@ -312,6 +312,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (request.queryParams().containsKey("snapshot") && !"GET".equalsIgnoreCase(method)
                         && !"HEAD".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method)) {
                     response = snapshotIsImmutable();
+                } else if ("tags".equals(comp)) {
+                    // Get Blob Tags must never fall through to Get Blob: the client would receive
+                    // the blob content where it expects a Tags document.
+                    response = notImplemented();
                 } else if ("PUT".equalsIgnoreCase(method) && "lease".equals(comp)) {
                     response = leaseBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "snapshot".equals(comp)) {
