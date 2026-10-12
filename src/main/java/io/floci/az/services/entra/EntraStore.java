@@ -25,6 +25,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -119,6 +120,29 @@ public class EntraStore implements Resettable {
 
     public void putApp(AppRegistration app) {
         write(APP_PREFIX + app.appId(), app);
+    }
+
+    public Optional<AppRegistration> findAppByObjectId(String objectId) {
+        for (AppRegistration app : listApps()) {
+            if (app.objectId().equalsIgnoreCase(objectId)) {
+                return Optional.of(app);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Every app registration, in storage order. */
+    public List<AppRegistration> listApps() {
+        List<AppRegistration> apps = new ArrayList<>();
+        for (StoredObject stored : store.scan(key -> key.startsWith(APP_PREFIX))) {
+            apps.add(parse(stored.data(), AppRegistration.class, stored.key()));
+        }
+        return apps;
+    }
+
+    public void removeApp(String appId) {
+        store.delete(APP_PREFIX + appId);
+        store.delete(SP_PREFIX + appId);
     }
 
     public Optional<ServicePrincipal> findServicePrincipalByAppId(String appId) {

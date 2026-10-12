@@ -16,6 +16,12 @@ group) is available here too.
 | `POST /v1.0/users/{id}/getMemberGroups` | Group object ids a user directly belongs to |
 | `POST /v1.0/groups/{id}/members/$ref` | Add a member to a group |
 | `DELETE /v1.0/groups/{id}/members/{id}/$ref` | Remove a member from a group |
+| `GET /v1.0/applications` | App registrations, with `$filter=appId eq '{id}'`, `displayName eq '{name}'` or `startswith(displayName,'{prefix}')` |
+| `GET /v1.0/applications(appId='{id}')` | One registration by application (client) id |
+| `GET` / `PATCH` / `DELETE /v1.0/applications/{id}` | One registration by object id (`PATCH` updates `displayName`) |
+| `POST /v1.0/applications` | Create a registration from `{"displayName": ...}`; a service principal is created with it |
+| `POST /v1.0/applications/{id}/addPassword` | Add a client secret: answers the `passwordCredential` with its `secretText` once |
+| `POST /v1.0/applications/{id}/removePassword` | Remove a client secret by `keyId` |
 
 `{id}` in `users/{id}` accepts either the user's object id or its userPrincipalName, as real Graph
 does. Only **direct** membership is modeled: there is no nested-group transitivity.
@@ -71,8 +77,26 @@ floci-az:
 |---|---|---|
 | `enabled` | `FLOCI_AZ_SERVICES_GRAPH_ENABLED` | `true` |
 
+### Applications and client secrets
+
+```bash
+# Register an app and mint a secret for it
+APP=$(curl -s -X POST http://localhost:4577/v1.0/applications -H "Content-Type: application/json" \
+  -d '{"displayName": "my-connector"}')
+OBJECT_ID=$(echo "$APP" | jq -r .id)
+curl -s -X POST "http://localhost:4577/v1.0/applications/$OBJECT_ID/addPassword" -H "Content-Type: application/json" \
+  -d '{"passwordCredential": {"displayName": "ci", "endDateTime": "2030-01-01T00:00:00Z"}}' | jq .
+# Read it back: passwordCredentials carry keyId, hint, startDateTime and endDateTime, never the secret
+curl -s "http://localhost:4577/v1.0/applications(appId='$(echo "$APP" | jq -r .appId)')" | jq .passwordCredentials
+```
+
+The seeded dev app (`11111111-1111-1111-1111-111111111111`) is listed with its seeded secret, whose
+`startDateTime` and `endDateTime` are null because the seed has no dates. The token endpoint issues
+tokens for any registered app id.
+
 ## Out of scope
 
-Full Graph CRUD (applications, service principals beyond discovery, directory roles, conditional
-access, ...) and app-registration management remain open
+Full Graph CRUD beyond the slice above (service principals beyond discovery, users and groups
+management, directory roles, conditional access, application `keyCredentials`, API permissions and
+`requiredResourceAccess`, owners, federated identity credentials) remains open
 ([#23](https://github.com/floci-io/floci-az/issues/23)).

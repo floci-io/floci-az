@@ -17,8 +17,17 @@ public final class EntraModels {
 
     public record Tenant(String id, String displayName) {}
 
-    /** A client secret. For dev seeding the plaintext value is kept; PR2 will hash on registration. */
-    public record ClientSecret(String keyId, String value, String hint) {}
+    /**
+     * A client secret of an app registration, as Microsoft Graph's {@code passwordCredential}: the
+     * {@code hint} is the first characters of the value, the dates are ISO 8601 or null when unknown.
+     */
+    public record ClientSecret(String keyId, String value, String hint, String displayName, String startDateTime,
+                               String endDateTime) {
+
+        public ClientSecret(String keyId, String value, String hint) {
+            this(keyId, value, hint, null, null, null);
+        }
+    }
 
     public record AppRegistration(
         String appId,            // client_id

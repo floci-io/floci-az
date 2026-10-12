@@ -73,6 +73,12 @@ public class GraphServiceHandler implements AzureServiceHandler {
         String sub = path.substring("v1.0/".length());
         String[] segments = sub.split("/");
 
+        Response applications = new GraphApplications(store, mapper, "https://graph.microsoft.com/v1.0/",
+                config.services().entra().defaultTenantId()).handle(request, segments);
+        if (applications != null) {
+            return applications;
+        }
+
         if (segments.length == 1 && "servicePrincipals".equals(segments[0])) {
             return "GET".equals(request.method())
                     ? servicePrincipals(request.queryParams().get("$filter"))
