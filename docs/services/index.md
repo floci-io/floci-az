@@ -35,6 +35,7 @@ Floci-AZ provides emulation for several core Azure services.
 | **Communication Services Email** | `/emails:send` + `/emailMessages` + ARM path (`Microsoft.Communication`) | ✅ ACS Email send + status polling; in-memory inspection mailbox (Mailpit-style); ARM communication/email services + domains. No real delivery |
 | **Managed Identity** | ARM path (`Microsoft.ManagedIdentity`) + `/metadata/identity/oauth2/token` + `/msi/token` | ✅ User-assigned identities + federated identity credentials, system-assigned `identities/default`, IMDS token endpoint (`ManagedIdentityCredential` via `AZURE_POD_IDENTITY_AUTHORITY_HOST`), App Service token endpoint (`IDENTITY_ENDPOINT` / `IDENTITY_HEADER`); tokens signed with the Entra key |
 | **Azure Policy** | ARM path (`Microsoft.Authorization/policy*`) | ✅ Policy definitions, set definitions, assignments and exemptions at management-group, subscription, resource-group and resource scope; assigned rules evaluated on writes (`deny`, `append`, `audit`); no compliance scans, no built-in definitions |
+| **Azure Resource Graph** | ARM path (`Microsoft.ResourceGraph/resources`) | ✅ KQL queries over `resources`, `resourcecontainers` and `policyresources`: `where`, `extend`, `project`, `summarize`, `order by`, `distinct`, `union`, `join`, the comparison and string operators, the conversion and string functions; `objectArray` / `table` formats, `$top` / `$skip` / `$skipToken` paging |
 
 ## Unified Endpoint
 

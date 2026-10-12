@@ -365,6 +365,19 @@ class AzureRoutingFilterTest {
     }
 
     @Test
+    void resourceGraphQueriesRouteToResourceGraph() {
+        // Resource Graph is tenant-rooted and POST-only: the provider route claims the query endpoint ...
+        given().contentType("application/json").body("{\"query\": \"resources | count\"}")
+                .when().post("/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01")
+                .then().statusCode(200)
+                .body(containsString("\"totalRecords\""));
+        // ... and answers its own 404 for a resource type the namespace does not have.
+        given().when().get("/providers/Microsoft.ResourceGraph/operations?api-version=2024-04-01")
+                .then().statusCode(404)
+                .body(containsString("InvalidResourceType"));
+    }
+
+    @Test
     void policyGuardLeavesOtherAuthorizationResourcesToArm() {
         // Role assignments share the Microsoft.Authorization namespace but are not policy resources:
         // the policy guard must not capture them.

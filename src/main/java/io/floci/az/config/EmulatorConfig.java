@@ -327,6 +327,7 @@ public interface EmulatorConfig {
         ManagedIdentityConfig  managedIdentity();
         ContainerAppsConfig    containerApps();
         PolicyConfig           policy();
+        ResourceGraphConfig    resourceGraph();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -437,6 +438,15 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean enforcement();
+    }
+
+    /**
+     * Azure Resource Graph: {@code POST /providers/Microsoft.ResourceGraph/resources} with a KQL subset over
+     * the resources, resource containers and policy resources the emulator holds.
+     */
+    interface ResourceGraphConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */
