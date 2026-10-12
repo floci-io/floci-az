@@ -1,5 +1,6 @@
 package io.floci.az.services.eventhub;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.services.eventhub.ArtemisConfigGenerator.EntitySpec;
 import org.junit.jupiter.api.Test;
 
@@ -7,12 +8,17 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ArtemisConfigGeneratorTest {
 
@@ -102,5 +108,33 @@ class ArtemisConfigGeneratorTest {
                 Map.of("eh1", new EntitySpec(4, List.of("$Default", "my-consumer-group")));
         assertEquals(matches(DIVERT_NAME, brokerXml("ns", entities)),
                      matches(DIVERT_NAME, brokerXml("ns", entities)));
+    }
+
+    /**
+     * The hostname family must match the broker's real container name, which carries the Docker
+     * resource namespace when one is configured.
+     */
+    @Test
+    void hostnameDivertsUseTheNamespacedContainerName() {
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.docker().resourceNamespace()).thenReturn(Optional.of("w1ns"));
+        String containerName = new EventHubNamespaceManager(config, null, null, null, null).containerName("ns");
+
+        List<String> addresses = matches(ADDRESS_NAME,
+                new ArtemisConfigGenerator(config).generate("ns", Map.of("eh1", new EntitySpec(1, List.of("$Default")))));
+
+        assertEquals("floci-az-w1ns-artemis-ns", containerName);
+        assertTrue(addresses.contains(ArtemisConfigGenerator.anycastEntityAddress(containerName, "ns", "eh1")),
+                "no hostname divert family for " + containerName + ": " + addresses);
+        assertFalse(addresses.stream().anyMatch(a -> a.startsWith("amqp://floci-az-artemis-ns/")),
+                "hostname family still uses the un-namespaced container name: " + addresses);
+    }
+
+    @Test
+    void hostnameDivertsWithoutAResourceNamespaceKeepTheirName() {
+        List<String> addresses =
+                matches(ADDRESS_NAME, brokerXml("ns", Map.of("eh1", new EntitySpec(1, List.of("$Default")))));
+
+        assertTrue(addresses.contains("amqp://floci-az-artemis-ns/ns/eh1"), addresses.toString());
     }
 }

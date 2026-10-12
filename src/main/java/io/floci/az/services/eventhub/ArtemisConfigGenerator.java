@@ -2,6 +2,7 @@ package io.floci.az.services.eventhub;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.XmlBuilder;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -50,7 +51,8 @@ public class ArtemisConfigGenerator {
 
     /** Returns broker.xml for the given namespace and entities (used for dynamic namespace creation). */
     public String generate(String namespace, Map<String, EntitySpec> entities) {
-        List<String> hostnames = List.of("localhost", "floci-az-artemis-" + namespace);
+        // The broker's own container name, spelled exactly as the namespace manager names it.
+        List<String> hostnames = List.of("localhost", ContainerStorageHelper.dockerName(config, "artemis-" + namespace));
 
         XmlBuilder addresses = new XmlBuilder();
         XmlBuilder diverts = new XmlBuilder();
