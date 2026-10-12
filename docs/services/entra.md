@@ -14,7 +14,8 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 ## Features
 
 - **Signed tokens**: RS256 JWTs with a stable signing key persisted across restarts; app-only
-  tokens carry `idtyp=app`, and every token carries a unique `uti`, matching real Entra
+  tokens carry `idtyp=app`, user access tokens name the user (`upn` and `unique_name` in v1.0,
+  `preferred_username` in v2.0), and every token carries a unique `uti`, matching real Entra
 - **Discovery**: `/.well-known/openid-configuration` derived from the request base URL. It
   advertises only what the emulator serves, see [Discovery document](#discovery-document)
 - **JWKS**: `/discovery/v2.0/keys` exposing the public signing key (`kty`, `use`, `alg`, `kid`,

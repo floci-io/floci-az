@@ -584,47 +584,61 @@ class PolicyTest {
                 .body("systemData.createdByType", equalTo("Application"))
                 .body("properties.metadata.createdBy", equalTo(PolicyHandler.AUTHOR));
 
-        // An application token: createdBy is the token's object id, the type is Application.
+        // An application token: createdBy is the application's client id, the type is Application.
         String appToken = token("client_credentials", "eval-app");
+        String appId = claim(appToken, "azp");
         String appOid = claim(appToken, "oid");
         given().header("Authorization", "Bearer " + appToken).contentType("application/json").body(DEFINITION_BODY)
                 .when().put(DEFINITIONS + "/by-app" + API)
                 .then().statusCode(201)
-                .body("systemData.createdBy", equalTo(appOid))
+                .body("systemData.createdBy", equalTo(appId))
                 .body("systemData.createdByType", equalTo("Application"))
-                .body("systemData.lastModifiedBy", equalTo(appOid))
+                .body("systemData.lastModifiedBy", equalTo(appId))
                 .body("properties.metadata.createdBy", equalTo(appOid));
 
-        // A user token updating it: createdBy stays, lastModifiedBy and updatedBy move to the user.
+        // A user token updating it: createdBy stays, lastModifiedBy and updatedBy move to the user's principal name.
         String userToken = token("password", "eval-app");
-        String userOid = claim(userToken, "oid");
+        String userName = claim(userToken, "preferred_username");
+        org.junit.jupiter.api.Assertions.assertEquals("user@floci.local", userName);
         given().header("Authorization", "Bearer " + userToken).contentType("application/json").body(DEFINITION_BODY)
                 .when().put(DEFINITIONS + "/by-app" + API)
                 .then().statusCode(201)
-                .body("systemData.createdBy", equalTo(appOid))
+                .body("systemData.createdBy", equalTo(appId))
                 .body("systemData.createdByType", equalTo("Application"))
-                .body("systemData.lastModifiedBy", equalTo(userOid))
+                .body("systemData.lastModifiedBy", equalTo(userName))
                 .body("systemData.lastModifiedByType", equalTo("User"))
                 .body("properties.metadata.createdBy", equalTo(appOid))
-                .body("properties.metadata.updatedBy", equalTo(userOid));
+                .body("properties.metadata.updatedBy", equalTo(userName));
 
         // Assignments carry the same stamps.
         given().header("Authorization", "Bearer " + appToken).contentType("application/json")
                 .body("{\"properties\": {\"policyDefinitionId\": \"" + DEFINITIONS + "/by-app\"}}")
                 .when().put(RG_SCOPE + AUTH + "/policyAssignments/by-app" + API)
                 .then().statusCode(201)
-                .body("systemData.createdBy", equalTo(appOid))
+                .body("systemData.createdBy", equalTo(appId))
                 .body("systemData.lastModifiedByType", equalTo("Application"));
+
+        // A managed identity token: the identity's client id, the type is ManagedIdentity.
+        String miBody = given().header("Metadata", "true")
+                .when().get("/metadata/identity/oauth2/token?resource=https://management.azure.com/&api-version=2018-02-01")
+                .then().statusCode(200).extract().asString();
+        String miToken = io.restassured.path.json.JsonPath.from(miBody).getString("access_token");
+        String miClientId = io.restassured.path.json.JsonPath.from(miBody).getString("client_id");
+        given().header("Authorization", "Bearer " + miToken).contentType("application/json").body(DEFINITION_BODY)
+                .when().put(DEFINITIONS + "/by-identity" + API)
+                .then().statusCode(201)
+                .body("systemData.createdBy", equalTo(miClientId))
+                .body("systemData.createdByType", equalTo("ManagedIdentity"));
 
         // A PATCH by another caller moves lastModifiedBy and updatedBy to that caller.
         given().header("Authorization", "Bearer " + userToken).contentType("application/json")
                 .body("{\"properties\": {\"overrides\": []}}")
                 .when().patch(RG_SCOPE + AUTH + "/policyAssignments/by-app" + API)
                 .then().statusCode(200)
-                .body("systemData.createdBy", equalTo(appOid))
-                .body("systemData.lastModifiedBy", equalTo(userOid))
+                .body("systemData.createdBy", equalTo(appId))
+                .body("systemData.lastModifiedBy", equalTo(userName))
                 .body("properties.metadata.createdBy", equalTo(appOid))
-                .body("properties.metadata.updatedBy", equalTo(userOid));
+                .body("properties.metadata.updatedBy", equalTo(userName));
     }
 
     private static String token(String grant, String clientId) {

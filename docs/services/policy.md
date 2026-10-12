@@ -286,9 +286,15 @@ floci-az:
   stored and echoed only).
 - **Definition versions are not implemented.** `versions` sub-resources answer `404`; `version` and
   `definitionVersion` are stored and echoed as plain strings.
-- **`systemData` and `metadata` audit fields** name the caller of the request: the `oid` (else the
-  `appid` or user name) of its bearer token, with `createdByType` / `lastModifiedByType` of
-  `Application` or `User` from the token's `idtyp`. The token is read, not verified. A request without
+- **`systemData` and `metadata` audit fields** name the caller of the request the way Resource
+  Manager does: a user by principal name (`upn`, `unique_name` or `preferred_username`), an
+  application or managed identity by client id (`appid` / `azp`), with `createdByType` /
+  `lastModifiedByType` of `User`, `Application` or `ManagedIdentity` (a token carrying `xms_mirid`).
+  The object id is used only when a token lacks those claims, and `Key` is never reported since
+  policy requests carry no shared key. The policy `metadata` fields follow the policy documentation
+  instead: `createdBy` is the principal's object id and `updatedBy` its friendly name (a user's
+  principal name, else the application's `app_displayname`, else its client id). The token is read,
+  not verified. A request without
   a readable token is stamped with a fixed emulator identity. `metadata.updatedBy` / `updatedOn` appear
   only after the first update instead of being present as `null` from creation.
 - **Listings are unpaginated** (`nextLink` is never returned) and `$top` is ignored.

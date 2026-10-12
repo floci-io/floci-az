@@ -35,7 +35,8 @@ public class PasswordGrant implements GrantHandler {
         String scp = Scopes.normalize(request.scope());
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), audience, userOid, userOid, request.appId(), scp,
-                request.tokenVersion(), null, request.lifetimeSeconds()));
+                request.tokenVersion(), null, request.lifetimeSeconds()),
+                TokenIssuer.userClaims(request.tokenVersion(), username));
         // MSAL asks for openid and client_info=1 on every password grant, and MSAL4J returns no account
         // (which azure-identity dereferences) unless the response carries both an ID token and client_info.
         String idToken = requestsOpenId(request.scope())
