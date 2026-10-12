@@ -123,6 +123,37 @@ name is matched with or without the `Custom-` prefix and the `_CL` suffix used b
 
 ---
 
+## Activity Log
+
+`GET /subscriptions/{sub}/providers/Microsoft.Insights/eventtypes/management/values` serves the
+subscription Activity Log the way the Activity Logs list operation does. Every management-plane PUT,
+PATCH, DELETE and POST action that passes the ARM request gate is recorded as an `Administrative`
+entry: a `BeginRequest` entry with status `Started` when the request enters, and an `EndRequest`
+entry with `Succeeded` or `Failed`, the HTTP status word as `subStatus` and `properties.statusCode`,
+when its handler answers. Reads and listings are not logged, as in Azure. Entries carry the caller and
+claims of the request's bearer token, the `x-ms-correlation-request-id` and `x-ms-client-request-id`
+headers, the `authorization` action and scope, the `httpRequest` method, uri and client address, and
+the resource's id, type, provider, group and subscription. Operation names follow ARM:
+`Microsoft.Storage/storageAccounts/write`, `.../delete`, `.../listKeys/action`,
+`Microsoft.Resources/subscriptions/resourceGroups/write`.
+
+```bash
+curl -s "http://localhost:4577/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.Insights/eventtypes/management/values?api-version=2015-04-01&\$filter=eventTimestamp%20ge%20'2026-01-01T00:00:00Z'%20and%20resourceGroupName%20eq%20'rg1'" | jq .
+```
+
+- **`$filter`** (required) takes `eventTimestamp ge '...'` plus `eventTimestamp le`, `resourceGroupName eq`,
+  `resourceUri eq` / `resourceId eq`, `resourceProvider eq`, `correlationId eq`, `eventChannels eq`,
+  `levels eq`, `operations eq`, `status eq`, `subStatus eq`, `caller eq`, `category eq` and
+  `searchText eq`, joined with `and`; the list-valued fields take comma-separated values. Anything else
+  answers `400 BadRequest`, as does a filter without a start time.
+- **`$select`** narrows each entry to the named properties.
+- **Paging**: `activity-log.page-size` entries per page (default 1000), the rest behind `nextLink`
+  with an opaque `$skiptoken`. Entries are newest first.
+- **`Policy` entries**: services that evaluate policy can record
+  `Microsoft.Authorization/policies/{effect}/action` entries through `ActivityLog.recordPolicyEffect`,
+  with the `properties.policies` JSON the Policy category carries.
+- Any `api-version` is accepted, the stable `2015-04-01` and the `2017-03-01-preview` alike.
+
 ## Supported KQL subset
 
 The query engine implements a pragmatic subset of KQL: enough for the assertions test suites and
@@ -147,11 +178,18 @@ floci-az:
   services:
     monitor:
       enabled: true
+      activity-log:
+        enabled: true
+        capacity: 10000
+        page-size: 1000
 ```
 
 | Env var | Default | Description |
 |---|---|---|
 | `FLOCI_AZ_SERVICES_MONITOR_ENABLED` | `true` | Enable/disable the service |
+| `FLOCI_AZ_SERVICES_MONITOR_ACTIVITY_LOG_ENABLED` | `true` | Records `Administrative` Activity Log entries for every ARM write, delete and action and serves the list operation |
+| `FLOCI_AZ_SERVICES_MONITOR_ACTIVITY_LOG_CAPACITY` | `10000` | Activity Log entries kept in memory; the oldest are dropped beyond it |
+| `FLOCI_AZ_SERVICES_MONITOR_ACTIVITY_LOG_PAGE_SIZE` | `1000` | Entries per page of the Activity Log list operation |
 
 Stored log records use the global `StorageBackend` (`FLOCI_AZ_STORAGE_MODE`), so logs can survive
 restarts in `persistent`/`hybrid`/`wal` modes.
@@ -163,6 +201,10 @@ restarts in `persistent`/`hybrid`/`wal` modes.
 - **KQL is a subset.** `summarize`, `extend`, `join`, `order by`, `parse`, scalar functions, and
   aggregations are not implemented: only `where` / `project` / `take` / `limit` plus `timespan`
   filtering.
+- **The Activity Log is in memory** (`activity-log.capacity` entries, default 10000) and covers the
+  management plane only: no `ServiceHealth`, `Alert`, `Autoscale`, `Security` or `Recommendation`
+  categories, no tenant-level log (`/providers/Microsoft.Insights/eventtypes/management/values` without a
+  subscription), and `authorization.role` is not reported.
 - **Metrics are out of scope.** Only the logs surface (ingestion + Log Analytics query) is emulated;
   `Microsoft.Insights/metrics`, alerts, action groups, and autoscale are not.
 - **Auth is permissive.** Bearer tokens are accepted but not validated (dev mode), matching the rest

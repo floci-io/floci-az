@@ -1,6 +1,7 @@
 package io.floci.az.core.arm;
 
 import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
+import io.floci.az.services.monitor.activitylog.ActivityLogRule;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -23,10 +24,10 @@ class ArmRequestGateProductionTest {
     void theProductionRulesRunInTheirDeclaredOrder() {
         List<Class<?>> expected = List.of(SubscriptionRule.class, ProviderRule.class, ResourceGroupRule.class,
             LocationRule.class, ResourceNameRule.class, GlobalNameRule.class, PolicyEvaluationRule.class,
-            AppendedLocationRule.class);
+            AppendedLocationRule.class, ActivityLogRule.class);
         List<Integer> orders = List.of(SubscriptionRule.ORDER, ProviderRule.ORDER, ResourceGroupRule.ORDER,
             LocationRule.ORDER, ResourceNameRule.ORDER, GlobalNameRule.ORDER, PolicyEvaluationRule.ORDER,
-            AppendedLocationRule.ORDER);
+            AppendedLocationRule.ORDER, ActivityLogRule.ORDER);
         List<ArmRequestRule> rules = gate.rules();
         assertEquals(expected.size(), rules.size(), "rules: " + rules);
         for (int i = 0; i < expected.size(); i++) {

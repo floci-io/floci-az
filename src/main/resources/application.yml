@@ -270,6 +270,10 @@ floci-az:
       lock-duration-seconds: 60
     monitor:
       enabled: true
+      activity-log:
+        enabled: true      # FLOCI_AZ_SERVICES_MONITOR_ACTIVITY_LOG_ENABLED: Administrative entries for every ARM write, delete and action
+        capacity: 10000    # entries kept in memory
+        page-size: 1000    # entries per page of the list operation
     aks:
       enabled: true
       mocked: false

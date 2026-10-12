@@ -5,6 +5,7 @@ import io.floci.az.core.AzureRequest;
 
 import java.io.IOException;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -21,11 +22,17 @@ import java.util.Map;
  * @param idtyp   {@code app}, {@code user} or null when the token does not say and no claim implies it
  * @param managedIdentity true when the token names a managed identity resource ({@code xms_mirid} or {@code xms_az_rid})
  */
-public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity) {
+public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity,
+                           Map<String, String> claims) {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false);
+    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false, Map.of());
+
+    /** Claims without the full map, for callers that only need the identity. */
+    public BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity) {
+        this(oid, appId, upn, idtyp, managedIdentity, Map.of());
+    }
 
     /** The claims of the request's bearer token, or {@link #NONE} when it carries none that can be read. */
     public static BearerClaims of(AzureRequest request) {
@@ -49,6 +56,14 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
             if (claims == null) {
                 return NONE; // a payload of JSON null
             }
+            Map<String, String> all = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : claims.entrySet()) {
+                if (entry.getValue() != null) {
+                    all.put(String.valueOf(entry.getKey()), entry.getValue() instanceof String text ? text
+                        : entry.getValue() instanceof Map<?, ?> || entry.getValue() instanceof java.util.List<?>
+                            ? MAPPER.writeValueAsString(entry.getValue()) : String.valueOf(entry.getValue()));
+                }
+            }
             String oid = string(claims, "oid");
             String appId = string(claims, "appid");
             if (appId == null) {
@@ -67,7 +82,7 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
                 // A delegated token carries the user's scopes (scp); an app-only token carries roles instead.
                 idtyp = upn != null || string(claims, "scp") != null ? "user" : "app";
             }
-            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity);
+            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity, Map.copyOf(all));
         } catch (IOException | IllegalArgumentException e) {
             return NONE;
         }
@@ -75,6 +90,27 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
 
     public boolean present() {
         return oid != null || appId != null || upn != null;
+    }
+
+    /**
+     * The claims as the Activity Log reports them: every claim as a string, plus the long-form names
+     * Azure adds for the object id, tenant, user name and scope when the short ones are present.
+     */
+    public Map<String, String> activityLogClaims() {
+        Map<String, String> out = new LinkedHashMap<>(claims);
+        putIfPresent(out, "appid", appId);
+        putIfPresent(out, "http://schemas.microsoft.com/identity/claims/objectidentifier", claims.get("oid"));
+        putIfPresent(out, "http://schemas.microsoft.com/identity/claims/tenantid", claims.get("tid"));
+        putIfPresent(out, "http://schemas.microsoft.com/identity/claims/scope", claims.get("scp"));
+        putIfPresent(out, "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn", upn);
+        putIfPresent(out, "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name", upn);
+        return out;
+    }
+
+    private static void putIfPresent(Map<String, String> target, String key, String value) {
+        if (value != null && !target.containsKey(key)) {
+            target.put(key, value);
+        }
     }
 
     /**

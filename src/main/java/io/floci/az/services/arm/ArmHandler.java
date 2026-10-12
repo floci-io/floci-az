@@ -25,6 +25,7 @@ import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
 import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
+import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.floci.az.services.network.NetworkHandler;
 import io.floci.az.services.queue.QueueServiceHandler;
 import jakarta.annotation.PostConstruct;
@@ -274,6 +275,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             return Response.ok(Map.of("value", hsms)).build();
         }
 
+        // ── Subscription Activity Log (Microsoft.Insights/eventtypes/management/values) ──
+        if (ActivityLogEndpoint.matches(path)) {
+            return handleProviders(req, path, method, extractSub(path));
+        }
+
         // ── Subscription-level resource listing ──────────────────────────────
         if (path.matches("subscriptions/[^/?]+/resources([?].*)?")) {
             return listIndex(req, extractSub(path), null);
@@ -419,11 +425,25 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             return handleWeb(req, path, method, sub);
         }
         // Delegating providers (Network/APIM/Monitor/EventGrid), via the ArmProviderService lane.
-        ArmProviderService provider = providerLane.get(providerNamespace(path));
+        ArmProviderService provider = providerLane(providerNamespace(path));
         if (provider != null) {
             return provider.armEnabled() ? provider.handleArm(req, path, method, sub) : armNotFound(path);
         }
         return armNotFound(path);
+    }
+
+    /** The lane service for a namespace, matched ignoring case: ARM ids and links spell namespaces either way. */
+    private ArmProviderService providerLane(String namespace) {
+        ArmProviderService exact = providerLane.get(namespace);
+        if (exact != null) {
+            return exact;
+        }
+        for (Map.Entry<String, ArmProviderService> entry : providerLane.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(namespace)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     /** The {@code Microsoft.X} namespace segment immediately after {@code /providers/}, or "" if none. */
