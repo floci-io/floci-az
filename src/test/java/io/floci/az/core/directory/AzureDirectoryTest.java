@@ -100,6 +100,40 @@ class AzureDirectoryTest {
     }
 
     @Test
+    void aFirstUseSubscriptionWhoseTenantIsGoneMovesToTheDefaultTenantAndStaysThere() {
+        StorageBackend<String, StoredObject> store = new InMemoryStorage<>();
+        AzureDirectory before = new AzureDirectory(seed(), store);
+        before.registerOnFirstUse("default-owned", null);
+        before.registerOnFirstUse("gov-owned", "gov");
+
+        String newDefaultTenant = "00000000-0000-0000-0000-0000000000aa";
+        DirectorySeed edited = DirectorySeed.of("AzureCloud", newDefaultTenant, SUB, List.of(), List.of());
+        AzureDirectory restarted = new AzureDirectory(edited, store);
+
+        assertEquals(newDefaultTenant, restarted.subscription("default-owned").orElseThrow().tenantId());
+        assertEquals(newDefaultTenant, restarted.subscription("gov-owned").orElseThrow().tenantId());
+        assertEquals(List.of(SUB, "default-owned", "gov-owned"), ids(restarted.subscriptionsOfTenant(newDefaultTenant)));
+        List<String> tenantIds = restarted.tenants().stream().map(Tenant::id).toList();
+        assertTrue(restarted.subscriptions().stream().allMatch(sub -> tenantIds.contains(sub.tenantId())),
+            "every subscription names a tenant the directory holds");
+
+        AzureDirectory again = new AzureDirectory(edited, store);
+        assertEquals(newDefaultTenant, again.subscription("gov-owned").orElseThrow().tenantId(),
+            "the move was written back, not recomputed");
+        assertEquals(DirectoryOrigin.FIRST_USE, again.subscription("gov-owned").orElseThrow().origin());
+    }
+
+    @Test
+    void aFirstUseSubscriptionKeepsATenantTheDirectoryStillHolds() {
+        StorageBackend<String, StoredObject> store = new InMemoryStorage<>();
+        new AzureDirectory(seed(), store).registerOnFirstUse("gov-owned", "gov");
+
+        AzureDirectory restarted = new AzureDirectory(seed(), store);
+
+        assertEquals("gov", restarted.subscription("gov-owned").orElseThrow().tenantId());
+    }
+
+    @Test
     void firstUseEntriesSurviveARestartThroughAPersistentStorageFactoryStore() {
         AzureDirectory before = new AzureDirectory(seed(), persistentFactory().create(AzureDirectory.STORE));
         before.registerOnFirstUse("persisted-sub", "gov");

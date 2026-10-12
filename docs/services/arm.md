@@ -166,7 +166,9 @@ or a configured one, and an unknown cloud or state fails startup with the proper
   configured one, or the one the subscription was first used with).
 - **Persistence**: configured entries are rewritten from configuration at every start, and an entry no
   longer configured is dropped. First-use entries survive a restart when `storage.services.directory.mode`
-  (or `storage.mode`) persists. `POST /_admin/reset` drops first-use entries.
+  (or `storage.mode`) persists. `POST /_admin/reset` drops first-use entries. A first-use subscription whose tenant is no longer
+  in the directory after a restart (the default tenant id changed, or a configured tenant was removed) moves to
+  the default tenant.
 
 ### Parity levels
 

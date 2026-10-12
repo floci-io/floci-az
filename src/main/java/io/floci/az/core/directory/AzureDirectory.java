@@ -31,7 +31,8 @@ import java.util.UUID;
  * <p>The default tenant and subscription and the configured ones ({@link DirectorySeed}) are rewritten from
  * configuration at every start, so editing the config takes effect; an entry that was seeded or configured
  * before and no longer is gets dropped. Entries registered on first use survive restarts in a persistent
- * storage mode. Everything goes through one {@link StorageFactory} store, {@code directory}, keyed
+ * storage mode; a first-use subscription whose tenant was dropped that way moves to the default tenant.
+ * Everything goes through one {@link StorageFactory} store, {@code directory}, keyed
  * {@code tenant/{id}} and {@code subscription/{id}} with the id lowercased, because ids are case-insensitive.
  *
  * <p>Listing order is the default entry first, then configured entries in config order, then first-use
@@ -202,7 +203,15 @@ public class AzureDirectory implements Resettable {
             puts.put(SUBSCRIPTION_PREFIX + key, stored(SUBSCRIPTION_PREFIX + key, subscription));
         }
         for (Map.Entry<String, Subscription> entry : firstUseSubscriptions.entrySet()) {
-            subscriptions.putIfAbsent(entry.getKey(), entry.getValue());
+            String key = entry.getKey();
+            if (subscriptions.containsKey(key)) {
+                continue;
+            }
+            Subscription restored = underAKnownTenant(entry.getValue());
+            subscriptions.put(key, restored);
+            if (restored != entry.getValue()) {
+                puts.put(SUBSCRIPTION_PREFIX + key, stored(SUBSCRIPTION_PREFIX + key, restored));
+            }
         }
 
         // A stale key a seed entry now rewrites stays; the others were seeded or configured once and no longer are.
@@ -211,6 +220,22 @@ public class AzureDirectory implements Resettable {
             LOG.infov("Directory: dropping {0} entries no longer seeded or configured: {1}", stale.size(), stale);
         }
         store.applyBatch(puts, Set.copyOf(stale));
+    }
+
+    /**
+     * A first-use subscription restored from storage may name a tenant the directory no longer holds: the
+     * default tenant id changed, or a configured tenant was removed. It then moves to the default tenant, the
+     * same owner first use gives a subscription whose tenant is unknown, so it stays listed and never reports
+     * a tenant that {@code GET /tenants} does not.
+     */
+    private Subscription underAKnownTenant(Subscription subscription) {
+        if (tenants.containsKey(DirectorySeed.key(subscription.tenantId()))) {
+            return subscription;
+        }
+        LOG.infov("Directory: subscription {0} belonged to tenant {1}, which is gone; moving it to the default"
+            + " tenant {2}", subscription.id(), subscription.tenantId(), defaultTenantId());
+        return new Subscription(subscription.id(), defaultTenantId(), subscription.displayName(),
+            subscription.state(), subscription.origin());
     }
 
     private List<String> sortedKeys() {
