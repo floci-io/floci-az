@@ -9,6 +9,7 @@ import io.floci.az.core.arm.ArmRequestRule;
 import io.floci.az.core.arm.ArmVerdict;
 import io.floci.az.services.policy.evaluation.PolicyEngine.Match;
 import io.floci.az.services.policy.evaluation.PolicyEngine.Outcome;
+import io.floci.az.services.policyinsights.ComplianceStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -48,20 +49,27 @@ public class PolicyEvaluationRule implements ArmRequestRule {
     private final PolicyEvaluationLog log;
     private final boolean enabled;
 
-    /** The audit matches of admitted requests, recorded on exit when the handler has answered with a 2xx. */
+    /** The admitted requests, whose audits and compliance verdicts are recorded on exit when the handler answered 2xx. */
     private final Map<ArmCall, Pending> pending = Collections.synchronizedMap(new IdentityHashMap<>());
 
-    private record Pending(PolicyEngine.Request request, List<Match> audits, String caller, String correlationId) {
+    /** The deletes in flight, whose resource loses its compliance records once the handler answered 2xx. */
+    private final Set<ArmCall> deletions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
+    private record Pending(PolicyEngine.Request request, List<Match> audits, String caller, String correlationId,
+                           List<PolicyEngine.Evaluation> evaluations) {
     }
+
+    private final ComplianceStore compliance;
 
     @Inject
-    public PolicyEvaluationRule(PolicyEngine engine, PolicyEvaluationLog log, EmulatorConfig config) {
-        this(engine, log, config.services().policy().enabled() && config.services().policy().enforcement());
+    public PolicyEvaluationRule(PolicyEngine engine, PolicyEvaluationLog log, ComplianceStore compliance, EmulatorConfig config) {
+        this(engine, log, compliance, config.services().policy().enabled() && config.services().policy().enforcement());
     }
 
-    PolicyEvaluationRule(PolicyEngine engine, PolicyEvaluationLog log, boolean enabled) {
+    PolicyEvaluationRule(PolicyEngine engine, PolicyEvaluationLog log, ComplianceStore compliance, boolean enabled) {
         this.engine = engine;
         this.log = log;
+        this.compliance = compliance;
         this.enabled = enabled;
     }
 
@@ -77,6 +85,10 @@ public class PolicyEvaluationRule implements ArmRequestRule {
 
     @Override
     public ArmVerdict enter(ArmCall call) {
+        if (enabled && "DELETE".equals(call.method()) && call.id() != null && call.id().name() != null) {
+            deletions.add(call);
+            return ArmVerdict.proceed();
+        }
         if (!enabled || !PolicyEngine.evaluates(call)) {
             return ArmVerdict.proceed();
         }
@@ -117,21 +129,28 @@ public class PolicyEvaluationRule implements ArmRequestRule {
         for (Match append : appends) {
             log.record(event(evaluation, append, "append", "Informational", "Succeeded", caller, correlationId));
         }
-        if (!audits.isEmpty()) {
-            pending.put(call, new Pending(evaluation, audits, caller, correlationId));
-        }
+        pending.put(call, new Pending(evaluation, audits, caller, correlationId, outcome.evaluations()));
         return ArmVerdict.proceed();
     }
 
     @Override
     public void exit(ArmCall call, Response response) {
-        Pending audit = pending.remove(call);
-        if (audit == null || response == null || response.getStatus() / 100 != 2) {
+        boolean succeeded = response != null && response.getStatus() / 100 == 2;
+        if (deletions.remove(call)) {
+            if (succeeded) {
+                compliance.forgetResource(call.id().id());
+            }
             return;
         }
-        for (Match match : audit.audits()) {
-            log.record(event(audit.request(), match, "audit", "Warning", "Succeeded", audit.caller(), audit.correlationId()));
+        Pending admitted = pending.remove(call);
+        if (admitted == null || !succeeded) {
+            return;
         }
+        for (Match match : admitted.audits()) {
+            log.record(event(admitted.request(), match, "audit", "Warning", "Succeeded", admitted.caller(), admitted.correlationId()));
+        }
+        compliance.forgetResource(call.id().id());
+        compliance.record(call.id(), admitted.request().content(), admitted.evaluations());
     }
 
     private static PolicyEvaluationEvent event(PolicyEngine.Request request, Match match, String operation, String level,

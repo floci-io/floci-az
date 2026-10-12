@@ -320,6 +320,7 @@ floci-az:
     policy:
       enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions
       enforcement: true   # FLOCI_AZ_SERVICES_POLICY_ENFORCEMENT: evaluate assigned rules on resource writes (deny, append, audit)
+      insights: true      # FLOCI_AZ_SERVICES_POLICY_INSIGHTS: Microsoft.PolicyInsights compliance states, queries, summaries and scans
 
   auth:
     # Not enforced yet: every value behaves like dev, accepting any credentials without
