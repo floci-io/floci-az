@@ -286,9 +286,10 @@ floci-az:
   stored and echoed only).
 - **Definition versions are not implemented.** `versions` sub-resources answer `404`; `version` and
   `definitionVersion` are stored and echoed as plain strings.
-- **`systemData` and `metadata` audit fields** name a fixed emulator identity rather than the caller,
-  and `metadata.updatedBy` / `updatedOn` appear only after the first update instead of being present
-  as `null` from creation.
+- **`systemData` and `metadata` audit fields** name the caller of the request: the `oid` (else the
+  `appid` or user name) of its bearer token, with `createdByType` / `lastModifiedByType` of
+  `Application` or `User` from the token's `idtyp`. The token is read, not verified. A request without
+  a readable token is stamped with a fixed emulator identity.
 - **Listings are unpaginated** (`nextLink` is never returned) and `$top` is ignored.
 - **Policy state is in-memory only**, regardless of `storage.mode`, like the rest of the ARM control
   plane.
