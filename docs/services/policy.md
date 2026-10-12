@@ -7,15 +7,16 @@ Azure SDKs (`azure-resourcemanager-resources`, `armpolicy`, `azure-mgmt-resource
 definitions**, **policy set definitions** (initiatives), **policy assignments** and **policy
 exemptions** at every scope the real service accepts, and **evaluates the assigned rules** on every
 resource write: `deny` refuses the request with `RequestDisallowedByPolicy`, `append` amends it and
-`audit` is recorded.
+`audit` is recorded. Every evaluation leaves a **compliance state** served through
+`Microsoft.PolicyInsights` (`policyStates` queries, summaries and on-demand evaluation).
 
 > **HTTP-only, no Docker.** All policy state is in-memory and ephemeral, like the rest of the ARM
 > control plane.
 
-> **Request-time effects only.** `deny`, `append` and `audit` fire when a resource is written; there is
-> no compliance scan of existing resources, no remediation and no compliance state
-> (`Microsoft.PolicyInsights` is not implemented). A rule the engine cannot evaluate denies the request
-> rather than standing aside, so a broken rule fails loudly.
+> **Request-time effects, on-demand scans.** `deny`, `append` and `audit` fire when a resource is
+> written, and `triggerEvaluation` re-evaluates what already exists; there is no periodic scan and no
+> remediation. A rule the engine cannot evaluate denies the request rather than standing aside, so a
+> broken rule fails loudly.
 
 ---
 
@@ -87,8 +88,18 @@ DELETE /{scope}/providers/Microsoft.Authorization/policyExemptions/{name}
 GET    /{scope}/providers/Microsoft.Authorization/policyExemptions[?$filter=...]
 ```
 
-Any `api-version` is accepted. Shapes follow the policy spec `2025-03-01` and the exemptions spec
-`2022-07-01-preview`.
+```
+# Compliance states (Microsoft.PolicyInsights): {scope} is a subscription, resource group, resource,
+# policy assignment, policy definition or policy set definition
+POST   /{scope}/providers/Microsoft.PolicyInsights/policyStates/latest/queryResults[?$filter=...&$top=...&$select=...&$orderby=...&$skiptoken=...]
+POST   /{scope}/providers/Microsoft.PolicyInsights/policyStates/latest/summarize[?$filter=...]
+POST   /{scope}/providers/Microsoft.PolicyInsights/policyStates/latest/triggerEvaluation   # subscription or resource group
+GET    /{scope}/providers/Microsoft.PolicyInsights/asyncOperationResults/{id}
+GET    /providers/Microsoft.PolicyInsights/operations
+```
+
+Any `api-version` is accepted. Shapes follow the policy spec `2025-03-01`, the exemptions spec
+`2022-07-01-preview` and the Policy Insights spec `2024-10-01`.
 
 ---
 
@@ -220,6 +231,45 @@ Each entry names the resource, the assignment, the definition, the set definitio
 there is one, the resolved effect, the enforcement mode, the caller and claims, the correlation id and
 the `evaluatedExpressions`. `POST /_admin/reset` empties the log too.
 
+### Compliance states
+
+Each evaluation of a resource against an assignment leaves one policy state per definition the
+assignment carries, `Compliant`, `NonCompliant` or `Exempt`, keyed by resource, assignment, definition
+and reference id, so a later write of the same resource replaces the earlier verdict. Resource groups
+and resources are recorded alike. Deleting a resource forgets its states; deleting an assignment forgets
+the states it produced.
+
+`policyStates/latest/queryResults` answers `PolicyStatesQueryResults` with the record fields Azure
+serves (`resourceId`, `policyAssignmentId`, `policyDefinitionId`, `complianceState`, `isCompliant`,
+`resourceType`, `resourceLocation`, `resourceGroup`, `subscriptionId`, `policyDefinitionAction`,
+`policyDefinitionCategory`, `policySetDefinitionId`, `policyDefinitionReferenceId`,
+`policyAssignmentScope`, `policyAssignmentParameters`, `effectiveParameters` and the rest). Newest
+records come first; `$orderby=timestamp asc` reverses that. `$filter` accepts `eq` clauses joined with
+`and` over `complianceState`, `isCompliant`, `policyAssignmentId`, `policyAssignmentName`,
+`policyDefinitionId`, `policyDefinitionName`, `policySetDefinitionId`, `policyDefinitionReferenceId`,
+`policyDefinitionAction`, `resourceType`, `resourceLocation`, `resourceGroup`, `resourceId` and
+`subscriptionId`; `$select` trims the records; `$top` pages with an `@odata.nextLink` carrying
+`$skiptoken`. An unsupported clause answers `400 InvalidQueryFilter`. The scope narrows the result the
+way Azure's does: a subscription, resource group or resource covers itself and everything below, an
+assignment, definition or set definition covers the states it produced.
+
+`policyStates/latest/summarize` answers the `SummarizeResults` shape: counts of non-compliant
+resources and policies, `resourceDetails` and `policyDetails` by compliance state, and one entry per
+assignment with its definitions and their effects.
+
+`policyStates/latest/triggerEvaluation` at subscription or resource-group scope re-evaluates every
+resource group and resource there against the current assignments, synchronously, and answers the way
+Azure does: `202 Accepted` with a `Location` header naming an `asyncOperationResults` operation that
+reads as `Succeeded`, and a `Retry-After`. Use it after assigning a policy to resources that already
+exist, which Azure does on a schedule and the emulator does only on request.
+
+```bash
+SUB=http://localhost:4577/subscriptions/00000000-0000-0000-0000-000000000000
+curl -s -X POST "$SUB/providers/Microsoft.PolicyInsights/policyStates/latest/triggerEvaluation?api-version=2024-10-01" -i | grep -i location
+curl -s -X POST "$SUB/providers/Microsoft.PolicyInsights/policyStates/latest/queryResults?api-version=2024-10-01&\$filter=complianceState%20eq%20'NonCompliant'" | jq '.value[].resourceId'
+curl -s -X POST "$SUB/providers/Microsoft.PolicyInsights/policyStates/latest/summarize?api-version=2024-10-01" | jq '.value[0].results'
+```
+
 ### Alias resolution
 
 Azure resolves an alias through a per-api-version path table. The emulator has no table, so it resolves
@@ -239,12 +289,14 @@ floci-az:
     policy:
       enabled: true
       enforcement: true
+      insights: true
 ```
 
 | Property | Env var | Default | Description |
 |---|---|---|---|
 | `enabled` | `FLOCI_AZ_SERVICES_POLICY_ENABLED` | `true` | Enables the `Microsoft.Authorization` policy resources. When disabled, their paths fall through to the generic ARM handler and answer `404` |
 | `enforcement` | `FLOCI_AZ_SERVICES_POLICY_ENFORCEMENT` | `true` | Evaluates the assigned rules on every resource write. When off, policies are stored but no request is denied, amended or audited |
+| `insights` | `FLOCI_AZ_SERVICES_POLICY_INSIGHTS` | `true` | Serves `Microsoft.PolicyInsights`: the compliance states the evaluation records, their queries and summaries, and `triggerEvaluation` scans. Needs `enforcement` to record anything |
 
 ---
 
@@ -252,12 +304,16 @@ floci-az:
 
 - **Request-time evaluation only.** `deny`, `append` and `audit` fire on writes; `modify`,
   `denyAction`, `auditIfNotExists`, `deployIfNotExists`, `manual`, `mutate` and the resource-provider
-  modes (`Microsoft.Kubernetes.Data` and the like) evaluate to nothing. There is no compliance scan of
-  existing resources and `Microsoft.PolicyInsights` (policy states, remediations, compliance summaries)
-  is not implemented. A PATCH of a resource that cannot be read back (none stored, or a handler that
-  answers something other than 200) is evaluated on the body it carries, and the merge is generic:
-  a provider that replaces a nested collection on PATCH (a Redis cache's `redisConfiguration`, say)
-  stores less than the policy saw when the patch supplies only part of it.
+  modes (`Microsoft.Kubernetes.Data` and the like) evaluate to nothing. A PATCH of a resource that
+  cannot be read back (none stored, or a handler that answers something other than 200) is evaluated
+  on the body it carries, and the merge is generic: a provider that replaces a nested collection on
+  PATCH (a Redis cache's `redisConfiguration`, say) stores less than the policy saw when the patch
+  supplies only part of it.
+- **Compliance is recorded at write time and on `triggerEvaluation`**, never on a schedule, and
+  `queryResults` reflects it at once rather than after Azure's propagation delay. Only
+  `policyStates/latest` is served (`default` answers the same records); there are no policy events,
+  remediations, attestations or component states, and `triggerEvaluation` runs synchronously before
+  answering `202`.
 - **Management-group assignments apply to every subscription.** The emulator has no management-group
   hierarchy, so an assignment at `Microsoft.Management/managementGroups/{mg}` covers all subscriptions.
 - **`Indexed` mode is approximated** as top-level provider resources: nested child types, extension

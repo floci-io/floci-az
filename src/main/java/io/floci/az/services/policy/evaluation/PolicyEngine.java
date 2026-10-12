@@ -62,8 +62,22 @@ public class PolicyEngine {
                         String nonComplianceMessage, String error) {
     }
 
-    /** What the request should do next: the denying matches, if any, and every match that fired. */
-    public record Outcome(List<Match> matches, List<Match> denials, boolean contentChanged) {
+    /**
+     * One applicable definition and whether its {@code if} condition matched the resource, matched or not:
+     * the compliance verdict of the resource against that assignment.
+     *
+     * @param exempt true when an exemption lifted the assignment for this resource
+     */
+    public record Evaluation(Map<String, Object> assignment, Map<String, Object> definition,
+                             Map<String, Object> setDefinition, String referenceId, String effect,
+                             Map<String, Object> parameters, boolean matched, boolean exempt) {
+    }
+
+    /**
+     * What the request should do next: the denying matches, if any, every match that fired, and the
+     * verdict of every applicable definition, for compliance reporting.
+     */
+    public record Outcome(List<Match> matches, List<Match> denials, boolean contentChanged, List<Evaluation> evaluations) {
         public boolean denied() {
             return !denials.isEmpty();
         }
@@ -131,6 +145,7 @@ public class PolicyEngine {
 
         List<Match> matches = new ArrayList<>();
         List<Match> denials = new ArrayList<>();
+        List<Evaluation> evaluations = new ArrayList<>();
         boolean changed = false;
         for (String phase : List.of("append", "deny", "audit", "other")) {
             for (Candidate candidate : candidates) {
@@ -141,11 +156,16 @@ public class PolicyEngine {
                     case "audit" -> effect.equals("audit");
                     default -> !Set.of("append", "deny", "audit", "disabled").contains(effect);
                 };
-                if (!inPhase || isExempt(candidate, resourceKey, content, resourceType)
+                if (!inPhase || !isApplicable(candidate, base)
                         || (request.tagsOnly() && !inspectsTags(candidate, base))) {
                     continue;
                 }
+                if (isExempt(candidate, resourceKey, content, resourceType)) {
+                    evaluations.add(evaluation(candidate, false, true));
+                    continue;
+                }
                 Match match = evaluateCandidate(candidate, base);
+                evaluations.add(evaluation(candidate, match != null, false));
                 if (match == null) {
                     continue;
                 }
@@ -176,7 +196,23 @@ public class PolicyEngine {
                 matches.add(match);
             }
         }
-        return new Outcome(List.copyOf(matches), List.copyOf(denials), changed);
+        return new Outcome(List.copyOf(matches), List.copyOf(denials), changed, List.copyOf(evaluations));
+    }
+
+    private static Evaluation evaluation(Candidate candidate, boolean matched, boolean exempt) {
+        return new Evaluation(candidate.assignment(), candidate.definition(), candidate.setDefinition(), candidate.referenceId(),
+            candidate.effect(), candidate.parameters(), matched, exempt);
+    }
+
+    /** Whether the definition's mode covers the resource and the definition carries a rule to evaluate. */
+    private static boolean isApplicable(Candidate candidate, EvaluationContext base) {
+        Map<String, Object> definitionProperties = properties(candidate.definition());
+        String mode = String.valueOf(definitionProperties.getOrDefault("mode", "Indexed"));
+        if ("indexed".equalsIgnoreCase(mode) && !supportsTagsAndLocation(base.id)) {
+            return false;
+        }
+        Object rule = definitionProperties.get("policyRule");
+        return rule instanceof Map<?, ?> r && ResourceFields.get(r, "if") instanceof Map<?, ?>;
     }
 
     // ── Applicability ───────────────────────────────────────────────────────────
@@ -520,10 +556,6 @@ public class PolicyEngine {
 
     private static Match evaluateCandidate(Candidate candidate, EvaluationContext base) {
         Map<String, Object> definitionProperties = properties(candidate.definition());
-        String mode = String.valueOf(definitionProperties.getOrDefault("mode", "Indexed"));
-        if ("indexed".equalsIgnoreCase(mode) && !supportsTagsAndLocation(base.id)) {
-            return null;
-        }
         Object rule = definitionProperties.get("policyRule");
         Object condition = rule instanceof Map<?, ?> r ? ResourceFields.get(r, "if") : null;
         if (!(condition instanceof Map<?, ?> ifCondition)) {
@@ -633,7 +665,7 @@ public class PolicyEngine {
         content.put("id", id.id());
     }
 
-    static Map<String, Object> properties(Map<String, Object> resource) {
+    public static Map<String, Object> properties(Map<String, Object> resource) {
         Object properties = resource == null ? null : resource.get("properties");
         if (properties instanceof Map<?, ?> map) {
             @SuppressWarnings("unchecked")

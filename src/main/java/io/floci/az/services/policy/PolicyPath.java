@@ -76,7 +76,9 @@ record PolicyPath(String scope, Type type, String name, String remainder) {
     /** True when the last Microsoft.Authorization segment of {@code path} names a policy resource type. */
     static boolean isPolicyPath(String path) {
         PolicyPath parsed = parse(stripQuery(path));
-        return parsed != null && parsed.type() != null;
+        // An extension resource under a policy resource (its policy states, for instance) belongs to its own provider.
+        return parsed != null && parsed.type() != null
+                && !parsed.remainder().toLowerCase(Locale.ROOT).startsWith("providers/");
     }
 
     static String stripQuery(String path) {

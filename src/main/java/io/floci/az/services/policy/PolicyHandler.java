@@ -9,6 +9,7 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.services.entra.TokenIssuer;
 import io.floci.az.services.managedidentity.ManagedIdentityStore;
+import io.floci.az.services.policyinsights.ComplianceStore;
 import io.floci.az.services.policy.PolicyPath.ScopeKind;
 import io.floci.az.services.policy.PolicyPath.Type;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -61,12 +62,14 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
     private final EmulatorConfig config;
     private final PolicyStore store;
     private final ManagedIdentityStore identities;
+    private final ComplianceStore compliance;
 
     @Inject
-    public PolicyHandler(EmulatorConfig config, PolicyStore store, ManagedIdentityStore identities) {
+    public PolicyHandler(EmulatorConfig config, PolicyStore store, ManagedIdentityStore identities, ComplianceStore compliance) {
         this.config = config;
         this.store = store;
         this.identities = identities;
+        this.compliance = compliance;
     }
 
     @Override
@@ -340,6 +343,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
                 // Exemptions are bound to their assignment and go with it, as on Azure.
                 store.removeExemptionsForAssignment(id);
                 store.removeAssignment(id);
+                compliance.forgetAssignment(id);
                 yield Response.ok(strip(existing)).build();
             }
             default -> methodNotAllowed(method);

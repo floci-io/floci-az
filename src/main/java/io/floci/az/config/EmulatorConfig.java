@@ -437,6 +437,13 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean enforcement();
+
+        /**
+         * Serves {@code Microsoft.PolicyInsights}: the compliance states the evaluation records, their
+         * query and summary operations, and on-demand compliance scans.
+         */
+        @WithDefault("true")
+        boolean insights();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

@@ -365,7 +365,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      * @param everyContributor whether contributors outside the default listing
      *                         ({@link ResourceIndexContributor#inDefaultListing()}) contribute too
      */
-    private List<Map<String, Object>> indexedResources(String sub, String rg, boolean everyContributor) {
+    public List<Map<String, Object>> indexedResources(String sub, String rg, boolean everyContributor) {
         List<Map<String, Object>> resources = new ArrayList<>();
         collectOwn(storageAccounts, sub, rg, resources);
         collectOwn(keyVaults, sub, rg, resources);
