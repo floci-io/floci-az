@@ -35,4 +35,14 @@ public interface ResourceIndexContributor {
     default boolean indexEnabled() {
         return true;
     }
+
+    /**
+     * Whether the generic listings show this contributor's resources in the default configuration. A service
+     * that joined the index after the listings were pinned answers {@code false}: its resources are listed only
+     * under {@code parity-overrides.resource-group-delete}, so the default listings stay as they were, while a
+     * resource-group delete always sees them and deletes them with the group.
+     */
+    default boolean inDefaultListing() {
+        return true;
+    }
 }

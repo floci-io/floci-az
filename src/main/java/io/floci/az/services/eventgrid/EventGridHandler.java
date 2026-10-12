@@ -6,11 +6,14 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -25,7 +28,7 @@ import java.util.Set;
  * </ul>
  */
 @ApplicationScoped
-public class EventGridHandler implements AzureServiceHandler, Resettable, ArmProviderService {
+public class EventGridHandler implements AzureServiceHandler, Resettable, ArmProviderService, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(EventGridHandler.class);
 
@@ -76,6 +79,27 @@ public class EventGridHandler implements AzureServiceHandler, Resettable, ArmPro
     @Override
     public boolean armEnabled() {
         return config.services().eventGrid().enabled();
+    }
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return service.topicIndexEntries(sub, rg);
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return service.topicIndexEntries(sub, null);
+    }
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().eventGrid().enabled();
+    }
+
+    /** Joined the index with the resource-group cascade; listed only under {@code resource-group-delete}. */
+    @Override
+    public boolean inDefaultListing() {
+        return false;
     }
 
     /** Control plane (ArmHandler lane): {@code sub} is supplied by ArmHandler. */

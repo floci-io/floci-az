@@ -95,7 +95,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     /** The tenants and subscriptions {@code GET /tenants} and {@code GET /subscriptions} report. */
     private final AzureDirectory directory;
 
-    /** Resource groups and their own operations. */
+    /** Resource groups: their own operations and the cascade a delete runs. */
     private final ResourceGroupService resourceGroups;
 
     @Inject
@@ -275,6 +275,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             return listIndex(req, extractSub(path), null);
         }
 
+        // ── Long-running operation results (resource-group delete) ───────────
+        if (path.matches("subscriptions/[^/?]+/operationresults/[^/?]+([?].*)?")) {
+            return resourceGroups.operationResult(extractSub(path), extractAfter(path, "/operationresults/"));
+        }
+
         // ── Resource Groups ───────────────────────────────────────────────────
         // Azure spec uses lowercase "resourcegroups" but convention uses "resourceGroups"; accept both.
         if (path.startsWith("subscriptions/") && path.toLowerCase().contains("/resourcegroups")) {
@@ -297,7 +302,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
         // subscriptions/{sub}/resourceGroups/{rg}  (no trailing segments)
         if (lc.matches("subscriptions/[^/]+/resourcegroups/[^/]+([?].*)?")) {
-            return resourceGroups.handle(req, method, sub, extractRg(path));
+            return resourceGroups.handle(req, method, sub, extractRg(path), () -> resourceIds(sub));
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}/resources  (list resources in RG)
@@ -328,8 +333,17 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         } catch (ArmResourceFilter.InvalidFilterException e) {
             return ArmErrors.error(400, "InvalidFilter", e.getMessage());
         }
-        return Response.ok(Map.of("value", indexedResources(sub, rg).stream().filter(matches).toList()))
-                .build();
+        return Response.ok(Map.of("value", indexedResources(sub, rg, config.resourceGroupDelete()).stream()
+                .filter(matches).toList())).build();
+    }
+
+    /** The id of every resource in the subscription, contributors listed only under parity included. */
+    private List<String> resourceIds(String sub) {
+        return indexedResources(sub, null, true).stream()
+                .map(resource -> resource.get("id"))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .toList();
     }
 
     /**
@@ -343,8 +357,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      * which a properties-free entry would not carry. A deliberate deviation from Azure, whose
      * generic listing never carries {@code properties} — its {@code $expand} adds only
      * {@code createdTime}, {@code changedTime} and {@code provisioningState}.</p>
+     *
+     * @param everyContributor whether contributors outside the default listing
+     *                         ({@link ResourceIndexContributor#inDefaultListing()}) contribute too
      */
-    private List<Map<String, Object>> indexedResources(String sub, String rg) {
+    private List<Map<String, Object>> indexedResources(String sub, String rg, boolean everyContributor) {
         List<Map<String, Object>> resources = new ArrayList<>();
         collectOwn(storageAccounts, sub, rg, resources);
         collectOwn(keyVaults, sub, rg, resources);
@@ -364,7 +381,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                     : managedIdentityHandler.listResources(sub, rg));
         }
         for (ResourceIndexContributor contributor : resourceIndexContributors) {
-            if (contributor.indexEnabled()) {
+            if (contributor.indexEnabled() && (everyContributor || contributor.inDefaultListing())) {
                 resources.addAll(rg == null
                         ? contributor.listSubscriptionResources(sub)
                         : contributor.listRgResources(sub, rg));

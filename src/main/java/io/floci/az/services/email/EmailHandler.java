@@ -11,7 +11,9 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.email.EmailModels.CapturedEmail;
@@ -57,7 +59,7 @@ import java.util.regex.Pattern;
  * <p>Emails are captured in-memory for local inspection; no actual delivery occurs.
  */
 @ApplicationScoped
-public class EmailHandler implements AzureServiceHandler, Resettable {
+public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(EmailHandler.class);
 
@@ -424,6 +426,41 @@ public class EmailHandler implements AzureServiceHandler, Resettable {
             }
             default -> Response.status(405).build();
         };
+    }
+
+    // ── Resource index ───────────────────────────────────────────────────────
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries(sub, rg);
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries(sub, null);
+    }
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().email().enabled();
+    }
+
+    /** Joined the index with the resource-group cascade; listed only under {@code resource-group-delete}. */
+    @Override
+    public boolean inDefaultListing() {
+        return false;
+    }
+
+    /** Communication services, email services and their domains in a subscription, or one of its groups. */
+    private synchronized List<Map<String, Object>> indexEntries(String sub, String rg) {
+        List<Map<String, Object>> entries = new ArrayList<>();
+        for (Map<String, Map<String, Object>> store : List.of(communicationServices, emailServices, emailDomains)) {
+            store.values().stream()
+                    .filter(resource -> ArmResources.inScope(resource.get("id"), sub, rg))
+                    .map(ArmResources::indexEntry)
+                    .forEach(entries::add);
+        }
+        return entries;
     }
 
     // ── ARM scope helpers ────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 package io.floci.az.core.arm;
 
+import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.cloud.ScopeSource;
 import io.floci.az.services.arm.ArmHandler;
@@ -49,6 +50,9 @@ class ArmRequestGateCoverageTest {
     @Inject
     ArmHandler armHandler;
 
+    @Inject
+    ArmRouter armRouter;
+
     @BeforeEach
     void clearRecorder() {
         recorder.clear();
@@ -76,9 +80,42 @@ class ArmRequestGateCoverageTest {
 
     @Test
     void theRecordingRuleRunsAheadOfTheProductionRules() {
-        assertEquals(2, gate.rules().size(), "rules: " + gate.rules());
+        assertEquals(3, gate.rules().size(), "rules: " + gate.rules());
         assertInstanceOf(RecordingArmRequestRule.class, gate.rules().getFirst());
         assertInstanceOf(SubscriptionRule.class, gate.rules().get(1));
+        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(2));
+    }
+
+    // ── Requests floci-az makes to itself ───────────────────────────────────────
+
+    @Test
+    void anInternalRequestPassesTheGateOnceAndReachesItsHandler() {
+        String account = "/subscriptions/sub-gate/resourceGroups/rg-gate/providers/Microsoft.Storage/storageAccounts/"
+            + "gateinternal0001";
+        json().body("{\"location\":\"eastus\"}").put(account + "?api-version=2023-01-01").then().statusCode(200);
+        recorder.clear();
+
+        AzureRequest origin = new AzureRequest("DELETE", "arm", "arm",
+            "subscriptions/sub-gate/resourceGroups/rg-gate", null, null, Map.of(), Map.of(), null, false,
+            "localhost", null, "subscriptions/sub-gate/resourceGroups/rg-gate", null, "localhost:4577");
+        Response response = armRouter.dispatchInternal("DELETE", account, Map.of(), origin);
+
+        assertEquals(200, response.getStatus());
+        ArmCall call = assertGatedOnce(200);
+        assertEquals("DELETE", call.method());
+        assertEquals(account, call.id().id());
+        assertEquals("sub-gate", call.scope().subscriptionId());
+        json().get(account + "?api-version=2023-01-01").then().statusCode(404);
+    }
+
+    @Test
+    void anInternalRequestNoStageClaimsIsAnArmNotFound() {
+        AzureRequest origin = new AzureRequest("DELETE", "arm", "arm", "", null, null, Map.of(), null, false);
+
+        Response response = armRouter.dispatchInternal("DELETE", "not-an-arm-path/x", Map.of(), origin);
+
+        assertEquals(404, response.getStatus());
+        assertNotGated();
     }
 
     // ── Generic ARM stage (ArmHandler) ──────────────────────────────────────────

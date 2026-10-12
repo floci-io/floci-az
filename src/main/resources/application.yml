@@ -94,6 +94,12 @@ floci-az:
     # strict-subscriptions: true    # FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS; default on from strict.
     #                               # An unknown subscription is 404 SubscriptionNotFound instead of being
     #                               # registered on first use
+    # resource-group-semantics: true  # FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS; default on from azure.
+    #                               # Resource-group re-PUT answers 200, a missing group is 404 ResourceGroupNotFound,
+    #                               # a child PUT under a missing group creates it, and groups persist in the directory store
+    # resource-group-delete: true   # FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE; default on from azure.
+    #                               # Resource-group DELETE is a 202 long-running operation that deletes every
+    #                               # resource in the group first
 
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:

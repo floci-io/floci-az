@@ -94,6 +94,28 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether resource groups behave as Azure's where that differs from what floci-az has always answered: a
+     * re-PUT is {@code 200} rather than {@code 201}, a {@code GET} of a missing group is
+     * {@code 404 ResourceGroupNotFound}, a child PUT under a missing group creates the group once the child is
+     * created, and groups are kept in the directory store, so they persist under the directory's storage mode.
+     * On from {@code parity: azure}; {@code parity-overrides.resource-group-semantics} overrides it either way.
+     * Tags, {@code managedBy}, {@code PATCH} and {@code HEAD} do not depend on it.
+     */
+    default boolean resourceGroupSemantics() {
+        return parityOverrides().resourceGroupSemantics().orElse(parity().includes(ParityLevel.AZURE));
+    }
+
+    /**
+     * Whether a resource-group {@code DELETE} is Azure's long-running operation: {@code 202} with a
+     * {@code Location} to poll, every resource in the group deleted first, and {@code 404 ResourceGroupNotFound}
+     * for a missing group; the generic resource listings then also show the resources that cascade sees. On from
+     * {@code parity: azure}; {@code parity-overrides.resource-group-delete} overrides it either way.
+     */
+    default boolean resourceGroupDelete() {
+        return parityOverrides().resourceGroupDelete().orElse(parity().includes(ParityLevel.AZURE));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -103,6 +125,12 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictSubscriptions()}. */
         Optional<Boolean> strictSubscriptions();
+
+        /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#resourceGroupSemantics()}. */
+        Optional<Boolean> resourceGroupSemantics();
+
+        /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#resourceGroupDelete()}. */
+        Optional<Boolean> resourceGroupDelete();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */

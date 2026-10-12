@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterDestination;
@@ -266,6 +267,20 @@ public class EventGridService {
                 .map(this::toTopicFrom)
                 .filter(t -> t != null && t.name().equals(name))
                 .findFirst();
+    }
+
+    /**
+     * Index entries for the topics in a subscription, or in one of its resource groups when {@code rg} is
+     * non-null. Event subscriptions are extension resources: they are not listed, and a topic's delete takes
+     * them with it.
+     */
+    public List<Map<String, Object>> topicIndexEntries(String sub, String rg) {
+        return store.scan(k -> k.startsWith(TOPIC_PREFIX)).stream()
+                .map(this::toTopicFrom)
+                .filter(t -> t != null && ArmResources.inScope(t.resourceId(), sub, rg))
+                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), "Microsoft.EventGrid/topics",
+                        t.location(), null))
+                .toList();
     }
 
     public List<EventSubscription> subscriptionsForTopic(String topicResourceId) {

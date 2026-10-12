@@ -9,14 +9,16 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 
 /**
  * Resource groups in the default configuration: the fixes that are always on (tags and {@code managedBy}
  * kept, {@code PATCH} and {@code HEAD} answered, names matched case-insensitively) and the answers that must
  * not change (every PUT 201, {@code DELETE} 200 without cascade, a missing group's delete 200, nothing
- * created for a resource PUT under a missing group).
+ * created for a resource PUT under a missing group, the generic listings as they were).
  */
 @QuarkusTest
 @DisplayName("ARM resource groups: default configuration")
@@ -170,5 +172,20 @@ class ResourceGroupTest {
 
         given().when().get(group("rg-implicit") + API).then().statusCode(404);
         given().when().head(group("rg-implicit") + API).then().statusCode(404);
+    }
+
+    @Test
+    void theGenericListingLeavesOutTheServicesThatJoinedTheIndexForTheCascade() {
+        json("{\"location\":\"eastus\"}").when().put(group("rg-index") + API).then().statusCode(201);
+        String topic = group("rg-index") + "/providers/Microsoft.EventGrid/topics/rgindextopic";
+        json("{\"location\":\"eastus\",\"properties\":{}}")
+            .when().put(topic + "?api-version=2022-06-15").then().statusCode(200);
+
+        given().when().get(group("rg-index") + "/resources" + API)
+            .then().statusCode(200)
+            .body("value.id", not(hasItem(topic)));
+        given().when().get("/subscriptions/" + SUB + "/resources" + API)
+            .then().statusCode(200)
+            .body("value.id", not(hasItem(topic)));
     }
 }

@@ -286,8 +286,8 @@ public class AzureRoutingFilter {
 
         String host = hostWithoutPort(capturedHost);
         ScopeContext scope = scopeResolver.resolve(path, host);
-        RoutingContext ctx = new RoutingContext(requestContext, path, encodedPath, rawQuery, headers,
-            host, requestContext.getSecurityContext().isSecure(), remoteAddress, authority, scope);
+        RoutingContext ctx = RoutingContext.of(requestContext, path, encodedPath, rawQuery, headers, host,
+            remoteAddress, authority, scope);
 
         for (Function<RoutingContext, RouteOutcome> stage : stages) {
             RouteOutcome outcome = stage.apply(ctx);
@@ -458,15 +458,14 @@ public class AzureRoutingFilter {
 
     /** Service Bus root-level spec paths (e.g. {@code $namespaceinfo}, {@code $Resources/...}) or AtomPub XML. */
     private RouteOutcome routeServiceBusAtomPub(RoutingContext ctx) {
-        ContainerRequestContext rc = ctx.requestContext();
-        String contentType = rc.getHeaderString(HttpHeaders.CONTENT_TYPE);
-        String accept = rc.getHeaderString(HttpHeaders.ACCEPT);
-        String userAgent = rc.getHeaderString(HttpHeaders.USER_AGENT);
+        String contentType = ctx.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+        String accept = ctx.headers().getHeaderString(HttpHeaders.ACCEPT);
+        String userAgent = ctx.headers().getHeaderString(HttpHeaders.USER_AGENT);
         boolean isAtomPub = (contentType != null && contentType.contains("application/atom+xml"))
             || (accept != null && accept.contains("application/atom+xml"));
         boolean isDotNetAdministrationClient = userAgent != null
             && userAgent.contains("azsdk-net-Messaging.ServiceBus/")
-            && rc.getUriInfo().getQueryParameters().containsKey("api-version");
+            && ctx.queryParameters().containsKey("api-version");
         SuffixRoute accountSuffix = matchSuffix(accountSuffixRoutes, ctx.firstSegment());
         boolean hasExplicitServiceBusAccountPrefix = accountSuffix != null
             && "servicebus".equals(accountSuffix.serviceType())
@@ -524,9 +523,9 @@ public class AzureRoutingFilter {
         if (route != null) {
             serviceType = route.serviceType();
             accountName = stripSuffix(accountName, route);
-            ctx.requestContext().getHeaders().putSingle("x-floci-account-suffix", route.suffix());
+            ctx.mutableHeaders().putSingle("x-floci-account-suffix", route.suffix());
         } else {
-            serviceType = resolveStorageServiceType(ctx.requestContext(), resourcePath);
+            serviceType = resolveStorageServiceType(ctx, resourcePath);
         }
 
         LOGGER.infof("Resolved accountName: %s, serviceType: %s, resourcePath: %s",
@@ -549,18 +548,18 @@ public class AzureRoutingFilter {
     }
 
     /** Distinguishes blob from queue when the account name carries no service suffix. */
-    private String resolveStorageServiceType(ContainerRequestContext requestContext, String resourcePath) {
-        if (requestContext.getHeaderString("x-ms-blob-type") != null) {
+    private String resolveStorageServiceType(RoutingContext ctx, String resourcePath) {
+        if (ctx.headers().getHeaderString("x-ms-blob-type") != null) {
             return "blob";
         }
         if (resourcePath.contains("/messages") || resourcePath.endsWith("/messages")) {
             return "queue";
         }
-        List<String> restype = requestContext.getUriInfo().getQueryParameters().get("restype");
+        List<String> restype = ctx.queryParameters().get("restype");
         if (restype != null && restype.contains("queue")) {
             return "queue";
         }
-        if (requestContext.getHeaderString("x-ms-queue-message-count") != null) {
+        if (ctx.headers().getHeaderString("x-ms-queue-message-count") != null) {
             return "queue";
         }
         return "blob";

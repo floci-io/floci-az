@@ -9,6 +9,8 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -33,7 +35,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProviderService {
+public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProviderService,
+        ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(MonitorHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -116,6 +119,42 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return handleDiagnosticSettingsArm(req, path, method.toUpperCase());
         }
         return Response.status(404).entity("Provider resource not found").build();
+    }
+
+    /** Key prefixes of the tracked resources the index lists: workspaces, data collection endpoints and rules. */
+    private static final List<String> INDEXED_PREFIXES = List.of("workspace/", "dce/", "dcr/");
+
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries(sub, rg);
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries(sub, null);
+    }
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().monitor().enabled();
+    }
+
+    /** Joined the index with the resource-group cascade; listed only under {@code resource-group-delete}. */
+    @Override
+    public boolean inDefaultListing() {
+        return false;
+    }
+
+    /**
+     * Workspaces, data collection endpoints and rules in a subscription, or in one of its resource groups.
+     * Diagnostic settings are extension resources and are not listed.
+     */
+    private List<Map<String, Object>> indexEntries(String sub, String rg) {
+        return store.scan(k -> INDEXED_PREFIXES.stream().anyMatch(k::startsWith)).stream()
+                .map(this::parseStoredData)
+                .filter(resource -> ArmResources.inScope(resource.get("id"), sub, rg))
+                .map(ArmResources::indexEntry)
+                .toList();
     }
 
     /**

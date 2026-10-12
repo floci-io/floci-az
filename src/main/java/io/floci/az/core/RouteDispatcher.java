@@ -5,7 +5,6 @@ import io.floci.az.core.RouteOutcome.Handled;
 import io.floci.az.core.auth.AuthPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -94,7 +93,7 @@ public class RouteDispatcher {
             return Fallthrough.TO_JAX_RS;
         }
         AzureRequest request = new AzureRequest(ctx.method(), serviceType, serviceType, ctx.path(),
-            ctx.headers(), ctx.requestContext().getEntityStream(), singleValueQueryParams(ctx.requestContext()),
+            ctx.headers(), ctx.body(), singleValueQueryParams(ctx),
             Map.of(), null, ctx.secure(), ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(),
             ctx.authority()).withScope(ctx.scope());
         LOG.infof("Dispatching %s request to %s: %s %s", label,
@@ -106,13 +105,13 @@ public class RouteDispatcher {
     AzureRequest buildRequest(RoutingContext ctx, String account, String serviceType, String path) {
         Map<String, String> queryParams = new HashMap<>();
         Map<String, List<String>> queryParamsMulti = new HashMap<>();
-        ctx.requestContext().getUriInfo().getQueryParameters().forEach((k, v) -> {
+        ctx.queryParameters().forEach((k, v) -> {
             queryParams.put(k, v.get(0));
             queryParamsMulti.put(k, List.copyOf(v));
         });
 
         AzureRequest request = new AzureRequest(ctx.method(), account, serviceType, path, ctx.headers(),
-            ctx.requestContext().getEntityStream(), queryParams, queryParamsMulti, null, ctx.secure(),
+            ctx.body(), queryParams, queryParamsMulti, null, ctx.secure(),
             ctx.host(), ctx.remoteAddress(), ctx.rawPath(), ctx.rawQuery(),
             ctx.authority()).withScope(ctx.scope());
         return request.withAuthContext(authPipeline.resolve(request));
@@ -124,9 +123,9 @@ public class RouteDispatcher {
                 .toXmlResponse(Response.Status.SERVICE_UNAVAILABLE.getStatusCode());
     }
 
-    private static Map<String, String> singleValueQueryParams(ContainerRequestContext requestContext) {
+    private static Map<String, String> singleValueQueryParams(RoutingContext ctx) {
         Map<String, String> queryParams = new HashMap<>();
-        requestContext.getUriInfo().getQueryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
+        ctx.queryParameters().forEach((k, v) -> queryParams.put(k, v.get(0)));
         return queryParams;
     }
 }

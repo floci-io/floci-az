@@ -29,14 +29,18 @@ class ParityConfigTest {
     /** Every override the config declares, with the lowest level that turns it on. */
     private static final Map<String, ParityLevel> ON_FROM = Map.of(
         "subscription-listing", ParityLevel.AZURE,
-        "strict-subscriptions", ParityLevel.STRICT);
+        "strict-subscriptions", ParityLevel.STRICT,
+        "resource-group-semantics", ParityLevel.AZURE,
+        "resource-group-delete", ParityLevel.AZURE);
 
     private record Override(String name, Predicate<EmulatorConfig> resolver) {
     }
 
     private static final List<Override> OVERRIDES = List.of(
         new Override("subscription-listing", EmulatorConfig::subscriptionListing),
-        new Override("strict-subscriptions", EmulatorConfig::strictSubscriptions));
+        new Override("strict-subscriptions", EmulatorConfig::strictSubscriptions),
+        new Override("resource-group-semantics", EmulatorConfig::resourceGroupSemantics),
+        new Override("resource-group-delete", EmulatorConfig::resourceGroupDelete));
 
     private static EmulatorConfig config(ParityLevel level, Map<String, Boolean> explicit, String authMode) {
         EmulatorConfig config = mock(EmulatorConfig.class, CALLS_REAL_METHODS);
@@ -48,6 +52,9 @@ class ParityConfigTest {
         when(auth.mode()).thenReturn(authMode);
         when(overrides.subscriptionListing()).thenReturn(Optional.ofNullable(explicit.get("subscription-listing")));
         when(overrides.strictSubscriptions()).thenReturn(Optional.ofNullable(explicit.get("strict-subscriptions")));
+        when(overrides.resourceGroupSemantics())
+            .thenReturn(Optional.ofNullable(explicit.get("resource-group-semantics")));
+        when(overrides.resourceGroupDelete()).thenReturn(Optional.ofNullable(explicit.get("resource-group-delete")));
         return config;
     }
 
@@ -137,5 +144,9 @@ class ParityConfigTest {
             BannerLogger.parityLine(config(ParityLevel.AZURE, Map.of("subscription-listing", true), "dev")));
         assertEquals("parity: strict  strict-subscriptions:false",
             BannerLogger.parityLine(config(ParityLevel.STRICT, Map.of("strict-subscriptions", false), "dev")));
+        assertEquals("parity: compat  resource-group-delete:true",
+            BannerLogger.parityLine(config(ParityLevel.COMPAT, Map.of("resource-group-delete", true), "dev")));
+        assertEquals("parity: azure  resource-group-semantics:false",
+            BannerLogger.parityLine(config(ParityLevel.AZURE, Map.of("resource-group-semantics", false), "dev")));
     }
 }

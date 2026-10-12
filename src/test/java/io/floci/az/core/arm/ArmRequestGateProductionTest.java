@@ -18,10 +18,12 @@ class ArmRequestGateProductionTest {
     ArmRequestGate gate;
 
     @Test
-    void theSubscriptionRuleIsTheOnlyProductionRuleAndRunsFirst() {
+    void theSubscriptionRuleRunsFirstAndTheResourceGroupRuleAfterIt() {
         List<ArmRequestRule> rules = gate.rules();
-        assertEquals(1, rules.size(), "rules: " + rules);
+        assertEquals(2, rules.size(), "rules: " + rules);
         assertInstanceOf(SubscriptionRule.class, rules.getFirst());
         assertEquals(SubscriptionRule.ORDER, rules.getFirst().order());
+        assertInstanceOf(ResourceGroupRule.class, rules.get(1));
+        assertEquals(ResourceGroupRule.ORDER, rules.get(1).order());
     }
 }

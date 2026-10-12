@@ -2,21 +2,32 @@ package io.floci.az.core;
 
 import io.floci.az.core.RouteOutcome.Fallthrough;
 import io.floci.az.core.RouteOutcome.Handled;
+import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmRequestGate;
+import io.floci.az.core.cloud.ScopeResolver;
 import io.floci.az.services.arm.ArmHandler;
 import io.floci.az.services.monitor.MonitorHandler;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * The routing stages for requests that arrive at the ARM base URL: the metadata anti-route, the data-plane
@@ -38,6 +49,9 @@ public class ArmRouter {
         "secrets", "certificates", "keys", "deletedsecrets", "deletedcertificates", "deletedkeys", "rng"
     );
 
+    /** The origin headers an internal request keeps: the caller's credentials and the scheme it used. */
+    private static final List<String> FORWARDED_HEADERS = List.of(HttpHeaders.AUTHORIZATION, "X-Forwarded-Proto");
+
     /** Service types the ARM stages dispatch to directly rather than through a handler's routing table. */
     static final Set<String> LITERAL_ROUTE_SERVICE_TYPES = Set.of("monitor", "keyvault", "email", "arm");
 
@@ -55,7 +69,14 @@ public class ArmRouter {
     private final RouteDispatcher dispatcher;
     private final ArmHandler armHandler;
     private final ArmRequestGate gate;
+    private final ScopeResolver scopeResolver;
     private final RouteDispatcher.Invocation gated;
+
+    /**
+     * The stages a request floci-az makes to itself runs through, in the routing filter's order. Every stage of
+     * the chain ahead of these, and the ones after, matches only hosts and paths an ARM resource id never has.
+     */
+    private final List<Function<RoutingContext, RouteOutcome>> internalStages;
 
     /**
      * ARM provider routes, guarded routes first. Managed Identity is the only guarded route, and it
@@ -68,12 +89,15 @@ public class ArmRouter {
 
     @Inject
     public ArmRouter(AzureServiceRegistry serviceRegistry, RouteDispatcher dispatcher, ArmHandler armHandler,
-                     ArmRequestGate gate) {
+                     ArmRequestGate gate, ScopeResolver scopeResolver) {
         this.serviceRegistry = serviceRegistry;
         this.dispatcher = dispatcher;
         this.armHandler = armHandler;
         this.gate = gate;
+        this.scopeResolver = scopeResolver;
         this.gated = (handler, request) -> this.gate.serve(request, handler::handle);
+        this.internalStages = List.of(this::routeMonitor, this::routeKeyVaultAtArmBase, this::routeEmailAtArmBase,
+            this::routeArmProviders, this::routeArmGeneric);
     }
 
     /** Assembles the provider table from every registered handler's {@link ServiceRoutes}. */
@@ -117,6 +141,54 @@ public class ArmRouter {
     /** The service types the provider table can produce. */
     List<String> providerServiceTypes() {
         return providerRoutes.stream().map(ResolvedProvider::serviceType).toList();
+    }
+
+    // ── Requests floci-az makes to itself ───────────────────────────────────────
+
+    /**
+     * Sends an ARM request on behalf of {@code origin}, through the same stages, request gate and handler a
+     * client's request to {@code path} would reach, so the handler applies its own side effects. The request
+     * carries no body; it keeps the origin's credentials, scheme and authority, so the handler sees the same
+     * caller and generates the same URLs.
+     *
+     * @param method the HTTP method
+     * @param path   an ARM path ({@code /subscriptions/...}), with or without a leading slash; no query
+     * @param query  the query parameters, such as {@code api-version}
+     * @param origin the request this one is made for
+     * @return the handler's response; an ARM {@code 404 ResourceNotFound} when no stage claims the path
+     */
+    public Response dispatchInternal(String method, String path, Map<String, String> query, AzureRequest origin) {
+        String relative = path.startsWith("/") ? path.substring(1) : path;
+        Map<String, String> initialHeaders = new LinkedHashMap<>();
+        if (origin.headers() != null) {
+            for (String name : FORWARDED_HEADERS) {
+                initialHeaders.put(name, origin.headers().getHeaderString(name));
+            }
+        }
+        String authority = RequestUrls.resolveAuthority(origin);
+        if (authority != null) {
+            initialHeaders.put(HttpHeaders.HOST, authority);
+        }
+        SyntheticHttpHeaders headers = new SyntheticHttpHeaders(initialHeaders);
+        MultivaluedMap<String, String> queryParameters = new MultivaluedHashMap<>();
+        query.forEach(queryParameters::putSingle);
+        String rawQuery = query.isEmpty() ? null : query.entrySet().stream()
+            .map(entry -> entry.getKey() + "=" + entry.getValue())
+            .collect(Collectors.joining("&"));
+        RoutingContext ctx = new RoutingContext(method.toUpperCase(Locale.ROOT), relative, relative, rawQuery,
+            headers, headers.map(), queryParameters, InputStream.nullInputStream(), origin.host(), origin.secure(),
+            origin.remoteAddress(), authority, scopeResolver.resolve(relative, origin.host()));
+        LOG.debugv("Internal ARM request: {0} {1}", ctx.method(), relative);
+        for (Function<RoutingContext, RouteOutcome> stage : internalStages) {
+            RouteOutcome outcome = stage.apply(ctx);
+            if (outcome instanceof Handled handled) {
+                return handled.response();
+            }
+            if (outcome == Fallthrough.TO_JAX_RS) {
+                break;
+            }
+        }
+        return ArmErrors.notFound("Resource not found: " + relative);
     }
 
     // ── Routing stages, in chain order ──────────────────────────────────────────
