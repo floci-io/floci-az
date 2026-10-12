@@ -30,4 +30,9 @@ public final class ArmErrors {
     public static Response subscriptionNotFound(String subscriptionId) {
         return error(404, "SubscriptionNotFound", "The subscription '" + subscriptionId + "' could not be found.");
     }
+
+    /** {@code 404 ResourceGroupNotFound} for a resource group that does not exist, with Azure's message. */
+    public static Response resourceGroupNotFound(String resourceGroup) {
+        return error(404, "ResourceGroupNotFound", "Resource group '" + resourceGroup + "' could not be found.");
+    }
 }

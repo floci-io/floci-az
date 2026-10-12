@@ -55,7 +55,8 @@ import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCO
  *
  * <ul>
  *   <li>Subscription — {@code GET /subscriptions/{sub}}</li>
- *   <li>Resource Groups — {@code PUT/GET/DELETE /subscriptions/{sub}/resourceGroups/{rg}}</li>
+ *   <li>Resource Groups: {@code PUT/GET/HEAD/PATCH/DELETE /subscriptions/{sub}/resourceGroups/{rg}}, served by
+ *       {@link ResourceGroupService}</li>
  *   <li>Storage Accounts — ARM shell that bridges container/queue creation to the
  *       existing Blob and Queue storage backends</li>
  *   <li>Key Vaults — ARM shell whose vault URI points at the existing Key Vault handler</li>
@@ -69,7 +70,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
 
     // In-memory ARM resource state — no StorageBackend needed, these are ephemeral
-    private final Map<String, Map<String, Object>> resourceGroups   = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> keyVaults        = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> managedHsms      = new ConcurrentHashMap<>();
@@ -95,13 +95,16 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     /** The tenants and subscriptions {@code GET /tenants} and {@code GET /subscriptions} report. */
     private final AzureDirectory directory;
 
+    /** Resource groups and their own operations. */
+    private final ResourceGroupService resourceGroups;
+
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
                       Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate,
-                      AzureDirectory directory) {
+                      AzureDirectory directory, ResourceGroupService resourceGroups) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -113,6 +116,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         this.resourceIndexContributors = resourceIndexContributors;
         this.gate                 = gate;
         this.directory            = directory;
+        this.resourceGroups       = resourceGroups;
     }
 
     /**
@@ -288,23 +292,12 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
         // GET subscriptions/{sub}/resourceGroups  (list)
         if (lc.matches("subscriptions/[^/]+/resourcegroups([?].*)?")) {
-            String prefix = sub.toLowerCase() + "/";
-            List<Map<String, Object>> groups = resourceGroups.entrySet().stream()
-                    .filter(e -> e.getKey().toLowerCase().startsWith(prefix))
-                    .map(Map.Entry::getValue)
-                    .toList();
-            return Response.ok(Map.of("value", groups)).build();
+            return resourceGroups.list(sub);
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}  (no trailing segments)
         if (lc.matches("subscriptions/[^/]+/resourcegroups/[^/]+([?].*)?")) {
-            String rg = extractRg(path);
-            return switch (method) {
-                case "PUT"    -> createOrUpdateResourceGroup(sub, rg, req);
-                case "GET"    -> getResourceGroup(sub, rg);
-                case "DELETE" -> { resourceGroups.remove(rgKey(sub, rg)); yield Response.ok().build(); }
-                default       -> Response.status(405).build();
-            };
+            return resourceGroups.handle(req, method, sub, extractRg(path));
         }
 
         // subscriptions/{sub}/resourceGroups/{rg}/resources  (list resources in RG)
@@ -912,32 +905,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         return Response.ok(stripInternal(resource)).build();
     }
 
-    // ── Resource Groups ───────────────────────────────────────────────────────
-
-    private Response createOrUpdateResourceGroup(String sub, String rg, AzureRequest req) {
-        Map<String, Object> body     = parseBody(req);
-        String location              = bodyString(body, "location", "eastus");
-
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("id",       "/subscriptions/" + sub + "/resourceGroups/" + rg);
-        resource.put("name",     rg);
-        resource.put("type",     "Microsoft.Resources/resourceGroups");
-        resource.put("location", location);
-        resource.put("properties", Map.of("provisioningState", "Succeeded"));
-
-        resourceGroups.put(rgKey(sub, rg), resource);
-        LOG.infof("ARM: created resource group %s", rg);
-        return Response.status(201).entity(resource).build();
-    }
-
-    private Response getResourceGroup(String sub, String rg) {
-        Map<String, Object> resource = resourceGroups.get(rgKey(sub, rg));
-        if (resource == null) {
-            return armNotFound("resourceGroups/" + rg);
-        }
-        return Response.ok(resource).build();
-    }
-
     // ── Global resource names ────────────────────────────────────────────────
     // Storage accounts, vaults, managed HSMs and web apps are DNS names, unique across every
     // subscription. A create under a second scope is a name conflict, never a second resource.
@@ -1040,7 +1007,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public void clear() {
-        resourceGroups.clear();
         storageAccounts.clear();
         keyVaults.clear();
         managedHsms.clear();
@@ -1065,7 +1031,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
-    private static String rgKey(String sub, String rg)               { return sub + "/" + rg; }
     private static String saKey(String sub, String rg, String name)  { return sub + "/" + rg + "/" + name; }
     private static String kvKey(String sub, String rg, String name)  { return sub + "/" + rg + "/kv/" + name; }
     private static String hsmKey(String sub, String rg, String name) { return sub + "/" + rg + "/hsm/" + name; }

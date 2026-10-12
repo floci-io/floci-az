@@ -1214,6 +1214,9 @@
       "properties" : {
         "provisioningState" : "Succeeded"
       },
+      "tags" : {
+        "env" : "golden"
+      },
       "type" : "Microsoft.Resources/resourceGroups"
     },
     "headers" : {
@@ -1229,6 +1232,9 @@
       "name" : "golden-rg",
       "properties" : {
         "provisioningState" : "Succeeded"
+      },
+      "tags" : {
+        "env" : "golden"
       },
       "type" : "Microsoft.Resources/resourceGroups"
     },
@@ -1247,6 +1253,9 @@
         "properties" : {
           "provisioningState" : "Succeeded"
         },
+        "tags" : {
+          "env" : "golden"
+        },
         "type" : "Microsoft.Resources/resourceGroups"
       } ]
     },
@@ -1254,6 +1263,50 @@
       "Content-Type" : "application/json;charset=UTF-8"
     },
     "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups?api-version=2021-04-01",
+    "status" : 200
+  },
+  "resource group head" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "HEAD /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 204
+  },
+  "resource group get, other casing" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg",
+      "location" : "eastus",
+      "name" : "golden-rg",
+      "properties" : {
+        "provisioningState" : "Succeeded"
+      },
+      "tags" : {
+        "env" : "golden"
+      },
+      "type" : "Microsoft.Resources/resourceGroups"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/GOLDEN-RG?api-version=2021-04-01",
+    "status" : 200
+  },
+  "resource group patch tags" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg",
+      "location" : "eastus",
+      "name" : "golden-rg",
+      "properties" : {
+        "provisioningState" : "Succeeded"
+      },
+      "tags" : {
+        "env" : "patched"
+      },
+      "type" : "Microsoft.Resources/resourceGroups"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "PATCH /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
     "status" : 200
   },
   "storage name check, free" : {
@@ -1449,6 +1502,12 @@
       "Content-Type" : "application/json"
     },
     "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 404
+  },
+  "resource group head after delete" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "HEAD /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
     "status" : 404
   }
 }

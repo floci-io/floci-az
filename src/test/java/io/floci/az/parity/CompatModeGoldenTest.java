@@ -109,6 +109,12 @@ class CompatModeGoldenTest {
             "PUT", rg + RG_API);
         script.step("resource group get", given(), "GET", rg + RG_API);
         script.step("resource groups list", given(), "GET", sub + "/resourceGroups" + RG_API);
+        // Fix (#394 and the resource-group contract): HEAD and PATCH were 405 on main and a differently cased
+        // name was a different group; these steps pin the fixed answers.
+        script.step("resource group head", given(), "HEAD", rg + RG_API);
+        script.step("resource group get, other casing", given(), "GET",
+            sub + "/resourceGroups/" + RG.toUpperCase(Locale.ROOT) + RG_API);
+        script.step("resource group patch tags", json("{\"tags\":{\"env\":\"patched\"}}"), "PATCH", rg + RG_API);
         script.step("storage name check, free", json("{\"name\":\"" + STORAGE_ACCOUNT
             + "\",\"type\":\"Microsoft.Storage/storageAccounts\"}"), "POST",
             sub + "/providers/Microsoft.Storage/checkNameAvailability" + STORAGE_API);
@@ -125,6 +131,7 @@ class CompatModeGoldenTest {
         script.step("storage account delete", given(), "DELETE", account + STORAGE_API);
         script.step("resource group delete", given(), "DELETE", rg + RG_API);
         script.step("resource group get after delete", given(), "GET", rg + RG_API);
+        script.step("resource group head after delete", given(), "HEAD", rg + RG_API);
         script.finish();
     }
 
