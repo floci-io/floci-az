@@ -64,8 +64,12 @@ final class KqlFunctions {
             case "tostring" -> {
                 return KqlValues.toString(a.get(0));
             }
-            case "toint", "tolong" -> {
+            case "tolong" -> {
                 return KqlValues.toLong(a.get(0));
+            }
+            case "toint" -> {
+                Long l = KqlValues.toLong(a.get(0));
+                return l == null || l < Integer.MIN_VALUE || l > Integer.MAX_VALUE ? null : l;
             }
             case "todouble", "toreal", "todecimal" -> {
                 return KqlValues.toDouble(a.get(0));
@@ -173,7 +177,10 @@ final class KqlFunctions {
                 }
             }
             case "indexof" -> {
-                return (long) KqlValues.toString(a.get(0)).indexOf(KqlValues.toString(a.get(1)));
+                String source = KqlValues.toString(a.get(0));
+                Long start = a.size() > 2 ? KqlValues.toLong(a.get(2)) : null;
+                int from = start == null ? 0 : start < 0 ? Math.max(0, source.length() + start.intValue()) : start.intValue();
+                return from > source.length() ? -1L : (long) source.indexOf(KqlValues.toString(a.get(1)), from);
             }
             case "strcmp" -> {
                 return (long) Integer.signum(KqlValues.toString(a.get(0)).compareTo(KqlValues.toString(a.get(1))));
@@ -236,12 +243,20 @@ final class KqlFunctions {
                 return switch (name) {
                     case "floor" -> Math.floor(d);
                     case "ceiling" -> Math.ceil(d);
-                    default -> (double) Math.round(d);
+                    default -> {
+                        Long digits = a.size() > 1 ? KqlValues.toLong(a.get(1)) : null;
+                        if (digits == null || digits == 0) {
+                            yield (double) Math.round(d);
+                        }
+                        yield new java.math.BigDecimal(d).setScale(digits.intValue(), java.math.RoundingMode.HALF_UP).doubleValue();
+                    }
                 };
             }
             case "startofday" -> {
                 Instant instant = KqlValues.toDateTime(a.get(0));
-                return instant == null ? null : instant.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+                Long offset = a.size() > 1 ? KqlValues.toLong(a.get(1)) : null;
+                return instant == null ? null
+                    : instant.truncatedTo(java.time.temporal.ChronoUnit.DAYS).plus(offset == null ? 0 : offset, java.time.temporal.ChronoUnit.DAYS);
             }
             case "format_datetime" -> {
                 Instant instant = KqlValues.toDateTime(a.get(0));

@@ -19,8 +19,11 @@ holds, and answers in the `objectArray` or `table` result format with the servic
   (empty: role assignments and definitions are not stored). Table names are case-insensitive.
 - **Columns** as Resource Graph publishes them: `id`, `name`, `type`, `tenantId`, `kind`, `location`,
   `resourceGroup`, `subscriptionId`, `managedBy`, `sku`, `plan`, `properties`, `tags`, `identity`,
-  `zones`, `extendedLocation` and `systemData` when the resource carries it; `type`, `location` and
-  `resourceGroup` are lowercased the way the service normalises them.
+  `zones`, `extendedLocation` and `systemData` (null when the resource carries none); `type`, `location`
+  and `resourceGroup` are lowercased the way the service normalises them. A reference to a column the
+  schema does not have is a `SemanticError`, as in Kusto; properties below `properties`, `tags` and the
+  other dynamic columns are data and read as null when absent. Comparisons with a null operand are null,
+  so `not(x < now())` keeps rows with no `x` out, as Kusto does.
 - **Operators**: `where`, `extend`, `project`, `project-away`, `summarize ... by`, `order by` /
   `sort by`, `distinct`, `take` / `limit`, `union`, `join kind=inner|innerunique|leftouter|leftsemi|leftanti|fullouter ... on`
   and `count`.
@@ -42,7 +45,7 @@ holds, and answers in the `objectArray` or `table` result format with the servic
 - **Scoping** with the request's `subscriptions` list; `managementGroups` is accepted and ignored.
 - **Azure error shapes**: a query that does not parse or names an unknown table or function answers
   `400 BadRequest` with `details` of `InvalidQuery` plus `ParserFailure` or `SemanticError`;
-  `NullOrEmptyQuery` for a missing query; `InvalidSkipToken`; `InvalidResourceType` for other paths
+  `NullOrEmptyQuery` for a missing query; `InvalidSkipToken`; `InvalidQueryOption` for a `$skip` out of range; `InvalidResourceType` for other paths
   under the namespace.
 
 ## Endpoints

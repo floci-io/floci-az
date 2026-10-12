@@ -68,10 +68,144 @@ public final class KqlEngine {
             }
             case SubquerySource sub -> run(sub.query(), tables);
         };
+        Set<String> schema = rows.isEmpty() ? null : lowerCased(columns(rows));
         for (Op op : query.ops()) {
+            schema = checkColumns(op, schema);
             rows = apply(op, rows, tables);
         }
         return rows;
+    }
+
+    // ── Column checks ───────────────────────────────────────────────────────────
+
+    /**
+     * Rejects a reference to a top-level column the current schema does not have, as Kusto does before
+     * running the query, and returns the schema the operator leaves behind; null means unknown, after
+     * an operator whose output columns depend on the data (a join or a union), when nothing is checked.
+     */
+    private static Set<String> checkColumns(Op op, Set<String> schema) {
+        if (schema == null) {
+            return null;
+        }
+        switch (op) {
+            case Where where -> {
+                checkExpr(where.predicate(), schema);
+                return schema;
+            }
+            case Extend extend -> {
+                Set<String> out = new LinkedHashSet<>(schema);
+                int position = 0;
+                for (Named column : extend.columns()) {
+                    checkExpr(column.expr(), schema);
+                    out.add(columnName(column, position++).toLowerCase(Locale.ROOT));
+                }
+                return out;
+            }
+            case Project project -> {
+                Set<String> out = new LinkedHashSet<>();
+                int position = 0;
+                for (Named column : project.columns()) {
+                    checkExpr(column.expr(), schema);
+                    out.add(columnName(column, position++).toLowerCase(Locale.ROOT));
+                }
+                return out;
+            }
+            case ProjectAway away -> {
+                Set<String> out = new LinkedHashSet<>(schema);
+                for (String column : away.columns()) {
+                    out.remove(column.toLowerCase(Locale.ROOT));
+                }
+                return out;
+            }
+            case Summarize summarize -> {
+                Set<String> out = new LinkedHashSet<>();
+                int position = 0;
+                for (Named by : summarize.by()) {
+                    checkExpr(by.expr(), schema);
+                    out.add(columnName(by, position++).toLowerCase(Locale.ROOT));
+                }
+                for (Named aggregate : summarize.aggregates()) {
+                    checkExpr(aggregate.expr(), schema);
+                }
+                return null; // aggregate names depend on the functions used
+            }
+            case OrderBy orderBy -> {
+                for (SortKey key : orderBy.keys()) {
+                    checkExpr(key.expr(), schema);
+                }
+                return schema;
+            }
+            case Distinct distinct -> {
+                Set<String> out = new LinkedHashSet<>();
+                for (String column : distinct.columns()) {
+                    if (!column.equals("*")) {
+                        checkColumn(column, schema);
+                        out.add(column.toLowerCase(Locale.ROOT));
+                    }
+                }
+                return distinct.columns().contains("*") ? schema : out;
+            }
+            case Take take -> {
+                return schema;
+            }
+            case Count count -> {
+                return lowerCased(List.of("Count"));
+            }
+            case Union union -> {
+                return null;
+            }
+            case Join join -> {
+                for (JoinKey key : join.keys()) {
+                    if (key.left().size() == 1) {
+                        checkColumn(key.left().getFirst(), schema);
+                    }
+                }
+                return null;
+            }
+        }
+    }
+
+    private static void checkExpr(Expr expr, Set<String> schema) {
+        switch (expr) {
+            case Col col -> {
+                if (!col.path().isEmpty() && !col.leaf().equals("*")) {
+                    checkColumn(col.path().getFirst(), schema);
+                }
+            }
+            case Call call -> call.args().forEach(arg -> checkExpr(arg, schema));
+            case Bin bin -> {
+                checkExpr(bin.left(), schema);
+                checkExpr(bin.right(), schema);
+            }
+            case Not not -> checkExpr(not.expr(), schema);
+            case Neg neg -> checkExpr(neg.expr(), schema);
+            case In in -> {
+                checkExpr(in.expr(), schema);
+                in.options().forEach(option -> checkExpr(option, schema));
+            }
+            case Member member -> checkExpr(member.target(), schema);
+            case Index index -> {
+                checkExpr(index.target(), schema);
+                checkExpr(index.index(), schema);
+            }
+            case Lit lit -> {
+                // nothing to check
+            }
+        }
+    }
+
+    private static void checkColumn(String name, Set<String> schema) {
+        if (!schema.contains(name.toLowerCase(Locale.ROOT))) {
+            throw KqlException.semantic("Failed to resolve table or column expression named '" + name + "'");
+        }
+    }
+
+    private static Set<String> lowerCased(List<String> names) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String name : names) {
+            out.add(name.toLowerCase(Locale.ROOT));
+        }
+        return out;
     }
 
     private static List<Map<String, Object>> apply(Op op, List<Map<String, Object>> rows, Tables tables) {
@@ -89,8 +223,9 @@ public final class KqlEngine {
                 List<Map<String, Object>> out = new ArrayList<>(rows.size());
                 for (Map<String, Object> row : rows) {
                     Map<String, Object> copy = new LinkedHashMap<>(row);
+                    int position = 0;
                     for (Named column : extend.columns()) {
-                        copy.put(columnName(column), eval(column.expr(), row));
+                        copy.put(columnName(column, position++), eval(column.expr(), row));
                     }
                     out.add(copy);
                 }
@@ -100,8 +235,9 @@ public final class KqlEngine {
                 List<Map<String, Object>> out = new ArrayList<>(rows.size());
                 for (Map<String, Object> row : rows) {
                     Map<String, Object> projected = new LinkedHashMap<>();
+                    int position = 0;
                     for (Named column : project.columns()) {
-                        projected.put(columnName(column), eval(column.expr(), row));
+                        projected.put(columnName(column, position++), eval(column.expr(), row));
                     }
                     out.add(projected);
                 }
@@ -186,10 +322,41 @@ public final class KqlEngine {
 
     /** The name an output column gets: the given one, a column's own name, or the column a function reads. */
     static String columnName(Named named) {
+        return columnName(named, 0);
+    }
+
+    /** As {@link #columnName(Named)}, numbering an unnamed calculation by its {@code position} ({@code Column1}, ...). */
+    static String columnName(Named named, int position) {
         if (named.name() != null) {
             return named.name();
         }
-        return inferredName(named.expr(), 0);
+        return inferredName(named.expr(), position);
+    }
+
+    /** The columns a query's last operator produces, for a result with no rows: a projection or a summary. */
+    public static List<String> outputColumns(Query query, List<Map<String, Object>> rows) {
+        if (!rows.isEmpty() || query.ops().isEmpty()) {
+            return columns(rows);
+        }
+        Op last = query.ops().getLast();
+        List<String> names = new ArrayList<>();
+        if (last instanceof Project project) {
+            int position = 0;
+            for (Named column : project.columns()) {
+                names.add(columnName(column, position++));
+            }
+        } else if (last instanceof Summarize summarize) {
+            int position = 0;
+            for (Named by : summarize.by()) {
+                names.add(columnName(by, position++));
+            }
+            for (Named aggregate : summarize.aggregates()) {
+                names.add(aggregate.name() != null ? aggregate.name()
+                    : aggregate.expr() instanceof Call call ? aggregateName(call) : "Column" + (position + 1));
+                position++;
+            }
+        }
+        return names;
     }
 
     private static String inferredName(Expr expr, int position) {
@@ -212,8 +379,9 @@ public final class KqlEngine {
         Map<String, Map<String, Object>> keys = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> key = new LinkedHashMap<>();
+            int position = 0;
             for (Named by : summarize.by()) {
-                key.put(columnName(by), eval(by.expr(), row));
+                key.put(columnName(by, position++), eval(by.expr(), row));
             }
             String groupKey = KqlValues.toString(key);
             groups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(row);
@@ -228,6 +396,11 @@ public final class KqlEngine {
             Map<String, Object> result = new LinkedHashMap<>(keys.get(group.getKey()));
             int position = result.size();
             for (Named aggregate : summarize.aggregates()) {
+                if (aggregate.name() == null && aggregate.expr() instanceof Call call && selectsColumns(call)) {
+                    result.putAll(selectedColumns(call, group.getValue()));
+                    position++;
+                    continue;
+                }
                 String name = aggregate.name() != null ? aggregate.name()
                     : aggregate.expr() instanceof Call call ? aggregateName(call) : "Column" + (position + 1);
                 result.put(name, aggregate(aggregate.expr(), group.getValue()));
@@ -236,6 +409,59 @@ public final class KqlEngine {
             out.add(result);
         }
         return out;
+    }
+
+    /** True for {@code arg_max(x, *)}, {@code arg_max(x, a, b)}, {@code take_any(*)} and the like, which yield several columns. */
+    private static boolean selectsColumns(Call call) {
+        boolean selector = call.name().equals("arg_max") || call.name().equals("arg_min");
+        boolean any = call.name().equals("take_any") || call.name().equals("any");
+        if (!selector && !any) {
+            return false;
+        }
+        if (selector) {
+            return call.args().size() >= 2; // arg_max(by, a, b) yields by, a and b; arg_max(by, *) the whole row
+        }
+        if (call.args().size() > 1) {
+            return true;
+        }
+        return !call.args().isEmpty() && call.args().getFirst() instanceof Col col && col.leaf().equals("*");
+    }
+
+    /** The columns {@code arg_max} / {@code arg_min} / {@code take_any} return from the chosen row: the selected ones, or all of them for {@code *}. */
+    private static Map<String, Object> selectedColumns(Call call, List<Map<String, Object>> group) {
+        boolean selector = call.name().startsWith("arg_");
+        Map<String, Object> chosen = group.isEmpty() ? null : chosenRow(call, group);
+        List<Expr> selected = call.args().subList(selector ? 1 : 0, call.args().size());
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (selector) {
+            Named first = new Named(null, call.args().getFirst());
+            out.put(columnName(first), chosen == null ? null : eval(call.args().getFirst(), chosen));
+        }
+        int position = 0;
+        for (Expr expr : selected) {
+            if (expr instanceof Col col && col.leaf().equals("*")) {
+                if (chosen != null) {
+                    chosen.forEach((name, value) -> out.putIfAbsent(name, value));
+                }
+                continue;
+            }
+            out.put(columnName(new Named(null, expr), position++), chosen == null ? null : eval(expr, chosen));
+        }
+        return out;
+    }
+
+    private static Map<String, Object> chosenRow(Call call, List<Map<String, Object>> group) {
+        Map<String, Object> chosen = group.getFirst();
+        if (call.name().startsWith("arg_")) {
+            Expr by = call.args().getFirst();
+            for (Map<String, Object> row : group) {
+                Integer c = KqlValues.compare(eval(by, row), eval(by, chosen));
+                if (c != null && (call.name().equals("arg_max") ? c > 0 : c < 0)) {
+                    chosen = row;
+                }
+            }
+        }
+        return chosen;
     }
 
     private static String aggregateName(Call call) {
@@ -320,14 +546,8 @@ public final class KqlEngine {
                 if (group.isEmpty()) {
                     return null;
                 }
-                Map<String, Object> chosen = group.getFirst();
+                Map<String, Object> chosen = chosenRow(call, group);
                 if (call.name().startsWith("arg_")) {
-                    for (Map<String, Object> row : group) {
-                        Integer c = KqlValues.compare(eval(args.getFirst(), row), eval(args.getFirst(), chosen));
-                        if (c != null && (call.name().equals("arg_max") ? c > 0 : c < 0)) {
-                            chosen = row;
-                        }
-                    }
                     return args.size() > 1 ? eval(args.get(1), chosen) : eval(args.getFirst(), chosen);
                 }
                 return eval(args.getFirst(), chosen);
@@ -346,6 +566,9 @@ public final class KqlEngine {
         }
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> matchedRightKeys = new HashSet<>();
+        Set<String> seenLeftKeys = new HashSet<>();
+        List<String> leftColumns = columns(left);
+        List<String> rightColumns = columns(right);
         for (Map<String, Object> leftRow : left) {
             String key = joinKey(leftRow, join.keys(), true);
             List<Map<String, Object>> matches = key == null ? List.of() : rightByKey.getOrDefault(key, List.of());
@@ -354,19 +577,20 @@ public final class KqlEngine {
             }
             switch (kind) {
                 case "inner", "innerunique" -> {
+                    // innerunique, the default, keeps the first left row of each key and every right match.
+                    if (kind.equals("innerunique") && key != null && !seenLeftKeys.add(key)) {
+                        continue;
+                    }
                     for (Map<String, Object> rightRow : matches) {
-                        out.add(merge(leftRow, rightRow, join.keys()));
-                        if (kind.equals("innerunique")) {
-                            break;
-                        }
+                        out.add(merge(leftRow, rightRow, leftColumns, rightColumns));
                     }
                 }
                 case "leftouter" -> {
                     if (matches.isEmpty()) {
-                        out.add(merge(leftRow, Map.of(), join.keys()));
+                        out.add(merge(leftRow, Map.of(), leftColumns, rightColumns));
                     } else {
                         for (Map<String, Object> rightRow : matches) {
-                            out.add(merge(leftRow, rightRow, join.keys()));
+                            out.add(merge(leftRow, rightRow, leftColumns, rightColumns));
                         }
                     }
                 }
@@ -382,10 +606,10 @@ public final class KqlEngine {
                 }
                 case "fullouter" -> {
                     if (matches.isEmpty()) {
-                        out.add(merge(leftRow, Map.of(), join.keys()));
+                        out.add(merge(leftRow, Map.of(), leftColumns, rightColumns));
                     } else {
                         for (Map<String, Object> rightRow : matches) {
-                            out.add(merge(leftRow, rightRow, join.keys()));
+                            out.add(merge(leftRow, rightRow, leftColumns, rightColumns));
                         }
                     }
                 }
@@ -396,7 +620,7 @@ public final class KqlEngine {
             for (Map.Entry<String, List<Map<String, Object>>> entry : rightByKey.entrySet()) {
                 if (!matchedRightKeys.contains(entry.getKey())) {
                     for (Map<String, Object> rightRow : entry.getValue()) {
-                        out.add(merge(Map.of(), rightRow, join.keys()));
+                        out.add(merge(Map.of(), rightRow, leftColumns, rightColumns));
                     }
                 }
             }
@@ -416,18 +640,19 @@ public final class KqlEngine {
         return sb.toString();
     }
 
-    /** Left columns, then right columns; a right column whose name the left already has gets the suffix {@code 1}. */
-    private static Map<String, Object> merge(Map<String, Object> left, Map<String, Object> right, List<JoinKey> keys) {
-        Map<String, Object> merged = new LinkedHashMap<>(left);
-        for (Map.Entry<String, Object> entry : right.entrySet()) {
-            String name = entry.getKey();
-            if (merged.containsKey(name)) {
-                boolean isSharedKey = keys.stream().anyMatch(k -> k.left().equals(k.right()) && k.left().size() == 1
-                    && k.left().getFirst().equalsIgnoreCase(name));
-                merged.put(isSharedKey ? name + "1" : name + "1", entry.getValue());
-            } else {
-                merged.put(name, entry.getValue());
-            }
+    /**
+     * Every left column, then every right column, named from the two inputs' schemas rather than from the
+     * rows at hand, so that matched and unmatched rows share one column set; a right column whose name the
+     * left side already has gets the suffix {@code 1}, and a side that did not match contributes nulls.
+     */
+    private static Map<String, Object> merge(Map<String, Object> left, Map<String, Object> right,
+                                             List<String> leftColumns, List<String> rightColumns) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        for (String name : leftColumns) {
+            merged.put(name, left.get(name));
+        }
+        for (String name : rightColumns) {
+            merged.put(leftColumns.contains(name) ? name + "1" : name, right.get(name));
         }
         return merged;
     }
@@ -512,22 +737,23 @@ public final class KqlEngine {
         Object l = eval(bin.left(), row);
         Object r = eval(bin.right(), row);
         switch (op) {
+            // A comparison with a null operand is null, as in Kusto, so that not() keeps it out of a where.
             case "==" -> {
-                return KqlValues.equal(l, r, false);
+                return l == null || r == null ? null : KqlValues.equal(l, r, false);
             }
             case "!=" -> {
-                return l != null && r != null && !KqlValues.equal(l, r, false);
+                return l == null || r == null ? null : !KqlValues.equal(l, r, false);
             }
             case "=~" -> {
-                return KqlValues.equal(l, r, true);
+                return l == null || r == null ? null : KqlValues.equal(l, r, true);
             }
             case "!~" -> {
-                return l != null && r != null && !KqlValues.equal(l, r, true);
+                return l == null || r == null ? null : !KqlValues.equal(l, r, true);
             }
             case "<", "<=", ">", ">=" -> {
                 Integer c = KqlValues.compare(l, r);
                 if (l == null || r == null || c == null) {
-                    return false;
+                    return null;
                 }
                 return switch (op) {
                     case "<" -> c < 0;

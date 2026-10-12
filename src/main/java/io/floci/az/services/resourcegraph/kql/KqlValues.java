@@ -273,6 +273,9 @@ public final class KqlValues {
         if (x == null || y == null) {
             return false;
         }
+        if (x instanceof Long a && y instanceof Long b) {
+            return a.longValue() == b.longValue();
+        }
         if (x instanceof Number || y instanceof Number) {
             Double a = toDouble(x);
             Double b = toDouble(y);
@@ -306,6 +309,9 @@ public final class KqlValues {
         y = normalize(y);
         if (x == null || y == null) {
             return x == null && y == null ? 0 : (x == null ? -1 : 1);
+        }
+        if (x instanceof Long a && y instanceof Long b) {
+            return Long.compare(a, b);
         }
         if (x instanceof Number || y instanceof Number) {
             Double a = toDouble(x);

@@ -177,6 +177,12 @@ class ResourceGraphTest {
                 .body("count", equalTo(1))
                 .body("resultTruncated", equalTo("false"))
                 .body("'$skipToken'", nullValue());
+        given().contentType("application/json")
+                .body("{\"query\": \"policyresources | project id\", \"options\": {\"$skip\": -1}}")
+                .when().post(GRAPH).then().statusCode(400).body("error.code", equalTo("InvalidQueryOption"));
+        given().contentType("application/json")
+                .body("{\"query\": \"policyresources | project id\", \"options\": {\"$skipToken\": \"c2tpcDotMQ\"}}")
+                .when().post(GRAPH).then().statusCode(400).body("error.code", equalTo("InvalidSkipToken"));
     }
 
     @Test
@@ -189,6 +195,13 @@ class ResourceGraphTest {
                 .body("data.columns[0].type", equalTo("string"))
                 .body("data.rows[0][0]", equalTo("graphkv1"))
                 .body("data.rows", hasSize(3));
+        // A projection with no rows still names its columns.
+        given().contentType("application/json")
+                .body("{\"query\": \"resources | where name == 'nothing' | project name, type\", \"options\": {\"resultFormat\": \"table\"}}")
+                .when().post(GRAPH)
+                .then().statusCode(200)
+                .body("data.columns.name", equalTo(java.util.List.of("name", "type")))
+                .body("data.rows", hasSize(0));
         given().contentType("application/json")
                 .body("{\"query\": \"resources | count\", \"subscriptions\": [\"" + SUB2 + "\"]}")
                 .when().post(GRAPH)

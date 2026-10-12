@@ -79,18 +79,30 @@ public class GraphTables implements KqlEngine.Tables {
     private List<Map<String, Object>> resources() {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (String subscriptionId : subscriptionIds()) {
+            String tenantId = tenantOf(subscriptionId);
             for (Map<String, Object> resource : armHandler.indexedResources(subscriptionId, null, true)) {
-                rows.add(row(ArmResources.stripInternal(resource), subscriptionId));
+                Map<String, Object> row = row(ArmResources.stripInternal(resource), subscriptionId);
+                row.putIfAbsent("tenantId", tenantId);
+                if (row.get("tenantId") == null) {
+                    row.put("tenantId", tenantId);
+                }
+                rows.add(row);
             }
         }
         return rows;
+    }
+
+    /** The tenant a subscription belongs to: its directory entry's, else the default tenant. */
+    private String tenantOf(String subscriptionId) {
+        Subscription subscription = subscriptionId == null ? null : directory.subscription(subscriptionId).orElse(null);
+        return subscription == null || subscription.tenantId() == null ? directory.defaultTenantId() : subscription.tenantId();
     }
 
     private List<Map<String, Object>> resourceContainers() {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (String subscriptionId : subscriptionIds()) {
             Subscription subscription = directory.subscription(subscriptionId).orElse(null);
-            String tenantId = subscription == null ? directory.defaultTenantId() : subscription.tenantId();
+            String tenantId = tenantOf(subscriptionId);
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", "/subscriptions/" + subscriptionId);
             row.put("name", subscription == null ? subscriptionId : subscription.displayName());
@@ -147,6 +159,9 @@ public class GraphTables implements KqlEngine.Tables {
                 clean.keySet().removeIf(key -> key.startsWith("_"));
                 Map<String, Object> row = row(clean, null);
                 row.put("kind", "policy");
+                if (row.get("tenantId") == null) {
+                    row.put("tenantId", tenantOf(row.get("subscriptionId") instanceof String s ? s : null));
+                }
                 rows.add(row);
             }
         }
@@ -174,9 +189,7 @@ public class GraphTables implements KqlEngine.Tables {
         row.put("identity", resource.get("identity"));
         row.put("zones", resource.get("zones"));
         row.put("extendedLocation", resource.get("extendedLocation"));
-        if (resource.get("systemData") != null) {
-            row.put("systemData", resource.get("systemData"));
-        }
+        row.put("systemData", resource.get("systemData"));
         return row;
     }
 }

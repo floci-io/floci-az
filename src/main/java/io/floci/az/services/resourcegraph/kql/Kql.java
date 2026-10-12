@@ -156,6 +156,9 @@ public final class Kql {
                 out.add(new Token(Kind.RPAREN, ")", i++));
             } else if (c == ',') {
                 out.add(new Token(Kind.COMMA, ",", i++));
+            } else if (c == '.' && i + 1 < n && source.charAt(i + 1) == '.') {
+                out.add(new Token(Kind.OP, "..", i));
+                i += 2;
             } else if (c == '.') {
                 out.add(new Token(Kind.DOT, ".", i++));
             } else if (c == '[') {
@@ -176,7 +179,19 @@ public final class Kql {
                 i = string(source, i + 1, out);
             } else if (Character.isDigit(c)) {
                 int start = i++;
-                while (i < n && (Character.isLetterOrDigit(source.charAt(i)) || source.charAt(i) == '.')) {
+                while (i < n) {
+                    char d = source.charAt(i);
+                    if (d == '.' && i + 1 < n && source.charAt(i + 1) == '.') {
+                        break; // the range separator of between (a .. b)
+                    }
+                    if ((d == 'e' || d == 'E') && i + 2 < n && (source.charAt(i + 1) == '+' || source.charAt(i + 1) == '-')
+                            && Character.isDigit(source.charAt(i + 2)) && Character.isDigit(source.charAt(i - 1))) {
+                        i += 2; // a signed exponent
+                        continue;
+                    }
+                    if (!Character.isLetterOrDigit(d) && d != '.') {
+                        break;
+                    }
                     i++;
                 }
                 out.add(new Token(Kind.NUMBER, source.substring(start, i), start));
@@ -214,7 +229,7 @@ public final class Kql {
                 }
             } else {
                 String two = i + 1 < n ? source.substring(i, i + 2) : "";
-                if (Set.of("==", "!=", "=~", "!~", "<=", ">=", "<>").contains(two)) {
+                if (Set.of("==", "!=", "=~", "!~", "<=", ">=", "<>", "..").contains(two)) {
                     out.add(new Token(Kind.OP, two, i));
                     i += 2;
                 } else if ("=<>+-*/%!~".indexOf(c) >= 0) {
@@ -557,8 +572,10 @@ public final class Kql {
                     next();
                     expect(Kind.LPAREN);
                     Expr low = additive();
-                    expect(Kind.DOT);
-                    expect(Kind.DOT);
+                    if (!(peek().kind() == Kind.OP && peek().text().equals(".."))) {
+                        throw KqlException.parse("Expected '..' in between (low .. high)");
+                    }
+                    next();
                     Expr high = additive();
                     expect(Kind.RPAREN);
                     return new Bin("and", new Bin(">=", left, low), new Bin("<=", left, high));

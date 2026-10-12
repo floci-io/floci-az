@@ -97,8 +97,9 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         String resultFormat = ArmJson.string(options, "resultFormat", "objectArray");
 
         List<Map<String, Object>> rows;
+        Kql.Query parsed;
         try {
-            Kql.Query parsed = Kql.parse(text);
+            parsed = Kql.parse(text);
             rows = KqlEngine.run(parsed, scoped(subscriptions));
         } catch (KqlException e) {
             LOG.debugf("Resource Graph query rejected: %s", e.getMessage());
@@ -109,11 +110,15 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         }
 
         int top = (int) Math.min(MAX_PAGE, Math.max(1, longOption(options, "$top", MAX_PAGE)));
-        int skip = (int) Math.max(0, longOption(options, "$skip", 0));
+        long requestedSkip = longOption(options, "$skip", 0);
+        if (requestedSkip < 0 || requestedSkip > Integer.MAX_VALUE) {
+            return badRequest("InvalidQueryOption", "The $skip option must be between 0 and " + Integer.MAX_VALUE + ".");
+        }
+        int skip = (int) requestedSkip;
         Object skipToken = options.get("$skipToken");
         if (skipToken instanceof String token && !token.isBlank()) {
             Integer offset = decodeSkipToken(token);
-            if (offset == null) {
+            if (offset == null || offset < 0) {
                 return badRequest("InvalidSkipToken", "The provided skip token is invalid.");
             }
             skip = offset;
@@ -126,7 +131,8 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("totalRecords", total);
         response.put("count", page.size());
-        response.put("data", "table".equalsIgnoreCase(resultFormat) ? table(rows, page) : objectArray(page));
+        response.put("data", "table".equalsIgnoreCase(resultFormat)
+            ? table(KqlEngine.outputColumns(parsed, rows), rows, page) : objectArray(page));
         response.put("facets", List.of());
         response.put("resultTruncated", to < total ? "true" : "false");
         if (to < total) {
@@ -167,8 +173,7 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         return out;
     }
 
-    private static Map<String, Object> table(List<Map<String, Object>> all, List<Map<String, Object>> page) {
-        List<String> names = KqlEngine.columns(all);
+    private static Map<String, Object> table(List<String> names, List<Map<String, Object>> all, List<Map<String, Object>> page) {
         List<Map<String, Object>> columns = new ArrayList<>();
         for (String name : names) {
             String type = "string";

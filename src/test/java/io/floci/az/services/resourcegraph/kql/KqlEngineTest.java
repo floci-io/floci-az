@@ -62,7 +62,7 @@ class KqlEngineTest {
         List<Map<String, Object>> resources = new ArrayList<>();
         resources.add(row("id", "/subscriptions/" + SUB_A + "/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/sa1",
                 "name", "sa1", "type", "microsoft.storage/storageaccounts", "location", "eastus", "subscriptionId", SUB_A,
-                "tags", row("env", "prod"), "properties", row("creationTime", "2026-01-02T03:04:05Z")));
+                "tags", row("env", "prod"), "properties", row("creationTime", "2026-01-02T03:04:05Z"), "systemData", null));
         resources.add(row("id", "/subscriptions/" + SUB_A + "/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/sa2",
                 "name", "sa2", "type", "microsoft.storage/storageaccounts", "location", "westus", "subscriptionId", SUB_A,
                 "tags", null, "properties", row()));
@@ -295,5 +295,106 @@ class KqlEngineTest {
         assertEquals("SemanticError", function.code());
         KqlException operator = assertThrows(KqlException.class, () -> run("resources | frobnicate name"));
         assertEquals("ParserFailure", operator.code());
+    }
+
+    @Test
+    void joinKindsFollowKustoRowAndColumnRules() {
+        // innerunique (the default) keeps the first left row of a key and every right match.
+        List<Map<String, Object>> unique = run("""
+                resources | project id, name
+                | join (resources | project id, location) on id
+                """);
+        assertEquals(3, unique.size());
+        List<Map<String, Object>> dedup = run("""
+                resources | project key = location
+                | join (resources | project key = location, name) on key
+                | order by name asc
+                """);
+        assertEquals(List.of("kv1", "sa1", "sa2"), dedup.stream().map(r -> r.get("name")).toList());
+        // fullouter: unmatched rows carry the same column names as matched ones, with nulls on the missing side.
+        List<Map<String, Object>> full = run("""
+                resources | where name == "sa1" | project id, name
+                | join kind=fullouter (resources | where name != "sa1" | project id, name) on id
+                | order by coalesce(name, name1) asc
+                """);
+        assertEquals(3, full.size());
+        for (Map<String, Object> row : full) {
+            assertEquals(List.of("id", "name", "id1", "name1"), new ArrayList<>(row.keySet()));
+        }
+        assertEquals("kv1", full.get(0).get("name1"));
+        assertNull(full.get(0).get("name"));
+        assertEquals("sa1", full.get(1).get("name"));
+        assertNull(full.get(1).get("id1"));
+    }
+
+    @Test
+    void selectorAggregatesExpandTheChosenRow() {
+        List<Map<String, Object>> rows = run("""
+                resources | extend created = todatetime(properties.creationTime)
+                | summarize arg_max(created, *) by subscriptionId
+                """);
+        assertEquals(1, rows.size());
+        assertEquals("sa1", rows.getFirst().get("name"));
+        assertEquals(Instant.parse("2026-01-02T03:04:05Z"), rows.getFirst().get("created"));
+        assertTrue(rows.getFirst().containsKey("location"));
+        List<Map<String, Object>> named = run("resources | summarize arg_min(name, id, location)");
+        assertEquals(List.of("name", "id", "location"), new ArrayList<>(named.getFirst().keySet()));
+        assertEquals("kv1", named.getFirst().get("name"));
+        assertEquals("eastus", named.getFirst().get("location"));
+        List<Map<String, Object>> pair = run("resources | summarize arg_max(name, location)");
+        assertEquals(List.of("name", "location"), new ArrayList<>(pair.getFirst().keySet()));
+        assertEquals("sa2", pair.getFirst().get("name"));
+    }
+
+    @Test
+    void calculatedColumnsAreNumberedByPosition() {
+        Map<String, Object> row = run("resources | take 1 | project 1 + 1, 2 + 2, name").getFirst();
+        assertEquals(List.of("Column1", "Column2", "name"), new ArrayList<>(row.keySet()));
+        assertEquals(2L, row.get("Column1"));
+        assertEquals(4L, row.get("Column2"));
+    }
+
+    @Test
+    void rangesExponentsAndIntegerPrecision() {
+        assertEquals(3, run("resources | where strlen(name) between (1 .. 10)").size());
+        assertEquals(3, run("resources | where strlen(name) between (1..10)").size());
+        assertEquals(0, run("resources | where strlen(name) between (10..20)").size());
+        Map<String, Object> row = run("resources | take 1 | project a = 1e-3, b = 1e+3, c = toint('3000000000'), d = tolong('3000000000')").getFirst();
+        assertEquals(0.001, (Double) row.get("a"), 1e-12);
+        assertEquals(1000.0, (Double) row.get("b"), 1e-12);
+        assertNull(row.get("c"));
+        assertEquals(3000000000L, row.get("d"));
+        assertEquals(0, run("resources | where 9007199254740993 == 9007199254740992").size());
+        assertEquals(3, run("resources | where 9007199254740993 > 9007199254740992").size());
+    }
+
+    @Test
+    void functionOptionsApply() {
+        Map<String, Object> row = run("""
+                resources | take 1
+                | project r = round(3.14159, 2), s = startofday(datetime(2026-01-02T10:00:00Z), 1), i = indexof('abcabc', 'a', 1)
+                """).getFirst();
+        assertEquals(3.14, (Double) row.get("r"), 1e-12);
+        assertEquals(Instant.parse("2026-01-03T00:00:00Z"), row.get("s"));
+        assertEquals(3L, row.get("i"));
+    }
+
+    @Test
+    void nullsStayNullThroughComparisons() {
+        // Resources with no creationTime are neither before nor after now: a negated comparison keeps them out.
+        assertEquals(1, run("resources | where todatetime(properties.creationTime) < now()").size());
+        assertEquals(0, run("resources | where not(todatetime(properties.creationTime) < now())").size());
+        assertEquals(2, run("resources | where isnull(todatetime(properties.creationTime))").size());
+    }
+
+    @Test
+    void unknownColumnsAreSemanticErrors() {
+        KqlException missing = assertThrows(KqlException.class, () -> run("resources | project misspelledColumn"));
+        assertTrue(missing.getMessage().contains("misspelledColumn"));
+        assertThrows(KqlException.class, () -> run("resources | where nosuch == 1"));
+        assertThrows(KqlException.class, () -> run("resources | extend x = name | project x, y"));
+        // Dynamic properties below a column are data, not schema.
+        assertEquals(3, run("resources | project properties.nosuch").size());
+        assertEquals(1, run("resources | extend x = name | project x | where x == 'sa1'").size());
     }
 }
