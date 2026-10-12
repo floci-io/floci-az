@@ -158,17 +158,18 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         }
 
         // ── Key actions ────────────────────────────────────────────────────
-        if (tail.matches("redis/[^/]+/listKeys") && "POST".equals(method)) {
+        if (tail.matches("(?i)redis/[^/]+/listKeys") && "POST".equals(method)) {
             return handleListKeys(extractSubscriptionId(fullPath), extractResourceGroup(fullPath),
                     segment(tail, 1));
         }
-        if (tail.matches("redis/[^/]+/regenerateKey") && "POST".equals(method)) {
+        if (tail.matches("(?i)redis/[^/]+/regenerateKey") && "POST".equals(method)) {
             return handleRegenerateKey(extractSubscriptionId(fullPath), extractResourceGroup(fullPath),
                     segment(tail, 1), req);
         }
 
         // ── Single cache CRUD ──────────────────────────────────────────────
-        if (tail.matches("redis/[^/]+")) {
+        // ARM resource types are case-insensitive, and the id this handler echoes spells the type "Redis".
+        if (tail.matches("(?i)redis/[^/]+")) {
             String cacheName = segment(tail, 1);
             String sub = extractSubscriptionId(fullPath);
             String rg = extractResourceGroup(fullPath);

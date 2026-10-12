@@ -212,4 +212,18 @@ class RedisHandlerTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'redis-idx' }.type", equalTo("Microsoft.Cache/Redis"));
     }
+
+    @Test
+    @DisplayName("the id a cache echoes addresses it: the type matches case-insensitively")
+    void theEchoedIdAddressesTheCache() {
+        String id = given()
+            .contentType("application/json").body(CREATE_BODY)
+            .when().put(BASE + "/redis/idcache" + API)
+            .then().statusCode(201)
+            .extract().path("id");
+
+        given().when().get(id + API).then().statusCode(200).body("name", equalTo("idcache"));
+        given().when().delete(id + API).then().statusCode(anyOf(is(200), is(202), is(204)));
+        given().when().get(BASE + "/redis/idcache" + API).then().statusCode(404);
+    }
 }
