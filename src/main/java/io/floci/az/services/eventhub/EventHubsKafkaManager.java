@@ -53,6 +53,7 @@ public class EventHubsKafkaManager {
         LOG.infov("Starting Redpanda (Kafka) sidecar for Event Hubs on port {0}", eh.kafkaPort());
 
         lifecycleManager.removeIfExists(containerName());
+        String advertisedAddress = advertisedKafkaAddress(eh.kafkaPort());
 
         ContainerSpec spec = containerBuilder.newContainer(eh.redpandaImage())
                 .withName(containerName())
@@ -64,7 +65,7 @@ public class EventHubsKafkaManager {
                         "--memory", "256M",
                         "--reserve-memory", "0M",
                         "--kafka-addr", "0.0.0.0:" + KAFKA_PORT,
-                        "--advertise-kafka-addr", "localhost:" + eh.kafkaPort()))
+                        "--advertise-kafka-addr", advertisedAddress))
                 .withPortBinding(KAFKA_PORT, eh.kafkaPort())
                 .withPortBinding(ADMIN_PORT, 0)
                 .withDockerNetwork(config.services().dockerNetwork())
@@ -74,9 +75,18 @@ public class EventHubsKafkaManager {
         ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
         containerId = info.containerId();
 
-        int resolvedAdminPort = info.getEndpoint(ADMIN_PORT).port();
-        waitForReady(resolvedAdminPort);
-        LOG.infov("Event Hubs Kafka (Redpanda) ready at localhost:{0}", eh.kafkaPort());
+        waitForReady(info.getEndpoint(ADMIN_PORT));
+        LOG.infov("Event Hubs Kafka (Redpanda) ready at {0}", advertisedAddress);
+    }
+
+    /**
+     * The {@code host:port} Redpanda hands Kafka clients in its metadata, which they then connect
+     * to: the published Kafka port on the Docker daemon's host in published mode, so a remote
+     * daemon works, and on localhost otherwise.
+     */
+    String advertisedKafkaAddress(int kafkaHostPort) {
+        String host = lifecycleManager.publishedEndpoints() ? lifecycleManager.daemonHost() : "localhost";
+        return host + ":" + kafkaHostPort;
     }
 
     public void stop() {
@@ -87,8 +97,9 @@ public class EventHubsKafkaManager {
         }
     }
 
-    private void waitForReady(int adminPort) {
-        String url = "http://localhost:" + adminPort + "/ready";
+    /** Polls the admin API at the endpoint floci-az resolved for it, which is not localhost in a container. */
+    private void waitForReady(ContainerLifecycleManager.EndpointInfo adminEndpoint) {
+        String url = "http://" + adminEndpoint.host() + ":" + adminEndpoint.port() + "/ready";
         long deadline = System.currentTimeMillis() + 30_000;
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -97,6 +108,7 @@ public class EventHubsKafkaManager {
                 conn.setReadTimeout(1000);
                 if (conn.getResponseCode() == 200) return;
             } catch (Exception ignored) {
+                // Not listening yet: poll again until the deadline.
             }
             try {
                 Thread.sleep(500);

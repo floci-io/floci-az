@@ -51,8 +51,28 @@ public class ArtemisConfigGenerator {
 
     /** Returns broker.xml for the given namespace and entities (used for dynamic namespace creation). */
     public String generate(String namespace, Map<String, EntitySpec> entities) {
+        return generate(namespace, entities, List.of());
+    }
+
+    /**
+     * Returns broker.xml for the given namespace and entities.
+     *
+     * @param clientHosts hosts clients are told to reach the broker at besides localhost and its
+     *                    container name (the Docker daemon's host in published endpoint mode), in
+     *                    the form they take in a URL; each gets the URI-addressed family too
+     */
+    public String generate(String namespace, Map<String, EntitySpec> entities, List<String> clientHosts) {
+        List<String> hostnames = new ArrayList<>();
+        hostnames.add("localhost");
         // The broker's own container name, spelled exactly as the namespace manager names it.
-        List<String> hostnames = List.of("localhost", ContainerStorageHelper.dockerName(config, "artemis-" + namespace));
+        hostnames.add(ContainerStorageHelper.dockerName(config, "artemis-" + namespace));
+        for (String clientHost : clientHosts) {
+            // The daemon's host is localhost when the daemon is local, and a second address of the
+            // same name is one Artemis skips without saying so. Addresses are spelled lower case.
+            if (hostnames.stream().noneMatch(clientHost::equalsIgnoreCase)) {
+                hostnames.add(clientHost);
+            }
+        }
 
         XmlBuilder addresses = new XmlBuilder();
         XmlBuilder diverts = new XmlBuilder();

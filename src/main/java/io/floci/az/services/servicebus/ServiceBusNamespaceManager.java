@@ -183,7 +183,9 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
 
             ArtemisTlsGenerator.TlsBundle tls;
             try {
-                tls = tlsGenerator.generate(containerName);
+                tls = lifecycleManager.publishedEndpoints()
+                        ? tlsGenerator.generate(containerName, lifecycleManager.daemonAddress())
+                        : tlsGenerator.generate(containerName);
             } catch (Exception e) {
                 throw new RuntimeException(
                         "Failed to generate TLS certificate for Service Bus namespace '"

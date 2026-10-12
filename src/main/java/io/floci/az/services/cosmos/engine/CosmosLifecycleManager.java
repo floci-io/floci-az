@@ -33,13 +33,24 @@ public class CosmosLifecycleManager {
 
     private static final Logger LOG = Logger.getLogger(CosmosLifecycleManager.class);
 
-    @Inject EmulatorConfig config;
-    @Inject CosmosEngineRegistry registry;
-    @Inject ContainerLifecycleManager containerManager;
-    @Inject ContainerBuilder containerBuilder;
+    private final EmulatorConfig config;
+    private final CosmosEngineRegistry registry;
+    private final ContainerLifecycleManager containerManager;
+    private final ContainerBuilder containerBuilder;
 
     /** Running container state per API. */
     private final ConcurrentHashMap<CosmosApi, RunningEngine> running = new ConcurrentHashMap<>();
+
+    @Inject
+    public CosmosLifecycleManager(EmulatorConfig config,
+                                  CosmosEngineRegistry registry,
+                                  ContainerLifecycleManager containerManager,
+                                  ContainerBuilder containerBuilder) {
+        this.config = config;
+        this.registry = registry;
+        this.containerManager = containerManager;
+        this.containerBuilder = containerBuilder;
+    }
 
     void onStart(@Observes StartupEvent ev) {
         if (config.services().cosmos().mocked()) {
@@ -148,10 +159,11 @@ public class CosmosLifecycleManager {
         ContainerSpec spec = buildSpec(containerName, image, hostPort, engine.defaultPort(), api);
         ContainerLifecycleManager.ContainerInfo info = containerManager.createAndStart(spec);
 
-        String host = "localhost";
-        int mappedPort = Optional.ofNullable(info.getEndpoint(engine.defaultPort()))
-            .map(ContainerLifecycleManager.EndpointInfo::port)
-            .orElse(hostPort);
+        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(engine.defaultPort());
+        int mappedPort = endpoint != null ? endpoint.port() : hostPort;
+        // Published mode reports the Docker daemon's host, which a remote daemon needs; auto mode
+        // keeps reporting localhost.
+        String host = containerManager.publishedEndpoints() && endpoint != null ? endpoint.host() : "localhost";
 
         CosmosConnectionInfo connInfo = engine.buildConnectionInfo(host, mappedPort);
         running.put(api, new RunningEngine(info.containerId(), connInfo));

@@ -1,5 +1,6 @@
 package io.floci.az.services.cosmos.engine.impl;
 
+import io.floci.az.core.docker.HostLiterals;
 import io.floci.az.services.cosmos.engine.CosmosApi;
 import io.floci.az.services.cosmos.engine.CosmosCompatibilityMetadata;
 import io.floci.az.services.cosmos.engine.CosmosConnectionInfo;
@@ -45,8 +46,11 @@ public class PostgreSqlCosmosEngine implements CosmosEngineProvider {
 
             @Override
             public CosmosConnectionInfo buildConnectionInfo(String host, int port) {
+                // A keyword/value connection string takes the address itself: an IPv6 literal goes in
+                // without the URL brackets the daemon host carries in published mode.
                 String cs = String.format(
-                    "host=%s port=%d dbname=citus user=citus password=mypassword sslmode=disable", host, port);
+                    "host=%s port=%d dbname=citus user=citus password=mypassword sslmode=disable",
+                    HostLiterals.bare(host), port);
                 return new CosmosConnectionInfo(host, port, cs,
                     "Connect with any PostgreSQL client or JDBC driver. "
                     + "Note: Cosmos DB for PostgreSQL (Citus) is being retired by Azure.");

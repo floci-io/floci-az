@@ -1,5 +1,6 @@
 package io.floci.az.services.eventhub;
 
+import io.floci.az.core.docker.HostLiterals;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -18,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.StringWriter;
 import java.math.BigInteger;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
@@ -28,7 +30,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Generates a self-signed TLS certificate and PKCS12 keystore for the Artemis AMQP broker.
@@ -41,13 +46,15 @@ public class ArtemisTlsGenerator {
     public static final String KEYSTORE_PASSWORD = "artemis-tls";
     private static final String CONTAINER_ALIAS = "artemis";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final Pattern IPV4_LITERAL = Pattern.compile("\\d{1,3}(\\.\\d{1,3}){3}");
 
     public record TlsBundle(byte[] pkcs12Bytes, String certPem) {}
 
     /**
      * Generates a new self-signed cert and PKCS12 keystore valid for 10 years.
      * SANs cover the Artemis container hostname, localhost variants, and any additional
-     * DNS names passed in (e.g. the Docker container name for the sidecar).
+     * hosts passed in (e.g. the Docker container name for the sidecar, or the Docker daemon's
+     * address in published endpoint mode); an IP literal becomes an iPAddress SAN.
      */
     public TlsBundle generate(String... additionalDnsNames) throws Exception {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
@@ -63,13 +70,13 @@ public class ArtemisTlsGenerator {
                 Date.from(now), Date.from(now.plus(3650, ChronoUnit.DAYS)),
                 name, keyPair.getPublic());
 
+        Set<String> sanHosts = new LinkedHashSet<>(List.of("floci-az-artemis", "localhost", "127.0.0.1"));
+        for (String host : additionalDnsNames) {
+            sanHosts.add(HostLiterals.bare(host));
+        }
         List<GeneralName> sanList = new ArrayList<>();
-        sanList.add(new GeneralName(GeneralName.dNSName, "floci-az-artemis"));
-        sanList.add(new GeneralName(GeneralName.dNSName, "localhost"));
-        sanList.add(new GeneralName(GeneralName.iPAddress,
-                new DEROctetString(InetAddress.getByName("127.0.0.1").getAddress())));
-        for (String dnsName : additionalDnsNames) {
-            sanList.add(new GeneralName(GeneralName.dNSName, dnsName));
+        for (String host : sanHosts) {
+            sanList.add(subjectAlternativeName(host));
         }
         GeneralName[] sans = sanList.toArray(new GeneralName[0]);
         certBuilder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(sans));
@@ -95,5 +102,15 @@ public class ArtemisTlsGenerator {
         }
 
         return new TlsBundle(baos.toByteArray(), sw.toString());
+    }
+
+    /** An IP literal (such as a remote Docker daemon's address) is an iPAddress SAN; anything else a dNSName. */
+    static GeneralName subjectAlternativeName(String host) throws UnknownHostException {
+        if (HostLiterals.isBareIpv6(host) || IPV4_LITERAL.matcher(host).matches()) {
+            // A literal: getByName parses it without a DNS lookup.
+            return new GeneralName(GeneralName.iPAddress,
+                    new DEROctetString(InetAddress.getByName(host).getAddress()));
+        }
+        return new GeneralName(GeneralName.dNSName, host);
     }
 }

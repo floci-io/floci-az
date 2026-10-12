@@ -137,4 +137,25 @@ class ArtemisConfigGeneratorTest {
 
         assertTrue(addresses.contains("amqp://floci-az-artemis-ns/ns/eh1"), addresses.toString());
     }
+
+    /** In published endpoint mode clients are told the daemon's host, so it needs the family too. */
+    @Test
+    void aClientHostGetsTheUriAddressedFamilyAndItsDiverts() {
+        Map<String, EntitySpec> entities = Map.of("eh1", new EntitySpec(1, List.of("$Default")));
+        String withDaemonHost = new ArtemisConfigGenerator(null).generate("ns", entities, List.of("Docker-Host"));
+
+        List<String> addresses = matches(ADDRESS_NAME, withDaemonHost);
+        assertTrue(addresses.contains("amqp://docker-host/ns/eh1"), addresses.toString());
+        assertTrue(addresses.contains("amqp://docker-host/ns/eh1/$Default"), addresses.toString());
+        assertEquals(matches(DIVERT_NAME, brokerXml("ns", entities)).size() + 1,
+                matches(DIVERT_NAME, withDaemonHost).size());
+    }
+
+    @Test
+    void aClientHostThatIsLocalhostAddsNoDuplicateAddress() {
+        Map<String, EntitySpec> entities = Map.of("eh1", new EntitySpec(1, List.of("$Default")));
+
+        assertEquals(matches(ADDRESS_NAME, brokerXml("ns", entities)),
+                matches(ADDRESS_NAME, new ArtemisConfigGenerator(null).generate("ns", entities, List.of("localhost"))));
+    }
 }
