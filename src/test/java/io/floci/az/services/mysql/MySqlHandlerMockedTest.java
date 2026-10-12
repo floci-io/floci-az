@@ -228,4 +228,23 @@ class MySqlHandlerMockedTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'mysql-idx' }.type", equalTo("Microsoft.DBforMySQL/flexibleServers"));
     }
+
+    @Test
+    @DisplayName("a resource group named default lists only its own servers")
+    void aGroupNamedDefaultListsOnlyItsOwnServers() {
+        String inDefault = "/subscriptions/" + SUB + "/resourceGroups/default/providers/Microsoft.DBforMySQL";
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(BASE + "/flexibleServers/elsewhere" + API)
+            .then().statusCode(201);
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(inDefault + "/flexibleServers/indefault" + API)
+            .then().statusCode(201);
+
+        given().when().get(inDefault + "/flexibleServers" + API)
+            .then().statusCode(200)
+            .body("value.name", contains("indefault"));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.DBforMySQL/flexibleServers" + API)
+            .then().statusCode(200)
+            .body("value.name", containsInAnyOrder("elsewhere", "indefault"));
+    }
 }

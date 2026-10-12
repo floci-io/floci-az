@@ -436,7 +436,7 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listDnsZones(sub, rg))).build();
+            return Response.ok(Map.of("value", listDnsZones(sub, ArmPaths.resourceGroup(path).orElse(null)))).build();
         }
 
         // 2. Zone CRUD
@@ -491,10 +491,11 @@ public class NetworkService {
                "SOA".equals(u) || "SRV".equals(u) || "CAA".equals(u);
     }
 
+    /** The subscription's DNS zones, or one resource group's when {@code rg} is non-null. */
     private List<Map<String, Object>> listDnsZones(String sub, String rg) {
         return resources.values().stream()
                 .filter(r -> sub.equals(r.get("_sub"))
-                        && ("unknown".equals(rg) || rg.equals(r.get("_rg")))
+                        && (rg == null || rg.equals(r.get("_rg")))
                         && "Microsoft.Network/dnsZones".equals(r.get("type")))
                 .map(NetworkService::stripInternal)
                 .toList();
@@ -795,7 +796,8 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listPrivateDnsZones(sub, rg))).build();
+            return Response.ok(Map.of("value", listPrivateDnsZones(sub, ArmPaths.resourceGroup(path).orElse(null))))
+                    .build();
         }
 
         // 2. Zone CRUD
@@ -868,10 +870,11 @@ public class NetworkService {
         return sub + "/" + rg + "/net/privateDnsZones/" + zoneName;
     }
 
+    /** The subscription's private DNS zones, or one resource group's when {@code rg} is non-null. */
     private List<Map<String, Object>> listPrivateDnsZones(String sub, String rg) {
         return resources.values().stream()
                 .filter(r -> sub.equals(r.get("_sub"))
-                        && ("unknown".equals(rg) || rg.equals(r.get("_rg")))
+                        && (rg == null || rg.equals(r.get("_rg")))
                         && "Microsoft.Network/privateDnsZones".equals(r.get("type")))
                 .map(NetworkService::stripInternal)
                 .toList();

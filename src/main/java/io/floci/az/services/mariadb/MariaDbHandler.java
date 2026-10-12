@@ -8,6 +8,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
@@ -315,10 +316,11 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     private Response handleServerList(AzureRequest request) {
         String sub = extractSubscriptionId(request.resourcePath());
-        String rg  = extractResourceGroup(request.resourcePath());
-        List<MariaDbState.ServerEntry> servers = rg.equals("default")
+        // A path with no resourceGroups segment lists the subscription; a group named "default" is a group.
+        Optional<String> rg = ArmPaths.resourceGroup(request.resourcePath());
+        List<MariaDbState.ServerEntry> servers = rg.isEmpty()
             ? state.listServersBySubscription(sub)
-            : state.listServersByResourceGroup(sub, rg);
+            : state.listServersByResourceGroup(sub, rg.get());
         List<Map<String, Object>> value = servers.stream()
             .map(this::rehydrateBestEffort)
             .map(this::serverResponse)

@@ -215,4 +215,23 @@ class MariaDbHandlerMockedTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'mariadb-idx' }.type", equalTo("Microsoft.DBforMariaDB/servers"));
     }
+
+    @Test
+    @DisplayName("a resource group named default lists only its own servers")
+    void aGroupNamedDefaultListsOnlyItsOwnServers() {
+        String inDefault = "/subscriptions/" + SUB + "/resourceGroups/default/providers/Microsoft.DBforMariaDB";
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(BASE + "/servers/elsewhere" + API)
+            .then().statusCode(201);
+        given().contentType("application/json").body(SERVER_BODY)
+            .when().put(inDefault + "/servers/indefault" + API)
+            .then().statusCode(201);
+
+        given().when().get(inDefault + "/servers" + API)
+            .then().statusCode(200)
+            .body("value.name", contains("indefault"));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.DBforMariaDB/servers" + API)
+            .then().statusCode(200)
+            .body("value.name", containsInAnyOrder("elsewhere", "indefault"));
+    }
 }

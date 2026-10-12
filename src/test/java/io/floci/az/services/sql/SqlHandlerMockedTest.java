@@ -113,4 +113,27 @@ class SqlHandlerMockedTest {
                 .then().statusCode(200)
                 .body("value.find { it.name == 'sql-idx' }.type", equalTo("Microsoft.Sql/servers"));
     }
+
+    @Test
+    @DisplayName("a resource group named default lists only its own servers")
+    void aGroupNamedDefaultListsOnlyItsOwnServers() {
+        String inDefault = "/subscriptions/" + SUB + "/resourceGroups/default/providers/Microsoft.Sql";
+        given().contentType("application/json").body("{\"location\":\"eastus\",\"properties\":{"
+                + "\"administratorLogin\":\"sa\","
+                + "\"administratorLoginPassword\":\"FlociAz_Strong123!\"}}")
+            .when().put(BASE + "/servers/elsewhere" + "?api-version=2021-11-01")
+            .then().statusCode(201);
+        given().contentType("application/json").body("{\"location\":\"eastus\",\"properties\":{"
+                + "\"administratorLogin\":\"sa\","
+                + "\"administratorLoginPassword\":\"FlociAz_Strong123!\"}}")
+            .when().put(inDefault + "/servers/indefault" + "?api-version=2021-11-01")
+            .then().statusCode(201);
+
+        given().when().get(inDefault + "/servers" + "?api-version=2021-11-01")
+            .then().statusCode(200)
+            .body("value.name", contains("indefault"));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.Sql/servers" + "?api-version=2021-11-01")
+            .then().statusCode(200)
+            .body("value.name", containsInAnyOrder("elsewhere", "indefault"));
+    }
 }

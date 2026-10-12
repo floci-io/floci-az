@@ -6,6 +6,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
@@ -745,5 +747,29 @@ class NetworkHandlerTest {
                         equalTo(agwId + "/frontendPorts/port80"))
                 .body("properties.operationalState", equalTo("Running"))
                 .body("properties.provisioningState", equalTo("Succeeded"));
+    }
+
+    @Test
+    void aResourceGroupNamedUnknownListsOnlyItsOwnDnsZones() {
+        String inUnknown = "/subscriptions/" + SUB + "/resourceGroups/unknown/providers/Microsoft.Network";
+        String zone = "{\"location\":\"global\"}";
+        given().contentType("application/json").body(zone)
+                .when().put(BASE + "/dnsZones/elsewhere.example" + API).then().statusCode(201);
+        given().contentType("application/json").body(zone)
+                .when().put(inUnknown + "/dnsZones/inunknown.example" + API).then().statusCode(201);
+        given().contentType("application/json").body(zone)
+                .when().put(BASE + "/privateDnsZones/elsewhere.internal" + API).then().statusCode(201);
+        given().contentType("application/json").body(zone)
+                .when().put(inUnknown + "/privateDnsZones/inunknown.internal" + API).then().statusCode(201);
+
+        given().when().get(inUnknown + "/dnsZones" + API)
+                .then().statusCode(200)
+                .body("value.name", contains("inunknown.example"));
+        given().when().get(inUnknown + "/privateDnsZones" + API)
+                .then().statusCode(200)
+                .body("value.name", contains("inunknown.internal"));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.Network/dnsZones" + API)
+                .then().statusCode(200)
+                .body("value.name", containsInAnyOrder("elsewhere.example", "inunknown.example"));
     }
 }
