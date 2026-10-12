@@ -1,0 +1,93 @@
+{
+  "discovery, tenant v2.0" : {
+    "body" : {
+      "authorization_endpoint" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/oauth2/v2.0/authorize",
+      "claims_supported" : [ "sub", "iss", "aud", "exp", "iat", "nbf", "oid", "tid", "ver", "appid", "azp", "scp", "idtyp", "uti" ],
+      "cloud_instance_name" : "microsoftonline.com",
+      "device_authorization_endpoint" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/oauth2/v2.0/devicecode",
+      "end_session_endpoint" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/oauth2/v2.0/logout",
+      "frontchannel_logout_supported" : true,
+      "grant_types_supported" : [ "authorization_code", "refresh_token", "client_credentials", "password", "urn:ietf:params:oauth:grant-type:device_code" ],
+      "http_logout_supported" : true,
+      "id_token_signing_alg_values_supported" : [ "RS256" ],
+      "issuer" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/v2.0",
+      "jwks_uri" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/discovery/v2.0/keys",
+      "request_uri_parameter_supported" : false,
+      "response_modes_supported" : [ "query", "fragment", "form_post" ],
+      "response_types_supported" : [ "code", "id_token", "code id_token", "id_token token" ],
+      "scopes_supported" : [ "openid", "profile", "email", "offline_access" ],
+      "subject_types_supported" : [ "pairwise" ],
+      "tenant_region_scope" : "NA",
+      "token_endpoint" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token",
+      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ],
+      "userinfo_endpoint" : "http://localhost:<port>/oidc/userinfo"
+    },
+    "headers" : {
+      "Content-Type" : "application/json"
+    },
+    "request" : "GET /00000000-0000-0000-0000-000000000002/v2.0/.well-known/openid-configuration",
+    "status" : 200
+  },
+  "discovery, common v2.0" : {
+    "body" : {
+      "authorization_endpoint" : "http://localhost:<port>/common/oauth2/v2.0/authorize",
+      "claims_supported" : [ "sub", "iss", "aud", "exp", "iat", "nbf", "oid", "tid", "ver", "appid", "azp", "scp", "idtyp", "uti" ],
+      "cloud_instance_name" : "microsoftonline.com",
+      "device_authorization_endpoint" : "http://localhost:<port>/common/oauth2/v2.0/devicecode",
+      "end_session_endpoint" : "http://localhost:<port>/common/oauth2/v2.0/logout",
+      "frontchannel_logout_supported" : true,
+      "grant_types_supported" : [ "authorization_code", "refresh_token", "client_credentials", "password", "urn:ietf:params:oauth:grant-type:device_code" ],
+      "http_logout_supported" : true,
+      "id_token_signing_alg_values_supported" : [ "RS256" ],
+      "issuer" : "http://localhost:<port>/common/v2.0",
+      "jwks_uri" : "http://localhost:<port>/common/discovery/v2.0/keys",
+      "request_uri_parameter_supported" : false,
+      "response_modes_supported" : [ "query", "fragment", "form_post" ],
+      "response_types_supported" : [ "code", "id_token", "code id_token", "id_token token" ],
+      "scopes_supported" : [ "openid", "profile", "email", "offline_access" ],
+      "subject_types_supported" : [ "pairwise" ],
+      "tenant_region_scope" : "NA",
+      "token_endpoint" : "http://localhost:<port>/common/oauth2/v2.0/token",
+      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ],
+      "userinfo_endpoint" : "http://localhost:<port>/oidc/userinfo"
+    },
+    "headers" : {
+      "Content-Type" : "application/json"
+    },
+    "request" : "GET /common/v2.0/.well-known/openid-configuration",
+    "status" : 200
+  },
+  "token, client credentials" : {
+    "body" : {
+      "access_token" : {
+        "claims" : {
+          "aud" : "https://management.azure.com",
+          "azp" : "11111111-1111-1111-1111-111111111111",
+          "exp" : "<exp:number>",
+          "iat" : "<iat:number>",
+          "idtyp" : "app",
+          "iss" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/v2.0",
+          "nbf" : "<nbf:number>",
+          "oid" : "<guid>",
+          "sub" : "<guid>",
+          "tid" : "00000000-0000-0000-0000-000000000002",
+          "uti" : "<uti:string>",
+          "ver" : "2.0"
+        },
+        "header" : {
+          "alg" : "RS256",
+          "kid" : "<kid:string>",
+          "typ" : "JWT"
+        }
+      },
+      "expires_in" : 3599,
+      "ext_expires_in" : 3599,
+      "token_type" : "Bearer"
+    },
+    "headers" : {
+      "Content-Type" : "application/json"
+    },
+    "request" : "POST /00000000-0000-0000-0000-000000000002/oauth2/v2.0/token",
+    "status" : 200
+  }
+}

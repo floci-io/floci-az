@@ -1,0 +1,50 @@
+{
+  "endpoints, 2022-09-01" : {
+    "body" : {
+      "authentication" : {
+        "audiences" : [ "http://localhost:<port>/" ],
+        "identityProvider" : "AAD",
+        "loginEndpoint" : "http://localhost:<port>/",
+        "tenant" : "common"
+      },
+      "gallery" : "http://localhost:<port>/",
+      "microsoftGraphResourceId" : "http://localhost:<port>/",
+      "name" : "floci-az",
+      "portal" : "http://localhost:<port>/",
+      "resourceManager" : "http://localhost:<port>",
+      "suffixes" : {
+        "keyVaultDns" : "vault.azure.net",
+        "storage" : "core.windows.net"
+      }
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /metadata/endpoints?api-version=2022-09-01",
+    "status" : 200
+  },
+  "endpoints, 2019-05-01" : {
+    "body" : {
+      "authentication" : {
+        "audiences" : [ "http://localhost:<port>/" ],
+        "identityProvider" : "AAD",
+        "loginEndpoint" : "http://localhost:<port>/",
+        "tenant" : "common"
+      },
+      "gallery" : "http://localhost:<port>/",
+      "microsoftGraphResourceId" : "http://localhost:<port>/",
+      "name" : "floci-az",
+      "portal" : "http://localhost:<port>/",
+      "resourceManager" : "http://localhost:<port>",
+      "suffixes" : {
+        "keyVaultDns" : "vault.azure.net",
+        "storage" : "core.windows.net"
+      }
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /metadata/endpoints?api-version=2019-05-01",
+    "status" : 200
+  }
+}

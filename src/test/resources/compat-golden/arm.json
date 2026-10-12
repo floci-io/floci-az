@@ -1,0 +1,1454 @@
+{
+  "tenants list" : {
+    "body" : {
+      "value" : [ {
+        "defaultDomain" : "floci-az.local",
+        "displayName" : "floci-az local",
+        "domains" : [ "floci-az.local" ],
+        "id" : "/tenants/00000000-0000-0000-0000-000000000002",
+        "tenantCategory" : "Home",
+        "tenantId" : "00000000-0000-0000-0000-000000000002",
+        "tenantType" : "AAD"
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /tenants?api-version=2022-12-01",
+    "status" : 200
+  },
+  "subscriptions list" : {
+    "body" : {
+      "value" : [ {
+        "authorizationSource" : "RoleBased",
+        "displayName" : "floci-az local",
+        "id" : "/subscriptions/00000000-0000-0000-0000-000000000001",
+        "managedByTenants" : [ ],
+        "state" : "Enabled",
+        "subscriptionId" : "00000000-0000-0000-0000-000000000001",
+        "subscriptionPolicies" : {
+          "locationPlacementId" : "Internal_2014-09-01",
+          "quotaId" : "Internal_2014-09-01",
+          "spendingLimit" : "Off"
+        },
+        "tenantId" : "00000000-0000-0000-0000-000000000002"
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions?api-version=2022-12-01",
+    "status" : 200
+  },
+  "subscription get, default" : {
+    "body" : {
+      "authorizationSource" : "RoleBased",
+      "displayName" : "floci-az local",
+      "id" : "/subscriptions/00000000-0000-0000-0000-000000000001",
+      "managedByTenants" : [ ],
+      "state" : "Enabled",
+      "subscriptionId" : "00000000-0000-0000-0000-000000000001",
+      "subscriptionPolicies" : {
+        "locationPlacementId" : "Internal_2014-09-01",
+        "quotaId" : "Internal_2014-09-01",
+        "spendingLimit" : "Off"
+      },
+      "tenantId" : "00000000-0000-0000-0000-000000000002"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/00000000-0000-0000-0000-000000000001?api-version=2022-12-01",
+    "status" : 200
+  },
+  "subscription get, first use" : {
+    "body" : {
+      "authorizationSource" : "RoleBased",
+      "displayName" : "floci-az local",
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001",
+      "managedByTenants" : [ ],
+      "state" : "Enabled",
+      "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+      "subscriptionPolicies" : {
+        "locationPlacementId" : "Internal_2014-09-01",
+        "quotaId" : "Internal_2014-09-01",
+        "spendingLimit" : "Off"
+      },
+      "tenantId" : "00000000-0000-0000-0000-000000000002"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001?api-version=2022-12-01",
+    "status" : 200
+  },
+  "subscriptions list after first use" : {
+    "body" : {
+      "value" : [ {
+        "authorizationSource" : "RoleBased",
+        "displayName" : "floci-az local",
+        "id" : "/subscriptions/00000000-0000-0000-0000-000000000001",
+        "managedByTenants" : [ ],
+        "state" : "Enabled",
+        "subscriptionId" : "00000000-0000-0000-0000-000000000001",
+        "subscriptionPolicies" : {
+          "locationPlacementId" : "Internal_2014-09-01",
+          "quotaId" : "Internal_2014-09-01",
+          "spendingLimit" : "Off"
+        },
+        "tenantId" : "00000000-0000-0000-0000-000000000002"
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions?api-version=2022-12-01",
+    "status" : 200
+  },
+  "locations list" : {
+    "body" : {
+      "value" : [ {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "eastus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "eastus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "eastus-az3"
+        } ],
+        "displayName" : "East US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "eastus",
+        "regionalDisplayName" : "East US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "eastus2-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "eastus2-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "eastus2-az3"
+        } ],
+        "displayName" : "East US 2",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastus2",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "eastus2",
+        "regionalDisplayName" : "East US 2",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "southcentralus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "southcentralus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "southcentralus-az3"
+        } ],
+        "displayName" : "South Central US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southcentralus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "southcentralus",
+        "regionalDisplayName" : "South Central US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westus2-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westus2-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westus2-az3"
+        } ],
+        "displayName" : "West US 2",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus2",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westus2",
+        "regionalDisplayName" : "West US 2",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "centralus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "centralus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "centralus-az3"
+        } ],
+        "displayName" : "Central US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/centralus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "centralus",
+        "regionalDisplayName" : "Central US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "northcentralus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "northcentralus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "northcentralus-az3"
+        } ],
+        "displayName" : "North Central US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/northcentralus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "northcentralus",
+        "regionalDisplayName" : "North Central US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westus-az3"
+        } ],
+        "displayName" : "West US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westus",
+        "regionalDisplayName" : "West US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westcentralus-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westcentralus-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westcentralus-az3"
+        } ],
+        "displayName" : "West Central US",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westcentralus",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westcentralus",
+        "regionalDisplayName" : "West Central US",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westus3-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westus3-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westus3-az3"
+        } ],
+        "displayName" : "West US 3",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus3",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westus3",
+        "regionalDisplayName" : "West US 3",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "canadacentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "canadacentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "canadacentral-az3"
+        } ],
+        "displayName" : "Canada Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/canadacentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "canadacentral",
+        "regionalDisplayName" : "Canada Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "canadaeast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "canadaeast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "canadaeast-az3"
+        } ],
+        "displayName" : "Canada East",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/canadaeast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "canadaeast",
+        "regionalDisplayName" : "Canada East",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "brazilsouth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "brazilsouth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "brazilsouth-az3"
+        } ],
+        "displayName" : "Brazil South",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/brazilsouth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "brazilsouth",
+        "regionalDisplayName" : "Brazil South",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "brazilsoutheast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "brazilsoutheast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "brazilsoutheast-az3"
+        } ],
+        "displayName" : "Brazil Southeast",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/brazilsoutheast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "brazilsoutheast",
+        "regionalDisplayName" : "Brazil Southeast",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "mexicocentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "mexicocentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "mexicocentral-az3"
+        } ],
+        "displayName" : "Mexico Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/mexicocentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "mexicocentral",
+        "regionalDisplayName" : "Mexico Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "northeurope-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "northeurope-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "northeurope-az3"
+        } ],
+        "displayName" : "North Europe",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/northeurope",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "northeurope",
+        "regionalDisplayName" : "North Europe",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "uksouth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "uksouth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "uksouth-az3"
+        } ],
+        "displayName" : "UK South",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uksouth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "uksouth",
+        "regionalDisplayName" : "UK South",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westeurope-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westeurope-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westeurope-az3"
+        } ],
+        "displayName" : "West Europe",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westeurope",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westeurope",
+        "regionalDisplayName" : "West Europe",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "francecentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "francecentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "francecentral-az3"
+        } ],
+        "displayName" : "France Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/francecentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "francecentral",
+        "regionalDisplayName" : "France Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "germanywestcentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "germanywestcentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "germanywestcentral-az3"
+        } ],
+        "displayName" : "Germany West Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/germanywestcentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "germanywestcentral",
+        "regionalDisplayName" : "Germany West Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "norwayeast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "norwayeast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "norwayeast-az3"
+        } ],
+        "displayName" : "Norway East",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/norwayeast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "norwayeast",
+        "regionalDisplayName" : "Norway East",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "switzerlandnorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "switzerlandnorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "switzerlandnorth-az3"
+        } ],
+        "displayName" : "Switzerland North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/switzerlandnorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "switzerlandnorth",
+        "regionalDisplayName" : "Switzerland North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "swedencentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "swedencentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "swedencentral-az3"
+        } ],
+        "displayName" : "Sweden Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/swedencentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "swedencentral",
+        "regionalDisplayName" : "Sweden Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "francesouth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "francesouth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "francesouth-az3"
+        } ],
+        "displayName" : "France South",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/francesouth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "francesouth",
+        "regionalDisplayName" : "France South",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "germanynorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "germanynorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "germanynorth-az3"
+        } ],
+        "displayName" : "Germany North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/germanynorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "germanynorth",
+        "regionalDisplayName" : "Germany North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "norwaywest-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "norwaywest-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "norwaywest-az3"
+        } ],
+        "displayName" : "Norway West",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/norwaywest",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "norwaywest",
+        "regionalDisplayName" : "Norway West",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "switzerlandwest-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "switzerlandwest-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "switzerlandwest-az3"
+        } ],
+        "displayName" : "Switzerland West",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/switzerlandwest",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "switzerlandwest",
+        "regionalDisplayName" : "Switzerland West",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "ukwest-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "ukwest-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "ukwest-az3"
+        } ],
+        "displayName" : "UK West",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/ukwest",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "ukwest",
+        "regionalDisplayName" : "UK West",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "italynorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "italynorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "italynorth-az3"
+        } ],
+        "displayName" : "Italy North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/italynorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "italynorth",
+        "regionalDisplayName" : "Italy North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "spaincentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "spaincentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "spaincentral-az3"
+        } ],
+        "displayName" : "Spain Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/spaincentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "spaincentral",
+        "regionalDisplayName" : "Spain Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "polandcentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "polandcentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "polandcentral-az3"
+        } ],
+        "displayName" : "Poland Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/polandcentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "polandcentral",
+        "regionalDisplayName" : "Poland Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "australiaeast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "australiaeast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "australiaeast-az3"
+        } ],
+        "displayName" : "Australia East",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiaeast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "australiaeast",
+        "regionalDisplayName" : "Australia East",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "southeastasia-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "southeastasia-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "southeastasia-az3"
+        } ],
+        "displayName" : "Southeast Asia",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southeastasia",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "southeastasia",
+        "regionalDisplayName" : "Southeast Asia",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "centralindia-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "centralindia-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "centralindia-az3"
+        } ],
+        "displayName" : "Central India",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/centralindia",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "centralindia",
+        "regionalDisplayName" : "Central India",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "eastasia-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "eastasia-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "eastasia-az3"
+        } ],
+        "displayName" : "East Asia",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastasia",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "eastasia",
+        "regionalDisplayName" : "East Asia",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "japaneast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "japaneast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "japaneast-az3"
+        } ],
+        "displayName" : "Japan East",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/japaneast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "japaneast",
+        "regionalDisplayName" : "Japan East",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "koreacentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "koreacentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "koreacentral-az3"
+        } ],
+        "displayName" : "Korea Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/koreacentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "koreacentral",
+        "regionalDisplayName" : "Korea Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "australiacentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "australiacentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "australiacentral-az3"
+        } ],
+        "displayName" : "Australia Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiacentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "australiacentral",
+        "regionalDisplayName" : "Australia Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "australiacentral2-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "australiacentral2-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "australiacentral2-az3"
+        } ],
+        "displayName" : "Australia Central 2",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiacentral2",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "australiacentral2",
+        "regionalDisplayName" : "Australia Central 2",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "australiasoutheast-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "australiasoutheast-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "australiasoutheast-az3"
+        } ],
+        "displayName" : "Australia Southeast",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiasoutheast",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "australiasoutheast",
+        "regionalDisplayName" : "Australia Southeast",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "japanwest-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "japanwest-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "japanwest-az3"
+        } ],
+        "displayName" : "Japan West",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/japanwest",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "japanwest",
+        "regionalDisplayName" : "Japan West",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "koreasouth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "koreasouth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "koreasouth-az3"
+        } ],
+        "displayName" : "Korea South",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/koreasouth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "koreasouth",
+        "regionalDisplayName" : "Korea South",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "southindia-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "southindia-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "southindia-az3"
+        } ],
+        "displayName" : "South India",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southindia",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "southindia",
+        "regionalDisplayName" : "South India",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "westindia-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "westindia-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "westindia-az3"
+        } ],
+        "displayName" : "West India",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westindia",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "westindia",
+        "regionalDisplayName" : "West India",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "indonesiacentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "indonesiacentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "indonesiacentral-az3"
+        } ],
+        "displayName" : "Indonesia Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/indonesiacentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "indonesiacentral",
+        "regionalDisplayName" : "Indonesia Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "newzealandnorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "newzealandnorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "newzealandnorth-az3"
+        } ],
+        "displayName" : "New Zealand North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/newzealandnorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "newzealandnorth",
+        "regionalDisplayName" : "New Zealand North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "uaenorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "uaenorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "uaenorth-az3"
+        } ],
+        "displayName" : "UAE North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uaenorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "uaenorth",
+        "regionalDisplayName" : "UAE North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "uaecentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "uaecentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "uaecentral-az3"
+        } ],
+        "displayName" : "UAE Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uaecentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "uaecentral",
+        "regionalDisplayName" : "UAE Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "israelcentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "israelcentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "israelcentral-az3"
+        } ],
+        "displayName" : "Israel Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/israelcentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "israelcentral",
+        "regionalDisplayName" : "Israel Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "qatarcentral-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "qatarcentral-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "qatarcentral-az3"
+        } ],
+        "displayName" : "Qatar Central",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/qatarcentral",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "qatarcentral",
+        "regionalDisplayName" : "Qatar Central",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "southafricanorth-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "southafricanorth-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "southafricanorth-az3"
+        } ],
+        "displayName" : "South Africa North",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southafricanorth",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "southafricanorth",
+        "regionalDisplayName" : "South Africa North",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      }, {
+        "availabilityZoneMappings" : [ {
+          "logicalZone" : "1",
+          "physicalZone" : "southafricawest-az1"
+        }, {
+          "logicalZone" : "2",
+          "physicalZone" : "southafricawest-az2"
+        }, {
+          "logicalZone" : "3",
+          "physicalZone" : "southafricawest-az3"
+        } ],
+        "displayName" : "South Africa West",
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southafricawest",
+        "metadata" : {
+          "regionCategory" : "Recommended",
+          "regionType" : "Physical"
+        },
+        "name" : "southafricawest",
+        "regionalDisplayName" : "South Africa West",
+        "subscriptionId" : "c0a7c0a7-0000-4000-8000-000000000001",
+        "type" : "Region"
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations?api-version=2022-12-01",
+    "status" : 200
+  },
+  "providers list" : {
+    "body" : {
+      "value" : [ ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers?api-version=2022-12-01",
+    "status" : 200
+  },
+  "provider get, Microsoft.Storage" : {
+    "body" : {
+      "value" : [ ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage?api-version=2022-12-01",
+    "status" : 200
+  },
+  "resource group put" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg",
+      "location" : "eastus",
+      "name" : "golden-rg",
+      "properties" : {
+        "provisioningState" : "Succeeded"
+      },
+      "type" : "Microsoft.Resources/resourceGroups"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "PUT /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 201
+  },
+  "resource group get" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg",
+      "location" : "eastus",
+      "name" : "golden-rg",
+      "properties" : {
+        "provisioningState" : "Succeeded"
+      },
+      "type" : "Microsoft.Resources/resourceGroups"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 200
+  },
+  "resource groups list" : {
+    "body" : {
+      "value" : [ {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg",
+        "location" : "eastus",
+        "name" : "golden-rg",
+        "properties" : {
+          "provisioningState" : "Succeeded"
+        },
+        "type" : "Microsoft.Resources/resourceGroups"
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups?api-version=2021-04-01",
+    "status" : 200
+  },
+  "storage name check, free" : {
+    "body" : {
+      "nameAvailable" : true
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "POST /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-01-01",
+    "status" : 200
+  },
+  "storage account put" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001",
+      "kind" : "StorageV2",
+      "location" : "eastus",
+      "name" : "goldensa0001",
+      "properties" : {
+        "accessTier" : "Hot",
+        "encryption" : {
+          "keySource" : "Microsoft.Storage",
+          "services" : {
+            "blob" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "file" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "queue" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "table" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            }
+          }
+        },
+        "isHnsEnabled" : false,
+        "primaryEndpoints" : {
+          "blob" : "http://goldensa0001.blob.core.windows.net/",
+          "dfs" : "http://goldensa0001.dfs.core.windows.net/",
+          "queue" : "http://goldensa0001.queue.core.windows.net/",
+          "table" : "http://goldensa0001.table.core.windows.net/"
+        },
+        "primaryLocation" : "eastus",
+        "provisioningState" : "Succeeded",
+        "statusOfPrimary" : "available",
+        "supportsHttpsTrafficOnly" : false
+      },
+      "sku" : {
+        "name" : "Standard_LRS",
+        "tier" : "Standard"
+      },
+      "type" : "Microsoft.Storage/storageAccounts"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "PUT /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001?api-version=2023-01-01",
+    "status" : 200
+  },
+  "storage account get" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001",
+      "kind" : "StorageV2",
+      "location" : "eastus",
+      "name" : "goldensa0001",
+      "properties" : {
+        "accessTier" : "Hot",
+        "encryption" : {
+          "keySource" : "Microsoft.Storage",
+          "services" : {
+            "blob" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "file" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "queue" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            },
+            "table" : {
+              "enabled" : true,
+              "keyType" : "Account"
+            }
+          }
+        },
+        "isHnsEnabled" : false,
+        "primaryEndpoints" : {
+          "blob" : "http://goldensa0001.blob.core.windows.net/",
+          "dfs" : "http://goldensa0001.dfs.core.windows.net/",
+          "queue" : "http://goldensa0001.queue.core.windows.net/",
+          "table" : "http://goldensa0001.table.core.windows.net/"
+        },
+        "primaryLocation" : "eastus",
+        "provisioningState" : "Succeeded",
+        "statusOfPrimary" : "available",
+        "supportsHttpsTrafficOnly" : false
+      },
+      "sku" : {
+        "name" : "Standard_LRS",
+        "tier" : "Standard"
+      },
+      "type" : "Microsoft.Storage/storageAccounts"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001?api-version=2023-01-01",
+    "status" : 200
+  },
+  "storage account listKeys" : {
+    "body" : {
+      "keys" : [ {
+        "keyName" : "key1",
+        "permissions" : "Full",
+        "value" : "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      }, {
+        "keyName" : "key2",
+        "permissions" : "Full",
+        "value" : "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      } ]
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "POST /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001/listKeys?api-version=2023-01-01",
+    "status" : 200
+  },
+  "storage name check, taken" : {
+    "body" : {
+      "message" : "The storage account named goldensa0001 is already taken.",
+      "nameAvailable" : false,
+      "reason" : "AlreadyExists"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "POST /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-01-01",
+    "status" : 200
+  },
+  "key vault put" : {
+    "body" : {
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.KeyVault/vaults/golden-kv-0001",
+      "location" : "eastus",
+      "name" : "golden-kv-0001",
+      "properties" : {
+        "accessPolicies" : [ ],
+        "enableSoftDelete" : false,
+        "provisioningState" : "Succeeded",
+        "sku" : {
+          "family" : "A",
+          "name" : "standard"
+        },
+        "tenantId" : "00000000-0000-0000-0000-000000000002",
+        "vaultUri" : "https://golden-kv-0001.vault.azure.net/"
+      },
+      "type" : "Microsoft.KeyVault/vaults"
+    },
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "PUT /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.KeyVault/vaults/golden-kv-0001?api-version=2023-07-01",
+    "status" : 200
+  },
+  "storage account delete" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "DELETE /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg/providers/Microsoft.Storage/storageAccounts/goldensa0001?api-version=2023-01-01",
+    "status" : 200
+  },
+  "resource group delete" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "DELETE /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 200
+  },
+  "resource group get after delete" : {
+    "body" : {
+      "error" : {
+        "code" : "ResourceNotFound",
+        "message" : "Resource not found: resourceGroups/golden-rg"
+      }
+    },
+    "headers" : {
+      "Content-Type" : "application/json"
+    },
+    "request" : "GET /subscriptions/c0a7c0a7-0000-4000-8000-000000000001/resourceGroups/golden-rg?api-version=2021-04-01",
+    "status" : 404
+  }
+}

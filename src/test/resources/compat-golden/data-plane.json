@@ -1,0 +1,36 @@
+{
+  "blob container create" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "PUT /devstoreaccount1/golden-container?restype=container",
+    "status" : 201
+  },
+  "blob put" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "PUT /devstoreaccount1/golden-container/golden.txt",
+    "status" : 201
+  },
+  "blob get" : {
+    "body" : "golden blob body",
+    "headers" : {
+      "Content-Type" : "text/plain; charset=ISO-8859-1"
+    },
+    "request" : "GET /devstoreaccount1/golden-container/golden.txt",
+    "status" : 200
+  },
+  "queue create" : {
+    "body" : null,
+    "headers" : { },
+    "request" : "PUT /devstoreaccount1-queue/golden-queue",
+    "status" : 201
+  },
+  "key vault challenge without a token" : {
+    "body" : null,
+    "headers" : {
+      "WWW-Authenticate" : "Bearer authorization=\"https://login.microsoftonline.com/common\", resource=\"https://vault.azure.net\""
+    },
+    "request" : "GET /devstoreaccount1-keyvault/secrets?api-version=7.4",
+    "status" : 401
+  }
+}
