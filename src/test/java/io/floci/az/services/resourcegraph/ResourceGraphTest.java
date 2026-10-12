@@ -202,6 +202,12 @@ class ResourceGraphTest {
                 .then().statusCode(200)
                 .body("data.columns.name", equalTo(java.util.List.of("name", "type")))
                 .body("data.rows", hasSize(0));
+        // Container rows publish systemData too, as null.
+        given().contentType("application/json")
+                .body("{\"query\": \"resourcecontainers | project id, systemData\"}")
+                .when().post(GRAPH)
+                .then().statusCode(200)
+                .body("data[0].systemData", nullValue());
         given().contentType("application/json")
                 .body("{\"query\": \"resources | count\", \"subscriptions\": [\"" + SUB2 + "\"]}")
                 .when().post(GRAPH)

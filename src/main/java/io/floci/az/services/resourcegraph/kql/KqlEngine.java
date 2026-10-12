@@ -143,7 +143,7 @@ public final class KqlEngine {
                         out.add(column.toLowerCase(Locale.ROOT));
                     }
                 }
-                return distinct.columns().contains("*") ? schema : out;
+                return distinct.columns().isEmpty() || distinct.columns().contains("*") ? schema : out;
             }
             case Take take -> {
                 return schema;

@@ -125,6 +125,7 @@ public class GraphTables implements KqlEngine.Tables {
             row.put("identity", null);
             row.put("zones", null);
             row.put("extendedLocation", null);
+            row.put("systemData", null);
             rows.add(row);
             for (ResourceGroup group : resourceGroups.list(subscriptionId)) {
                 Map<String, Object> groupRow = new LinkedHashMap<>();
@@ -144,6 +145,7 @@ public class GraphTables implements KqlEngine.Tables {
                 groupRow.put("identity", null);
                 groupRow.put("zones", null);
                 groupRow.put("extendedLocation", null);
+                groupRow.put("systemData", null);
                 rows.add(groupRow);
             }
         }

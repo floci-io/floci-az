@@ -396,5 +396,6 @@ class KqlEngineTest {
         // Dynamic properties below a column are data, not schema.
         assertEquals(3, run("resources | project properties.nosuch").size());
         assertEquals(1, run("resources | extend x = name | project x | where x == 'sa1'").size());
+        assertEquals(3, run("resources | distinct * | project name | where name != ''").size());
     }
 }
