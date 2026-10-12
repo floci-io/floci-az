@@ -7,6 +7,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public record AzureRequest(
     String method,
@@ -100,6 +101,14 @@ public record AzureRequest(
         return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
              queryParams, queryParamsMulti, resolved, secure, host, remoteAddress, rawPath, rawQuery, authority, scope,
              armCall);
+    }
+
+    /**
+     * The resource group the request's ARM path names, as the routing filter resolved it; empty for a path
+     * that names none (a subscription-wide listing) and for a request built without a scope.
+     */
+    public Optional<String> resourceGroup() {
+        return scope == null ? Optional.empty() : Optional.ofNullable(scope.resourceGroup());
     }
 
     /** Returns a copy of this request carrying the scope the routing filter resolved. */

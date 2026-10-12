@@ -436,7 +436,7 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listDnsZones(sub, ArmPaths.resourceGroup(path).orElse(null)))).build();
+            return Response.ok(Map.of("value", listDnsZones(sub, request.resourceGroup().orElse(null)))).build();
         }
 
         // 2. Zone CRUD
@@ -796,7 +796,7 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listPrivateDnsZones(sub, ArmPaths.resourceGroup(path).orElse(null))))
+            return Response.ok(Map.of("value", listPrivateDnsZones(sub, request.resourceGroup().orElse(null))))
                     .build();
         }
 

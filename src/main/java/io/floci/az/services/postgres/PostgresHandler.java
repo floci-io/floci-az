@@ -386,7 +386,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     private Response handleServerList(AzureRequest request) {
         String sub = extractSubscriptionId(request.resourcePath());
         // A path with no resourceGroups segment lists the subscription; a group named "default" is a group.
-        Optional<String> rg = ArmPaths.resourceGroup(request.resourcePath());
+        Optional<String> rg = request.resourceGroup();
         List<PostgresState.ServerEntry> servers = rg.isEmpty()
             ? state.listServersBySubscription(sub)
             : state.listServersByResourceGroup(sub, rg.get());
