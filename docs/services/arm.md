@@ -9,7 +9,8 @@ Managed Identity, and the other `Microsoft.*` providers).
 > **HTTP-only: no Docker.** ARM resource state (resource groups and the ARM shells) is in-memory and
 > ephemeral; it does not persist across restarts regardless of `storage.mode`. The tenant and
 > subscription directory is the exception: it follows `storage.mode` (see
-> [Tenants and subscriptions](#tenants-and-subscriptions)).
+> [Tenants and subscriptions](#tenants-and-subscriptions)), and so do resource groups under
+> `resource-group-semantics` (see [Resource groups](#resource-groups)).
 
 !!! note "Disabling ARM disables the management plane"
     `arm.enabled: false` turns off `/subscriptions` and `/providers` routing, which the
@@ -27,9 +28,10 @@ Managed Identity, and the other `Microsoft.*` providers).
 - **Locations**: `GET /subscriptions/{sub}/locations`, the public-cloud region catalog read by
   `az account list-locations`, the CLI's display-name location translation (`-l "East US"`), and
   Terraform's `data.azurerm_location`
-- **Resource groups**: CreateOrUpdate, Get, Delete, List
-  (`/subscriptions/{sub}/resourceGroups/{rg}`), scoped per subscription; accepts both `resourceGroups` and the lowercase
-  `resourcegroups` spelling
+- **Resource groups**: CreateOrUpdate, Get, CheckExistence (`HEAD`), Update (`PATCH`), Delete, List
+  (`/subscriptions/{sub}/resourceGroups/{rg}`), scoped per subscription, names matched case-insensitively;
+  `tags` and `managedBy` are kept; accepts both `resourceGroups` and the lowercase `resourcegroups`
+  spelling. See [Resource groups](#resource-groups)
 - **Storage accounts**: an ARM shell that bridges `Microsoft.Storage/storageAccounts` to the live
   [Blob](blob.md) and [Queue](queue.md) backends, returning the well-known development account key
 - **Key vaults**: an ARM shell for `Microsoft.KeyVault/vaults` whose `vaultUri` points at the
@@ -50,8 +52,11 @@ GET    /subscriptions/{sub}/locations
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}
 GET    /subscriptions/{sub}/resourceGroups/{rg}
+HEAD   /subscriptions/{sub}/resourceGroups/{rg}
+PATCH  /subscriptions/{sub}/resourceGroups/{rg}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}
 GET    /subscriptions/{sub}/resourceGroups
+GET    /subscriptions/{sub}/operationresults/{operationId}   # poll of a resource-group delete
 
 GET    /subscriptions/{sub}/resources
 GET    /subscriptions/{sub}/providers[/{namespace}]
@@ -101,6 +106,9 @@ floci-az:
   # parity-overrides:
   #   subscription-listing: true     # default: on from azure
   #   strict-subscriptions: true     # default: on from strict
+  #   resource-group-semantics: true # default: on from azure
+  #   resource-group-delete: true    # default: on from azure
+  #   strict-resource-groups: true   # default: on from strict
   cloud:
     default: AzureCloud
   services:
@@ -120,6 +128,9 @@ floci-az:
 | `parity` | `FLOCI_AZ_PARITY` | `compat` | The Azure parity level, `compat`, `azure` or `strict`; see [Parity levels](#parity-levels) |
 | `parity-overrides.subscription-listing` | `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | on from `azure` | `true`: `GET /subscriptions` also lists subscriptions registered on first use, and `GET /subscriptions/{sub}` echoes the directory's id rather than the path's spelling |
 | `parity-overrides.strict-subscriptions` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | on from `strict` | `true`: an unknown subscription is `404 SubscriptionNotFound`. `false`: it is registered on first use |
+| `parity-overrides.resource-group-semantics` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | on from `azure` | `true`: a resource-group re-PUT answers `200`, a missing group is `404 ResourceGroupNotFound`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
+| `parity-overrides.resource-group-delete` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | on from `azure` | `true`: a resource-group `DELETE` deletes every resource in the group and answers `202` with a `Location` to poll; the generic listings also show Event Grid, Monitor and Email resources |
+| `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound` |
 | `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup |
 | `tenants[n].*` | `FLOCI_AZ_TENANTS_<n>__ID`, `..._DISPLAY_NAME`, `..._DEFAULT_DOMAIN`, `..._CLOUD` | none | Extra tenants; see below |
 | `subscriptions[n].*` | `FLOCI_AZ_SUBSCRIPTIONS_<n>__ID`, `..._TENANT_ID`, `..._DISPLAY_NAME`, `..._STATE` | none | Extra subscriptions; see below |
@@ -178,9 +189,9 @@ can also be set alone to opt in piecemeal:
 
 | Level | What changes |
 |---|---|
-| `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, and ids are echoed as sent |
-| `azure` | Every parity override on: `subscription-listing` |
-| `strict` | `azure` plus every `strict-*` override: `strict-subscriptions` |
+| `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
+| `azure` | Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete` |
+| `strict` | `azure` plus every `strict-*` override: `strict-subscriptions`, `strict-resource-groups` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
 override set to a value its level would not give it.
@@ -205,6 +216,49 @@ Emulator choices, with no Azure source to settle them:
 - **`PastDue`** is a billing state the provider contract does not list; floci-az keeps it writable.
 - **`Deleted`** is read-only like `Disabled`. Azure cleans a deleted subscription's resources up; floci-az
   does not cascade them.
+
+## Resource groups
+
+Resource groups follow the `ResourceGroups` operations of the Resources REST spec (the az CLI pins
+`2024-11-01`, azurerm `2023-07-01`; both declare the same status codes). Names are matched
+case-insensitively, and a group answers with the spelling it was last written with.
+
+These hold in every configuration:
+
+- **Tags and `managedBy`**: a PUT keeps both and every read returns them; a group created without tags
+  has no `tags` key.
+- **`PATCH`** answers `200` with the group. `tags` and `managedBy` replace what they name (a `tags`
+  object replaces the whole tag set, as azurerm expects when it sends its full tag map); everything the
+  body leaves out is kept. A missing group is `404 ResourceGroupNotFound`.
+- **`HEAD`** answers `204` for a group and `404` without one.
+
+The rest depends on the parity overrides:
+
+| Behaviour | Default | Override |
+|---|---|---|
+| PUT of an existing group | `201`, as for a new one | `resource-group-semantics`: `200` |
+| GET of a missing group | `404 ResourceNotFound` | `resource-group-semantics`: `404 ResourceGroupNotFound`, `Resource group '{rg}' could not be found.` |
+| Resource PUT under a missing group | the resource is created, no group appears | `resource-group-semantics`: the group is created once the resource is (only after a `2xx`), in the location the resource reports, else the cloud's default location. `strict-resource-groups`: refused with `404 ResourceGroupNotFound` before the resource's handler runs, as is a read, an action or a delete of a resource under a missing group |
+| `DELETE` | `200`; only the group is removed, a missing group is `200` too | `resource-group-delete`: see below |
+| Persistence | in memory, lost on restart | `resource-group-semantics`: kept in the directory store, so they follow `storage.services.directory.mode` |
+| Generic listings (`.../resources`) | as before: Event Grid topics, Log Analytics workspaces, data collection endpoints and rules, and Communication and Email services are not listed | `resource-group-delete`: listed, so Terraform's `prevent_deletion_if_contains_resources` sees what a delete would remove |
+
+Under `resource-group-delete` a `DELETE` of a group is the long-running operation the spec declares:
+
+1. Every resource the generic index holds in the group is deleted, the deepest ids first, by sending the
+   resource's own `DELETE` through the same routing and handler a client request reaches, so each
+   service applies its own side effects (a global name is released, a sidecar container stopped). A
+   resource that is already gone counts as deleted; any other failure is logged and the delete goes on.
+2. The group is removed and the request answers `202` with a `Location` of
+   `{scheme}://{host}/subscriptions/{sub}/operationresults/{id}?api-version=...`, built from the request's
+   own scheme and host, and `Retry-After: 1`.
+3. The work is done by the time the `Location` is polled: it answers `200` with an empty body, the shape
+   Azure's own poll ends with. A missing group is `404 ResourceGroupNotFound`.
+
+Emulator choices, with no Azure source to settle them: a re-PUT with a different location replaces the
+location, as floci-az always has (Azure documents the location as fixed at creation but no local source
+gives the error it answers); `Retry-After` is `1` second (Azure sends none on this operation, and clients
+then fall back to their own, much longer, poll interval); `forceDeletionTypes` is accepted and ignored.
 
 ## Resource names across subscriptions
 
@@ -256,9 +310,10 @@ servers is not publicly documented either; `409` is the likeliest.
   so `includeExtendedLocations=true` returns the same list. Location values on resources are echoed,
   not validated.
 - **ARM state is in-memory**: resource groups and the ARM shells do not persist across restarts; only
-  the tenant and subscription directory follows `storage.mode`.
-- **Resource-group deletion does not cascade**: deleting a group leaves resources created under it
-  behind (they still appear in `GET .../resources`, so Terraform's
-  `prevent_deletion_if_contains_resources` works).
+  the tenant and subscription directory follows `storage.mode`, and resource groups too under
+  `resource-group-semantics`.
+- **Resource-group deletion does not cascade by default**: deleting a group leaves resources created
+  under it behind (they still appear in `GET .../resources`, so Terraform's
+  `prevent_deletion_if_contains_resources` works). `resource-group-delete` turns the cascade on.
 - **Shared Key / ARM auth is accepted but not verified**: any bearer token or Shared Key is
   honored, consistent with the rest of the emulator's permissive dev auth.
