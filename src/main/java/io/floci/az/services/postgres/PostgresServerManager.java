@@ -143,7 +143,13 @@ public class PostgresServerManager {
                 entry.serverName(), containerId, reachableHost, reachablePort);
 
             try {
-                waitForReady(reachableHost, reachablePort, pgConfig.startupTimeoutSeconds());
+                // The reported host is the container name, which the default bridge does not resolve;
+                // floci-az's own probe goes where it can connect.
+                ContainerLifecycleManager.EndpointInfo probe =
+                    containerDetector.isRunningInContainer() && !containerManager.publishedEndpoints()
+                        ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, PG_CONTAINER_PORT)
+                        : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
+                waitForReady(probe.host(), probe.port(), pgConfig.startupTimeoutSeconds());
             } catch (RuntimeException startupFailure) {
                 // The container itself is left for the pre-existing cleanup gap to deal with;
                 // the port claim is this method's to give back.

@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.InetAddress;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -213,6 +214,65 @@ class ContainerLifecycleManagerEndpointModeTest {
         lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
         assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, CONTAINER_PORT),
                 manager().resolveAutoEndpoint(CONTAINER_ID, CONTAINER_PORT));
+    }
+
+    // ------------------------------------------------------- container-network addressing
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({
+            "app-net, true",
+            "floci-az_default, true",
+            "bridge, false",
+            "default, false",
+            "host, false",
+            "none, false",
+            "'', false"
+    })
+    @DisplayName("only user-defined networks resolve container names")
+    void resolvesContainerNames(String network, boolean expected) {
+        assertEquals(expected, ContainerLifecycleManager.resolvesContainerNames(network));
+    }
+
+    @Test
+    @DisplayName("a container created without a network is on the default bridge: no name resolution")
+    void noNetworkDoesNotResolveNames() {
+        assertFalse(ContainerLifecycleManager.resolvesContainerNames(null));
+    }
+
+    @Test
+    @DisplayName("container mode on a user-defined network: the sidecar is addressed by name")
+    void containerNetworkEndpointOnUserDefinedNetwork() {
+        assertEquals(new ContainerLifecycleManager.EndpointInfo("floci-az-redis-1", 6379),
+                ContainerLifecycleManager.containerNetworkEndpoint(
+                        spec("floci-az-redis-1", "app-net"), startedAt(CONTAINER_IP, 6379), 6379));
+    }
+
+    @Test
+    @DisplayName("container mode on the default bridge: the sidecar is addressed by container IP")
+    void containerNetworkEndpointOnDefaultBridge() {
+        ContainerLifecycleManager.ContainerInfo info = startedAt(CONTAINER_IP, 6379);
+        assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, 6379),
+                ContainerLifecycleManager.containerNetworkEndpoint(spec("floci-az-redis-1", "bridge"), info, 6379));
+        assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, 6379),
+                ContainerLifecycleManager.containerNetworkEndpoint(spec("floci-az-redis-1", null), info, 6379));
+    }
+
+    @Test
+    @DisplayName("default bridge without a resolved IP: falls back to the name")
+    void containerNetworkEndpointWithoutIpFallsBackToName() {
+        assertEquals(new ContainerLifecycleManager.EndpointInfo("floci-az-redis-1", 6379),
+                ContainerLifecycleManager.containerNetworkEndpoint(spec("floci-az-redis-1", "bridge"),
+                        new ContainerLifecycleManager.ContainerInfo("c1", Map.of()), 6379));
+    }
+
+    private static ContainerSpec spec(String name, String network) {
+        return new ContainerSpec("image:test", name, List.of(), null, null, null, Map.of(), List.of(), network,
+                List.of(), List.of(), List.of(), Map.of(), null, false, null, List.of(), null, null, List.of());
+    }
+
+    private static ContainerLifecycleManager.ContainerInfo startedAt(String host, int port) {
+        return new ContainerLifecycleManager.ContainerInfo("c1",
+                Map.of(port, new ContainerLifecycleManager.EndpointInfo(host, port)));
     }
 
     @Test

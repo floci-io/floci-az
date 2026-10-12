@@ -114,7 +114,8 @@ public class RedisCacheManager {
         } else if (containerDetector.isRunningInContainer()) {
             cache.setHostName(containerName);
             cache.setPort(REDIS_PORT);
-            cache.setInternalEndpoint(containerName + ":" + REDIS_PORT);
+            cache.setInternalEndpoint(
+                    ContainerLifecycleManager.containerNetworkEndpoint(spec, info, REDIS_PORT).toString());
         } else {
             cache.setHostName("localhost");
             cache.setPort(hostPort);

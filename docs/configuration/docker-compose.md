@@ -150,6 +150,18 @@ services:
 Once the sidecars start, their ports are available on the host: `localhost:27017` (MongoDB),
 `localhost:5432` (PostgreSQL), `localhost:5672` (AMQP / Artemis).
 
+### Sidecars and Docker networks
+
+Docker Compose puts its services on a user-defined network, where containers resolve each other by name. A plain `docker run` without `--network` puts floci-az on Docker's default `bridge` network instead, which does not resolve container names. floci-az still reaches its sidecars there by container IP, so Redis caches, container registries and database servers finish provisioning, but the host names it reports for Redis, PostgreSQL, MySQL, MariaDB and SQL Server are container names that clients on the default bridge cannot resolve. floci-az logs a warning at startup in that case. Use a user-defined network:
+
+```bash
+docker network create floci-net
+docker run -d --name floci-az --network floci-net -p 4577:4577 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e FLOCI_AZ_SERVICES_DOCKER_NETWORK=floci-net \
+  floci/floci-az:latest
+```
+
 ### With the Azure CLI inside the container
 
 Use the `latest-compat` image when your scripts need Azure tooling inside the container. It includes the Azure CLI and `azfloci`. Call `azfloci` to target the local emulator without passing a connection string; plain `az` still needs explicit connection settings. See [Docker Images](docker-images.md) for what the compat image contains.
@@ -280,6 +292,7 @@ All variables are optional; the default applies when unset.
 |---|---|---|
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket, unix socket or `tcp://host:port` |
 | `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed, by floci-az and in the host/port reported to clients. `auto`: container name/IP and internal port when floci-az runs in a container, `localhost` and the published port otherwise. `published`: always the Docker daemon's host (from `docker-host`) and the published port. Use it for remote daemons such as docker-in-docker or kubedock, whose containers aren't directly reachable |
+| `FLOCI_AZ_SERVICES_DOCKER_NETWORK` | _(detected)_ | Docker network sidecar containers join. Defaults to the network floci-az itself runs on, preferring a user-defined one. On the default `bridge` network floci-az reaches sidecars by container IP |
 | `FLOCI_AZ_DOCKER_LOG_MAX_SIZE` | `10m` | Max log file size per function container |
 | `FLOCI_AZ_DOCKER_LOG_MAX_FILE` | `3` | Max rotated log files per function container |
 | `FLOCI_AZ_DOCKER_DOCKER_CONFIG_PATH` | _(unset)_ | Path to Docker `config.json` for private registry auth |

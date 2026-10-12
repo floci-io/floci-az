@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -53,6 +54,9 @@ import java.util.concurrent.TimeUnit;
 public class ContainerLifecycleManager {
 
     private static final Logger LOG = Logger.getLogger(ContainerLifecycleManager.class);
+
+    /** Docker's built-in network modes, none of which resolves container names. */
+    private static final Set<String> BUILT_IN_NETWORKS = Set.of("bridge", "default", "host", "none");
 
     private final DockerClient dockerClient;
     private final ImageCacheService imageCacheService;
@@ -1008,6 +1012,32 @@ public class ContainerLifecycleManager {
             String containerIp = resolveContainerIp(inspect, preferredNetwork);
             return new EndpointInfo(containerIp, containerPort);
         }
+    }
+
+    /**
+     * True when containers on {@code network} reach each other by container name. Docker resolves
+     * names only on user-defined networks: the default {@code bridge}, which a container created
+     * without a network joins, does not.
+     */
+    public static boolean resolvesContainerNames(String network) {
+        return network != null && !network.isBlank() && !BUILT_IN_NETWORKS.contains(network);
+    }
+
+    /**
+     * Where floci-az, running in a container in {@code auto} mode, connects to a sidecar's
+     * container port: the container name on a user-defined network, where it stays valid across
+     * a restart of the sidecar, and otherwise the container IP {@link #startCreated} resolved,
+     * since the default bridge cannot resolve the name.
+     */
+    public static EndpointInfo containerNetworkEndpoint(ContainerSpec spec, ContainerInfo info,
+                                                        int containerPort) {
+        if (!resolvesContainerNames(spec.networkMode())) {
+            EndpointInfo resolved = info.getEndpoint(containerPort);
+            if (resolved != null && resolved.host() != null && !resolved.host().isBlank()) {
+                return resolved;
+            }
+        }
+        return new EndpointInfo(spec.name(), containerPort);
     }
 
     /**

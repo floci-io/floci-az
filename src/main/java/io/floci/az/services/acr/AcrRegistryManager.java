@@ -100,7 +100,8 @@ public class AcrRegistryManager {
 
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REGISTRY_PORT);
             if (containerDetector.isRunningInContainer() && !lifecycleManager.publishedEndpoints()) {
-                this.internalEndpoint = sharedName() + ":" + REGISTRY_PORT;
+                this.internalEndpoint =
+                        ContainerLifecycleManager.containerNetworkEndpoint(spec, info, REGISTRY_PORT).toString();
             } else {
                 String host = lifecycleManager.publishedEndpoints() ? lifecycleManager.daemonHost() : "localhost";
                 this.internalEndpoint = ep != null ? ep.host() + ":" + ep.port() : host + ":" + chosenPort;

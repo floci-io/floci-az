@@ -121,7 +121,13 @@ public class MariaDbServerManager {
                 LOG.infof("MariaDB container started: server=%s containerId=%s endpoint=%s:%d",
                     entry.serverName(), containerId, reachableHost, reachablePort);
 
-                waitForReady(reachableHost, reachablePort, mariaConfig.startupTimeoutSeconds());
+                // The reported host is the container name, which the default bridge does not resolve;
+                // floci-az's own probe goes where it can connect.
+                ContainerLifecycleManager.EndpointInfo probe =
+                    containerDetector.isRunningInContainer() && !containerManager.publishedEndpoints()
+                        ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, MARIADB_CONTAINER_PORT)
+                        : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
+                waitForReady(probe.host(), probe.port(), mariaConfig.startupTimeoutSeconds());
                 LOG.infof("MariaDB server ready: server=%s endpoint=%s:%d",
                     entry.serverName(), reachableHost, reachablePort);
 

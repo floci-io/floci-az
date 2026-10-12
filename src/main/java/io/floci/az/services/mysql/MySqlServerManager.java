@@ -121,7 +121,13 @@ public class MySqlServerManager {
                 LOG.infof("MySQL container started: server=%s containerId=%s endpoint=%s:%d",
                     entry.serverName(), containerId, reachableHost, reachablePort);
 
-                waitForReady(reachableHost, reachablePort, mysqlConfig.startupTimeoutSeconds());
+                // The reported host is the container name, which the default bridge does not resolve;
+                // floci-az's own probe goes where it can connect.
+                ContainerLifecycleManager.EndpointInfo probe =
+                    containerDetector.isRunningInContainer() && !containerManager.publishedEndpoints()
+                        ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, MYSQL_CONTAINER_PORT)
+                        : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
+                waitForReady(probe.host(), probe.port(), mysqlConfig.startupTimeoutSeconds());
                 LOG.infof("MySQL server ready: server=%s endpoint=%s:%d",
                     entry.serverName(), reachableHost, reachablePort);
 

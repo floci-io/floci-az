@@ -151,7 +151,13 @@ public class SqlServerManager {
                 entry.serverName(), containerId, reachableHost, reachablePort);
 
             try {
-                waitForReady(reachableHost, reachablePort, sqlConfig.startupTimeoutSeconds());
+                // The reported host is the container name, which the default bridge does not resolve;
+                // floci-az's own probe goes where it can connect.
+                ContainerLifecycleManager.EndpointInfo probe =
+                    containerDetector.isRunningInContainer() && !containerManager.publishedEndpoints()
+                        ? ContainerLifecycleManager.containerNetworkEndpoint(spec, info, SQL_CONTAINER_PORT)
+                        : new ContainerLifecycleManager.EndpointInfo(reachableHost, reachablePort);
+                waitForReady(probe.host(), probe.port(), sqlConfig.startupTimeoutSeconds());
             } catch (RuntimeException startupFailure) {
                 managedContainers.remove(containerId);
                 claimedPorts.remove(containerId);
