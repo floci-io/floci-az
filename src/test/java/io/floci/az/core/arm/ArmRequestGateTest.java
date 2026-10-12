@@ -34,8 +34,9 @@ class ArmRequestGateTest {
     /** Records the order of every hook call into a shared log. */
     private record LoggingRule(int order, List<String> log) implements ArmRequestRule {
         @Override
-        public void enter(ArmCall call) {
+        public ArmVerdict enter(ArmCall call) {
             log.add("enter" + order + " " + call.method() + " " + call.id());
+            return ArmVerdict.proceed();
         }
 
         @Override
@@ -121,10 +122,64 @@ class ArmRequestGateTest {
     void aPathOutsideTheArmRootsEntersWithoutAnId() {
         ArmRequestGate gate = new ArmRequestGate(List.of());
 
-        ArmCall call = gate.enter(request("GET", "devstoreaccount1/c"));
+        ArmCall call = gate.call(request("GET", "devstoreaccount1/c"));
 
         assertNull(call.id());
         assertSame(SCOPE, call.scope());
+    }
+
+    /** Answers every request itself with {@code status}, logging its hooks like {@link LoggingRule}. */
+    private record RespondingRule(int order, int status, List<String> log) implements ArmRequestRule {
+        @Override
+        public ArmVerdict enter(ArmCall call) {
+            log.add("enter" + order + " respond " + status);
+            return ArmVerdict.respond(Response.status(status).build());
+        }
+
+        @Override
+        public void exit(ArmCall call, Response response) {
+            log.add("exit" + order + " " + (response == null ? "threw" : response.getStatus()));
+        }
+    }
+
+    @Test
+    void aRuleThatRespondsStandsInForTheHandlerAndTheLaterRules() {
+        List<String> log = new ArrayList<>();
+        ArmRequestGate gate = new ArmRequestGate(List.of(new LoggingRule(1, log), new RespondingRule(2, 404, log),
+            new LoggingRule(3, log)));
+
+        Response served = gate.serve(request("PUT", "subscriptions/s/resourceGroups/rg"), req -> {
+            log.add("handler");
+            return Response.ok().build();
+        });
+
+        assertEquals(404, served.getStatus());
+        assertEquals(List.of("enter1 PUT /subscriptions/s/resourceGroups/rg", "enter2 respond 404",
+            "exit1 404", "exit2 404"), log);
+    }
+
+    @Test
+    void anEntryCheckThatThrowsStillExitsTheRulesEnteredSoFar() {
+        List<String> log = new ArrayList<>();
+        ArmRequestRule throwing = new ArmRequestRule() {
+            @Override
+            public int order() {
+                return 2;
+            }
+
+            @Override
+            public ArmVerdict enter(ArmCall call) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        ArmRequestGate gate = new ArmRequestGate(List.of(new LoggingRule(1, log), throwing, new LoggingRule(3, log)));
+
+        assertThrows(IllegalStateException.class, () -> gate.serve(request("GET", "subscriptions/s"), req -> {
+            log.add("handler");
+            return Response.ok().build();
+        }));
+
+        assertEquals(List.of("enter1 GET /subscriptions/s", "exit1 threw"), log);
     }
 
     @Test

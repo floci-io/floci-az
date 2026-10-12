@@ -15,18 +15,18 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Proves the {@link ArmRequestGate} sits on every ARM management-plane route, once per request, whichever
- * lane serves it, and on nothing else. A recording rule is selected for this profile only, so the production
- * gate stays empty.
+ * lane serves it, and on nothing else. A recording rule is built in for this profile only and runs ahead of the
+ * production rules, which in the default parity let every request here through.
  */
 @QuarkusTest
 @TestProfile(ArmRequestGateCoverageTest.RecordingRuleProfile.class)
@@ -35,8 +35,8 @@ class ArmRequestGateCoverageTest {
 
     public static class RecordingRuleProfile implements QuarkusTestProfile {
         @Override
-        public Set<Class<?>> getEnabledAlternatives() {
-            return Set.of(RecordingArmRequestRule.class);
+        public Map<String, String> getConfigOverrides() {
+            return Map.of(RecordingArmRequestRule.ENABLED_BY, "true");
         }
     }
 
@@ -75,8 +75,10 @@ class ArmRequestGateCoverageTest {
     }
 
     @Test
-    void theRecordingRuleIsTheOnlyRuleUnderThisProfile() {
-        assertEquals(1, gate.rules().size());
+    void theRecordingRuleRunsAheadOfTheProductionRules() {
+        assertEquals(2, gate.rules().size(), "rules: " + gate.rules());
+        assertInstanceOf(RecordingArmRequestRule.class, gate.rules().getFirst());
+        assertInstanceOf(SubscriptionRule.class, gate.rules().get(1));
     }
 
     // ── Generic ARM stage (ArmHandler) ──────────────────────────────────────────

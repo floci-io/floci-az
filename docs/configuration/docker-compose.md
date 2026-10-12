@@ -212,7 +212,11 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_PORT` | `4577` | Port the emulator listens on |
 | `FLOCI_AZ_BASE_URL` | `http://localhost:4577` | Base URL embedded in API responses |
 | `FLOCI_AZ_HOSTNAME` | _(unset)_ | Override the hostname in SAS and invoke URLs (useful behind a reverse proxy) |
-| `FLOCI_AZ_AUTH_MODE` | `dev` | `dev`: accept any credentials; `strict`: validate HMAC-SHA256 signatures |
+| `FLOCI_AZ_AUTH_MODE` | `dev` | Not enforced yet: every value, `strict` included, accepts any credentials without validating SharedKey signatures. Blob service SAS signatures are checked against `auth.storage-account-keys` regardless |
+| `FLOCI_AZ_PARITY` | `compat` | Azure parity level. `compat`: responses stay as floci-az has always answered them. `azure`: every parity override on. `strict`: `azure` plus Azure's refusals. See the [ARM page](../services/arm.md#parity-levels) |
+| `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | _(on from `azure`)_ | `true`: `GET /subscriptions` also lists subscriptions registered on first use, and a subscription is echoed with the directory's id |
+| `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | _(on from `strict`)_ | `true`: an unknown subscription is `404 SubscriptionNotFound`; `false`: it is registered on first use |
+| `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | Cloud of the default tenant: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud` |
 
 ### Storage
 
@@ -232,6 +236,7 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_STORAGE_SERVICES_QUEUE_MODE` | _(global)_ | Storage mode for Queue Storage only |
 | `FLOCI_AZ_STORAGE_SERVICES_TABLE_MODE` | _(global)_ | Storage mode for Table Storage only |
 | `FLOCI_AZ_STORAGE_SERVICES_APP_CONFIG_MODE` | _(global)_ | Storage mode for App Configuration only |
+| `FLOCI_AZ_STORAGE_SERVICES_DIRECTORY_MODE` | _(global)_ | Storage mode for the ARM tenant and subscription directory only |
 
 ### Enable / disable services
 

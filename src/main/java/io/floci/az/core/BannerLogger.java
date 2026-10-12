@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.config.ParityLevel;
 import io.floci.az.services.cosmos.engine.CosmosApi;
 import io.floci.az.services.cosmos.engine.CosmosEngineRegistry;
 import io.quarkus.runtime.StartupEvent;
@@ -9,7 +10,9 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 @ApplicationScoped
 public class BannerLogger {
@@ -28,6 +31,7 @@ public class BannerLogger {
     void onStart(@Observes StartupEvent ev) {
         LOGGER.info("=== FLOCI - AZ Starting ===");
         LOGGER.infof("Storage mode: %s", config.storage().mode());
+        LOGGER.info(parityLine(config));
         
         StringBuilder sb = new StringBuilder("\nEnabled Services:\n");
         if (config.services().blob().enabled()) {
@@ -171,7 +175,9 @@ public class BannerLogger {
         sb.append(String.format("   %-9s [%s]  %s\n", "arm",
                 config.services().arm().enabled() ? "enabled " : "disabled",
                 "management plane (/providers, /subscriptions, resource groups)  subscription:"
-                        + config.services().arm().defaultSubscriptionId()));
+                        + config.services().arm().defaultSubscriptionId()
+                        + "  cloud:" + config.cloud().defaultCloud()
+                        + "  directory storage: " + getStorageMode("directory")));
         sb.append(String.format("   %-9s [%s]  %s\n", "network",
                 config.services().network().enabled() ? "enabled " : "disabled",
                 "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
@@ -198,6 +204,27 @@ public class BannerLogger {
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
 
+    /**
+     * {@code parity: <level>}, followed by every override set to a value its level would not give it, so the
+     * banner shows exactly where a run departs from its level.
+     */
+    public static String parityLine(EmulatorConfig config) {
+        ParityLevel level = config.parity();
+        Map<String, Boolean> overrides = new LinkedHashMap<>();
+        overrides.put("subscription-listing", config.subscriptionListing());
+        overrides.put("strict-subscriptions", config.strictSubscriptions());
+        Map<String, Boolean> levelDefaults = Map.of(
+                "subscription-listing", level.includes(ParityLevel.AZURE),
+                "strict-subscriptions", level.includes(ParityLevel.STRICT));
+        StringBuilder line = new StringBuilder("parity: ").append(level.name().toLowerCase(Locale.ROOT));
+        overrides.forEach((name, value) -> {
+            if (!value.equals(levelDefaults.get(name))) {
+                line.append("  ").append(name).append(':').append(value);
+            }
+        });
+        return line.toString();
+    }
+
     private String getStorageMode(String service) {
         return switch (service) {
             case "blob"      -> config.storage().services().blob().mode().orElse(config.storage().mode());
@@ -211,6 +238,7 @@ public class BannerLogger {
             case "containerapps" -> config.storage().services().containerApps().mode().orElse(config.storage().mode());
             case "monitor"   -> config.storage().services().monitor().mode().orElse(config.storage().mode());
             case "email"     -> config.storage().services().email().mode().orElse(config.storage().mode());
+            case "directory" -> config.storage().services().directory().mode().orElse(config.storage().mode());
             default          -> config.storage().mode();
         };
     }

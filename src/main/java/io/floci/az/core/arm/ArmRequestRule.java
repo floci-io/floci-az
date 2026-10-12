@@ -11,14 +11,19 @@ public interface ArmRequestRule {
     /** Position in the gate's pipeline; lower runs first on entry. */
     int order();
 
-    /** Runs before the handler. */
-    default void enter(ArmCall call) {
+    /**
+     * Runs before the handler. A {@link ArmVerdict.Respond} answers the request in the handler's place: the
+     * rules after this one are not entered and the handler does not run.
+     */
+    default ArmVerdict enter(ArmCall call) {
+        return ArmVerdict.proceed();
     }
 
     /**
-     * Runs after the handler, in the same order as {@link #enter}.
+     * Runs after the handler, in the same order as {@link #enter}, for every rule that was entered: when a rule
+     * answered the request itself, the rules before it and that rule see its response.
      *
-     * @param response the handler's response, or null when the handler threw
+     * @param response the response the client gets, or null when the handler or an entry check threw
      */
     default void exit(ArmCall call, Response response) {
     }

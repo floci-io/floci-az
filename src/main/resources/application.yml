@@ -79,6 +79,39 @@ floci-az:
         flush-interval-ms: 5000
       email:
         flush-interval-ms: 5000
+      directory:                    # tenants and subscriptions (seeded, configured, registered on first use)
+        flush-interval-ms: 5000
+
+  # How closely floci-az follows Azure where Azure differs from what floci-az has always answered.
+  # compat (default): nothing a client could rely on changes. azure: every parity override on.
+  # strict: azure plus every strict-* override (Azure's refusals). Each override defaults from the level
+  # and can be set on its own to opt in piecemeal.
+  parity: compat                    # FLOCI_AZ_PARITY
+  # parity-overrides:
+    # subscription-listing: true    # FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING; default on from azure.
+    #                               # GET /subscriptions also lists first-use subscriptions, and
+    #                               # GET /subscriptions/{sub} echoes the directory's id, not the path's spelling
+    # strict-subscriptions: true    # FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS; default on from strict.
+    #                               # An unknown subscription is 404 SubscriptionNotFound instead of being
+    #                               # registered on first use
+
+  # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
+  cloud:
+    default: AzureCloud             # FLOCI_AZ_CLOUD_DEFAULT
+
+  # Tenants and subscriptions besides the defaults (services.entra.default-tenant-id and
+  # services.arm.default-subscription-id, which always exist). Only id is required. An entry with a
+  # default's id overrides it. Env vars index the list: FLOCI_AZ_TENANTS_0__ID, FLOCI_AZ_SUBSCRIPTIONS_0__STATE.
+  # tenants:
+  #   - id: 11111111-0000-0000-0000-000000000000
+  #     display-name: Contoso
+  #     default-domain: contoso.onmicrosoft.com
+  #     cloud: AzureUSGovernment    # default: cloud.default
+  # subscriptions:
+  #   - id: 22222222-0000-0000-0000-000000000000
+  #     tenant-id: 11111111-0000-0000-0000-000000000000   # default: the default tenant
+  #     display-name: contoso-dev
+  #     state: Enabled              # Enabled, Warned, PastDue, Disabled or Deleted
 
   dns:
     # When floci-az runs inside Docker, an embedded DNS server is started on port 53
@@ -260,7 +293,7 @@ floci-az:
       enabled: true
     arm:
       enabled: true       # central management plane (/providers, /subscriptions, resource groups). Disabling turns OFF all ARM-based services.
-      default-subscription-id: "00000000-0000-0000-0000-000000000001"   # the subscription GET /subscriptions lists (what az login selects)
+      default-subscription-id: "00000000-0000-0000-0000-000000000001"   # always exists; listed first by GET /subscriptions (what az login selects)
     network:
       enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
     event-grid:
@@ -280,8 +313,9 @@ floci-az:
       enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions (control plane only, no rule evaluation)
 
   auth:
-    # dev: accept any credentials without signature validation
-    # strict: validate HMAC-SHA256 signatures
+    # Not enforced yet: every value behaves like dev, accepting any credentials without
+    # SharedKey signature validation. Blob service SAS signatures are checked against
+    # storage-account-keys below regardless of this setting.
     mode: dev
     storage-account-keys:
       devstoreaccount1: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="

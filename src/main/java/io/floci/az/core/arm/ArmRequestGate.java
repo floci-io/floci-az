@@ -21,7 +21,8 @@ import java.util.function.Function;
  * {@code ArmHandler} delegates to.
  *
  * <p>The gate builds an {@link ArmCall} on entry, runs the ordered {@link ArmRequestRule}s, invokes the
- * handler with the call attached to the request, and runs the rules again on exit. Entry happens once per
+ * handler with the call attached to the request, and runs the rules again on exit. A rule may answer the
+ * request itself on entry, which is how a refused request never reaches its handler. Entry happens once per
  * request: a request that already carries an {@link ArmCall} is inside the gate, so a nested
  * {@link #serve} passes it straight through.
  */
@@ -44,37 +45,46 @@ public class ArmRequestGate {
     }
 
     /**
-     * Runs {@code handler} inside the gate: {@link #enter} before it, {@link #exit} after it, even when it
-     * throws. A request already inside the gate is handed to {@code handler} unchanged.
+     * Runs {@code handler} inside the gate: each rule's entry check before it and each entered rule's exit hook
+     * after it, even when it throws. A rule that answers the request on entry ({@link ArmVerdict.Respond}) stands
+     * in for the handler: no later rule is entered, the handler does not run, and the entered rules' exit hooks
+     * see that response. A request already inside the gate is handed to {@code handler} unchanged.
      */
     public Response serve(AzureRequest request, Function<AzureRequest, Response> handler) {
         if (request.armCall() != null) {
             return handler.apply(request);
         }
-        ArmCall call = enter(request);
+        ArmCall call = call(request);
+        if (rules.isEmpty()) {
+            return handler.apply(request.withArm(call));
+        }
+        int entered = 0;
         Response response = null;
         try {
+            for (ArmRequestRule rule : rules) {
+                entered++;
+                if (rule.enter(call) instanceof ArmVerdict.Respond respond) {
+                    response = respond.response();
+                    return response;
+                }
+            }
             response = handler.apply(request.withArm(call));
             return response;
         } finally {
-            exit(call, response);
+            exit(call, response, entered);
         }
     }
 
-    /** Builds the {@link ArmCall} for {@code request} and runs every rule's entry check. */
-    public ArmCall enter(AzureRequest request) {
-        ArmCall call = new ArmCall(request.scope(), ArmResourceId.parse(request.resourcePath()).orElse(null),
+    /** Builds the {@link ArmCall} the rules and the handler see for {@code request}. */
+    public ArmCall call(AzureRequest request) {
+        return new ArmCall(request.scope(), ArmResourceId.parse(request.resourcePath()).orElse(null),
             null, request.method() == null ? null : request.method().toUpperCase(Locale.ROOT), null);
-        for (ArmRequestRule rule : rules) {
-            rule.enter(call);
-        }
-        return call;
     }
 
-    /** Runs every rule's exit hook; {@code response} is null when the handler threw. */
-    public void exit(ArmCall call, Response response) {
-        for (ArmRequestRule rule : rules) {
-            rule.exit(call, response);
+    /** Runs the exit hook of the first {@code entered} rules; {@code response} is null when something threw. */
+    private void exit(ArmCall call, Response response, int entered) {
+        for (int i = 0; i < entered; i++) {
+            rules.get(i).exit(call, response);
         }
     }
 

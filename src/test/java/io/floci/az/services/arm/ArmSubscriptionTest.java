@@ -5,6 +5,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -44,6 +45,37 @@ class ArmSubscriptionTest {
                 .body("value", hasSize(1))
                 .body("value[0].subscriptionId", equalTo(DEFAULT_SUB))
                 .body("value[0].tenantId", equalTo(DEFAULT_TENANT));
+    }
+
+    @Test
+    void aSubscriptionFirstUsedByAChildRequestIsServedButNotListed() {
+        String sub = "33333333-1111-0000-0000-000000000000";
+        given().when().get("/subscriptions/" + sub + "/resourceGroups" + API)
+                .then().statusCode(200);
+
+        given().when().get("/subscriptions/" + sub + API)
+                .then().statusCode(200)
+                .body("subscriptionId", equalTo(sub))
+                .body("state", equalTo("Enabled"));
+
+        given().when().get("/subscriptions" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value.subscriptionId", not(hasItem(sub)));
+    }
+
+    @Test
+    void aSubscriptionIsEchoedAsThePathSpellsIt() {
+        String firstSeen = "44444444-aaaa-0000-0000-000000000000";
+        String upper = firstSeen.toUpperCase(Locale.ROOT);
+        given().when().get("/subscriptions/" + firstSeen + API)
+                .then().statusCode(200)
+                .body("subscriptionId", equalTo(firstSeen));
+
+        given().when().get("/subscriptions/" + upper + API)
+                .then().statusCode(200)
+                .body("id", equalTo("/subscriptions/" + upper))
+                .body("subscriptionId", equalTo(upper));
     }
 
     @Test

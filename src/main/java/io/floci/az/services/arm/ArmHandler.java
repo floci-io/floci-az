@@ -13,6 +13,10 @@ import io.floci.az.core.arm.ArmResourceFilter;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.core.directory.DirectoryOrigin;
+import io.floci.az.core.directory.Subscription;
+import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.apim.ApiManagementHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
 import io.floci.az.services.functions.FunctionRuntime;
@@ -88,12 +92,16 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     /** Wraps this handler, its inline providers and its provider lane, for callers that bypass the router. */
     private final ArmRequestGate gate;
 
+    /** The tenants and subscriptions {@code GET /tenants} and {@code GET /subscriptions} report. */
+    private final AzureDirectory directory;
+
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
-                      Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate) {
+                      Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate,
+                      AzureDirectory directory) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -104,6 +112,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         this.providerServices     = providerServices;
         this.resourceIndexContributors = resourceIndexContributors;
         this.gate                 = gate;
+        this.directory            = directory;
     }
 
     /**
@@ -176,27 +185,30 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // ── Tenant list ───────────────────────────────────────────────────────
         // GET /tenants — the az CLI enumerates tenants during `az login`.
         if (path.matches("tenants([?].*)?")) {
-            return Response.ok(Map.of("value", List.of(Map.of(
-                    "id",                "/tenants/" + tenantId(),
-                    "tenantId",          tenantId(),
-                    "displayName",       "floci-az local",
-                    "tenantCategory",    "Home",
-                    "defaultDomain",     "floci-az.local",
-                    "domains",           List.of("floci-az.local"),
-                    "tenantType",        "AAD"
-            )))).build();
+            return Response.ok(Map.of("value", directory.tenants().stream().map(ArmHandler::tenantBody).toList()))
+                    .build();
         }
 
         // ── Subscription list ─────────────────────────────────────────────────
         // GET /subscriptions — the az CLI enumerates subscriptions during `az login`.
         if (path.matches("subscriptions([?].*)?")) {
-            return Response.ok(Map.of("value", List.of(subscriptionBody(defaultSubscriptionId())))).build();
+            boolean listFirstUse = config.subscriptionListing();
+            return Response.ok(Map.of("value", directory.subscriptionsOfTenant(callerTenantId(req)).stream()
+                    .filter(subscription -> listFirstUse || subscription.origin() != DirectoryOrigin.FIRST_USE)
+                    .map(subscription -> subscriptionBody(subscription, subscription.id())).toList())).build();
         }
 
         // ── Subscription ──────────────────────────────────────────────────────
+        // The gate's SubscriptionRule has already registered an unknown id on first use, or refused it.
         if (path.matches("subscriptions/[^/?]+") ||
             path.matches("subscriptions/[^/?]+\\?.*")) {
-            return subscriptionResponse(extractSub(path));
+            String sub = extractSub(path);
+            // compat echoes the id as the path spells it, as floci-az always has; subscription-listing echoes
+            // the directory's spelling, as Azure echoes its canonical id.
+            return directory.subscription(sub)
+                    .map(subscription -> Response.ok(subscriptionBody(subscription,
+                            config.subscriptionListing() ? subscription.id() : sub)).build())
+                    .orElseGet(() -> ArmErrors.subscriptionNotFound(sub));
         }
 
         // ── Location list ─────────────────────────────────────────────────────
@@ -986,17 +998,14 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     // ── Subscription ─────────────────────────────────────────────────────────
 
-    private Response subscriptionResponse(String sub) {
-        return Response.ok(subscriptionBody(sub)).build();
-    }
-
-    private Map<String, Object> subscriptionBody(String sub) {
+    /** {@code subscriptionId} is the spelling the body reports; the rest comes from the directory. */
+    private static Map<String, Object> subscriptionBody(Subscription subscription, String subscriptionId) {
         return Map.of(
-                "id",                   "/subscriptions/" + sub,
-                "subscriptionId",       sub,
-                "displayName",          "floci-az local",
-                "state",                "Enabled",
-                "tenantId",             tenantId(),
+                "id",                   "/subscriptions/" + subscriptionId,
+                "subscriptionId",       subscriptionId,
+                "displayName",          subscription.displayName(),
+                "state",                subscription.state().wireName(),
+                "tenantId",             subscription.tenantId(),
                 "authorizationSource",  "RoleBased",
                 "managedByTenants",     List.of(),
                 "subscriptionPolicies", Map.of(
@@ -1006,12 +1015,27 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         );
     }
 
-    private String defaultSubscriptionId() {
-        return config.services().arm().defaultSubscriptionId();
+    /** Every tenant reports {@code Home} until the tenant listing is scoped to the caller. */
+    private static Map<String, Object> tenantBody(Tenant tenant) {
+        return Map.of(
+                "id",                "/tenants/" + tenant.id(),
+                "tenantId",          tenant.id(),
+                "displayName",       tenant.displayName(),
+                "tenantCategory",    "Home",
+                "defaultDomain",     tenant.defaultDomain(),
+                "domains",           List.of(tenant.defaultDomain()),
+                "tenantType",        "AAD"
+        );
     }
 
     private String tenantId() {
-        return config.services().entra().defaultTenantId();
+        return directory.defaultTenantId();
+    }
+
+    /** The caller's tenant: its token's, when the request carries one the directory holds, else the default. */
+    private String callerTenantId(AzureRequest req) {
+        String tokenTenantId = req.scope() == null ? null : req.scope().tokenTenantId();
+        return directory.tenant(tokenTenantId).map(Tenant::id).orElse(directory.defaultTenantId());
     }
 
     @Override

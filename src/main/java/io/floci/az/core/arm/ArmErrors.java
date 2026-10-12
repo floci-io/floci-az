@@ -25,4 +25,9 @@ public final class ArmErrors {
     public static Response notFound(String message) {
         return error(404, "ResourceNotFound", message);
     }
+
+    /** {@code 404 SubscriptionNotFound} for a subscription the directory does not hold, with Azure's message. */
+    public static Response subscriptionNotFound(String subscriptionId) {
+        return error(404, "SubscriptionNotFound", "The subscription '" + subscriptionId + "' could not be found.");
+    }
 }

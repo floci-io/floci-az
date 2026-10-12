@@ -51,6 +51,93 @@ public interface EmulatorConfig {
 
     DockerConfig docker();
 
+    CloudConfig cloud();
+
+    /**
+     * Tenants the directory holds besides the default one ({@code services.entra.default-tenant-id}, which
+     * always exists). An entry with the default tenant's id overrides its display name, domain or cloud.
+     */
+    List<TenantConfig> tenants();
+
+    /**
+     * Subscriptions the directory holds besides the default one ({@code services.arm.default-subscription-id},
+     * which always exists). An entry with the default subscription's id overrides its tenant, name or state.
+     */
+    List<SubscriptionConfig> subscriptions();
+
+    /**
+     * {@code compat} (default), {@code azure} or {@code strict}: how closely floci-az follows Azure where Azure
+     * differs from what floci-az has always answered. Each {@link #parityOverrides() override} defaults from it.
+     */
+    @WithDefault("compat")
+    ParityLevel parity();
+
+    /** Fine-grained switches, each defaulting from {@link #parity()}; read them through the resolvers below. */
+    ParityOverridesConfig parityOverrides();
+
+    /**
+     * Whether {@code GET /subscriptions} also lists subscriptions registered on first use, and
+     * {@code GET /subscriptions/{sub}} echoes the directory's id rather than the path's spelling. On from
+     * {@code parity: azure}; {@code parity-overrides.subscription-listing} overrides it either way.
+     */
+    default boolean subscriptionListing() {
+        return parityOverrides().subscriptionListing().orElse(parity().includes(ParityLevel.AZURE));
+    }
+
+    /**
+     * Whether an ARM request naming a subscription the directory does not hold is refused with
+     * {@code 404 SubscriptionNotFound} instead of registering it on first use. On from {@code parity: strict};
+     * {@code parity-overrides.strict-subscriptions} overrides it either way.
+     */
+    default boolean strictSubscriptions() {
+        return parityOverrides().strictSubscriptions().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
+     * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
+     * Later phases add their own switches here.
+     */
+    interface ParityOverridesConfig {
+        /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#subscriptionListing()}. */
+        Optional<Boolean> subscriptionListing();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictSubscriptions()}. */
+        Optional<Boolean> strictSubscriptions();
+    }
+
+    /** The cloud a tenant lives in when nothing else names one. */
+    interface CloudConfig {
+        /** A cloud name from the bundled catalog: {@code AzureCloud}, {@code AzureUSGovernment} or {@code AzureChinaCloud}. */
+        @WithName("default")
+        @WithDefault("AzureCloud")
+        String defaultCloud();
+    }
+
+    /** One configured tenant; only {@code id} is required. */
+    interface TenantConfig {
+        String id();
+
+        Optional<String> displayName();
+
+        Optional<String> defaultDomain();
+
+        /** The tenant's cloud; the default cloud when absent. */
+        Optional<String> cloud();
+    }
+
+    /** One configured subscription; only {@code id} is required. */
+    interface SubscriptionConfig {
+        String id();
+
+        /** The owning tenant, which must be the default tenant or a configured one; the default tenant when absent. */
+        Optional<String> tenantId();
+
+        Optional<String> displayName();
+
+        /** {@code Enabled} (default), {@code Warned}, {@code PastDue}, {@code Disabled} or {@code Deleted}. */
+        Optional<String> state();
+    }
+
     interface StorageConfig {
         /** Supported modes: memory, persistent, hybrid, wal */
         @WithDefault("memory")
@@ -90,6 +177,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig monitor();
         ServiceStorageConfig containerApps();
         ServiceStorageConfig email();
+        ServiceStorageConfig directory();
     }
 
     interface ServiceStorageConfig {
@@ -194,9 +282,9 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /**
-         * The subscription {@code GET /subscriptions} lists, and so the one {@code az login} selects.
-         * {@code GET /subscriptions/{sub}} still answers for any id, so clients configured with their
-         * own subscription keep working.
+         * The subscription that always exists in the directory, listed first by {@code GET /subscriptions}
+         * and so the one {@code az login} selects. Unless subscriptions are strict, any other id is
+         * registered on first use, so clients configured with their own subscription keep working.
          */
         @WithDefault("00000000-0000-0000-0000-000000000001")
         String defaultSubscriptionId();
@@ -583,7 +671,12 @@ public interface EmulatorConfig {
     }
 
     interface AuthConfig {
-        /** dev: accept any credentials. strict: validate HMAC-SHA256 signatures. */
+        /**
+         * Reserved; nothing reads it today. Every value, {@code strict} included, behaves like
+         * {@code dev}: any credentials are accepted and SharedKey signatures are not validated.
+         * Blob service SAS signatures are checked against {@link #storageAccountKeys()}
+         * independently of this setting.
+         */
         @WithDefault("dev")
         String mode();
 

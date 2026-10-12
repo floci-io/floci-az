@@ -5,17 +5,23 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 @QuarkusTest
-@DisplayName("ArmRequestGate: the production gate has no rules yet")
+@DisplayName("ArmRequestGate: the production rules")
 class ArmRequestGateProductionTest {
 
     @Inject
     ArmRequestGate gate;
 
     @Test
-    void theProductionGateIsAPurePassThrough() {
-        assertTrue(gate.rules().isEmpty(), "rules: " + gate.rules());
+    void theSubscriptionRuleIsTheOnlyProductionRuleAndRunsFirst() {
+        List<ArmRequestRule> rules = gate.rules();
+        assertEquals(1, rules.size(), "rules: " + rules);
+        assertInstanceOf(SubscriptionRule.class, rules.getFirst());
+        assertEquals(SubscriptionRule.ORDER, rules.getFirst().order());
     }
 }

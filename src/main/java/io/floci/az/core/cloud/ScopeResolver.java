@@ -1,7 +1,7 @@
 package io.floci.az.core.cloud;
 
-import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.directory.AzureDirectory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -32,10 +33,10 @@ import java.util.function.Supplier;
  * <p>Resolution only records; it never rejects a request. Deciding what a mismatch means (a token from
  * another tenant, a subscription nobody registered) is the job of the ARM request gate's rules.
  *
- * <p>Today the directory holds one tenant ({@code entra.default-tenant-id}) in the default cloud, and every
- * subscription belongs to it. {@link #tenantOfSubscription} and {@link #cloudOfTenant} are where the
- * tenant and subscription directory plugs in, signal 4 waits for the global-name registry, and the token's
- * {@code tid} is left null until the bearer verifier exposes parsed claims.
+ * <p>{@link #tenantOfSubscription} and {@link #cloudOfTenant} ask the tenant and subscription directory
+ * ({@link AzureDirectory}); a subscription it does not hold yet resolves to the default tenant, which is where
+ * first use registers it. Signal 4 waits for the global-name registry, and the token's {@code tid} is left
+ * null until the bearer verifier exposes parsed claims.
  */
 @ApplicationScoped
 public class ScopeResolver {
@@ -46,17 +47,25 @@ public class ScopeResolver {
     /** First segments of Entra paths that carry no tenant segment. */
     private static final Set<String> TENANTLESS_ENTRA_ROOTS = Set.of("oauth2", "discovery", ".well-known", "v2.0");
 
-    private final Supplier<String> defaultTenantId;
+    private final Function<String, String> tenantOfSubscription;
+    private final Function<String, CloudProfile> cloudOfTenant;
     private final CloudProfile defaultCloud;
     private final Map<String, CloudProfile> cloudHosts;
 
     @Inject
-    public ScopeResolver(EmulatorConfig config) {
-        this(() -> config.services().entra().defaultTenantId(), CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD));
+    public ScopeResolver(AzureDirectory directory) {
+        this(directory::tenantOfSubscription, directory::cloudOfTenant, directory.defaultCloud());
     }
 
+    /** One tenant in one cloud: every subscription is {@code defaultTenantId}'s, every tenant is in {@code defaultCloud}. */
     ScopeResolver(Supplier<String> defaultTenantId, CloudProfile defaultCloud) {
-        this.defaultTenantId = defaultTenantId;
+        this(subscription -> defaultTenantId.get(), tenant -> defaultCloud, defaultCloud);
+    }
+
+    ScopeResolver(Function<String, String> tenantOfSubscription, Function<String, CloudProfile> cloudOfTenant,
+                  CloudProfile defaultCloud) {
+        this.tenantOfSubscription = tenantOfSubscription;
+        this.cloudOfTenant = cloudOfTenant;
         this.defaultCloud = defaultCloud;
         this.cloudHosts = cloudHosts(CloudCatalog.all());
     }
@@ -119,14 +128,14 @@ public class ScopeResolver {
         return new ScopeContext(defaultCloud, null, null, null, tokenTenantId, ScopeSource.DEFAULT);
     }
 
-    /** The tenant a subscription belongs to. One tenant today: every subscription is the default tenant's. */
+    /** The tenant a subscription belongs to: the directory's answer, the default tenant for an unknown one. */
     String tenantOfSubscription(String subscriptionId) {
-        return defaultTenantId.get();
+        return tenantOfSubscription.apply(subscriptionId);
     }
 
-    /** The cloud a tenant lives in. One cloud today: every tenant is in the default cloud. */
+    /** The cloud a tenant lives in: the directory's answer, the default cloud for an unknown tenant. */
     CloudProfile cloudOfTenant(String tenantId) {
-        return defaultCloud;
+        return cloudOfTenant.apply(tenantId);
     }
 
     /**
