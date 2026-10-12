@@ -201,7 +201,7 @@ restarts in `persistent`/`hybrid`/`wal` modes.
 - **KQL is a subset.** `summarize`, `extend`, `join`, `order by`, `parse`, scalar functions, and
   aggregations are not implemented: only `where` / `project` / `take` / `limit` plus `timespan`
   filtering.
-- **The Activity Log is in memory** (`activity-log.capacity` entries, default 10000) and covers the
+- **The Activity Log is in memory** (`activity-log.capacity` entries, default 10000, `0` keeps none) and covers the
   management plane only: no `ServiceHealth`, `Alert`, `Autoscale`, `Security` or `Recommendation`
   categories, no tenant-level log (`/providers/Microsoft.Insights/eventtypes/management/values` without a
   subscription), and `authorization.role` is not reported.

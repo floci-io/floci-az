@@ -20,7 +20,8 @@ import java.util.function.Predicate;
 /**
  * {@code GET /subscriptions/{sub}/providers/Microsoft.Insights/eventtypes/management/values}: the Activity
  * Logs list operation, with its {@code $filter} grammar, {@code $select} projection and {@code nextLink}
- * paging through an opaque {@code $skiptoken}.
+ * paging through an opaque {@code $skiptoken} that names the entry the previous page ended on, so a
+ * page stays stable while writes keep adding entries.
  */
 @ApplicationScoped
 public class ActivityLogEndpoint {
@@ -58,27 +59,26 @@ public class ActivityLogEndpoint {
             return ArmErrors.error(400, "BadRequest", e.getMessage());
         }
         Set<String> select = select(req.queryParams().get("$select"));
-        List<ActivityLogEvent> events = log.query(subscriptionId, filter);
 
-        int skip = 0;
+        long before = Long.MAX_VALUE;
         String token = req.queryParams().get("$skiptoken");
         if (token != null && !token.isBlank()) {
-            Integer offset = decode(token);
-            if (offset == null) {
+            Long cursor = decode(token);
+            if (cursor == null) {
                 return ArmErrors.error(400, "BadRequest", "The provided $skiptoken is invalid.");
             }
-            skip = offset;
+            before = cursor;
         }
-        int from = Math.min(skip, events.size());
-        int to = Math.min(from + pageSize, events.size());
+        List<ActivityLog.Entry> entries = log.query(subscriptionId, filter, before);
+        int to = Math.min(pageSize, entries.size());
         List<Map<String, Object>> value = new ArrayList<>();
-        for (ActivityLogEvent event : events.subList(from, to)) {
-            value.add(event.toJson(select));
+        for (ActivityLog.Entry entry : entries.subList(0, to)) {
+            value.add(entry.event().toJson(select));
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("value", value);
-        if (to < events.size()) {
-            body.put("nextLink", nextLink(req, subscriptionId, to));
+        if (to < entries.size()) {
+            body.put("nextLink", nextLink(req, subscriptionId, entries.get(to - 1).sequence()));
         }
         return Response.ok(body).build();
     }
@@ -95,7 +95,7 @@ public class ActivityLogEndpoint {
         return out;
     }
 
-    private static String nextLink(AzureRequest req, String subscriptionId, int offset) {
+    private static String nextLink(AzureRequest req, String subscriptionId, long lastSequence) {
         String base = (req.secure() ? "https://" : "http://") + (req.authority() == null ? req.host() : req.authority());
         StringBuilder link = new StringBuilder(base == null || base.endsWith("//") ? "" : base);
         link.append("/subscriptions/").append(subscriptionId).append("/providers/microsoft.insights/eventtypes/management/values");
@@ -106,18 +106,24 @@ public class ActivityLogEndpoint {
                 link.append('&').append(param).append('=').append(java.net.URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20"));
             }
         }
-        link.append("&$skiptoken=").append(encode(offset));
+        link.append("&$skiptoken=").append(encode(lastSequence));
         return link.toString();
     }
 
-    static String encode(int offset) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(("skip:" + offset).getBytes(StandardCharsets.UTF_8));
+    /** A cursor naming the last entry served: the next page holds the entries recorded before it. */
+    static String encode(long lastSequence) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(("before:" + lastSequence).getBytes(StandardCharsets.UTF_8));
     }
 
-    static Integer decode(String token) {
+    /** The sequence number a cursor names, or null when the token is malformed or not positive. */
+    static Long decode(String token) {
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
-            return decoded.startsWith("skip:") ? Integer.parseInt(decoded.substring(5)) : null;
+            if (!decoded.startsWith("before:")) {
+                return null;
+            }
+            long sequence = Long.parseLong(decoded.substring(7));
+            return sequence > 0 ? sequence : null;
         } catch (IllegalArgumentException e) {
             return null;
         }

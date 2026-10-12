@@ -21,6 +21,7 @@ import java.util.Map;
  *                or null for an application
  * @param idtyp   {@code app}, {@code user} or null when the token does not say and no claim implies it
  * @param managedIdentity true when the token names a managed identity resource ({@code xms_mirid} or {@code xms_az_rid})
+ * @param claims  every claim of the token as a string, for the Activity Log; empty when not read
  */
 public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity,
                            Map<String, String> claims) {

@@ -161,6 +161,11 @@ class ActivityLogTest {
                 .body("nextLink", containsString("$skiptoken="))
                 .body("nextLink", containsString("$select="))
                 .extract().path("nextLink");
+        // A write between pages does not shift the next page: the cursor names the entry the page ended on.
+        given().contentType("application/json")
+                .body("{\"location\": \"eastus\", \"kind\": \"StorageV2\", \"sku\": {\"name\": \"Standard_LRS\"}}")
+                .when().put(RG_SCOPE + "/providers/Microsoft.Storage/storageAccounts/pagedsa3?api-version=2023-01-01")
+                .then().statusCode(isOneOf(200, 201));
         // The link is already encoded, as a client follows it verbatim.
         String relative = next.substring(next.indexOf("/subscriptions/"));
         given().urlEncodingEnabled(false).when().get(relative)
@@ -176,6 +181,10 @@ class ActivityLogTest {
                 .then().statusCode(400)
                 .body("error.code", equalTo("BadRequest"));
         given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "'&$skiptoken=garbage")
+                .then().statusCode(400);
+        given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "'&$skiptoken=" + ActivityLogEndpoint.encode(-1))
+                .then().statusCode(400);
+        given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "'&$skiptoken=YmVmb3JlOi0x")
                 .then().statusCode(400);
         given().when().post(LOGS + "&$filter=eventTimestamp ge '" + since + "'")
                 .then().statusCode(405);

@@ -27,8 +27,13 @@ public class ActivityLog implements Resettable {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final Deque<ActivityLogEvent> events = new ArrayDeque<>();
+    /** An entry with the sequence number that orders it, which page cursors refer to. */
+    public record Entry(long sequence, ActivityLogEvent event) {
+    }
+
+    private final Deque<Entry> events = new ArrayDeque<>();
     private final int capacity;
+    private long nextSequence = 1;
 
     @Inject
     public ActivityLog(EmulatorConfig config) {
@@ -40,18 +45,28 @@ public class ActivityLog implements Resettable {
     }
 
     public synchronized void record(ActivityLogEvent event) {
+        if (capacity <= 0) {
+            return; // a log that keeps nothing
+        }
         if (events.size() >= capacity) {
             events.removeFirst();
         }
-        events.addLast(event);
+        events.addLast(new Entry(nextSequence++, event));
     }
 
-    /** The entries of a subscription that satisfy {@code filter}, newest first, as the API lists them. */
-    public synchronized List<ActivityLogEvent> query(String subscriptionId, Predicate<ActivityLogEvent> filter) {
-        List<ActivityLogEvent> out = new ArrayList<>();
-        for (ActivityLogEvent event : events) {
-            if ((subscriptionId == null || subscriptionId.equalsIgnoreCase(event.subscriptionId())) && filter.test(event)) {
-                out.add(event);
+    /**
+     * The entries of a subscription that satisfy {@code filter}, newest first, as the API lists them;
+     * {@code before} limits them to entries recorded before that sequence number, so that a page cursor
+     * stays stable while new entries arrive.
+     */
+    public synchronized List<Entry> query(String subscriptionId, Predicate<ActivityLogEvent> filter, long before) {
+        List<Entry> out = new ArrayList<>();
+        for (Entry entry : events) {
+            ActivityLogEvent event = entry.event();
+            if (entry.sequence() < before
+                    && (subscriptionId == null || subscriptionId.equalsIgnoreCase(event.subscriptionId()))
+                    && filter.test(event)) {
+                out.add(entry);
             }
         }
         java.util.Collections.reverse(out);
@@ -59,7 +74,11 @@ public class ActivityLog implements Resettable {
     }
 
     public synchronized List<ActivityLogEvent> events() {
-        return new ArrayList<>(events);
+        List<ActivityLogEvent> out = new ArrayList<>(events.size());
+        for (Entry entry : events) {
+            out.add(entry.event());
+        }
+        return out;
     }
 
     @Override
