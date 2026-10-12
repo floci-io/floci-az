@@ -100,6 +100,8 @@ floci-az:
     # resource-group-delete: true   # FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE; default on from azure.
     #                               # Resource-group DELETE is a 202 long-running operation that deletes every
     #                               # resource in the group first
+    # strict-resource-groups: true  # FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS; default on from strict.
+    #                               # A request for a resource under a missing group is 404 ResourceGroupNotFound
 
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:

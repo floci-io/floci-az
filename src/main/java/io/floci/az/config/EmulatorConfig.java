@@ -116,6 +116,15 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether a request for a resource under a resource group that does not exist (a PUT, a read, an action or
+     * a delete) is refused with {@code 404 ResourceGroupNotFound}. On from {@code parity: strict};
+     * {@code parity-overrides.strict-resource-groups} overrides it either way.
+     */
+    default boolean strictResourceGroups() {
+        return parityOverrides().strictResourceGroups().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -131,6 +140,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#resourceGroupDelete()}. */
         Optional<Boolean> resourceGroupDelete();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictResourceGroups()}. */
+        Optional<Boolean> strictResourceGroups();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */
