@@ -132,6 +132,23 @@ class ResourceGroupTest {
     }
 
     @Test
+    void aPatchInAnotherCasingKeepsTheSpellingOfTheLatestPut() {
+        json("{\"location\":\"eastus\"}").when().put(group("Rg-Patch-Case") + API).then().statusCode(201);
+
+        json("{\"tags\":{\"owner\":\"probe\"}}")
+            .when().patch(group("RG-PATCH-CASE") + API)
+            .then().statusCode(200)
+            .body("name", equalTo("Rg-Patch-Case"))
+            .body("id", equalTo(group("Rg-Patch-Case")))
+            .body("tags.owner", equalTo("probe"));
+
+        given().when().get(group("rg-patch-case") + API)
+            .then().statusCode(200)
+            .body("name", equalTo("Rg-Patch-Case"))
+            .body("id", equalTo(group("Rg-Patch-Case")));
+    }
+
+    @Test
     void everyPutAnswers201AsItAlwaysHas() {
         json("{\"location\":\"eastus\"}").when().put(group("rg-reput") + API).then().statusCode(201);
         json("{\"location\":\"eastus\",\"tags\":{\"a\":\"b\"}}")

@@ -32,6 +32,7 @@ class ResourceGroupSemanticsOverrideTest {
     private static final String SUB = "7a1d0000-0000-4000-8000-00000000c0a3";
     private static final String API = "?api-version=2024-11-01";
     private static final String STORAGE_API = "?api-version=2023-01-01";
+    private static final String CONTAINER_APPS_API = "?api-version=2025-07-01";
 
     private static String group(String name) {
         return "/subscriptions/" + SUB + "/resourceGroups/" + name;
@@ -67,5 +68,16 @@ class ResourceGroupSemanticsOverrideTest {
         given().when().delete(group("rg-sem-auto") + API).then().statusCode(200);
         given().when().get(account + STORAGE_API).then().statusCode(200);
         given().when().delete(group("rg-sem-auto") + API).then().statusCode(200);
+    }
+
+    @Test
+    void aGroupCreatedForAManagedEnvironmentTakesTheLocationOfItsJacksonBody() {
+        String environment = group("rg-sem-env") + "/providers/Microsoft.App/managedEnvironments/sem-env";
+        json("{\"location\":\"westeurope\",\"properties\":{\"zoneRedundant\":false}}")
+            .when().put(environment + CONTAINER_APPS_API).then().statusCode(201);
+
+        given().when().get(group("rg-sem-env") + API)
+            .then().statusCode(200)
+            .body("location", equalTo("westeurope"));
     }
 }

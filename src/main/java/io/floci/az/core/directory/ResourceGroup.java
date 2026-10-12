@@ -8,11 +8,11 @@ import java.util.Map;
 
 /**
  * A resource group: {@code Microsoft.Resources/resourceGroups} in the {@code ResourceGroup} shape of the
- * Resources spec. Names are case-insensitive; {@link #name()} is the most recent spelling a client created or
- * updated the group with, which is what ARM echoes.
+ * Resources spec. Names are case-insensitive; {@link #name()} is the spelling of the latest PUT, which a PATCH
+ * in another casing keeps.
  *
- * @param subscriptionId    the subscription, as the request that last wrote the group spelled it
- * @param name              the group name, as most recently spelled
+ * @param subscriptionId    the subscription, as the latest PUT spelled it
+ * @param name              the group name, as the latest PUT spelled it
  * @param location          the location the group was created in
  * @param tags              the group's tags, or null when the client never sent any
  * @param managedBy         the id of the resource that manages the group, or null

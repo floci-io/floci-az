@@ -1,5 +1,7 @@
 package io.floci.az.core.arm;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.ScopeContext;
 import io.floci.az.core.cloud.ScopeSource;
@@ -79,6 +81,29 @@ class ResourceGroupRuleTest {
     }
 
     @Test
+    void autoCreateReadsTheLocationOfAJacksonBodyToo() {
+        ResourceGroups groups = new ResourceGroups(null);
+        ResourceGroupRule rule = new ResourceGroupRule(groups, false, true);
+        ObjectNode body = JsonNodeFactory.instance.objectNode().put("location", "westeurope");
+
+        rule.exit(call("PUT", ACCOUNT), Response.status(201).entity(body).build());
+
+        assertEquals("westeurope", groups.get(SUB, "rg-rule").orElseThrow().location());
+    }
+
+    @Test
+    void aJacksonBodyWithoutATextLocationFallsBackToTheCloudsDefault() {
+        ResourceGroups groups = new ResourceGroups(null);
+        ResourceGroupRule rule = new ResourceGroupRule(groups, false, true);
+        ObjectNode body = JsonNodeFactory.instance.objectNode().putNull("location");
+
+        rule.exit(call("PUT", ACCOUNT), Response.status(201).entity(body).build());
+
+        assertEquals(CloudCatalog.forNameOrPublic("AzureUSGovernment").effectiveDefaultLocation(),
+            groups.get(SUB, "rg-rule").orElseThrow().location());
+    }
+
+    @Test
     void autoCreateFallsBackToTheCloudsDefaultLocation() {
         ResourceGroups groups = new ResourceGroups(null);
         ResourceGroupRule rule = new ResourceGroupRule(groups, false, true);
@@ -113,5 +138,37 @@ class ResourceGroupRuleTest {
         ResourceGroup group = groups.get(SUB, "rg-rule").orElseThrow();
         assertEquals("eastus", group.location());
         assertTrue(group.tags().containsKey("keep"));
+    }
+
+    @Test
+    void writesAreNeitherRefusedNorCountedUnlessTheDeleteGuardIsOn() {
+        ResourceGroups groups = new ResourceGroups(null);
+        groups.put(new ResourceGroup(SUB, "rg-rule", "eastus", null, null, ResourceGroup.SUCCEEDED));
+        ResourceGroupRule rule = new ResourceGroupRule(groups, false, false);
+        assertTrue(groups.beginDelete(SUB, "rg-rule"));
+
+        assertInstanceOf(ArmVerdict.Proceed.class, rule.enter(call("PUT", ACCOUNT)));
+    }
+
+    @Test
+    void theDeleteGuardRefusesAWriteUnderAGroupBeingDeletedInAnyCasing() {
+        ResourceGroups groups = new ResourceGroups(null);
+        groups.put(new ResourceGroup(SUB, "RG-RULE", "eastus", null, null, ResourceGroup.SUCCEEDED));
+        ResourceGroupRule rule = new ResourceGroupRule(groups, false, false, true);
+        assertTrue(groups.beginDelete(SUB, "rg-Rule"));
+
+        Response response = assertInstanceOf(ArmVerdict.Respond.class, rule.enter(call("PUT", ACCOUNT))).response();
+        assertEquals(409, response.getStatus());
+        Map<?, ?> error = (Map<?, ?>) ((Map<?, ?>) response.getEntity()).get("error");
+        assertEquals("ResourceGroupBeingDeleted", error.get("code"));
+        assertInstanceOf(ArmVerdict.Proceed.class, rule.enter(call("GET", ACCOUNT)));
+        assertInstanceOf(ArmVerdict.Proceed.class, rule.enter(call("DELETE", ACCOUNT)));
+        assertInstanceOf(ArmVerdict.Proceed.class,
+            rule.enter(call("PUT", "subscriptions/" + SUB + "/resourceGroups/rg-rule")));
+
+        groups.endDelete(SUB, "rg-rule");
+        ArmCall admitted = call("PUT", ACCOUNT);
+        assertInstanceOf(ArmVerdict.Proceed.class, rule.enter(admitted));
+        rule.exit(admitted, null);
     }
 }

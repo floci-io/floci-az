@@ -221,7 +221,8 @@ Emulator choices, with no Azure source to settle them:
 
 Resource groups follow the `ResourceGroups` operations of the Resources REST spec (the az CLI pins
 `2024-11-01`, azurerm `2023-07-01`; both declare the same status codes). Names are matched
-case-insensitively, and a group answers with the spelling it was last written with.
+case-insensitively, and a group answers with the spelling of its latest PUT; a PATCH in another casing
+updates the group and keeps that spelling.
 
 These hold in every configuration:
 
@@ -255,10 +256,20 @@ Under `resource-group-delete` a `DELETE` of a group is the long-running operatio
 3. The work is done by the time the `Location` is polled: it answers `200` with an empty body, the shape
    Azure's own poll ends with. A missing group is `404 ResourceGroupNotFound`.
 
+While the delete runs, the group is marked as being deleted, so that no resource created meanwhile is
+left behind: a `PUT` or `PATCH` of a resource under the group is refused with
+`409 ResourceGroupBeingDeleted`, and the delete waits for any such request that was already running
+before it lists the group's resources. The mark is removed when the delete ends, whether it removed the
+group or failed. Without `resource-group-delete` nothing is marked and no request is refused.
+
 Emulator choices, with no Azure source to settle them: a re-PUT with a different location replaces the
 location, as floci-az always has (Azure documents the location as fixed at creation but no local source
 gives the error it answers); `Retry-After` is `1` second (Azure sends none on this operation, and clients
-then fall back to their own, much longer, poll interval); `forceDeletionTypes` is accepted and ignored.
+then fall back to their own, much longer, poll interval); `forceDeletionTypes` is accepted and ignored;
+a write under a group that is being deleted answers `409` with the message `The resource group '{rg}' is
+in deprovisioning state and cannot perform this operation.` (Azure documents the
+`ResourceGroupBeingDeleted` code, with the advice to wait for the deletion to complete, but not its
+status or message).
 
 ## Resource names across subscriptions
 

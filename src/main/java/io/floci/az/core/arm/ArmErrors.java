@@ -35,4 +35,13 @@ public final class ArmErrors {
     public static Response resourceGroupNotFound(String resourceGroup) {
         return error(404, "ResourceGroupNotFound", "Resource group '" + resourceGroup + "' could not be found.");
     }
+
+    /**
+     * {@code 409 ResourceGroupBeingDeleted} for a write under a resource group whose delete is running. Azure
+     * documents the code; the status and the message are an emulator choice.
+     */
+    public static Response resourceGroupBeingDeleted(String resourceGroup) {
+        return error(409, "ResourceGroupBeingDeleted", "The resource group '" + resourceGroup
+            + "' is in deprovisioning state and cannot perform this operation.");
+    }
 }

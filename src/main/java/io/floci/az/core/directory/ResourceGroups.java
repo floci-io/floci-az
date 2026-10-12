@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +45,12 @@ public class ResourceGroups implements Resettable {
 
     /** Guarded by {@code this}; keyed by {@link #key}, in creation order. */
     private final Map<String, ResourceGroup> groups = new LinkedHashMap<>();
+
+    /** Guarded by {@code this}; the deletes in progress per {@link #key}. Never persisted. */
+    private final Map<String, Integer> deleting = new HashMap<>();
+
+    /** Guarded by {@code this}; the admitted writes still running per {@link #key}. Never persisted. */
+    private final Map<String, Integer> writing = new HashMap<>();
 
     @Inject
     public ResourceGroups(EmulatorConfig config, StorageFactory storageFactory) {
@@ -124,6 +131,62 @@ public class ResourceGroups implements Resettable {
             store.delete(PREFIX + key);
         }
         return Optional.ofNullable(removed);
+    }
+
+    /**
+     * Admits a write of a resource under a group, unless the group is being deleted. Every admitted write must
+     * end with {@link #endWrite}, which is what lets {@link #beginDelete} wait for it.
+     *
+     * @return false when a delete of the group is in progress
+     */
+    public synchronized boolean beginWrite(String subscriptionId, String name) {
+        String key = key(subscriptionId, name);
+        if (deleting.containsKey(key)) {
+            return false;
+        }
+        writing.merge(key, 1, Integer::sum);
+        return true;
+    }
+
+    /** Ends a write {@link #beginWrite} admitted. */
+    public synchronized void endWrite(String subscriptionId, String name) {
+        release(writing, key(subscriptionId, name));
+        notifyAll();
+    }
+
+    /**
+     * Marks an existing group as being deleted, so no further write under it is admitted, then waits for the
+     * writes admitted earlier to end. On return every resource a write could have created in the group is
+     * visible to the caller, and none can appear until {@link #endDelete}. A write under the group ends on its
+     * own request thread, so the wait is as long as the slowest handler already running.
+     *
+     * @return false when there is no such group, in which case nothing is marked
+     */
+    public synchronized boolean beginDelete(String subscriptionId, String name) {
+        String key = key(subscriptionId, name);
+        if (!groups.containsKey(key)) {
+            return false;
+        }
+        deleting.merge(key, 1, Integer::sum);
+        try {
+            while (writing.containsKey(key)) {
+                wait();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            release(deleting, key);
+            throw new IllegalStateException("Interrupted waiting for writes under resource group " + name, e);
+        }
+        return true;
+    }
+
+    /** Ends a delete {@link #beginDelete} marked, whether or not it removed the group. */
+    public synchronized void endDelete(String subscriptionId, String name) {
+        release(deleting, key(subscriptionId, name));
+    }
+
+    private static void release(Map<String, Integer> counts, String key) {
+        counts.computeIfPresent(key, (ignored, count) -> count > 1 ? count - 1 : null);
     }
 
     @Override

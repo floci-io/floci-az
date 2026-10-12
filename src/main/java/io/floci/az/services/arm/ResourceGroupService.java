@@ -42,7 +42,9 @@ import java.util.function.Supplier;
  *   <li>{@link EmulatorConfig#resourceGroupDelete()}: {@code DELETE} deletes every resource in the group,
  *       deepest first, through {@link ArmRouter#dispatchInternal} so each handler applies its own side effects,
  *       then answers 202 with a {@code Location} to poll and a short {@code Retry-After}; a missing group is
- *       {@code 404 ResourceGroupNotFound}. Without it {@code DELETE} answers 200, deletes only the group, and
+ *       {@code 404 ResourceGroupNotFound}. While the delete runs, a PUT or PATCH of a resource under the group
+ *       is refused with {@code 409 ResourceGroupBeingDeleted}, so nothing created meanwhile outlives the
+ *       group. Without it {@code DELETE} answers 200, deletes only the group, and
  *       answers 200 for a missing group too</li>
  * </ul>
  *
@@ -150,11 +152,17 @@ public class ResourceGroupService {
             groups.remove(subscriptionId, name);
             return Response.ok().build();
         }
-        if (!groups.exists(subscriptionId, name)) {
+        // Marked before the resources are listed: a write that would otherwise land between the listing and
+        // the removal is refused by ResourceGroupRule, and one already running is waited for.
+        if (!groups.beginDelete(subscriptionId, name)) {
             return ArmErrors.resourceGroupNotFound(name);
         }
-        cascade(req, subscriptionId, name, resources.get());
-        groups.remove(subscriptionId, name);
+        try {
+            cascade(req, subscriptionId, name, resources.get());
+            groups.remove(subscriptionId, name);
+        } finally {
+            groups.endDelete(subscriptionId, name);
+        }
         String operationId = UUID.randomUUID().toString();
         record(operationId, subscriptionId);
         String location = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + subscriptionId
