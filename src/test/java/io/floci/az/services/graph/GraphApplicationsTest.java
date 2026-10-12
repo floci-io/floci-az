@@ -114,6 +114,17 @@ class GraphApplicationsTest {
         given().contentType("application/json").body("{\"passwordCredential\": {\"endDateTime\": \"soon\"}}")
                 .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
                 .then().statusCode(400);
+        given().contentType("application/json").body("{\"passwordCredential\": {\"startDateTime\": \"soon\"}}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        given().contentType("application/json").body("not json")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        given().when().get("/v1.0/applications?$filter=displayName eq 'a' and appId eq 'b'")
+                .then().statusCode(400).body("error.code", equalTo("Request_BadRequest"));
+        // None of the rejected requests added a secret to the seeded dev app.
+        given().when().get("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID)
+                .then().statusCode(200).body("passwordCredentials", hasSize(1));
         given().when().put("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID).then().statusCode(405);
         given().when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/frobnicate").then().statusCode(400);
     }
