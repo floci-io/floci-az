@@ -273,6 +273,7 @@ public interface EmulatorConfig {
         ManagedIdentityConfig  managedIdentity();
         ContainerAppsConfig    containerApps();
         PolicyConfig           policy();
+        ManagementGroupsConfig managementGroups();
 
         /** Shared Docker network for sidecar containers (Artemis, Redpanda, etc.). */
         Optional<String> dockerNetwork();
@@ -373,6 +374,12 @@ public interface EmulatorConfig {
      * assignments and exemptions. Control plane only; rules are stored, never evaluated.
      */
     interface PolicyConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Azure Management Groups ({@code Microsoft.Management}): the tenant hierarchy of groups and subscriptions. */
+    interface ManagementGroupsConfig {
         @WithDefault("true")
         boolean enabled();
     }

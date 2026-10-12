@@ -365,6 +365,19 @@ class AzureRoutingFilterTest {
     }
 
     @Test
+    void managementGroupsRouteToTheirHandlerAndPolicyKeepsItsManagementGroupScope() {
+        given().when().get("/providers/Microsoft.Management/managementGroups?api-version=2023-04-01")
+                .then().statusCode(200)
+                .body(containsString("Tenant Root Group"));
+        // A policy definition at management-group scope is still the policy handler's: the last
+        // Microsoft.Authorization segment decides, not the Microsoft.Management prefix.
+        given().when().get("/providers/Microsoft.Management/managementGroups/mg/providers/Microsoft.Authorization/policyDefinitions/none"
+                        + "?api-version=2025-03-01")
+                .then().statusCode(404)
+                .body(containsString("PolicyDefinitionNotFound"));
+    }
+
+    @Test
     void policyGuardLeavesOtherAuthorizationResourcesToArm() {
         // Role assignments share the Microsoft.Authorization namespace but are not policy resources:
         // the policy guard must not capture them.

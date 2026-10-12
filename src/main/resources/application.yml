@@ -319,6 +319,8 @@ floci-az:
       app-service-header-secret: floci-az-msi-secret   # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_HEADER_SECRET
     policy:
       enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions (control plane only, no rule evaluation)
+    management-groups:
+      enabled: true       # FLOCI_AZ_SERVICES_MANAGEMENT_GROUPS_ENABLED: Microsoft.Management management groups and subscription membership
 
   auth:
     # Not enforced yet: every value behaves like dev, accepting any credentials without
