@@ -7,11 +7,13 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.docker.HostLiterals;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +49,7 @@ import java.util.Optional;
 public class EventHubHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(EventHubHandler.class);
+    private static final int HEALTH_CONNECT_TIMEOUT_MS = 2000;
 
     private final EmulatorConfig config;
     private final EventHubNamespaceManager namespaceManager;
@@ -234,12 +237,13 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
             return Response.ok(ns.tlsCertPem()).type("application/x-pem-file").build();
         }
         if ("connection".equals(sub)) {
+            String host = HostLiterals.forUrl(ns.clientHost() != null ? ns.clientHost() : "localhost");
             String json = String.format(
                     "{\"namespace\":\"%s\",\"amqpPort\":%d,\"amqpsPort\":%d,"
-                    + "\"amqpEndpoint\":\"amqp://localhost:%d\","
-                    + "\"amqpsEndpoint\":\"amqps://localhost:%d\"}",
+                    + "\"amqpEndpoint\":\"amqp://%s:%d\","
+                    + "\"amqpsEndpoint\":\"amqps://%s:%d\"}",
                     namespaceName, ns.amqpHostPort(), ns.amqpsHostPort(),
-                    ns.amqpHostPort(), ns.amqpsHostPort());
+                    host, ns.amqpHostPort(), host, ns.amqpsHostPort());
             return Response.ok(json).type("application/json").build();
         }
 
@@ -295,9 +299,16 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
 
     private Response handleHealth() {
         int amqpPort = config.services().eventHub().amqpPort();
-        boolean amqpUp = isTcpOpen("localhost", amqpPort);
         int amqpsPort = config.services().eventHub().amqpTlsPort();
-        boolean amqpsUp = isTcpOpen("localhost", amqpsPort);
+        // Probe the broker where floci-az resolved it, which is not localhost when floci-az runs in
+        // a container or the daemon is remote; with no broker running, the configured ports on
+        // localhost as before.
+        Optional<EventHubNamespaceManager.NamespaceState> broker = healthProbeTarget();
+        String probeHost = broker.map(EventHubNamespaceManager.NamespaceState::amqpHost).orElse("localhost");
+        boolean amqpUp = isTcpOpen(probeHost,
+                broker.map(EventHubNamespaceManager.NamespaceState::amqpHostPort).orElse(amqpPort));
+        boolean amqpsUp = isTcpOpen(probeHost,
+                broker.map(EventHubNamespaceManager.NamespaceState::amqpsHostPort).orElse(amqpsPort));
 
         String body = String.format(
                 "{\"amqp\":{\"port\":%d,\"status\":\"%s\"},\"amqps\":{\"port\":%d,\"status\":\"%s\"},\"kafka\":{\"running\":%b}}",
@@ -307,6 +318,19 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
 
         int status = (amqpUp || amqpsUp) ? 200 : 503;
         return Response.status(status).entity(body).type("application/json").build();
+    }
+
+    /** The default namespace's broker when it runs one, otherwise any namespace's broker. */
+    private Optional<EventHubNamespaceManager.NamespaceState> healthProbeTarget() {
+        Map<String, EventHubNamespaceManager.NamespaceState> namespaces = namespaceManager.listNamespaces();
+        EventHubNamespaceManager.NamespaceState defaultNamespace =
+                namespaces.get(config.services().eventHub().defaultNamespace());
+        if (defaultNamespace != null && !defaultNamespace.mocked() && defaultNamespace.amqpHost() != null) {
+            return Optional.of(defaultNamespace);
+        }
+        return namespaces.values().stream()
+                .filter(state -> !state.mocked() && state.amqpHost() != null)
+                .findFirst();
     }
 
     private Response handleDefaultTlsCert() {
@@ -338,7 +362,9 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
     }
 
     private boolean isTcpOpen(String host, int port) {
-        try (Socket s = new Socket(host, port)) {
+        try (Socket s = new Socket()) {
+            // Bounded: an unreachable container IP would otherwise hold the request for the OS timeout.
+            s.connect(new InetSocketAddress(HostLiterals.bare(host), port), HEALTH_CONNECT_TIMEOUT_MS);
             return true;
         } catch (Exception e) {
             return false;

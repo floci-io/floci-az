@@ -46,12 +46,19 @@ public class EventHubNamespaceManager {
      * Immutable snapshot of a running namespace.
      *
      * @param containerId  Docker container ID (null when mocked)
+     * @param amqpHost     host the broker's AMQP and AMQPS ports are reached at, as resolved for the
+     *                     sidecar: localhost on the host, the container IP when floci-az runs in a
+     *                     container, the Docker daemon's host in published mode (null when mocked)
+     * @param clientHost   host reported to clients for those ports: the Docker daemon's host in
+     *                     published mode, otherwise localhost. Never the container IP, which the
+     *                     broker certificate does not name (null when mocked)
      * @param amqpHostPort host-side port for plain AMQP (0 when mocked)
      * @param amqpsHostPort host-side port for TLS AMQP (0 when mocked)
      * @param tlsCertPem   PEM-encoded self-signed cert for TLS AMQP (empty when mocked)
      * @param mocked       true when no real Artemis broker is backing this namespace
      */
-    public record NamespaceState(String containerId, int amqpHostPort, int amqpsHostPort, String tlsCertPem, boolean mocked) {}
+    public record NamespaceState(String containerId, String amqpHost, String clientHost, int amqpHostPort,
+                                 int amqpsHostPort, String tlsCertPem, boolean mocked) {}
 
     // Artemis library patches, shared with the Service Bus broker — see where they are
     // copied in below for why each is needed.
@@ -180,7 +187,8 @@ public class EventHubNamespaceManager {
         // every message twice.
 
         NamespaceState state = new NamespaceState(
-                containerId, amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem(), false);
+                containerId, amqpEndpoint.host(), clientHost(amqpEndpoint.host()),
+                amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem(), false);
         namespaces.put(namespaceName, state);
 
         LOG.infov("Event Hubs namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
@@ -190,7 +198,7 @@ public class EventHubNamespaceManager {
 
     /** Registers a mocked namespace with no backing broker — management API only. */
     public NamespaceState registerMockedNamespace(String namespaceName) {
-        NamespaceState state = new NamespaceState(null, 0, 0, "", true);
+        NamespaceState state = new NamespaceState(null, null, null, 0, 0, "", true);
         namespaces.put(namespaceName, state);
         LOG.infov("Registered mocked Event Hubs namespace ''{0}'' (no AMQP broker)", namespaceName);
         return state;
@@ -262,6 +270,16 @@ public class EventHubNamespaceManager {
      */
     List<String> routedClientHosts() {
         return lifecycleManager.publishedEndpoints() ? List.of(lifecycleManager.daemonHost()) : List.of();
+    }
+
+    /**
+     * The host clients are told to reach the broker at. The resolved host is the right answer only
+     * in published endpoint mode, where it is the Docker daemon's host and {@link #tlsHosts} puts
+     * it in the certificate; in auto mode it can be a container IP, known only after the
+     * certificate is generated, so clients keep getting localhost.
+     */
+    String clientHost(String resolvedHost) {
+        return lifecycleManager.publishedEndpoints() ? resolvedHost : "localhost";
     }
 
     String containerName(String namespaceName) {
