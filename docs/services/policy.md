@@ -289,7 +289,8 @@ floci-az:
 - **`systemData` and `metadata` audit fields** name the caller of the request: the `oid` (else the
   `appid` or user name) of its bearer token, with `createdByType` / `lastModifiedByType` of
   `Application` or `User` from the token's `idtyp`. The token is read, not verified. A request without
-  a readable token is stamped with a fixed emulator identity.
+  a readable token is stamped with a fixed emulator identity. `metadata.updatedBy` / `updatedOn` appear
+  only after the first update instead of being present as `null` from creation.
 - **Listings are unpaginated** (`nextLink` is never returned) and `$top` is ignored.
 - **Policy state is in-memory only**, regardless of `storage.mode`, like the rest of the ARM control
   plane.

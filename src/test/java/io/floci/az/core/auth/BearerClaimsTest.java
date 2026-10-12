@@ -47,6 +47,7 @@ class BearerClaimsTest {
         assertFalse(BearerClaims.parse("Basic abc").present());
         assertFalse(BearerClaims.parse("Bearer not-a-jwt").present());
         assertFalse(BearerClaims.parse("Bearer a.!!!.c").present());
+        assertFalse(BearerClaims.parse("Bearer e30.bnVsbA.sig").present());
         assertNull(BearerClaims.NONE.principal());
     }
 }

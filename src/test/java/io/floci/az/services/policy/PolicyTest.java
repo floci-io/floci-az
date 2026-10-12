@@ -615,6 +615,16 @@ class PolicyTest {
                 .then().statusCode(201)
                 .body("systemData.createdBy", equalTo(appOid))
                 .body("systemData.lastModifiedByType", equalTo("Application"));
+
+        // A PATCH by another caller moves lastModifiedBy and updatedBy to that caller.
+        given().header("Authorization", "Bearer " + userToken).contentType("application/json")
+                .body("{\"properties\": {\"overrides\": []}}")
+                .when().patch(RG_SCOPE + AUTH + "/policyAssignments/by-app" + API)
+                .then().statusCode(200)
+                .body("systemData.createdBy", equalTo(appOid))
+                .body("systemData.lastModifiedBy", equalTo(userOid))
+                .body("properties.metadata.createdBy", equalTo(appOid))
+                .body("properties.metadata.updatedBy", equalTo(userOid));
     }
 
     private static String token(String grant, String clientId) {

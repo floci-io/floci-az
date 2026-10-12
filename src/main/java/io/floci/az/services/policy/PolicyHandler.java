@@ -424,6 +424,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (patch.get("overrides") instanceof List<?> overrides) {
             properties.put("overrides", overrides);
         }
+        properties.put("metadata", auditedMetadata(properties.get("metadata"), existing, caller(req)));
         updated.put("properties", properties);
         updated.put("id", existing.get("id"));
         updated.put("type", existing.get("type"));

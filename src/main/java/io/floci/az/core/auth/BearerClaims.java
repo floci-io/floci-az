@@ -43,6 +43,9 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp) {
         }
         try {
             Map<?, ?> claims = MAPPER.readValue(Base64.getUrlDecoder().decode(padded(parts[1])), Map.class);
+            if (claims == null) {
+                return NONE; // a payload of JSON null
+            }
             String oid = string(claims, "oid");
             String appId = string(claims, "appid");
             if (appId == null) {
