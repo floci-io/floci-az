@@ -15,7 +15,8 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 
 - **Signed tokens**: RS256 JWTs with a stable signing key persisted across restarts; app-only
   tokens carry `idtyp=app`, and every token carries a unique `uti`, matching real Entra
-- **Discovery**: `/.well-known/openid-configuration` derived from the request base URL
+- **Discovery**: `/.well-known/openid-configuration` derived from the request base URL. It
+  advertises only what the emulator serves, see [Discovery document](#discovery-document)
 - **JWKS**: `/discovery/v2.0/keys` exposing the public signing key (`kty`, `use`, `alg`, `kid`,
   `n`, `e`) plus the self-signed cert chain (`x5c`, `x5t`)
 - **Grants**: `client_credentials`, `password` (ROPC), and `authorization_code` (auth code + PKCE),
@@ -39,6 +40,28 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 | `GET /{tenant}/v2.0/.well-known/openid-configuration` | OpenID discovery |
 | `GET /{tenant}/.well-known/openid-configuration` | OpenID discovery |
 | `GET /{tenant}/discovery/v2.0/keys` | JWKS |
+
+## Discovery document
+
+`GET /{tenant}/v2.0/.well-known/openid-configuration` lists only the grants, endpoints and
+response types the emulator implements, so a client that configures itself from discovery fails
+early with a clear message instead of calling a route that does not exist:
+
+| Field | Value |
+|---|---|
+| `issuer` | `{base}/{tenant}/v2.0`, echoing the tenant segment as requested (`common` stays `common`) |
+| `authorization_endpoint`, `token_endpoint`, `jwks_uri` | the routes in the table above |
+| `grant_types_supported` | `authorization_code`, `client_credentials`, `password` |
+| `response_types_supported` | `code` |
+| `response_modes_supported` | `query`, `fragment` |
+| `scopes_supported` | `openid`, `profile`, `email` |
+| `end_session_endpoint` | `{base}/{tenant}/oauth2/v2.0/logout` |
+
+There is no `device_authorization_endpoint` or `userinfo_endpoint`, and `refresh_token`,
+the device code grant and the `offline_access` scope are not listed, because none of them is
+implemented yet. msal-python's `initiate_device_flow` therefore stops with "You need to provide
+device authorization endpoint" before sending any request. `end_session_endpoint` is listed even though logout is not served yet, because
+MSAL.js refuses to log out without it.
 
 ## Default tenant & dev credentials
 

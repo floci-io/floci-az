@@ -9,6 +9,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -23,6 +24,13 @@ public class TokenEndpoint implements EntraEndpoint {
 
     private static final String V2_PATH = "oauth2/v2.0/token";
     private static final String V1_PATH = "oauth2/token";
+
+    /**
+     * Client authentication methods the endpoint accepts. Credentials are not verified yet, so a
+     * secret in the form, a secret in HTTP Basic and a {@code client_assertion} are all accepted.
+     */
+    private static final List<String> AUTH_METHODS =
+            List.of("client_secret_post", "client_secret_basic", "private_key_jwt");
 
     private final EmulatorConfig config;
     private final EntraStore store;
@@ -52,9 +60,21 @@ public class TokenEndpoint implements EntraEndpoint {
         return byType;
     }
 
+    /** The registered grant types, in a stable (sorted) order. */
+    public List<String> grantTypes() {
+        return List.copyOf(grants.keySet());
+    }
+
     @Override
     public boolean matches(String path) {
         return path.endsWith(V2_PATH) || path.endsWith(V1_PATH);
+    }
+
+    @Override
+    public void advertise(EntraRequest request, Map<String, Object> document) {
+        document.put("token_endpoint", request.tenantBase() + "/" + V2_PATH);
+        document.put("token_endpoint_auth_methods_supported", AUTH_METHODS);
+        document.put("grant_types_supported", grantTypes());
     }
 
     @Override

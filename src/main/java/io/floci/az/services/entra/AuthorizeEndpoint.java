@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,6 +25,9 @@ import java.util.UUID;
 public class AuthorizeEndpoint implements EntraEndpoint {
 
     private static final String PATH = "oauth2/v2.0/authorize";
+    private static final List<String> RESPONSE_TYPES = List.of("code");
+    /** {@code form_post} is not served: the code always comes back on the redirect URL. */
+    private static final List<String> RESPONSE_MODES = List.of("query", "fragment");
 
     private final EntraStore store;
     private final EntraResponses responses;
@@ -40,6 +44,13 @@ public class AuthorizeEndpoint implements EntraEndpoint {
     }
 
     @Override
+    public void advertise(EntraRequest request, Map<String, Object> document) {
+        document.put("authorization_endpoint", request.tenantBase() + "/" + PATH);
+        document.put("response_types_supported", RESPONSE_TYPES);
+        document.put("response_modes_supported", RESPONSE_MODES);
+    }
+
+    @Override
     public Response handle(EntraRequest request) {
         Map<String, String> params = request.request().queryParams();
         String redirectUri = params.get("redirect_uri");
@@ -51,7 +62,7 @@ public class AuthorizeEndpoint implements EntraEndpoint {
         if (redirectUri == null || redirectUri.isBlank()) {
             return responses.error(AadstsError.MISSING_REDIRECT_URI);
         }
-        if (!"code".equals(responseType)) {
+        if (!RESPONSE_TYPES.contains(responseType)) {
             return responses.error(AadstsError.UNSUPPORTED_RESPONSE_TYPE, responseType);
         }
         if (clientId == null || clientId.isBlank()) {

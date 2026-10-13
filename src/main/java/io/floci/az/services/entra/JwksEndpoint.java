@@ -4,6 +4,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.List;
+import java.util.Map;
+
 /** {@code GET /{tenant}/discovery/v2.0/keys}: the JWKS holding the token signing key. */
 @ApplicationScoped
 public class JwksEndpoint implements EntraEndpoint {
@@ -22,6 +25,12 @@ public class JwksEndpoint implements EntraEndpoint {
     @Override
     public boolean matches(String path) {
         return path.endsWith(PATH);
+    }
+
+    @Override
+    public void advertise(EntraRequest request, Map<String, Object> document) {
+        document.put("jwks_uri", request.tenantBase() + "/" + PATH);
+        document.put("id_token_signing_alg_values_supported", List.of("RS256"));
     }
 
     @Override
