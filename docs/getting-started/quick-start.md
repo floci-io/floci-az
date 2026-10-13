@@ -73,4 +73,5 @@ DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02x
 
 - [Configure via environment variables →](../configuration/docker-compose.md)
 - [Storage modes →](../configuration/storage.md)
+- [Emulator endpoints (health, reset, TLS certificate) →](../configuration/endpoints.md)
 - [Service reference →](../services/index.md)

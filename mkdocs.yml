@@ -65,6 +65,7 @@ nav:
     - Docker Compose: configuration/docker-compose.md
     - Docker Images: configuration/docker-images.md
     - Ports Reference: configuration/ports.md
+    - Emulator Endpoints: configuration/endpoints.md
     - Storage Modes: configuration/storage.md
     - Advanced:
       - application.yml Reference: configuration/advanced/application-yml.md

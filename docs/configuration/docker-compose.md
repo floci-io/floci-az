@@ -360,7 +360,7 @@ The script sends `GET /_floci/health` and passes on a `200`. The endpoint answer
 | `version` | The floci-az release the image was built from (`FLOCI_AZ_VERSION`), or `dev` for a local build |
 | `edition` | Always `floci-az-always-free` |
 
-`GET /health` returns the same body.
+`GET /health` returns the same body. See [Emulator Endpoints](endpoints.md) for the other control-plane paths, including `POST /_admin/reset`.
 
 `/ready` is the readiness probe: it answers `503` with `{"status":"DOWN"}` until every service has finished
 its startup work (for example Service Bus `start-on-boot` or eager Cosmos engines) and again once shutdown
