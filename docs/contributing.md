@@ -68,7 +68,7 @@ Azure Functions invocation tests.
 
 - Follow existing patterns: controllers stay thin, logic lives in service classes.
 - Errors returned to clients must use `AzureErrorResponse` (never raw strings or arbitrary JSON).
-- New config keys belong in `EmulatorConfig`; document them in `docs/configuration/application-yml.md`.
+- New config keys belong in `EmulatorConfig`; document them in the [application.yml reference](configuration/advanced/application-yml.md) (`docs/configuration/advanced/application-yml.md`).
 - New service operations should have a corresponding compatibility test.
 
 ## Pull Requests
