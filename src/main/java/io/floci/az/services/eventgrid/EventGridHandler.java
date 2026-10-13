@@ -67,11 +67,6 @@ public class EventGridHandler implements AzureServiceHandler, Resettable, ArmPro
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "eventgrid".equals(request.serviceType());
-    }
-
-    @Override
     public Set<String> providerNamespaces() {
         return Set.of("Microsoft.EventGrid");
     }

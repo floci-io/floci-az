@@ -48,7 +48,7 @@ Critical rules:
 floci-az follows a layered design:
 
 - **AzureRoutingFilter**: pre-matching JAX-RS filter; extracts account name and service type from the request path; dispatches to the correct `AzureServiceHandler`
-- **AzureServiceHandler**: interface implemented by each service (`getServiceType()`, `canHandle()`, `handle()`)
+- **AzureServiceHandler**: interface implemented by each service (`getServiceType()`, `handle()`)
 - **AzureServiceRegistry**: CDI registry of all handlers; checks `isEnabled()` per service
 - **Service Handler**: parses Azure protocol input, contains business logic, produces Azure-compatible responses
 - **StorageBackend**: pluggable persistence (memory / persistent / hybrid / wal)

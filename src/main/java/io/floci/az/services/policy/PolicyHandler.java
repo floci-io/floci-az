@@ -92,11 +92,6 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return SERVICE_TYPE.equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         String method = req.method().toUpperCase(Locale.ROOT);
         String path = PolicyPath.stripQuery(req.resourcePath());

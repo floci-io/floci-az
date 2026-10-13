@@ -137,9 +137,6 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) { return "vm".equals(req.serviceType()); }
-
-    @Override
     public Response handle(AzureRequest req) {
         String fullPath = req.resourcePath();
         String method = req.method().toUpperCase();

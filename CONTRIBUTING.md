@@ -92,7 +92,7 @@ ln -s AGENTS.md COPILOT.md
 ## Adding a New Azure Service
 
 1. Create a package under `src/main/java/io/floci/az/services/<service>/`
-2. Add a `*Handler.java` implementing `AzureServiceHandler` (`getServiceType()`, `canHandle()`, `handle()`), and implement `enabled(String serviceType)` to read the service's config flag
+2. Add a `*Handler.java` implementing `AzureServiceHandler` (`getServiceType()`, `handle()`), and implement `enabled(String serviceType)` to read the service's config flag
 3. Declare how requests reach the handler: return a `ServiceRoutes` from `routes()` naming its account suffix (such as `-queue`), host suffixes (such as `.blob.core.windows.net`) and ARM providers (such as `Microsoft.App`), and add the same literals to the golden lists in `RoutingTableAssemblyTest`, or `./mvnw test` fails
 4. Add model classes (`*Models.java`) as needed. A service backed by a Docker sidecar also gets a `*ContainerManager`, a `*Manager` and, if the sidecar needs one, a `*ConfigGenerator`
 5. Add config entries in `EmulatorConfig.java` and `application.yml`

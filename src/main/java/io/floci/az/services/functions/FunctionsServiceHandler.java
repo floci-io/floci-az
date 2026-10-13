@@ -93,10 +93,6 @@ public class FunctionsServiceHandler implements AzureServiceHandler, Resettable 
                 .build();
     }
 
-    @Override public boolean canHandle(AzureRequest request) {
-        return "functions".equals(request.serviceType());
-    }
-
     @Override
     public Response handle(AzureRequest request) {
         String path   = request.resourcePath();

@@ -106,11 +106,6 @@ public class AppConfigHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) {
-        return "appconfig".equals(req.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         String method = req.method().toUpperCase();

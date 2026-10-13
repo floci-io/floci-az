@@ -77,11 +77,6 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) {
-        return "keyvault".equals(req.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         // Certificate ownership checks and mutation must exclude independent key/secret writes.
         synchronized (store) {

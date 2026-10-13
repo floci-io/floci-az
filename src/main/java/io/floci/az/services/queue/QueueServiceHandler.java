@@ -93,11 +93,6 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "queue".equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest request) {
         String path = request.resourcePath();
         String method = request.method();

@@ -106,9 +106,6 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) { return "email".equals(req.serviceType()); }
-
-    @Override
     public Response handle(AzureRequest req) {
         String path   = req.resourcePath();
         String method = req.method().toUpperCase();

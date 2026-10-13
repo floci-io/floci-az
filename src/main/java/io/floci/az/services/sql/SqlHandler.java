@@ -87,7 +87,6 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .provider("Microsoft.Sql")
                 .build();
     }
-    @Override public boolean canHandle(AzureRequest r) { return "sql".equals(r.serviceType()); }
 
     @Override
     public Response handle(AzureRequest request) {

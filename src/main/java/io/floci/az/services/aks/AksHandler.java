@@ -124,9 +124,6 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) { return "aks".equals(req.serviceType()); }
-
-    @Override
     public Response handle(AzureRequest req) {
         String fullPath = req.resourcePath();
         String method = req.method();

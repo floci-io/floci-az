@@ -139,11 +139,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "blob".equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest request) {
         String path = request.resourcePath();
         String method = request.method();

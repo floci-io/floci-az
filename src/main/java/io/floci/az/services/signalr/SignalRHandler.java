@@ -29,9 +29,6 @@ public class SignalRHandler implements AzureServiceHandler {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) { return "signalr".equals(request.serviceType()); }
-
-    @Override
     public Response handle(AzureRequest request) {
         return Response.status(501).entity(Map.of("error", Map.of("code", "NotImplemented",
                 "message", "SignalR supports WebSocket default mode; REST management is not implemented"))).build();

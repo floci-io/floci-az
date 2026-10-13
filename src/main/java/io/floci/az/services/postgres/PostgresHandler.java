@@ -104,7 +104,6 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 .provider("Microsoft.DBforPostgreSQL")
                 .build();
     }
-    @Override public boolean canHandle(AzureRequest r) { return "postgres".equals(r.serviceType()); }
 
     @Override
     public Response handle(AzureRequest request) {

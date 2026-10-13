@@ -56,7 +56,6 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
     @Override public String getServiceType()           { return "mariadb"; }
-    @Override public boolean canHandle(AzureRequest r) { return "mariadb".equals(r.serviceType()); }
 
     @Override
     public boolean enabled(String serviceType) {

@@ -56,7 +56,6 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
     @Override public String getServiceType()           { return "mysql"; }
-    @Override public boolean canHandle(AzureRequest r) { return "mysql".equals(r.serviceType()); }
 
     @Override
     public boolean enabled(String serviceType) {

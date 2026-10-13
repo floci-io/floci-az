@@ -87,11 +87,6 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest req) {
-        return true;
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
 

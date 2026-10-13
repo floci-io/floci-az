@@ -119,7 +119,6 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                 .account("-cosmos", "cosmos")
                 .build();
     }
-    @Override public boolean canHandle(AzureRequest req)  { return "cosmos".equals(req.serviceType()); }
 
     @Override
     public Response handle(AzureRequest req) {

@@ -51,11 +51,6 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable, Ar
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "apim".equals(request.serviceType());
-    }
-
-    @Override
     public Set<String> providerNamespaces() {
         return Set.of("Microsoft.ApiManagement");
     }

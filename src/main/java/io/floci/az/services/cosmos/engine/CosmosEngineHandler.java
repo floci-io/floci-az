@@ -104,12 +104,6 @@ public class CosmosEngineHandler implements AzureServiceHandler {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        String st = request.serviceType();
-        return st != null && st.startsWith("cosmos-") && !st.equals("cosmos");
-    }
-
-    @Override
     public Response handle(AzureRequest request) {
         String serviceType = request.serviceType();
         Optional<CosmosEngineProvider> providerOpt = registry.resolveByServiceType(serviceType);

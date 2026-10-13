@@ -75,11 +75,6 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "monitor".equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest request) {
         String path = request.resourcePath();
         String method = request.method().toUpperCase();

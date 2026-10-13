@@ -89,11 +89,6 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "containerapps".equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest request) {
         try {
             if (request.resourcePath().contains(PROVIDER)) {

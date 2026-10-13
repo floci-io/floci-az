@@ -145,9 +145,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         return config.services().arm().enabled();
     }
 
-    @Override
-    public boolean canHandle(AzureRequest req) { return "arm".equals(req.serviceType()); }
-
     /**
      * Serves the request inside the ARM request gate. A request the router dispatched is already inside it
      * and passes straight through; one that reaches this handler another way enters here, so the inline

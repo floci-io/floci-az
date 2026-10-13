@@ -93,11 +93,6 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return "managedidentity".equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         String method = req.method().toUpperCase();
         String path = stripQuery(req.resourcePath());
