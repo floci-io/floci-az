@@ -82,7 +82,7 @@ docker run -d --name floci-az \
   floci/floci-az:latest
 ```
 
-All services are available at `http://localhost:4577`. Use any account name and key: in `dev` auth mode credentials are not validated.
+All services are available at `http://localhost:4577`. Use any account name and key: SharedKey credentials are not validated.
 
 > **Azure Functions** requires access to the Docker socket so Floci AZ can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
 

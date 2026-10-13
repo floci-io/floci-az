@@ -65,7 +65,7 @@ provider "azurerm" {
   subscription_id = "00000000-0000-0000-0000-000000000001"
   tenant_id       = "00000000-0000-0000-0000-000000000002"
   client_id       = "00000000-0000-0000-0000-000000000003"
-  client_secret   = "fake-secret"    # credentials are not validated in dev auth mode
+  client_secret   = "fake-secret"    # credentials are not validated
 }
 ```
 

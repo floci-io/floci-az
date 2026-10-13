@@ -23,7 +23,7 @@ Raise concerns when a PR introduces any of the following without strong justific
 - Broad refactors unrelated to the PR goal
 - New service patterns where an existing Floci-Az pattern should be reused
 - Direct storage implementation usage instead of `StorageFactory`
-- Auth bypasses that do not respect the configured `auth.mode`
+- Auth bypasses that skip `AuthPipeline` or Blob service SAS validation
 
 ## Architecture Expectations
 
@@ -71,23 +71,23 @@ Floci-Az implements real Azure wire protocols. Review protocol-affecting changes
 Pay extra attention to these cases:
 
 - Error responses must follow Azure's error envelope: `{ "error": { "code": "...", "message": "..." } }`
-- Blob and Queue operations use shared-key HMAC-SHA256 signatures: auth must not be silently skipped in `strict` mode
 - SAS token parsing must respect expiry, permissions, and resource fields
 - Azure Functions must use Docker-in-Docker; do not introduce direct process execution
 
 ## Auth Review
 
-Floci-Az supports two auth modes configured via `floci-az.auth.mode`:
-
-- `dev`: accept any credentials without signature validation (default)
-- `strict`: validate HMAC-SHA256 signatures via `SharedKeyAuthVerifier`
+`floci-az.auth.mode` (`dev` or `strict`) is not read by any code today: every request is handled as
+in `dev`, and `SharedKeyAuthVerifier` accepts any SharedKey signature. Blob service SAS signatures are
+validated by `StorageSasAuthorization` against `floci-az.auth.storage-account-keys`, independent of
+`auth.mode`. Do not wire `auth.mode` to rejections without a maintainer decision, since users may
+already have set it.
 
 Also supports Bearer tokens (`BearerTokenVerifier`) and SAS tokens (`SasTokenParser`).
 
 Flag PRs that:
 
 - Hardcode auth behavior instead of reading from `EmulatorConfig`
-- Break `strict` mode by skipping `AuthPipeline`
+- Skip `AuthPipeline` when resolving the caller
 - Accept malformed or expired SAS tokens
 
 ## XML and JSON Rules

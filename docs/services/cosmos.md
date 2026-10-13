@@ -106,7 +106,7 @@ Default endpoint: `http://localhost:4577/devstoreaccount1-cosmos`
     ```
 
 > [!TIP]
-> In `dev` auth mode (the default) any key is accepted: the well-known Cosmos DB emulator key above works out of the box with all SDKs.
+> Any key is accepted: the well-known Cosmos DB emulator key above works out of the box with all SDKs.
 
 > [!NOTE]
 > **Port difference by SDK:** The **Java SDK** enforces TLS in gateway mode and cannot use plain HTTP, so it connects
