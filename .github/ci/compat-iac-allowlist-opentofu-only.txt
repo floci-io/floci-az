@@ -1,0 +1,10 @@
+# Resource addresses allowed in compat-opentofu/main.tf but not in compat-terraform/main.tf,
+# checked by compat-iac-drift-check.py. One "type.name" per line; `#` starts a comment.
+# The reverse direction lives in compat-iac-allowlist-terraform-only.txt.
+#
+# These are a pre-existing gap, not a tool-specific fixture: PostgreSQL flexible server landed in
+# the OpenTofu suite only. Remove the entries once the resources and their bats assertions are
+# ported to compat-terraform.
+azurerm_postgresql_flexible_server.pg
+azurerm_postgresql_flexible_server_database.pgdb
+azurerm_postgresql_flexible_server_firewall_rule.pgfw

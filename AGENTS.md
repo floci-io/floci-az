@@ -259,6 +259,9 @@ Guidelines:
 - Prefer SDK clients over raw HTTP for all validation
 - Use `make test-<service>` to run a specific suite
 - Use `make compat-docker` to run all suites against a running container
+- `compat-terraform` and `compat-opentofu` must declare the same `resource` blocks in `main.tf`.
+  CI checks it with `.github/ci/compat-iac-drift-check.py`; add a new resource to both suites, or
+  list it in the matching `.github/ci/compat-iac-allowlist-*.txt` with the reason
 
 ### Suites that do not run in CI
 

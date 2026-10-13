@@ -1,0 +1,5 @@
+# Resource addresses allowed in compat-terraform/main.tf but not in compat-opentofu/main.tf,
+# checked by compat-iac-drift-check.py. One "type.name" per line; `#` starts a comment.
+# The reverse direction lives in compat-iac-allowlist-opentofu-only.txt.
+#
+# Empty: every resource the Terraform suite declares is also exercised under OpenTofu.
