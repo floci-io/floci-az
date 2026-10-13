@@ -46,13 +46,13 @@ The build stage is ~2.7 GB, but the SDK is static-linked and the runtime stage c
 ## Docker
 
 ```bash
-docker build -t compat-sdk-test-cpp .
+docker build -t floci-az-sdk-test-cpp .
 docker run --rm --network compat-net \
   -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
-  -v "$PWD/results:/results" compat-sdk-test-cpp
+  -v "$PWD/results:/results" floci-az-sdk-test-cpp
 
 # Run a subset (GoogleTest filters)
-docker run --rm --network compat-net compat-sdk-test-cpp --gtest_filter='BlobErrors.*'
+docker run --rm --network compat-net floci-az-sdk-test-cpp --gtest_filter='BlobErrors.*'
 ```
 
 Results are written as JUnit XML to `/results/junit.xml`.

@@ -26,14 +26,18 @@ AZCLI_DIR      = compatibility-tests/compat-azcli
 COMPAT_NETWORK = compat-net
 COMPAT_RESULTS = test-results
 FLOCI_AZ_IMAGE = floci-az:test
-PYTHON_IMAGE   = compat-sdk-test-python
-JAVA_IMAGE     = compat-sdk-test-java
-NODE_IMAGE     = compat-sdk-test-node
-DOTNET_IMAGE   = compat-sdk-test-dotnet
-CPP_IMAGE      = compat-sdk-test-cpp
-TERRAFORM_IMAGE = compat-terraform
-OPENTOFU_IMAGE  = compat-opentofu
-AZCLI_IMAGE     = compat-azcli
+# Suite image tags carry the repository name: the sibling Floci emulators build suites with the
+# same directory names, and on a shared Docker daemon a generic tag lets whichever repo built last
+# run its tests against this emulator. CI tags its images the same way (compatibility.yml).
+COMPAT_IMAGE_PREFIX = floci-az-
+PYTHON_IMAGE   = $(COMPAT_IMAGE_PREFIX)sdk-test-python
+JAVA_IMAGE     = $(COMPAT_IMAGE_PREFIX)sdk-test-java
+NODE_IMAGE     = $(COMPAT_IMAGE_PREFIX)sdk-test-node
+DOTNET_IMAGE   = $(COMPAT_IMAGE_PREFIX)sdk-test-dotnet
+CPP_IMAGE      = $(COMPAT_IMAGE_PREFIX)sdk-test-cpp
+TERRAFORM_IMAGE = $(COMPAT_IMAGE_PREFIX)compat-terraform
+OPENTOFU_IMAGE  = $(COMPAT_IMAGE_PREFIX)compat-opentofu
+AZCLI_IMAGE     = $(COMPAT_IMAGE_PREFIX)compat-azcli
 
 # ── Per-suite container env — single source of truth ─────────────────────────
 # Every docker run for a suite (individual test-*-compat targets AND compat-docker)

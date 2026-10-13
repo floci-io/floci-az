@@ -46,9 +46,9 @@ make compat-docker
 ## Docker
 
 ```bash
-docker build -t compat-azcli .
-docker run --rm --network host -v "$PWD/results:/results" compat-azcli
+docker build -t floci-az-compat-azcli .
+docker run --rm --network host -v "$PWD/results:/results" floci-az-compat-azcli
 
 # Custom endpoint (macOS/Windows, or a named emulator container)
-docker run --rm -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 compat-azcli
+docker run --rm -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 floci-az-compat-azcli
 ```

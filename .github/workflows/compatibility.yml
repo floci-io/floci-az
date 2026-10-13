@@ -213,7 +213,8 @@ jobs:
         with:
           context: compatibility-tests/${{ matrix.test }}
           load: true
-          tags: compat-${{ matrix.test }}
+          # Same repo-prefixed tag as the Makefile's suite images.
+          tags: floci-az-${{ matrix.test }}
           # Read-only on purpose. Actions caches are ref-scoped, so a pull_request run's
           # writes land in refs/pull/N/merge, private to that PR: eight images per open PR
           # overran the repo's cache budget and evicted entries between a PR's own runs.
@@ -228,7 +229,7 @@ jobs:
             -e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
             ${{ matrix.extra_env }} \
             -v "$(pwd)/test-results:/results" \
-            compat-${{ matrix.test }}
+            floci-az-${{ matrix.test }}
 
       - name: Generate test summary
         if: always() && steps.tests.outcome != 'skipped'
