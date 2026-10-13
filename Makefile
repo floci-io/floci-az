@@ -172,9 +172,14 @@ compat-run: compat-network
 	@until curl -sf http://127.0.0.1:$(PORT)/health > /dev/null; do sleep 1; done
 	@echo "floci-az Docker emulator is up!"
 
+# Stops the emulator gracefully first so its own shutdown hooks clean up what they can, then
+# reaps every sidecar it spawned: anything on the compat network carrying the label the
+# emulator stamps on each container it creates (floci_emulator=floci-az). Both filters must
+# match, so a floci-az started outside this session or an unrelated container is never touched.
 compat-stop:
-	@SIDECARS=$$(docker ps -aq --filter "network=$(COMPAT_NETWORK)" --filter "name=floci-az-servicebus-"); \
-	if [ -n "$$SIDECARS" ]; then docker rm -f $$SIDECARS >/dev/null 2>&1 || true; fi
+	@docker stop -t 30 floci-az >/dev/null 2>&1 || true
+	@SIDECARS=$$(docker ps -aq --filter "network=$(COMPAT_NETWORK)" --filter "label=floci_emulator=floci-az"); \
+	if [ -n "$$SIDECARS" ]; then docker rm -f -v $$SIDECARS >/dev/null 2>&1 || true; fi
 	@docker rm -f floci-az >/dev/null 2>&1 || true
 	@docker network rm $(COMPAT_NETWORK) >/dev/null 2>&1 || true
 
