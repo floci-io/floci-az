@@ -1,5 +1,6 @@
 package io.floci.az.services.resourcegraph;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
@@ -134,7 +135,8 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         response.put("data", "table".equalsIgnoreCase(resultFormat)
             ? table(KqlEngine.outputColumns(parsed, rows), rows, page) : objectArray(page));
         response.put("facets", List.of());
-        response.put("resultTruncated", to < total ? "true" : "false");
+        // Every result pages through $skipToken, so Azure's truncation (results cut by a limit) never applies.
+        response.put("resultTruncated", "false");
         if (to < total) {
             response.put("$skipToken", encodeSkipToken(to));
         }
@@ -268,7 +270,7 @@ public class ResourceGraphHandler implements AzureServiceHandler {
     static String json(Object value) {
         try {
             return MAPPER.writeValueAsString(value);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
     }

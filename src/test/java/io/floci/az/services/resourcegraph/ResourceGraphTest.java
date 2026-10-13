@@ -161,7 +161,8 @@ class ResourceGraphTest {
                 .then().statusCode(200)
                 .body("totalRecords", equalTo(5))
                 .body("count", equalTo(2))
-                .body("resultTruncated", equalTo("true"))
+                // A page with a $skipToken is not a truncated result: Azure answers "false" there.
+                .body("resultTruncated", equalTo("false"))
                 .body("'$skipToken'", notNullValue())
                 .extract().path("'$skipToken'");
         given().contentType("application/json")
@@ -169,7 +170,7 @@ class ResourceGraphTest {
                 .when().post(GRAPH)
                 .then().statusCode(200)
                 .body("count", equalTo(2))
-                .body("resultTruncated", equalTo("true"));
+                .body("resultTruncated", equalTo("false"));
         given().contentType("application/json")
                 .body("{\"query\": \"policyresources | project id | order by id asc\", \"options\": {\"$top\": 2, \"$skip\": 4}}")
                 .when().post(GRAPH)

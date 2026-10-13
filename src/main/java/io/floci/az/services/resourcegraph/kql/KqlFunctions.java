@@ -2,8 +2,11 @@ package io.floci.az.services.resourcegraph.kql;
 
 import io.floci.az.services.resourcegraph.kql.Kql.Expr;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -248,7 +251,7 @@ final class KqlFunctions {
                         if (digits == null || digits == 0) {
                             yield (double) Math.round(d);
                         }
-                        yield new java.math.BigDecimal(d).setScale(digits.intValue(), java.math.RoundingMode.HALF_UP).doubleValue();
+                        yield new BigDecimal(d).setScale(digits.intValue(), RoundingMode.HALF_UP).doubleValue();
                     }
                 };
             }
@@ -256,7 +259,7 @@ final class KqlFunctions {
                 Instant instant = KqlValues.toDateTime(a.get(0));
                 Long offset = a.size() > 1 ? KqlValues.toLong(a.get(1)) : null;
                 return instant == null ? null
-                    : instant.truncatedTo(java.time.temporal.ChronoUnit.DAYS).plus(offset == null ? 0 : offset, java.time.temporal.ChronoUnit.DAYS);
+                    : instant.truncatedTo(ChronoUnit.DAYS).plus(offset == null ? 0 : offset, ChronoUnit.DAYS);
             }
             case "format_datetime" -> {
                 Instant instant = KqlValues.toDateTime(a.get(0));

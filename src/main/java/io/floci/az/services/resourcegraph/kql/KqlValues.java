@@ -8,6 +8,7 @@ import java.math.BigInteger;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
@@ -170,7 +171,7 @@ public final class KqlValues {
             // fall through
         }
         try {
-            return java.time.LocalDateTime.parse(s).toInstant(ZoneOffset.UTC);
+            return LocalDateTime.parse(s).toInstant(ZoneOffset.UTC);
         } catch (DateTimeParseException ignored) {
             // fall through
         }

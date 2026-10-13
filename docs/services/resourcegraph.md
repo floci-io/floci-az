@@ -1,10 +1,12 @@
 # Azure Resource Graph
 
-Compatible with the `Microsoft.ResourceGraph` query endpoint used by `az graph query`, the
-`armresourcegraph` / `azure-mgmt-resourcegraph` / `azure-resourcemanager-resourcegraph` SDKs and the
-`azurerm` provider's data sources: `POST /providers/Microsoft.ResourceGraph/resources` runs a Kusto
-Query Language (KQL) query over the resources, resource containers and policy resources the emulator
-holds, and answers in the `objectArray` or `table` result format with the service's paging contract.
+Implements the `Microsoft.ResourceGraph` query endpoint of the Resource Graph REST specification
+(`stable/2024-04-01`): `POST /providers/Microsoft.ResourceGraph/resources` runs a Kusto Query Language
+(KQL) query over the resources, resource containers and policy resources the emulator holds, and
+answers in the `objectArray` or `table` result format with the service's paging contract. The
+request and response shapes are verified by the emulator's own test suite over HTTP; the Azure CLI
+`resource-graph` extension and the Resource Graph SDKs, which call this endpoint, have not been run
+against it yet.
 
 > **HTTP-only, no Docker.** Queries read the live state of the other services; nothing is indexed or
 > persisted separately.
@@ -61,10 +63,6 @@ curl -s -X POST "http://localhost:4577/providers/Microsoft.ResourceGraph/resourc
   -H "Content-Type: application/json" \
   -d '{"query": "resources | where type =~ \"Microsoft.Storage/storageAccounts\" | project name, location, tags",
        "subscriptions": ["00000000-0000-0000-0000-000000000001"]}'
-```
-
-```bash
-az graph query -q "resourcecontainers | where type == 'microsoft.resources/subscriptions/resourcegroups' | project name, location"
 ```
 
 ```bash
