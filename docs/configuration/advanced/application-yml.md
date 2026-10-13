@@ -91,6 +91,8 @@ floci-az:
   services:
     blob:
       enabled: true
+      # Comma-separated accounts with hierarchical namespace (ADLS Gen2) enabled by default
+      hierarchical-namespace-accounts: devstoreaccount1
     queue:
       enabled: true
     table:
@@ -135,10 +137,12 @@ floci-az:
 | `FLOCI_AZ_STORAGE_SERVICES_DIRECTORY_MODE` | _(global)_ | Per-service mode of the ARM tenant and subscription directory |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_EPHEMERAL` | `false` | Fresh container per invocation |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CONTAINER_IDLE_TIMEOUT_SECONDS` | `300` | Evict warm containers idle longer than this (seconds); `0` disables eviction |
+| `FLOCI_AZ_SERVICES_BLOB_HIERARCHICAL_NAMESPACE_ACCOUNTS` | `devstoreaccount1` | Comma-separated accounts with hierarchical namespace enabled by default |
 | `FLOCI_AZ_SERVICES_APP_CONFIG_ENABLED` | `true` | Enable/disable App Configuration |
 | `FLOCI_AZ_SERVICES_CONTAINER_APPS_MOCKED` | `true` | Keep Container Apps ARM state without Docker runtimes |
 | `FLOCI_AZ_SERVICES_FUNCTIONS_CODE_PATH` | `~/.floci-az/functions` | Function code directory |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon socket |
+| `FLOCI_AZ_DOCKER_ENDPOINT_MODE` | `auto` | How sidecar containers are addressed: `auto` (container name or IP and internal port inside Docker, `localhost` and the published port otherwise) or `published` (the Docker daemon's host and the published port, for remote daemons such as docker-in-docker or kubedock) |
 | `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
 `auth.mode` is not read by any service today. Setting it to `strict` does not turn on SharedKey
