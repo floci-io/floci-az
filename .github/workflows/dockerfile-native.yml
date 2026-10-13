@@ -3,14 +3,20 @@ name: Dockerfile.native
 # docker-compose.yml and the installation docs build docker/Dockerfile.native, but the
 # compatibility and release workflows package a runner-built binary with
 # Dockerfile.native-package instead, so nothing else starts an image from this file.
-# Path-filtered: the in-container native build takes several minutes.
+# Path-filtered: the in-container native build takes several minutes. The builder image floats
+# on its jdk-25 tag and the build reads pom.xml, so a change upstream or in a dependency can break
+# this image with no PR touching it; the weekly run catches that.
 on:
   pull_request:
     paths:
       - 'docker/Dockerfile.native'
       - 'docker/entrypoint.sh'
       - 'docker/healthcheck.sh'
+      - 'pom.xml'
       - '.github/workflows/dockerfile-native.yml'
+  schedule:
+    - cron: '0 4 * * 3'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,6 +30,8 @@ jobs:
     name: Build and start the Dockerfile.native image
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
+    # A fork inherits the schedule; it has no reason to spend minutes on it.
+    if: github.event_name != 'schedule' || !github.event.repository.fork
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
