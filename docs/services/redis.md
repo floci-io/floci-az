@@ -18,6 +18,10 @@ and any ARM-speaking client for the management plane: plus **any standard Redis 
 - **Real data plane**: a Redis container per cache; the primary access key is the Redis password
   (`--requirepass`), and both the primary and secondary key authenticate via a Redis ACL on the
   `default` user
+- **TLS on the SSL port (opt-in)**: with `FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true`, each cache
+  also serves TLS on `sslPort`, so the connection strings Azure tooling builds
+  (`{hostName}:{sslPort},password=...,ssl=True`, as azurerm's `primary_connection_string`) connect
+  as they are. See [TLS](#tls)
 - **Async provisioning**: non-mocked caches start as `provisioningState=Creating` and flip to
   `Succeeded` once the container answers `PING`; mocked caches return `Succeeded` immediately
 
@@ -74,6 +78,10 @@ The response contains the connection details and keys:
 }
 ```
 
+With floci-az running on the host, `port` is the host port published for the container's 6379,
+taken from the configured range; the values above are what a cache reports when floci-az itself
+runs in Docker. `sslPort` is `6380` unless [TLS](#tls) is enabled.
+
 ### 2: Connect with a Redis client
 
 ```python
@@ -99,6 +107,74 @@ In non-mocked mode the new key is applied to the running container immediately (
 
 ---
 
+## TLS
+
+TLS is opt-in. By default a cache serves plain RESP on `port` only, and `sslPort` is reported as
+`6380` but not served. Enable it with:
+
+```bash
+FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true
+```
+
+or `floci-az.services.redis.tls-enabled: true` in `application.yml`. Each cache then also serves
+TLS on the container's `6380`, and:
+
+- **Two host ports per cache.** The TLS port is published on a second host port from the same
+  range as the plain one (`base-port` to `max-port`), and `sslPort` reports it (the container port
+  `6380` when floci-az runs in Docker). The default range of 21 ports fits 10 caches instead of
+  21; widen it with `FLOCI_AZ_SERVICES_REDIS_MAX_PORT` if you need more.
+- **`enableNonSslPort` defaults to `false`**, the Azure default, when a create omits it. Without
+  TLS it defaults to `true`, since the plain port is then the only one served. The plain port is
+  served either way.
+
+Connect over TLS on `sslPort`, as Azure clients do by default:
+
+```python
+import redis
+client = redis.Redis(host="localhost", port=<sslPort>, password="<primaryKey>",
+                     ssl=True, ssl_ca_certs="floci-az-redis-ca.crt")
+print(client.ping())   # True
+```
+
+```bash
+redis-cli -h localhost -p <sslPort> -a "<primaryKey>" --tls --cacert floci-az-redis-ca.crt ping   # PONG
+```
+
+The SSL port is trusted the same way as floci-az's own HTTPS endpoint:
+
+- **floci-az TLS on** (`FLOCI_AZ_TLS_ENABLED=true`): the cache's certificate is issued by the CA
+  that `GET /_floci/tls-cert` serves, for the cache's `hostName`, its container name,
+  `localhost`, `127.0.0.1` and `host.docker.internal`. Trust that CA once and both the HTTPS
+  endpoint and every cache verify:
+
+    ```bash
+    curl -s http://localhost:4577/_floci/tls-cert -o floci-az-redis-ca.crt
+    ```
+
+    Issuing those certificates needs the CA's private key, which floci-az keeps next to the CA
+    (`tls/floci-az-selfsigned-ca.key` under the persistent path, owner-only) only when it
+    generates the CA with `FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true` set in the environment.
+    With a certificate of your own (`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`), or a CA
+    generated without its key (Redis TLS was off then, or enabled only in `application.yml`), the
+    caches serve the emulator's own certificate and key unchanged; delete the `tls` directory under
+    the persistent path and restart with the environment variable set to regenerate the CA with
+    its key.
+
+- **floci-az TLS off** (the default): floci-az generates a CA in memory when it starts and issues
+  each cache's certificate from it. Nothing is written to disk, and the CA changes on every
+  restart. Copy it out of any cache container:
+
+    ```bash
+    docker cp floci-az-redis-<id>:/tls/ca.crt floci-az-redis-ca.crt
+    ```
+
+    Or skip verification in the client (`ssl_cert_reqs="none"` in redis-py), which is what
+    `redis-cli --tls --insecure` does.
+
+`minimumTlsVersion` is accepted and echoed but not enforced; the container accepts TLS 1.2 and 1.3.
+
+---
+
 ## Configuration
 
 ```yaml
@@ -111,6 +187,7 @@ floci-az:
       base-port: 6379           # host port range start for cache containers
       max-port: 6399            # host port range end
       max-memory: "256mb"       # per-instance maxmemory
+      tls-enabled: false        # true = also serve TLS on sslPort (a second host port per cache)
 ```
 
 | Env var | Default | Description |
@@ -118,9 +195,10 @@ floci-az:
 | `FLOCI_AZ_SERVICES_REDIS_ENABLED` | `true` | Enable/disable the service |
 | `FLOCI_AZ_SERVICES_REDIS_MOCKED` | `false` | Mocked mode (management plane only, no Docker) |
 | `FLOCI_AZ_SERVICES_REDIS_DEFAULT_IMAGE` | `valkey/valkey:8-alpine` | Cache container image (RESP-compatible) |
-| `FLOCI_AZ_SERVICES_REDIS_BASE_PORT` | `6379` | Host port range start |
+| `FLOCI_AZ_SERVICES_REDIS_BASE_PORT` | `6379` | Host port range start (each cache takes one port, two with TLS enabled) |
 | `FLOCI_AZ_SERVICES_REDIS_MAX_PORT` | `6399` | Host port range end |
 | `FLOCI_AZ_SERVICES_REDIS_MAX_MEMORY` | `256mb` | Per-instance `maxmemory` |
+| `FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED` | `false` | Serve TLS on `sslPort` (see [TLS](#tls)) |
 
 ---
 
@@ -129,9 +207,12 @@ floci-az:
 - **Endpoint resolution.** `hostName` returns the actually-reachable host: `localhost` natively,
   or the container name when floci-az itself runs in Docker, not the real
   `{name}.redis.cache.windows.net` FQDN, so standard Redis clients can connect to the sidecar.
-  `port` is the dynamically allocated host port mapped to the container's `6379`.
-- **Non-SSL only (for now).** The data plane is served on the non-SSL port; `sslPort` (6380) is
-  reported for API fidelity but TLS termination is not yet wired. Connect over the non-SSL port.
+  `port` is the host port allocated from the range for the container's `6379` (the container
+  port itself when floci-az runs in Docker).
+- **SSL port only with TLS enabled.** By default `sslPort` (6380) is reported for API fidelity but
+  nothing serves it: connect over the non-SSL port, or enable [TLS](#tls).
+- **The plain port is always served.** `enableNonSslPort` is stored and reported, but the plain
+  port stays open either way so existing plain-text clients keep working.
 - **Single node.** Clustering (`shardCount`), geo-replication, private endpoints, firewall rules,
   and patch schedules are accepted on the management plane but not enforced.
 - Mocked mode returns `hostName=localhost` with no backing container: useful for provisioning

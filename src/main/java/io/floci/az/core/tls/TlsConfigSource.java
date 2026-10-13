@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -41,10 +42,11 @@ public class TlsConfigSource implements ConfigSource {
 
     private static final Logger LOG = Logger.getLogger(TlsConfigSource.class);
 
-    private static final String SELF_SIGNED_CERT_NAME     = "floci-az-selfsigned.crt";
-    private static final String SELF_SIGNED_CA_NAME       = "floci-az-selfsigned-ca.crt";
-    private static final String SELF_SIGNED_KEY_NAME      = "floci-az-selfsigned.key";
-    private static final String SELF_SIGNED_METADATA_NAME = "floci-az-selfsigned.metadata.json";
+    static final String SELF_SIGNED_CERT_NAME     = "floci-az-selfsigned.crt";
+    static final String SELF_SIGNED_CA_NAME       = "floci-az-selfsigned-ca.crt";
+    static final String SELF_SIGNED_CA_KEY_NAME   = "floci-az-selfsigned-ca.key";
+    static final String SELF_SIGNED_KEY_NAME      = "floci-az-selfsigned.key";
+    static final String SELF_SIGNED_METADATA_NAME = "floci-az-selfsigned.metadata.json";
     private static final String TLS_DIR = "tls";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -85,7 +87,7 @@ public class TlsConfigSource implements ConfigSource {
             anchorPath = certPath;
             LOG.infov("TLS: using user-provided certificate: {0}", certPath);
         } else if ("true".equalsIgnoreCase(selfSigned)) {
-            Path tlsDir   = Path.of(persistentPath, TLS_DIR);
+            Path tlsDir   = selfSignedDir(persistentPath);
             Path certFile = tlsDir.resolve(SELF_SIGNED_CERT_NAME);
             Path caFile   = tlsDir.resolve(SELF_SIGNED_CA_NAME);
             Path keyFile  = tlsDir.resolve(SELF_SIGNED_KEY_NAME);
@@ -133,6 +135,11 @@ public class TlsConfigSource implements ConfigSource {
 
         LOG.infov("TLS: HTTPS enabled — proxy will listen on port {0} (HTTP+HTTPS), cert={1}",
                 resolveProperty("floci-az.port", "4577"), certPath);
+    }
+
+    /** Where the self-signed certificate, its CA and their keys are kept. */
+    static Path selfSignedDir(String persistentPath) {
+        return Path.of(persistentPath, TLS_DIR);
     }
 
     @Override
@@ -250,19 +257,49 @@ public class TlsConfigSource implements ConfigSource {
             Files.createDirectories(tlsDir);
             ensureBouncyCastleRegistered();
 
-            CertificateGenerator.GeneratedCertificate generated =
-                    new CertificateGenerator().generateCertificate(sans);
+            CertificateGenerator generator = new CertificateGenerator();
+            CertificateGenerator.CertificateAuthority authority = generator.generateAuthority();
+            CertificateGenerator.GeneratedCertificate generated = generator.issue(authority, sans);
 
             // certFile holds the leaf+CA chain (same filename as before); caFile holds the CA alone.
             Files.writeString(certFile, generated.chainPem());
             Files.writeString(caFile, generated.caPem());
             Files.writeString(keyFile, generated.privateKeyPem());
+            // The CA key lets sidecars serving TLS (Redis, when its TLS is on) get leaves for their
+            // own host names that chain to the same trust anchor as the HTTPS endpoint. Nothing
+            // else needs it, so it is only kept then.
+            // A key left from an earlier run belongs to the CA just replaced: kept next to the new
+            // CA it would sign leaves no client can verify, so it goes whenever the new one is not kept.
+            Path caKeyFile = tlsDir.resolve(SELF_SIGNED_CA_KEY_NAME);
+            if (sidecarLeavesNeeded()) {
+                writeOwnerOnly(caKeyFile, CertificateGenerator.privateKeyPem(authority));
+            } else {
+                Files.deleteIfExists(caKeyFile);
+            }
 
             LOG.infov("TLS: generated self-signed certificate: {0}", certFile);
             persistMetadata(tlsDir, sans);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to write self-signed TLS certificate", e);
         }
+    }
+
+    /** Whether a sidecar serves TLS itself and so needs leaves issued by the emulator CA. */
+    static boolean sidecarLeavesNeeded() {
+        return "true".equalsIgnoreCase(resolveProperty("floci-az.services.redis.tls-enabled", "false"));
+    }
+
+    /** Writes a secret so that it never exists with wider permissions than its owner's. */
+    private static void writeOwnerOnly(Path file, String content) throws IOException {
+        Files.deleteIfExists(file);
+        try {
+            // Created empty and already restricted: writing first and restricting after would leave
+            // the key readable under the default permissions in between.
+            Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        } catch (UnsupportedOperationException e) {
+            LOG.debugv("TLS: {0} keeps the default permissions on this file system", file);
+        }
+        Files.writeString(file, content);
     }
 
     private void persistMetadata(Path tlsDir, List<String> hostnames) {

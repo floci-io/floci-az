@@ -281,6 +281,7 @@ floci-az:
       base-port: 6379
       max-port: 6399
       max-memory: "256mb"
+      tls-enabled: false    # FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED. true = also serve TLS on sslPort (takes a second host port per cache)
     acr:
       enabled: true
       mocked: false         # false = back registries with a shared registry:2 container (default). true = no Docker; pure ARM state

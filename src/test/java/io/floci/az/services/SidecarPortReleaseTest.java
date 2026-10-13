@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.PortAllocator;
+import io.floci.az.core.tls.SidecarCertificates;
 import io.floci.az.services.acr.AcrRegistryManager;
 import io.floci.az.services.aks.AksClusterManager;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
@@ -28,11 +29,12 @@ import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Redis, AKS and ACR take their sidecar's host port from a fixed range. The port must go back to
+ * Redis, AKS and ACR take their sidecar's host ports from a fixed range. The port must go back to
  * the pool when the start fails and when the container is removed, or a long-running emulator
  * drains the range (21 ports for Redis) and every later create fails with "No free port".
  */
@@ -40,6 +42,7 @@ import static org.mockito.Mockito.when;
 class SidecarPortReleaseTest {
 
     private static final int HOST_PORT = 6390;
+    private static final int TLS_HOST_PORT = 6391;
 
     private ContainerBuilder containerBuilder;
     private ContainerLifecycleManager lifecycleManager;
@@ -70,6 +73,7 @@ class SidecarPortReleaseTest {
         assertThrows(RuntimeException.class, () -> redis().startCache(cache()));
 
         verify(portAllocator).release(HOST_PORT);
+        verify(portAllocator, times(1)).allocate(anyInt(), anyInt());
     }
 
     @Test
@@ -83,6 +87,49 @@ class SidecarPortReleaseTest {
         manager.stopCache(cache);
 
         verify(portAllocator).release(HOST_PORT);
+        verify(portAllocator, times(1)).release(anyInt());
+    }
+
+    @Test
+    void redisWithTlsReleasesBothPortsWhenTheStartFails() {
+        redisTlsPorts();
+        when(lifecycleManager.create(any())).thenReturn("redis-container");
+        when(lifecycleManager.startCreated(any(), any())).thenThrow(new RuntimeException("port is already allocated"));
+
+        assertThrows(RuntimeException.class, () -> redis().startCache(cache()));
+
+        verify(lifecycleManager).removeIfExists("redis-container");
+        verify(portAllocator).release(HOST_PORT);
+        verify(portAllocator).release(TLS_HOST_PORT);
+    }
+
+    @Test
+    void redisWithTlsReleasesThePlainPortWhenNoTlsPortIsFree() {
+        when(config.services().redis().tlsEnabled()).thenReturn(true);
+        when(portAllocator.allocate(anyInt(), anyInt()))
+                .thenReturn(HOST_PORT)
+                .thenThrow(new IllegalStateException("No free port in range 6379-6399"));
+
+        assertThrows(IllegalStateException.class, () -> redis().startCache(cache()));
+
+        verify(lifecycleManager, never()).create(any());
+        verify(portAllocator).release(HOST_PORT);
+    }
+
+    @Test
+    void redisWithTlsReleasesBothPortsWhenTheCacheIsStopped() {
+        redisTlsPorts();
+        when(lifecycleManager.create(any())).thenReturn("redis-container");
+        when(lifecycleManager.startCreated(any(), any())).thenReturn(running("redis-container"));
+        RedisCacheManager manager = redis();
+        RedisCache cache = cache();
+
+        manager.startCache(cache);
+        verify(portAllocator, never()).release(anyInt());
+        manager.stopCache(cache);
+
+        verify(portAllocator).release(HOST_PORT);
+        verify(portAllocator).release(TLS_HOST_PORT);
     }
 
     @Test
@@ -169,7 +216,16 @@ class SidecarPortReleaseTest {
     }
 
     private RedisCacheManager redis() {
-        return new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator, config);
+        SidecarCertificates certificates = mock(SidecarCertificates.class);
+        when(certificates.issue(any())).thenReturn(new SidecarCertificates.ServerCertificate("chain", "key", "ca"));
+        return new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator,
+                certificates, config);
+    }
+
+    /** With TLS enabled, a Redis cache takes two ports from the range: plain, then TLS. */
+    private void redisTlsPorts() {
+        when(config.services().redis().tlsEnabled()).thenReturn(true);
+        when(portAllocator.allocate(anyInt(), anyInt())).thenReturn(HOST_PORT, TLS_HOST_PORT);
     }
 
     private AksClusterManager aks() {

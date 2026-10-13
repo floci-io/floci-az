@@ -152,7 +152,8 @@ public class BannerLogger {
                     ? "mocked  (no docker)"
                     : "image:" + config.services().redis().defaultImage()
                             + "  ports:" + config.services().redis().basePort()
-                            + "-" + config.services().redis().maxPort();
+                            + "-" + config.services().redis().maxPort()
+                            + (config.services().redis().tlsEnabled() ? "  tls:on" : "");
             sb.append(serviceStatusDocker("redis", true, redisInfo));
         }
         if (config.services().acr().enabled()) {

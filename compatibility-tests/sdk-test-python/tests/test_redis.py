@@ -103,3 +103,29 @@ def test_wrong_password_rejected(provisioned_cache):
     # (older); accept either.
     with pytest.raises((redis.exceptions.AuthenticationError, redis.exceptions.ResponseError)):
         _client(props, "wrong-password").ping()
+
+
+@pytest.mark.skipif(
+    os.environ.get("FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED", "").lower() != "true",
+    reason="Redis TLS is opt-in: set FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true on the emulator and the suite",
+)
+def test_ping_over_tls_on_the_ssl_port(provisioned_cache):
+    # azurerm builds primary_connection_string as host:sslPort,password=...,ssl=True, so with Redis
+    # TLS enabled the SSL port must serve TLS. The suite has no copy of the CA (with floci-az TLS off
+    # it lives only in the cache container, at /tls/ca.crt), so this checks the TLS port, not the chain.
+    props = provisioned_cache
+    try:
+        _client(props, props["primaryKey"]).ping()
+    except redis.exceptions.RedisError:
+        pytest.skip("Redis sidecar not reachable (mocked mode or no Docker)")
+
+    client = redis.Redis(
+        host=props["hostName"],
+        port=props["sslPort"],
+        password=props["primaryKey"],
+        ssl=True,
+        ssl_cert_reqs="none",
+        socket_connect_timeout=3,
+        socket_timeout=3,
+    )
+    assert client.ping()

@@ -36,7 +36,10 @@ public class RedisModels {
         private String hostName;
         /** Non-SSL host port mapped to the container's 6379. */
         private int port;
-        /** SSL host port (reserved; non-SSL is the supported data-plane for now). */
+        /**
+         * With Redis TLS enabled, the TLS host port mapped to the container's 6380 (the container
+         * port itself in container mode); otherwise Azure's 6380, reported but not served.
+         */
         private int sslPort;
 
         private String containerId;

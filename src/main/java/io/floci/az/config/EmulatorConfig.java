@@ -519,6 +519,14 @@ public interface EmulatorConfig {
         /** Per-instance max memory, e.g. "256mb", "1gb". */
         @WithDefault("256mb")
         String maxMemory();
+
+        /**
+         * When {@code true}, each cache also serves TLS on the container's 6380, published on a
+         * second host port from the range, and reports it as {@code sslPort}. Off by default, so
+         * each cache takes one host port and the range fits twice as many caches.
+         */
+        @WithDefault("false")
+        boolean tlsEnabled();
     }
 
     interface AksConfig {

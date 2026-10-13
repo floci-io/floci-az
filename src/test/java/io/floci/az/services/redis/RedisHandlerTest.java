@@ -84,6 +84,21 @@ class RedisHandlerTest {
     }
 
     @Test
+    @DisplayName("PUT without enableNonSslPort reports true while Redis TLS is off, the plain port being the only one served")
+    void createWithoutEnableNonSslPortReportsTrueWhileTlsIsOff() {
+        given()
+            .contentType("application/json")
+            .body("""
+                    {"location": "eastus", "properties": {"sku": {"name": "Basic", "family": "C", "capacity": 0}}}
+                    """)
+            .when().put(BASE + "/redis/default-ports" + API)
+            .then().statusCode(201)
+            .body("properties.enableNonSslPort", equalTo(true))
+            .body("properties.port", equalTo(6379))
+            .body("properties.sslPort", equalTo(6380));
+    }
+
+    @Test
     @DisplayName("GET cache after create returns 200")
     void getCacheAfterCreate() {
         given()

@@ -11,6 +11,7 @@ import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.PortAllocator;
+import io.floci.az.core.tls.SidecarCertificates;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -37,94 +38,196 @@ public class RedisCacheManager {
 
     private static final Logger LOG = Logger.getLogger(RedisCacheManager.class);
     private static final int REDIS_PORT = 6379;
+    /** The container port TLS is served on: Azure's SSL port, so container mode reports it as is. */
+    static final int REDIS_TLS_PORT = 6380;
+    static final String TLS_CERT_FILE = "/tls/server.crt";
+    static final String TLS_KEY_FILE = "/tls/server.key";
+    static final String TLS_CA_FILE = "/tls/ca.crt";
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
     private final ContainerDetector containerDetector;
     private final PortAllocator portAllocator;
+    private final SidecarCertificates certificates;
     private final EmulatorConfig config;
 
-    // Host port each running container was given by the allocator, keyed by container id, so it
-    // goes back to the pool when the container is removed. Without it the range drains over the
-    // process lifetime.
-    private final Map<String, Integer> hostPorts = new ConcurrentHashMap<>();
+    // Host ports each running container was given by the allocator (plain, then TLS when enabled), keyed by
+    // container id, so they go back to the pool when the container is removed. Without it the
+    // range drains over the process lifetime.
+    private final Map<String, List<Integer>> hostPorts = new ConcurrentHashMap<>();
 
     @Inject
     public RedisCacheManager(ContainerBuilder containerBuilder,
                              ContainerLifecycleManager lifecycleManager,
                              ContainerDetector containerDetector,
                              PortAllocator portAllocator,
+                             SidecarCertificates certificates,
                              EmulatorConfig config) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.containerDetector = containerDetector;
         this.portAllocator = portAllocator;
+        this.certificates = certificates;
         this.config = config;
     }
 
     /**
      * Starts a Redis container for the given cache. Sets containerId, hostName, port and the
-     * internal endpoint on the cache. Status remains "Creating" until {@link #isReady} returns
-     * true. Both the primary and secondary keys authenticate as the {@code default} user.
+     * internal endpoint on the cache, and sslPort when TLS is enabled. Status remains "Creating"
+     * until {@link #isReady} returns true. Both the primary and secondary keys authenticate as the
+     * {@code default} user.
+     *
+     * <p>The container serves plain RESP on 6379, published on a host port from the configured
+     * range. With {@code floci-az.services.redis.tls-enabled} it also serves TLS on 6380, published
+     * on a second host port from the same range, and sslPort reports that port, so the connection
+     * strings Azure tooling builds ({@code host:sslPort,password=...,ssl=True}) connect.</p>
      */
     public void startCache(RedisCache cache) {
         EmulatorConfig.RedisConfig redisConfig = config.services().redis();
+        boolean tlsEnabled = redisConfig.tlsEnabled();
         String image = redisConfig.defaultImage();
         String containerName = containerName(cache);
 
         LOG.infov("Starting Redis container for cache: {0} using image {1}", cache.getName(), image);
 
-        releaseHostPort(cache.getContainerId());
+        SidecarCertificates.ServerCertificate tls = tlsEnabled ? certificates.issue(tlsHosts(containerName)) : null;
+
+        releaseHostPorts(cache.getContainerId());
         int hostPort = portAllocator.allocate(redisConfig.basePort(), redisConfig.maxPort());
+        int tlsHostPort = 0;
+        if (tlsEnabled) {
+            try {
+                tlsHostPort = portAllocator.allocate(redisConfig.basePort(), redisConfig.maxPort());
+            } catch (RuntimeException e) {
+                portAllocator.release(hostPort);
+                throw e;
+            }
+        }
+        List<Integer> allocated = tlsEnabled ? List.of(hostPort, tlsHostPort) : List.of(hostPort);
 
         lifecycleManager.removeIfExists(containerName);
 
-        List<String> cmd = new ArrayList<>(List.of(
-                "valkey-server",
-                "--requirepass", cache.getPrimaryKey(),
-                "--maxmemory", redisConfig.maxMemory(),
-                "--maxmemory-policy", "allkeys-lru"));
-
-        ContainerSpec spec = containerBuilder.newContainer(image)
+        ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels("redis", cache.getName(),
                         cache.getSubscriptionId(), cache.getResourceGroup(), cache.getLocation()))
-                .withCmd(cmd)
-                .withPortBinding(REDIS_PORT, hostPort)
+                .withCmd(command(cache, redisConfig))
+                .withPortBinding(REDIS_PORT, hostPort);
+        if (tlsEnabled) {
+            specBuilder.withPortBinding(REDIS_TLS_PORT, tlsHostPort);
+        }
+        ContainerSpec spec = specBuilder
                 .withDockerNetwork(config.services().dockerNetwork())
                 .withLogRotation()
                 .build();
 
         ContainerLifecycleManager.ContainerInfo info;
         try {
-            info = lifecycleManager.createAndStart(spec);
+            info = tlsEnabled ? createWithCertificates(spec, tls) : lifecycleManager.createAndStart(spec);
         } catch (RuntimeException e) {
-            portAllocator.release(hostPort);
+            allocated.forEach(portAllocator::release);
             throw e;
         }
-        hostPorts.put(info.containerId(), hostPort);
+        hostPorts.put(info.containerId(), allocated);
         cache.setContainerId(info.containerId());
 
         ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(REDIS_PORT);
         if (lifecycleManager.publishedEndpoints()) {
             cache.setHostName(lifecycleManager.daemonAddress());
             cache.setPort(hostPort);
+            if (tlsEnabled) {
+                cache.setSslPort(tlsHostPort);
+            }
             cache.setInternalEndpoint(ep != null ? ep.host() + ":" + ep.port()
                     : lifecycleManager.daemonHost() + ":" + hostPort);
         } else if (containerDetector.isRunningInContainer()) {
             cache.setHostName(containerName);
             cache.setPort(REDIS_PORT);
+            if (tlsEnabled) {
+                cache.setSslPort(REDIS_TLS_PORT);
+            }
             cache.setInternalEndpoint(
                     ContainerLifecycleManager.containerNetworkEndpoint(spec, info, REDIS_PORT).toString());
         } else {
             cache.setHostName("localhost");
             cache.setPort(hostPort);
+            if (tlsEnabled) {
+                cache.setSslPort(tlsHostPort);
+            }
             cache.setInternalEndpoint(ep != null ? ep.host() + ":" + ep.port() : "localhost:" + hostPort);
         }
 
-        LOG.infov("Redis container {0} started for cache {1} on {2}:{3} (internal: {4})",
-                info.containerId(), cache.getName(), cache.getHostName(), cache.getPort(),
-                cache.getInternalEndpoint());
+        if (tlsEnabled) {
+            LOG.infov("Redis container {0} started for cache {1} on {2}:{3} (TLS {4}, internal: {5})",
+                    info.containerId(), cache.getName(), cache.getHostName(), cache.getPort(),
+                    cache.getSslPort(), cache.getInternalEndpoint());
+        } else {
+            LOG.infov("Redis container {0} started for cache {1} on {2}:{3} (internal: {4})",
+                    info.containerId(), cache.getName(), cache.getHostName(), cache.getPort(),
+                    cache.getInternalEndpoint());
+        }
+    }
+
+    /**
+     * Creates the container, copies the certificate files in and only then starts it, because
+     * valkey-server reads them once, as it boots. A failure after the create removes the container.
+     */
+    private ContainerLifecycleManager.ContainerInfo createWithCertificates(
+            ContainerSpec spec, SidecarCertificates.ServerCertificate tls) {
+        String containerId = null;
+        try {
+            containerId = lifecycleManager.create(spec);
+            lifecycleManager.copyFileToContainer(containerId, tls.chainPem(), TLS_CERT_FILE);
+            lifecycleManager.copyFileToContainer(containerId, tls.privateKeyPem(), TLS_KEY_FILE);
+            lifecycleManager.copyFileToContainer(containerId, tls.caPem(), TLS_CA_FILE);
+            return lifecycleManager.startCreated(containerId, spec);
+        } catch (RuntimeException e) {
+            if (containerId != null) {
+                removeQuietly(containerId);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * The valkey command line: the primary key as the password and, when TLS is enabled, TLS on
+     * {@link #REDIS_TLS_PORT} with the certificate files copied in before the start. Clients are
+     * not asked for a certificate, as on Azure, where the access key is the credential.
+     */
+    static List<String> command(RedisCache cache, EmulatorConfig.RedisConfig redisConfig) {
+        List<String> cmd = new ArrayList<>(List.of(
+                "valkey-server",
+                "--requirepass", cache.getPrimaryKey(),
+                "--maxmemory", redisConfig.maxMemory(),
+                "--maxmemory-policy", "allkeys-lru"));
+        if (redisConfig.tlsEnabled()) {
+            cmd.addAll(List.of(
+                    "--tls-port", String.valueOf(REDIS_TLS_PORT),
+                    "--tls-cert-file", TLS_CERT_FILE,
+                    "--tls-key-file", TLS_KEY_FILE,
+                    "--tls-ca-cert-file", TLS_CA_FILE,
+                    "--tls-auth-clients", "no"));
+        }
+        return cmd;
+    }
+
+    /**
+     * Host names a TLS client may address the cache by besides the loopback names: its container
+     * name and, in published endpoint mode, the Docker daemon's address.
+     */
+    private List<String> tlsHosts(String containerName) {
+        return lifecycleManager.publishedEndpoints()
+                ? List.of(containerName, lifecycleManager.daemonAddress())
+                : List.of(containerName);
+    }
+
+    private void removeQuietly(String containerId) {
+        try {
+            lifecycleManager.removeIfExists(containerId);
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not remove Redis container {0} after a failed start: {1}",
+                    containerId, e.getMessage());
+        }
     }
 
     /**
@@ -193,17 +296,17 @@ public class RedisCacheManager {
             return;
         }
         lifecycleManager.stopAndRemove(cache.getContainerId(), null);
-        releaseHostPort(cache.getContainerId());
+        releaseHostPorts(cache.getContainerId());
         LOG.infov("Stopped Redis container for cache {0}", cache.getName());
     }
 
-    private void releaseHostPort(String containerId) {
+    private void releaseHostPorts(String containerId) {
         if (containerId == null) {
             return;
         }
-        Integer hostPort = hostPorts.remove(containerId);
-        if (hostPort != null) {
-            portAllocator.release(hostPort);
+        List<Integer> ports = hostPorts.remove(containerId);
+        if (ports != null) {
+            ports.forEach(portAllocator::release);
         }
     }
 

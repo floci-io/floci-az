@@ -6,6 +6,7 @@ import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.PortAllocator;
+import io.floci.az.core.tls.SidecarCertificates;
 import io.floci.az.services.acr.AcrRegistryManager;
 import io.floci.az.services.redis.RedisCacheManager;
 import io.floci.az.services.redis.RedisModels.RedisCache;
@@ -103,9 +104,13 @@ class SidecarDefaultBridgeAddressingTest {
         cache.setName("cache");
         cache.setInstanceId("abc123");
         cache.setPrimaryKey("primary-key");
-        new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator, config)
-                .startCache(cache);
+        new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator,
+                certificates(), config).startCache(cache);
         return cache;
+    }
+
+    private static SidecarCertificates certificates() {
+        return mock(SidecarCertificates.class);
     }
 
     private AcrRegistryManager startAcr(String network) {
