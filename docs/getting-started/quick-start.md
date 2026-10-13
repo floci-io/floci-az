@@ -48,8 +48,16 @@ docker run -d --name floci-az \
 ## Verify it's running
 
 ```bash
-curl http://localhost:4577/health
+curl http://localhost:4577/_floci/health
 ```
+
+```json
+{"status": "UP", "version": "0.14.0", "edition": "floci-az-always-free"}
+```
+
+`version` is the floci-az release (`dev` for a local build). The image's built-in `HEALTHCHECK` probes the
+same endpoint, so `docker ps` shows the container as `healthy` once it answers, and Compose services can wait
+on it with `depends_on: condition: service_healthy`. See [Health Check](../configuration/docker-compose.md#health-check).
 
 ## Connection strings
 

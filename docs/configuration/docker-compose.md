@@ -325,7 +325,10 @@ If you don't need Functions, omit the socket mount and set `FLOCI_AZ_SERVICES_FU
 
 ## Health Check
 
-floci-az exposes a health endpoint you can use in `depends_on` conditions:
+The published image ships its own probe, `/usr/local/bin/healthcheck.sh`, and declares it as the image
+`HEALTHCHECK`, so `depends_on` with `condition: service_healthy` works without a `healthcheck:` block.
+The image has neither `curl` nor `wget`, so an override that calls either never passes. To tune the
+timings, point the override at the same script:
 
 ```yaml
 services:
@@ -334,16 +337,30 @@ services:
     ports:
       - "4577:4577"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4577/health"]
+      test: ["CMD", "healthcheck.sh"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   my-app:
     depends_on:
       floci-az:
         condition: service_healthy
 ```
+
+The script sends `GET /_floci/health` and passes on a `200`. The endpoint answers:
+
+```json
+{"status": "UP", "version": "0.14.0", "edition": "floci-az-always-free"}
+```
+
+| Field | Meaning |
+|---|---|
+| `status` | `UP`, or `DOWN` with a `503` and a `problems` map when a service reports a problem |
+| `version` | The floci-az release the image was built from (`FLOCI_AZ_VERSION`), or `dev` for a local build |
+| `edition` | Always `floci-az-always-free` |
+
+`GET /health` returns the same body.
 
 `/ready` is the readiness probe: it answers `503` with `{"status":"DOWN"}` until every service has finished
 its startup work (for example Service Bus `start-on-boot` or eager Cosmos engines) and again once shutdown
