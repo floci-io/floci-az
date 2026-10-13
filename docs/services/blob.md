@@ -33,6 +33,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   operations require an HNS-enabled account. Accounts listed in `hierarchical-namespace-accounts`
   have HNS enabled by default; ARM-created accounts can also enable it with
   `properties.isHnsEnabled: true`. Other custom account names use a flat namespace by default.
+  As in Azure, HNS is fixed when the account is created: a later PUT that sends a different
+  `isHnsEnabled` value returns `400 AccountPropertyCannotBeUpdated`, while a PUT that omits the
+  property keeps the current setting.
 - **ADLS filesystem operations** - create/delete a filesystem and get/set filesystem properties via
   `?resource=filesystem`. Root `getAccessControl` is supported so Hadoop can auto-detect HNS and
   resolve `getFileStatus("/")` without forcing `fs.azure.account.hns.enabled=true`.
