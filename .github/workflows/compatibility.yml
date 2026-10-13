@@ -12,6 +12,7 @@ on:
       - 'docker/Dockerfile.native-package'
       - 'docker/entrypoint.sh'
       - 'compatibility-tests/**'
+      - '.github/ci/compat-*'
       - '.github/workflows/compatibility.yml'
 
 permissions:
@@ -108,8 +109,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # min_tests: floor on executed test cases, checked after the run. Set loosely, at about
+        # a third of the cases each suite declares, so it trips when a suite loses most of its
+        # tests rather than on ordinary skips; raise it when a suite grows a lot.
         include:
           - test: sdk-test-python
+            min_tests: 50
             emulator_env: >-
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
             extra_env: >-
@@ -118,6 +123,7 @@ jobs:
               -e SERVICEBUS_AMQP_PORT=5672
               -e SERVICEBUS_NAMESPACE=default
           - test: sdk-test-java
+            min_tests: 150
             emulator_env: >-
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5
@@ -130,12 +136,14 @@ jobs:
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
           - test: sdk-test-dotnet
+            min_tests: 20
             emulator_env: >-
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
             extra_env: >-
               -e SERVICEBUS_HOST=floci-az-servicebus-default
               -e SERVICEBUS_AMQP_PORT=5672
           - test: sdk-test-node
+            min_tests: 30
             emulator_env: >-
               -e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false
             extra_env: >-
@@ -144,10 +152,14 @@ jobs:
               -e SERVICEBUS_NAMESPACE=default
               -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
           - test: sdk-test-cpp
+            min_tests: 5
             timeout_minutes: 45
           - test: compat-terraform
+            min_tests: 7
           - test: compat-opentofu
+            min_tests: 7
           - test: compat-azcli
+            min_tests: 10
 
     steps:
       - name: Download native floci-az image
@@ -204,7 +216,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: compatibility-tests
+          sparse-checkout: |
+            compatibility-tests
+            .github/ci
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -230,6 +244,12 @@ jobs:
             ${{ matrix.extra_env }} \
             -v "$(pwd)/test-results:/results" \
             floci-az-${{ matrix.test }}
+
+      # The container's exit code alone passes a suite whose setup aborted or whose tests all
+      # skipped themselves. Counts executed test cases across the suite's JUnit reports and fails
+      # below the leg's min_tests, so a suite that silently loses most of its tests fails too.
+      - name: Fail a suite that ran no tests
+        run: python3 .github/ci/compat-test-count-check.py --min "${{ matrix.min_tests }}" test-results
 
       - name: Generate test summary
         if: always() && steps.tests.outcome != 'skipped'

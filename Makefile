@@ -89,15 +89,21 @@ SUITE_IMAGE_opentofu  = $(OPENTOFU_IMAGE)
 SUITE_IMAGE_azcli     = $(AZCLI_IMAGE)
 
 # ── Canned recipes for Docker compat sessions ─────────────────────────────────
-# One docker run for a suite container against the running emulator.
+# One docker run for a suite container against the running emulator, then the same
+# zero-tests check CI runs: a suite that exits 0 without executing a test fails here.
+# The marker keeps a stale report in a reused results directory from counting.
 # $(call RUN_SUITE,<suite>,<results-subdir>,<env args>,<late args e.g. --entrypoint>,<container cmd>)
+COMPAT_TEST_COUNT_CHECK = python3 $(CURDIR)/.github/ci/compat-test-count-check.py
 define RUN_SUITE
+mkdir -p "$(CURDIR)/$(COMPAT_RESULTS)/$(2)" && \
+touch "$(CURDIR)/$(COMPAT_RESULTS)/$(2)/.run-started" && \
 docker run --rm --network $(COMPAT_NETWORK) \
 	-e FLOCI_AZ_ENDPOINT=http://floci-az:4577 \
 	$(3) \
 	-v "$(CURDIR)/$(COMPAT_RESULTS)/$(2):/results" \
 	$(4) \
-	$(SUITE_IMAGE_$(1)) $(5)
+	$(SUITE_IMAGE_$(1)) $(5) && \
+$(COMPAT_TEST_COUNT_CHECK) --newer-than "$(CURDIR)/$(COMPAT_RESULTS)/$(2)/.run-started" "$(CURDIR)/$(COMPAT_RESULTS)/$(2)"
 endef
 
 # Full session: build + start emulator, build suite image, run suite, always stop.

@@ -277,7 +277,9 @@ embedded and run in-process, so they need no Docker and are cheap to run locally
 consequence either way is that a regression in a Cosmos engine or in the SQL data plane merges
 green. When you change either, run the suite locally and say so in the PR.
 
-A suite reporting `Tests run: 0` is a self-skip, never a pass.
+A suite reporting `Tests run: 0` is a self-skip, never a pass. CI and the Makefile's Docker suite
+targets enforce this with `.github/ci/compat-test-count-check.py`, which fails a suite whose JUnit
+reports show no executed test (CI also applies a per-suite floor, `min_tests` in the matrix).
 
 ### Keeping the Makefile and CI in sync
 
