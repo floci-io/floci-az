@@ -35,3 +35,41 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+
+  # The compat suites pin exact SDK versions (requirements.txt, package-lock.json, the csproj) so
+  # an upstream release cannot turn unrelated PRs red; upgrades arrive here as their own PRs.
+  - package-ecosystem: "pip"
+    directory: "/compatibility-tests/sdk-test-python"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      compat-python:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/compatibility-tests/sdk-test-node"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      compat-node:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "nuget"
+    directory: "/compatibility-tests/sdk-test-dotnet"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      compat-dotnet:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"

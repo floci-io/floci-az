@@ -40,6 +40,9 @@ emulator.log
 # The Release Cut toolchain is pinned; its lockfile must be committed
 # (npm ci fails without it) despite the global package-lock.json ignore.
 !.github/release-tooling/package-lock.json
+# The Node compat suite installs with npm ci from its committed lockfile, so an SDK release
+# cannot change what a build installs.
+!compatibility-tests/sdk-test-node/package-lock.json
 
 # Python tooling (tools/)
 __pycache__/

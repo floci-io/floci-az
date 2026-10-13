@@ -2,7 +2,7 @@ FROM node:22-slim
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --no-fund --no-audit
+RUN npm ci --no-fund --no-audit
 
 COPY tsconfig.json jest.config.js ./
 COPY tests/ tests/
