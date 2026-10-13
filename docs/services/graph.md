@@ -74,5 +74,4 @@ floci-az:
 ## Out of scope
 
 Full Graph CRUD (applications, service principals beyond discovery, directory roles, conditional
-access, ...) and app-registration management remain open
-([#23](https://github.com/floci-io/floci-az/issues/23)).
+access, ...) and app-registration management are not implemented yet.

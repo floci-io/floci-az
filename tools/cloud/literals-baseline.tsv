@@ -31,7 +31,7 @@ src/main/java/io/floci/az/services/email/EmailHandler.java	cloud-literal	2
 src/main/java/io/floci/az/services/email/EmailHandler.java	location-literal	3
 src/main/java/io/floci/az/services/email/EmailHandler.java	scope-parse	4
 src/main/java/io/floci/az/services/entra/DiscoveryProvider.java	cloud-literal	1
-src/main/java/io/floci/az/services/entra/EntraServiceHandler.java	cloud-literal	1
+src/main/java/io/floci/az/services/entra/IssuerFactory.java	cloud-literal	1
 src/main/java/io/floci/az/services/eventgrid/EventGridDelivery.java	cloud-literal	1
 src/main/java/io/floci/az/services/graph/GraphServiceHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/keyvault/KeyVaultCertificates.java	cloud-literal	1

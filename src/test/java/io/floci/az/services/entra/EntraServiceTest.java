@@ -99,7 +99,8 @@ class EntraServiceTest {
             .body("error_codes", hasItem(70003))
             .body("trace_id", not(emptyOrNullString()))
             .body("correlation_id", not(emptyOrNullString()))
-            .body("error_description", containsString("AADSTS70003"));
+            .body("error_description", containsString("AADSTS70003"))
+            .body("error_uri", is("https://login.microsoftonline.com/error?code=70003"));
     }
 
     @Test

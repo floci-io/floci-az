@@ -34,7 +34,8 @@ import java.util.Set;
  * {@link StorageFactory}-backed CRUD for Entra tenants, app registrations and service principals,
  * plus the out-of-the-box dev seed so {@code ClientSecretCredential} works with no setup.
  *
- * <p>PR1 only reads the seed to populate token claims. Full admin CRUD is layered on in PR2.
+ * <p>The token service reads the seed and the stored users to populate token claims; client
+ * credentials are not checked against the stored registrations.
  */
 @ApplicationScoped
 public class EntraStore implements Resettable {

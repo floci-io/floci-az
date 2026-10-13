@@ -1,6 +1,7 @@
 package io.floci.az.services.entra;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,15 +15,19 @@ import java.util.Map;
 @ApplicationScoped
 public class DiscoveryProvider {
 
-    /**
-     * @param baseUrl  request base URL with no trailing slash (e.g. {@code http://localhost:4577})
-     * @param tenantId tenant segment from the request path
-     */
-    public Map<String, Object> document(String baseUrl, String tenantId) {
-        String tenantBase = baseUrl + "/" + tenantId;
+    private final IssuerFactory issuers;
+
+    @Inject
+    public DiscoveryProvider(IssuerFactory issuers) {
+        this.issuers = issuers;
+    }
+
+    public Map<String, Object> document(EntraRequest request) {
+        String baseUrl = request.baseUrl();
+        String tenantBase = request.tenantBase();
 
         Map<String, Object> doc = new LinkedHashMap<>();
-        doc.put("issuer", tenantBase + "/v2.0");
+        doc.put("issuer", issuers.discoveryIssuer(baseUrl, request.tenantSegment()));
         doc.put("authorization_endpoint", tenantBase + "/oauth2/v2.0/authorize");
         doc.put("token_endpoint", tenantBase + "/oauth2/v2.0/token");
         doc.put("device_authorization_endpoint", tenantBase + "/oauth2/v2.0/devicecode");

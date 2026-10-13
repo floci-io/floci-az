@@ -194,9 +194,9 @@ public class ArmRouter {
     // ── Routing stages, in chain order ──────────────────────────────────────────
 
     /**
-     * ARM metadata endpoint, called by go-azure-sdk for environment discovery. Hand it to JAX-RS so it
-     * 404s and the azurerm provider falls back to defaults. Implementing the metadata response causes
-     * the provider to detect Azure Stack and reject the configuration as an unsupported environment.
+     * ARM metadata endpoint, read by go-azure-sdk for environment discovery (the azurerm provider's
+     * {@code metadata_host}). Handed to JAX-RS, where {@code AzureIdentityController} answers it with
+     * the emulator's endpoints and suffixes, derived from the request base URL.
      */
     RouteOutcome routeArmMetadataEndpoints(RoutingContext ctx) {
         return ctx.path().startsWith("metadata/endpoints") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;

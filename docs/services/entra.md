@@ -9,7 +9,7 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 > ([#120](https://github.com/floci-io/floci-az/issues/120)) adds the **authorization code + PKCE**
 > grant for interactive (browser SPA) sign-in, plus a narrow Microsoft Graph slice for group
 > membership: see [`services/graph.md`](graph.md). App-registration management and full Graph
-> CRUD remain open ([#23](https://github.com/floci-io/floci-az/issues/23)).
+> CRUD are not implemented yet.
 
 ## Features
 
@@ -22,8 +22,9 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
   v1.0 and v2.0 token shapes
 - **Azure-shaped errors**: token errors return `error`, `error_description` (with the `AADSTS`
   code), `error_codes`, `trace_id`, `correlation_id`, `timestamp`, and `error_uri`
-- **Dev seed**: a default tenant and a well-known dev app registration, so
-  `ClientSecretCredential` works with zero setup
+- **Dev seed**: a default tenant, a well-known dev app registration, a dev user and a dev group
+- **Permissive client authentication**: client secrets are not checked, so any `client_id` and
+  `client_secret` get a token and `ClientSecretCredential` works with zero setup
 
 ## Endpoints
 
@@ -45,7 +46,7 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 |---|---|
 | Tenant id | `00000000-0000-0000-0000-000000000002` |
 | Client id | `11111111-1111-1111-1111-111111111111` |
-| Client secret | `floci-az-dev-secret` |
+| Client secret | `floci-az-dev-secret` (not checked: any secret is accepted) |
 | Dev user (UPN) | `dev-user@floci-az.local` |
 | Dev group | `floci-az dev group` (the dev user is a direct member) |
 
@@ -90,7 +91,7 @@ id (per OIDC, regardless of v1.0/v2.0), and it echoes the `nonce` from the `/aut
 MSAL rejects an ID token whose nonce doesn't match. PKCE verification (`S256` or `plain`) is
 skipped when `/authorize` was called without a `code_challenge`: `client_id` is still required and
 bound to the code, so an omitted challenge no longer hands a usable code to a caller who doesn't
-know the client. There is no app-registration redirect-URI allow-list yet ([#23](https://github.com/floci-io/floci-az/issues/23)),
+know the client. There is no app-registration redirect-URI allow-list yet,
 so any `client_id` is accepted at `/authorize`, matching this phase's permissive client validation
 elsewhere (`client_credentials` is likewise accepted without strict validation).
 
@@ -111,7 +112,7 @@ real Entra's default behavior): call the Graph `getMemberGroups` endpoint instea
     cred = ClientSecretCredential(
         tenant_id="00000000-0000-0000-0000-000000000002",
         client_id="11111111-1111-1111-1111-111111111111",
-        client_secret="floci-az-dev-secret",
+        client_secret="floci-az-dev-secret",  # any value works: secrets are not checked
         authority="http://localhost:4577",
     )
     token = cred.get_token("api://resource/.default")
@@ -151,7 +152,7 @@ floci-az:
       default-tenant-id: "00000000-0000-0000-0000-000000000002"
       # issuer:                     # optional override; default {baseUrl}/{tenant}/v2.0
       token-lifetime-seconds: 3599
-      validate-tokens: false        # true = enforce signature/claims on incoming Bearer tokens
+      validate-tokens: false        # reserved: not enforced yet, any Bearer token is accepted
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
 ```
 
@@ -164,8 +165,9 @@ floci-az:
 | `validate-tokens` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_TOKENS` | `false` |
 | `signing-key-path` | `FLOCI_AZ_SERVICES_ENTRA_SIGNING_KEY_PATH` | `{storage.persistent-path}/entra` |
 
-> `validate-tokens` stays **off** by default so existing services keep accepting any Bearer
-> token in dev. Token *enforcement* against the local signing key becomes opt-in in a later phase.
+> `validate-tokens` is reserved and currently has no effect: every service accepts any Bearer
+> token whatever its value. Token *enforcement* against the local signing key becomes opt-in in a
+> later phase.
 
 > **Keep `enabled: true` unless you have a reason not to.** The OAuth2 token endpoint
 > (`/{tenant}/oauth2/v2.0/token`) is served by this service. Disabling Entra makes that endpoint
