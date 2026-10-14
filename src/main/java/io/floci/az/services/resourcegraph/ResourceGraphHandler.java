@@ -67,11 +67,6 @@ public class ResourceGraphHandler implements AzureServiceHandler {
     }
 
     @Override
-    public boolean canHandle(AzureRequest request) {
-        return SERVICE_TYPE.equals(request.serviceType());
-    }
-
-    @Override
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         int query = path.indexOf('?');
