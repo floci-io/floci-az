@@ -50,6 +50,23 @@ class AadstsCatalogGoldenTest {
                 new Entry(70000, "invalid_grant", 400, "code_verifier does not match the code_challenge"));
         GOLDEN.put(AadstsError.CODE_UNKNOWN_USER,
                 new Entry(70000, "invalid_grant", 400, "authorization code does not resolve to a known user"));
+        GOLDEN.put(AadstsError.MISSING_REQUIRED_PARAMETER,
+                new Entry(900144, "invalid_request", 400,
+                        "The request body must contain the following parameter: '%s'."));
+        GOLDEN.put(AadstsError.APPLICATION_NOT_FOUND,
+                new Entry(700016, "unauthorized_client", 400,
+                        "Application with identifier '%s' was not found in the directory '%s'. This can happen if "
+                                + "the application has not been installed by the administrator of the tenant or "
+                                + "consented to by any user in the tenant. You may have sent your authentication "
+                                + "request to the wrong tenant."));
+        GOLDEN.put(AadstsError.INVALID_CLIENT_SECRET,
+                new Entry(7000215, "invalid_client", 401,
+                        "Invalid client secret provided. Ensure the secret being sent in the request is the client "
+                                + "secret value, not the client secret ID, for a secret added to app '%s'."));
+        GOLDEN.put(AadstsError.MISSING_CLIENT_CREDENTIAL,
+                new Entry(7000218, "invalid_client", 401,
+                        "The request body must contain the following parameter: 'client_assertion' or "
+                                + "'client_secret'."));
         GOLDEN.put(AadstsError.SERIALISATION_FAILED,
                 new Entry(50000, "server_error", 500, "serialisation failed"));
     }

@@ -12,5 +12,13 @@ public interface GrantHandler {
     /** The {@code grant_type} form value this handler redeems. */
     String grantType();
 
+    /**
+     * Whether the grant is for confidential clients only, so the client must present a secret or
+     * an assertion when {@code entra.validate-client-credentials} is on.
+     */
+    default boolean requiresClientCredential() {
+        return false;
+    }
+
     Response handle(TokenRequest request);
 }

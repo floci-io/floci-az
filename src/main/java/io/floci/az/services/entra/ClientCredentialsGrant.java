@@ -23,6 +23,11 @@ public class ClientCredentialsGrant implements GrantHandler {
     }
 
     @Override
+    public boolean requiresClientCredential() {
+        return true;
+    }
+
+    @Override
     public Response handle(TokenRequest request) {
         String audience = Scopes.clientCredentialsAudience(request.scope(), request.baseUrl());
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(

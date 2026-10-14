@@ -405,6 +405,14 @@ public interface EmulatorConfig {
         boolean validateTokens();
 
         /**
+         * When {@code true}, the token endpoint checks the client against the directory: an
+         * unregistered {@code client_id} gets AADSTS700016 and a wrong secret AADSTS7000215
+         * (401 {@code invalid_client}). Default {@code false} accepts any client and secret.
+         */
+        @WithDefault("false")
+        boolean validateClientCredentials();
+
+        /**
          * Directory holding the persisted RSA signing key. When empty, defaults to
          * {@code {storage.persistent-path}/entra}.
          */

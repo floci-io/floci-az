@@ -166,7 +166,8 @@ public class BannerLogger {
         }
         if (config.services().entra().enabled()) {
             String entraInfo = "oidc  tenant:" + config.services().entra().defaultTenantId()
-                    + "  validate-tokens:" + config.services().entra().validateTokens();
+                    + "  validate-tokens:" + config.services().entra().validateTokens()
+                    + "  validate-client-credentials:" + config.services().entra().validateClientCredentials();
             sb.append(String.format("   %-9s [%s]  %s\n", "entra", "enabled ", entraInfo));
         }
         if (config.services().graph().enabled()) {

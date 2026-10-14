@@ -24,7 +24,9 @@ import org.jboss.logging.Logger;
  * </ul>
  * where {@code tenant} may be a tenant id or {@code common}/{@code organizations}/{@code consumers}.
  *
- * <p>Client credentials are not verified: any {@code client_id} and secret get a token.
+ * <p>Client credentials are checked by {@link ClientAuthenticator} only when
+ * {@code entra.validate-client-credentials} is on; by default any {@code client_id} and secret get
+ * a token.
  */
 @ApplicationScoped
 public class EntraServiceHandler implements AzureServiceHandler {

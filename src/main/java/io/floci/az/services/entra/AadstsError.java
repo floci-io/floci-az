@@ -27,6 +27,17 @@ public enum AadstsError {
     CLIENT_ID_MISMATCH(70000, "invalid_grant", 400, "client_id does not match the authorization request"),
     PKCE_MISMATCH(70000, "invalid_grant", 400, "code_verifier does not match the code_challenge"),
     CODE_UNKNOWN_USER(70000, "invalid_grant", 400, "authorization code does not resolve to a known user"),
+    MISSING_REQUIRED_PARAMETER(900144, "invalid_request", 400,
+            "The request body must contain the following parameter: '%s'."),
+    APPLICATION_NOT_FOUND(700016, "unauthorized_client", 400,
+            "Application with identifier '%s' was not found in the directory '%s'. This can happen if the "
+                    + "application has not been installed by the administrator of the tenant or consented to by "
+                    + "any user in the tenant. You may have sent your authentication request to the wrong tenant."),
+    INVALID_CLIENT_SECRET(7000215, "invalid_client", 401,
+            "Invalid client secret provided. Ensure the secret being sent in the request is the client secret "
+                    + "value, not the client secret ID, for a secret added to app '%s'."),
+    MISSING_CLIENT_CREDENTIAL(7000218, "invalid_client", 401,
+            "The request body must contain the following parameter: 'client_assertion' or 'client_secret'."),
     SERIALISATION_FAILED(50000, "server_error", 500, "serialisation failed");
 
     private final int code;

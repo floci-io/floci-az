@@ -24,8 +24,10 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 - **Azure-shaped errors**: token errors return `error`, `error_description` (with the `AADSTS`
   code), `error_codes`, `trace_id`, `correlation_id`, `timestamp`, and `error_uri`
 - **Dev seed**: a default tenant, a well-known dev app registration, a dev user and a dev group
-- **Permissive client authentication**: client secrets are not checked, so any `client_id` and
-  `client_secret` get a token and `ClientSecretCredential` works with zero setup
+- **Permissive client authentication by default**: client secrets are not checked, so any
+  `client_id` and `client_secret` get a token and `ClientSecretCredential` works with zero setup.
+  Set `validate-client-credentials: true` to check them against the directory (see
+  [Client credential validation](#client-credential-validation))
 
 ## Endpoints
 
@@ -69,7 +71,7 @@ MSAL.js refuses to log out without it.
 |---|---|
 | Tenant id | `00000000-0000-0000-0000-000000000002` |
 | Client id | `11111111-1111-1111-1111-111111111111` |
-| Client secret | `floci-az-dev-secret` (not checked: any secret is accepted) |
+| Client secret | `floci-az-dev-secret` (checked only when `validate-client-credentials` is on) |
 | Dev user (UPN) | `dev-user@floci-az.local` |
 | Dev group | `floci-az dev group` (the dev user is a direct member) |
 
@@ -135,7 +137,7 @@ real Entra's default behavior): call the Graph `getMemberGroups` endpoint instea
     cred = ClientSecretCredential(
         tenant_id="00000000-0000-0000-0000-000000000002",
         client_id="11111111-1111-1111-1111-111111111111",
-        client_secret="floci-az-dev-secret",  # any value works: secrets are not checked
+        client_secret="floci-az-dev-secret",  # any value works unless validate-client-credentials is on
         authority="http://localhost:4577",
     )
     token = cred.get_token("api://resource/.default")
@@ -165,6 +167,30 @@ signing_key = jwks.get_signing_key_from_jwt(token)
 claims = jwt.decode(token, signing_key.key, algorithms=["RS256"], audience="api://resource")
 ```
 
+## Client credential validation
+
+By default the token endpoint accepts any client: an unregistered `client_id` and a wrong secret
+both get a token, and the first unregistered `client_id` is logged once at `WARN`. With
+`validate-client-credentials: true` the client is checked against the directory instead:
+
+| Request | Response |
+|---|---|
+| a `client_id` not registered in the tenant | `400` `unauthorized_client`, `AADSTS700016` |
+| a secret that matches none of the app's secrets | `401` `invalid_client`, `AADSTS7000215` |
+| `client_credentials` with neither a secret nor a `client_assertion` | `401` `invalid_client`, `AADSTS7000218` |
+| no `client_id` at all | `400` `invalid_request`, `AADSTS900144` |
+
+The secret may be sent in the form (`client_secret_post`) or in an HTTP Basic header
+(`client_secret_basic`). The `password` and `authorization_code` grants need no secret, only a
+registered `client_id`. A `client_assertion` is accepted without verification, and the `password`
+grant does not check the user's password. The seeded dev app (`11111111-...` with
+`floci-az-dev-secret`) is registered, so it keeps working. Secrets are stored as salted
+PBKDF2-HMAC-SHA256 hashes, never in plaintext.
+
+Tenants: `common`, `organizations` and `consumers` act in the default tenant. Any other tenant id
+is accepted as it is and served from the default tenant's directory, so the dev app authenticates
+under it too.
+
 ## Configuration
 
 ```yaml
@@ -176,6 +202,7 @@ floci-az:
       # issuer:                     # optional override; default {baseUrl}/{tenant}/v2.0
       token-lifetime-seconds: 3599
       validate-tokens: false        # reserved: not enforced yet, any Bearer token is accepted
+      validate-client-credentials: false   # true: reject unregistered clients and wrong secrets
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
 ```
 
@@ -186,6 +213,7 @@ floci-az:
 | `issuer` | `FLOCI_AZ_SERVICES_ENTRA_ISSUER` | _(derived from request)_ |
 | `token-lifetime-seconds` | `FLOCI_AZ_SERVICES_ENTRA_TOKEN_LIFETIME_SECONDS` | `3599` |
 | `validate-tokens` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_TOKENS` | `false` |
+| `validate-client-credentials` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS` | `false` |
 | `signing-key-path` | `FLOCI_AZ_SERVICES_ENTRA_SIGNING_KEY_PATH` | `{storage.persistent-path}/entra` |
 
 > `validate-tokens` is reserved and currently has no effect: every service accepts any Bearer
