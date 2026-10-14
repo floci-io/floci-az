@@ -109,7 +109,7 @@ public final class KqlEngine {
                 Set<String> out = schema == null ? null : new LinkedHashSet<>(schema);
                 int position = 0;
                 for (Named column : extend.columns()) {
-                    checkExpr(column.expr(), schema);
+                    checkExpr(column.expr(), out); // a calculated column is visible to the ones after it
                     if (out != null) {
                         out.add(columnName(column, position).toLowerCase(Locale.ROOT));
                     }
@@ -254,7 +254,7 @@ public final class KqlEngine {
                     Map<String, Object> copy = new LinkedHashMap<>(row);
                     int position = 0;
                     for (Named column : extend.columns()) {
-                        copy.put(columnName(column, position++), eval(column.expr(), row));
+                        copy.put(columnName(column, position++), eval(column.expr(), copy)); // sees the columns before it
                     }
                     out.add(copy);
                 }
@@ -483,10 +483,16 @@ public final class KqlEngine {
         Map<String, Object> chosen = group.getFirst();
         if (call.name().startsWith("arg_")) {
             Expr by = call.args().getFirst();
+            Object best = eval(by, chosen);
             for (Map<String, Object> row : group) {
-                Integer c = KqlValues.compare(eval(by, row), eval(by, chosen));
-                if (c != null && (call.name().equals("arg_max") ? c > 0 : c < 0)) {
+                Object value = eval(by, row);
+                if (value == null) {
+                    continue; // a missing value never wins over a present one
+                }
+                Integer c = best == null ? null : KqlValues.compare(value, best);
+                if (best == null || (c != null && (call.name().equals("arg_max") ? c > 0 : c < 0))) {
                     chosen = row;
+                    best = value;
                 }
             }
         }
@@ -681,7 +687,11 @@ public final class KqlEngine {
             merged.put(name, left.get(name));
         }
         for (String name : rightColumns) {
-            merged.put(leftColumns.contains(name) ? name + "1" : name, right.get(name));
+            String target = name;
+            for (int suffix = 1; merged.containsKey(target); suffix++) {
+                target = name + suffix; // a name an earlier join already suffixed takes the next free one
+            }
+            merged.put(target, right.get(name));
         }
         return merged;
     }
@@ -838,7 +848,7 @@ public final class KqlEngine {
                 case "+" -> a + b;
                 case "-" -> a - b;
                 case "*" -> a * b;
-                case "/" -> b == 0 ? null : (Object) ((double) a / b);
+                case "/" -> b == 0 ? null : (Object) (a / b);
                 default -> b == 0 ? null : a % b;
             };
         }

@@ -414,4 +414,56 @@ class KqlEngineTest {
         assertEquals(1, run("resources | extend x = name | project x | where x == 'sa1'").size());
         assertEquals(3, run("resources | distinct * | project name | where name != ''").size());
     }
+
+    @Test
+    void chainedJoinsKeepEveryField() {
+        List<Map<String, Object>> rows = run("""
+                resources | project id, name
+                | join kind=inner (resources | project id, name) on id
+                | join kind=inner (resources | project id, name) on id
+                | where name == "sa1"
+                """);
+        assertEquals(1, rows.size());
+        assertEquals(List.of("id", "name", "id1", "name1", "id2", "name2"), new ArrayList<>(rows.getFirst().keySet()));
+        assertEquals("sa1", rows.getFirst().get("name2"));
+    }
+
+    @Test
+    void selectorsSkipMissingValues() {
+        Map<String, Object> row = run("resources | summarize arg_min(todatetime(properties.creationTime), name)").getFirst();
+        assertEquals("sa1", row.get("name"));
+        // Every value missing: the first row stands, as before.
+        assertEquals("sa2", run("resources | where name != 'sa1' | summarize arg_max(todatetime(properties.creationTime), name)").getFirst().get("name"));
+    }
+
+    @Test
+    void extendSeesTheColumnsBeforeIt() {
+        Map<String, Object> row = run("resources | where name == 'sa1' | extend x = name, y = strcat(x, '!'), x = toupper(x) | project x, y").getFirst();
+        assertEquals("SA1", row.get("x"));
+        assertEquals("sa1!", row.get("y"));
+    }
+
+    @Test
+    void literalsFollowKusto() {
+        assertEquals(1, run("resources | where todatetime(properties.creationTime) > ago(36500d)").size());
+        Map<String, Object> row = run("""
+                resources | take 1
+                | project q = 5 / 2, r = 5.0 / 2, big = tolong('9223372036854775808'), nan = tolong('NaN'),
+                          u = "\\u0041", v = @'a ''b''', span = 90m
+                """).getFirst();
+        assertEquals(2L, row.get("q"));
+        assertEquals(2.5, (Double) row.get("r"), 1e-12);
+        assertNull(row.get("big"));
+        assertNull(row.get("nan"));
+        assertEquals("A", row.get("u"));
+        assertEquals("a 'b'", row.get("v"));
+        assertEquals(java.time.Duration.ofMinutes(90), row.get("span"));
+    }
+
+    @Test
+    void dynamicKeysAreCaseSensitive() {
+        assertEquals(1, run("resources | where tags.env == 'prod'").size());
+        assertEquals(0, run("resources | where tags.Env == 'prod'").size());
+        assertEquals(1, run("resources | where isnull(tags.Env) and isnotnull(tags.env)").size());
+    }
 }

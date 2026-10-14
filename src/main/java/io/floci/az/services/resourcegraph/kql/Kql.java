@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * The Kusto Query Language subset Azure Resource Graph clients send, as a parser and a syntax tree.
@@ -169,12 +170,28 @@ public final class Kql {
                 i = string(source, i, out);
             } else if (c == '@' && i + 1 < n && (source.charAt(i + 1) == '"' || source.charAt(i + 1) == '\'')) {
                 char quote = source.charAt(i + 1);
-                int end = source.indexOf(quote, i + 2);
-                if (end < 0) {
+                StringBuilder verbatim = new StringBuilder();
+                int j = i + 2;
+                boolean closed = false;
+                while (j < n) {
+                    char d = source.charAt(j);
+                    if (d == quote) {
+                        if (j + 1 < n && source.charAt(j + 1) == quote) {
+                            verbatim.append(quote); // a doubled quote stands for one quote
+                            j += 2;
+                            continue;
+                        }
+                        closed = true;
+                        break;
+                    }
+                    verbatim.append(d);
+                    j++;
+                }
+                if (!closed) {
                     throw KqlException.parse("Unterminated string literal at position " + i);
                 }
-                out.add(new Token(Kind.STRING, source.substring(i + 2, end), i));
-                i = end + 1;
+                out.add(new Token(Kind.STRING, verbatim.toString(), i));
+                i = j + 1;
             } else if (c == 'h' && i + 1 < n && (source.charAt(i + 1) == '"' || source.charAt(i + 1) == '\'')) {
                 i = string(source, i + 1, out);
             } else if (Character.isDigit(c)) {
@@ -264,6 +281,14 @@ public final class Kql {
                     case 'b' -> sb.append('\b');
                     case 'f' -> sb.append('\f');
                     case 'v' -> sb.append('\u000B');
+                    case 'u' -> {
+                        if (i + 6 <= source.length() && source.substring(i + 2, i + 6).matches("[0-9a-fA-F]{4}")) {
+                            sb.append((char) Integer.parseInt(source.substring(i + 2, i + 6), 16));
+                            i += 4; // the four hex digits, beyond the two the escape itself takes
+                        } else {
+                            throw KqlException.parse("Invalid unicode escape at position " + i);
+                        }
+                    }
                     default -> sb.append(e);
                 }
                 i += 2;
@@ -717,7 +742,13 @@ public final class Kql {
             }
         }
 
+        private static final Pattern DURATION_LITERAL =
+            Pattern.compile("^\\d+(\\.\\d+)?(d|h|m|s|ms|microsecond|microseconds|tick|ticks)$");
+
         private static Object number(String text) {
+            if (DURATION_LITERAL.matcher(text).matches()) {
+                return KqlValues.toTimespan(text); // a timespan literal such as 7d or 30m
+            }
             try {
                 if (text.contains(".") || text.contains("e") || text.contains("E")) {
                     return Double.parseDouble(text);

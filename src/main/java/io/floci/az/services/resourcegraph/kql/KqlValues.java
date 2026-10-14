@@ -96,7 +96,9 @@ public final class KqlValues {
                 return Long.parseLong(s.trim());
             } catch (NumberFormatException e) {
                 try {
-                    return (long) Double.parseDouble(s.trim());
+                    double parsed = Double.parseDouble(s.trim());
+                    // A value the long range cannot hold is not a number for tolong(), rather than a clamped one.
+                    return Double.isFinite(parsed) && parsed >= -0x1p63 && parsed < 0x1p63 ? (long) parsed : null;
                 } catch (NumberFormatException ignored) {
                     return null;
                 }
@@ -237,18 +239,10 @@ public final class KqlValues {
         return value;
     }
 
-    /** A property of a dynamic object by name, exact first, then ignoring case. */
+    /** A property of a dynamic object by name; dynamic keys are case-sensitive, as in Kusto. */
     public static Object property(Object container, String name) {
         if (container instanceof Map<?, ?> map) {
-            Object exact = map.get(name);
-            if (exact != null || map.containsKey(name)) {
-                return normalize(exact);
-            }
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (entry.getKey() instanceof String key && key.equalsIgnoreCase(name)) {
-                    return normalize(entry.getValue());
-                }
-            }
+            return normalize(map.get(name));
         }
         return null;
     }

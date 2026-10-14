@@ -26,11 +26,13 @@ against it yet.
   schema does not have, or to a function the engine does not know, is a `SemanticError` before the
   query runs, whatever the table holds, as in Kusto; properties below `properties`, `tags` and the
   other dynamic columns are data and read as null when absent. Comparisons with a null operand are null,
-  so `not(x < now())` keeps rows with no `x` out, as Kusto does.
+  so `not(x < now())` keeps rows with no `x` out, as Kusto does. Dynamic property keys (`tags.env`,
+  `properties.x`) are case-sensitive and `/` on two integers is integer division, as in Kusto.
 - **Operators**: `where`, `extend`, `project`, `project-away`, `summarize ... by`, `order by` /
   `sort by`, `distinct`, `take` / `limit`, `union`, `join kind=inner|innerunique|leftouter|leftsemi|leftanti|fullouter ... on`
   and `count`.
-- **Expressions**: string, numeric, boolean, `null`, `dynamic(...)` and `datetime(...)` literals;
+- **Expressions**: string (`"..."`, `'...'`, verbatim `@"..."` with doubled quotes, `\\u` escapes),
+  numeric, timespan (`7d`, `30m`), boolean, `null`, `dynamic(...)` and `datetime(...)` literals;
   dotted and indexed property paths (`properties.details.parent.id`, `parse_json(x)[0].name`);
   `==` / `!=` / `=~` / `!~` / `<` / `<=` / `>` / `>=`; `in` / `!in` / `in~` / `!in~` over literals or
   dynamic arrays; `has`, `contains`, `startswith`, `endswith` and their `_cs` and `!` forms;
