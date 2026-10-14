@@ -1,5 +1,7 @@
 package io.floci.az.core.arm;
 
+import io.floci.az.services.monitor.activitylog.ActivityLogRule;
+
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
@@ -20,10 +22,12 @@ class ArmRequestGateProductionTest {
     @Test
     void theSubscriptionRuleRunsFirstAndTheResourceGroupRuleAfterIt() {
         List<ArmRequestRule> rules = gate.rules();
-        assertEquals(2, rules.size(), "rules: " + rules);
+        assertEquals(3, rules.size(), "rules: " + rules);
         assertInstanceOf(SubscriptionRule.class, rules.getFirst());
         assertEquals(SubscriptionRule.ORDER, rules.getFirst().order());
         assertInstanceOf(ResourceGroupRule.class, rules.get(1));
         assertEquals(ResourceGroupRule.ORDER, rules.get(1).order());
+        assertInstanceOf(ActivityLogRule.class, rules.get(2));
+        assertEquals(ActivityLogRule.ORDER, rules.get(2).order());
     }
 }

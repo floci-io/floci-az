@@ -28,7 +28,8 @@ applications use to acquire tokens without secrets.
   mode): requires the `X-IDENTITY-HEADER` header and `resource`, accepts `client_id` /
   `object_id` / `mi_res_id` / `msi_res_id` selectors, and returns an all-string response
   (including a quoted `expires_on`)
-- **Verifiable tokens**: v1.0 JWTs (`appid`, `oid`, `idtyp=app`) signed by the Entra key;
+- **Verifiable tokens**: v1.0 JWTs (`appid`, `oid`, `idtyp=app`, and `xms_mirid` naming the identity's
+  ARM id) signed by the Entra key;
   validate against `GET /common/discovery/v2.0/keys`
 
 ---

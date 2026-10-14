@@ -3,6 +3,7 @@ package io.floci.az.services.monitor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
@@ -59,6 +60,9 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private final EmulatorConfig config;
 
     @Inject
+    ActivityLogEndpoint activityLog;
+
+    @Inject
     public MonitorHandler(StorageFactory factory, EmulatorConfig config) {
         this.store = factory.create("monitor");
         this.config = config;
@@ -104,6 +108,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     public Response handleArm(AzureRequest req, String path, String method, String sub) {
         LOG.debugf("MonitorHandler ARM-plane %s /%s", method, path);
 
+        if (ActivityLogEndpoint.matches(path)) {
+            if (!config.services().monitor().activityLog().enabled()) {
+                return Response.status(404).entity("Provider resource not found").build();
+            }
+            return activityLog.list(req, sub);
+        }
         if (path.contains("/providers/Microsoft.OperationalInsights/workspaces/")) {
             return handleWorkspaceArm(req, path, method, sub);
         } else if (path.contains("/providers/Microsoft.Insights/dataCollectionEndpoints/")) {

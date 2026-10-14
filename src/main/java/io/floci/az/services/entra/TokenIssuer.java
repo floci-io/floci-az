@@ -68,6 +68,24 @@ public class TokenIssuer {
     }
 
     /**
+     * The claims that name the signed-in user in an access token, as Entra writes them: {@code upn} and
+     * {@code unique_name} in v1.0 tokens, {@code preferred_username} in v2.0 tokens.
+     */
+    public static Map<String, Object> userClaims(String version, String userPrincipalName) {
+        Map<String, Object> claims = new LinkedHashMap<>();
+        if (userPrincipalName == null || userPrincipalName.isBlank()) {
+            return claims;
+        }
+        if ("2.0".equals(version)) {
+            claims.put("preferred_username", userPrincipalName);
+        } else {
+            claims.put("upn", userPrincipalName);
+            claims.put("unique_name", userPrincipalName);
+        }
+        return claims;
+    }
+
+    /**
      * Mints an ID token: the same claim set as {@link #issue}, plus the OIDC-specific claims
      * {@code nonce}/{@code name}/{@code preferred_username}/{@code email}. {@code nonce} must echo
      * the value from the {@code /authorize} request or MSAL rejects the token as a replay.

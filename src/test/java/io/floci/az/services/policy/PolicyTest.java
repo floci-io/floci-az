@@ -573,6 +573,96 @@ class PolicyTest {
                 .body("error.code", equalTo("MissingSubscription"));
     }
 
+    // ── Audit fields ────────────────────────────────────────────────────────────
+
+    @Test
+    void auditFieldsNameTheCallerFromTheBearerToken() {
+        // Without a token the emulator's fixed author is stamped, as before.
+        putJson(DEFINITIONS + "/anonymous", DEFINITION_BODY)
+                .statusCode(201)
+                .body("systemData.createdBy", equalTo(PolicyHandler.AUTHOR))
+                .body("systemData.createdByType", equalTo("Application"))
+                .body("properties.metadata.createdBy", equalTo(PolicyHandler.AUTHOR));
+
+        // An application token: createdBy is the application's client id, the type is Application.
+        String appToken = token("client_credentials", "eval-app");
+        String appId = claim(appToken, "azp");
+        String appOid = claim(appToken, "oid");
+        given().header("Authorization", "Bearer " + appToken).contentType("application/json").body(DEFINITION_BODY)
+                .when().put(DEFINITIONS + "/by-app" + API)
+                .then().statusCode(201)
+                .body("systemData.createdBy", equalTo(appId))
+                .body("systemData.createdByType", equalTo("Application"))
+                .body("systemData.lastModifiedBy", equalTo(appId))
+                .body("properties.metadata.createdBy", equalTo(appOid));
+
+        // A user token updating it: createdBy stays, lastModifiedBy and updatedBy move to the user's principal name.
+        String userToken = token("password", "eval-app");
+        String userName = claim(userToken, "preferred_username");
+        org.junit.jupiter.api.Assertions.assertEquals("user@floci.local", userName);
+        given().header("Authorization", "Bearer " + userToken).contentType("application/json").body(DEFINITION_BODY)
+                .when().put(DEFINITIONS + "/by-app" + API)
+                .then().statusCode(201)
+                .body("systemData.createdBy", equalTo(appId))
+                .body("systemData.createdByType", equalTo("Application"))
+                .body("systemData.lastModifiedBy", equalTo(userName))
+                .body("systemData.lastModifiedByType", equalTo("User"))
+                .body("properties.metadata.createdBy", equalTo(appOid))
+                .body("properties.metadata.updatedBy", equalTo(userName));
+
+        // Assignments carry the same stamps.
+        given().header("Authorization", "Bearer " + appToken).contentType("application/json")
+                .body("{\"properties\": {\"policyDefinitionId\": \"" + DEFINITIONS + "/by-app\"}}")
+                .when().put(RG_SCOPE + AUTH + "/policyAssignments/by-app" + API)
+                .then().statusCode(201)
+                .body("systemData.createdBy", equalTo(appId))
+                .body("systemData.lastModifiedByType", equalTo("Application"));
+
+        // A managed identity token: the identity's client id, the type is ManagedIdentity.
+        String miBody = given().header("Metadata", "true")
+                .when().get("/metadata/identity/oauth2/token?resource=https://management.azure.com/&api-version=2018-02-01")
+                .then().statusCode(200).extract().asString();
+        String miToken = io.restassured.path.json.JsonPath.from(miBody).getString("access_token");
+        String miClientId = io.restassured.path.json.JsonPath.from(miBody).getString("client_id");
+        given().header("Authorization", "Bearer " + miToken).contentType("application/json").body(DEFINITION_BODY)
+                .when().put(DEFINITIONS + "/by-identity" + API)
+                .then().statusCode(201)
+                .body("systemData.createdBy", equalTo(miClientId))
+                .body("systemData.createdByType", equalTo("ManagedIdentity"));
+
+        // A PATCH by another caller moves lastModifiedBy and updatedBy to that caller.
+        given().header("Authorization", "Bearer " + userToken).contentType("application/json")
+                .body("{\"properties\": {\"overrides\": []}}")
+                .when().patch(RG_SCOPE + AUTH + "/policyAssignments/by-app" + API)
+                .then().statusCode(200)
+                .body("systemData.createdBy", equalTo(appId))
+                .body("systemData.lastModifiedBy", equalTo(userName))
+                .body("properties.metadata.createdBy", equalTo(appOid))
+                .body("properties.metadata.updatedBy", equalTo(userName));
+    }
+
+    private static String token(String grant, String clientId) {
+        var request = given().contentType("application/x-www-form-urlencoded")
+                .formParam("grant_type", grant)
+                .formParam("client_id", clientId)
+                .formParam("client_secret", "secret")
+                .formParam("scope", "https://management.azure.com/.default");
+        if (grant.equals("password")) {
+            request = request.formParam("username", "user@floci.local").formParam("password", "pw");
+        }
+        return request.when().post("/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token")
+                .then().statusCode(200).extract().path("access_token");
+    }
+
+    private static String claim(String token, String name) {
+        String payload = new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]), java.nio.charset.StandardCharsets.UTF_8);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + name + "\":\"([^\"]+)\"").matcher(payload);
+        if (!m.find()) {
+            throw new AssertionError("claim " + name + " missing in " + payload);
+        }
+        return m.group(1);
+    }
+
     // ── Routing boundaries ──────────────────────────────────────────────────────
 
     @Test

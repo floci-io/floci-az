@@ -301,6 +301,23 @@ public interface EmulatorConfig {
     interface MonitorConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /** The subscription Activity Log served at {@code Microsoft.Insights/eventtypes/management/values}. */
+        ActivityLogConfig activityLog();
+    }
+
+    interface ActivityLogConfig {
+        /** Records every management-plane write, delete and action the ARM request gate sees. */
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Entries kept in memory; the oldest are dropped beyond it. */
+        @WithDefault("10000")
+        int capacity();
+
+        /** Entries per page of the list operation; the next page follows the {@code nextLink}. */
+        @WithDefault("1000")
+        int pageSize();
     }
 
     interface SignalRConfig {
