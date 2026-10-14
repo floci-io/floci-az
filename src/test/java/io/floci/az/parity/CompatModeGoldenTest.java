@@ -130,6 +130,8 @@ class CompatModeGoldenTest {
             "PUT", rg + "/providers/Microsoft.KeyVault/vaults/" + VAULT + KV_API);
         script.step("storage account delete", given(), "DELETE", account + STORAGE_API);
         script.step("resource group delete", given(), "DELETE", rg + RG_API);
+        // Fix (missing-group code): main answered 404 ResourceNotFound with its own message; Azure answers
+        // 404 ResourceGroupNotFound, "Resource group '<name>' could not be found.". Same status.
         script.step("resource group get after delete", given(), "GET", rg + RG_API);
         script.step("resource group head after delete", given(), "HEAD", rg + RG_API);
         script.finish();

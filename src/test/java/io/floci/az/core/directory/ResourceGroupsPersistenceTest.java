@@ -104,6 +104,36 @@ class ResourceGroupsPersistenceTest {
         assertTrue(tempDir.resolve(AzureDirectory.STORE + ".json").toFile().isFile());
     }
 
+    @Test
+    void strictResourceGroupsAlonePersistsGroups() {
+        configured(false, true).put(tagged());
+
+        assertEquals(tagged(), configured(false, true).get(SUB, "rg-kept").orElseThrow());
+    }
+
+    @Test
+    void resourceGroupSemanticsAlonePersistsGroups() {
+        configured(true, false).put(tagged());
+
+        assertEquals(tagged(), configured(true, false).get(SUB, "rg-kept").orElseThrow());
+    }
+
+    @Test
+    void groupsStayInMemoryWhenNeitherSwitchIsOn() {
+        configured(false, false).put(tagged());
+
+        assertFalse(configured(false, false).exists(SUB, "rg-kept"));
+        assertFalse(tempDir.resolve(AzureDirectory.STORE + ".json").toFile().exists());
+    }
+
+    /** Groups built the way CDI builds them, from the two switches that turn persistence on. */
+    private ResourceGroups configured(boolean resourceGroupSemantics, boolean strictResourceGroups) {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        when(config.resourceGroupSemantics()).thenReturn(resourceGroupSemantics);
+        when(config.strictResourceGroups()).thenReturn(strictResourceGroups);
+        return new ResourceGroups(config, persistentFactory());
+    }
+
     /** A factory whose {@code directory} store is persistent under the temp dir, as {@code storage.services.directory.mode} sets it. */
     private StorageFactory persistentFactory() {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);

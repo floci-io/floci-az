@@ -5,6 +5,7 @@ import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.directory.Subscription;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.util.Optional;
 import java.util.Set;
@@ -42,6 +43,8 @@ public class SubscriptionRule implements ArmRequestRule {
 
     private static final Set<String> READ_ONLY_METHODS = Set.of("GET", "HEAD", "DELETE");
 
+    private static final Logger LOG = Logger.getLogger(SubscriptionRule.class);
+
     private final AzureDirectory directory;
     private final boolean strict;
 
@@ -69,6 +72,10 @@ public class SubscriptionRule implements ArmRequestRule {
         Optional<Subscription> known = directory.subscription(subscriptionId);
         if (known.isEmpty()) {
             if (strict) {
+                // The body is Azure's own; the log is where the emulator says which switch refused it.
+                LOG.infov("Refused {0}: subscription {1} is not in the directory and "
+                        + "floci-az.parity-overrides.strict-subscriptions is on (list it under "
+                        + "floci-az.subscriptions, or turn the override off)", call.method(), subscriptionId);
                 return ArmVerdict.respond(ArmErrors.subscriptionNotFound(subscriptionId));
             }
             directory.registerOnFirstUse(subscriptionId, call.scope() == null ? null : call.scope().tokenTenantId());
@@ -81,6 +88,7 @@ public class SubscriptionRule implements ArmRequestRule {
         return ArmVerdict.respond(ArmErrors.error(READ_ONLY_STATUS, READ_ONLY_CODE,
             "The subscription '" + subscription.id() + "' is " + subscription.state().wireName()
                 + " and therefore marked as read only. You cannot perform any write actions on this subscription"
-                + " until it is re-enabled."));
+                + " until it is re-enabled (its state is set under floci-az.subscriptions in the emulator's"
+                + " configuration)."));
     }
 }

@@ -337,6 +337,12 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| every suite, parity legs only | `-e FLOCI_AZ_PARITY=azure` (`PARITY_EMULATOR_ENV`, from `PARITY=azure`) | ✓ (`matrix.parity`, scheduled and manual runs only) |
+
+The parity legs run every suite against an emulator started at `floci-az.parity=azure`. In CI
+they are the `parity` matrix axis, which is empty on pull requests and `azure` on the scheduled and
+manually dispatched runs, so an opt-in behaviour cannot fail a PR. Locally, add `PARITY=azure` to any
+Docker compat target (`make test-terraform-compat PARITY=azure`, `make test-azcli PARITY=azure`).
 
 The container name follows the pattern `floci-az-<service>-<namespace>` (e.g. `floci-az-servicebus-default`). If a new sidecar-based service is added, its container name and port must be added to both places.
 

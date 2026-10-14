@@ -55,6 +55,7 @@ public class AzureDirectory implements Resettable {
 
     private final DirectorySeed seed;
     private final StorageBackend<String, StoredObject> store;
+    private final boolean listsFirstUse;
 
     /** Guarded by {@code this}; keyed by {@link DirectorySeed#key}, in listing order. */
     private final Map<String, Tenant> tenants = new LinkedHashMap<>();
@@ -62,16 +63,26 @@ public class AzureDirectory implements Resettable {
 
     @Inject
     public AzureDirectory(EmulatorConfig config, StorageFactory storageFactory) {
-        this(DirectorySeed.from(config), storageFactory.create(STORE));
+        this(DirectorySeed.from(config), storageFactory.create(STORE), config.subscriptionListing());
     }
 
     /** For tests: a directory over an explicit seed and backend. */
     public AzureDirectory(DirectorySeed seed, StorageBackend<String, StoredObject> store) {
+        this(seed, store, false);
+    }
+
+    private AzureDirectory(DirectorySeed seed, StorageBackend<String, StoredObject> store, boolean listsFirstUse) {
         this.seed = seed;
         this.store = store;
+        this.listsFirstUse = listsFirstUse;
         load();
         LOG.infov("Directory: {0} tenant(s), {1} subscription(s), default cloud {2}", tenants.size(),
             subscriptions.size(), seed.defaultCloud().name());
+        if (!CloudCatalog.PUBLIC_CLOUD.equals(seed.defaultCloud().name())) {
+            LOG.warnv("floci-az.cloud.default is {0}: tenants and request scopes resolve to that cloud, but "
+                + "endpoints, token issuers, DNS suffixes, TLS names and /locations are still the public "
+                + "cloud''s", seed.defaultCloud().name());
+        }
     }
 
     // ── Defaults ─────────────────────────────────────────────────────────────
@@ -145,7 +156,14 @@ public class AzureDirectory implements Resettable {
             SubscriptionState.ENABLED, DirectoryOrigin.FIRST_USE);
         subscriptions.put(key, registered);
         persist(SUBSCRIPTION_PREFIX + key, registered);
-        LOG.infov("Registered subscription {0} on first use, under tenant {1}", subscriptionId, owner);
+        if (listsFirstUse) {
+            // Client-visible from here on: it shows up in GET /subscriptions, where Azure answers 404.
+            LOG.warnv("Subscription {0} is not configured: registered on first use under tenant {1} and now "
+                + "listed. Azure answers 404 SubscriptionNotFound here. List it under floci-az.subscriptions, "
+                + "or set floci-az.parity-overrides.strict-subscriptions=true to refuse it", subscriptionId, owner);
+        } else {
+            LOG.infov("Registered subscription {0} on first use, under tenant {1}", subscriptionId, owner);
+        }
         return registered;
     }
 

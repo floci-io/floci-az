@@ -79,7 +79,7 @@ floci-az:
         flush-interval-ms: 5000
       email:
         flush-interval-ms: 5000
-      directory:                    # tenants and subscriptions (seeded, configured, registered on first use)
+      directory:                    # tenants, subscriptions (seeded, configured, first use) and, under the resource-group overrides, groups
         flush-interval-ms: 5000
 
   # How closely floci-az follows Azure where Azure differs from what floci-az has always answered.
@@ -95,13 +95,15 @@ floci-az:
     #                               # An unknown subscription is 404 SubscriptionNotFound instead of being
     #                               # registered on first use
     # resource-group-semantics: true  # FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS; default on from azure.
-    #                               # Resource-group re-PUT answers 200, a missing group is 404 ResourceGroupNotFound,
-    #                               # a child PUT under a missing group creates it, and groups persist in the directory store
+    #                               # Resource-group re-PUT answers 200, a child PUT under a missing group creates it,
+    #                               # and groups persist in the directory store
     # resource-group-delete: true   # FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE; default on from azure.
     #                               # Resource-group DELETE is a 202 long-running operation that deletes every
-    #                               # resource in the group first
+    #                               # resource in the group first; a write into a group being deleted is 409, and
+    #                               # /resources also lists Monitor, Event Grid and Email resources
     # strict-resource-groups: true  # FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS; default on from strict.
-    #                               # A request for a resource under a missing group is 404 ResourceGroupNotFound
+    #                               # A request for a resource under a missing group is 404 ResourceGroupNotFound,
+    #                               # and groups persist in the directory store
 
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:

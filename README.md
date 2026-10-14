@@ -726,6 +726,7 @@ All settings are overridable via environment variables (`FLOCI_AZ_` prefix).
 | `FLOCI_AZ_BASE_URL` | `http://localhost:4577` | Base URL used when the emulator returns service URLs |
 | `FLOCI_AZ_HOSTNAME` | Unset | Hostname added to returned URLs and TLS cert SANs when running inside Docker Compose |
 | `FLOCI_AZ_TLS_ENABLED` | `false` | Enable HTTP+HTTPS on the same port via protocol-sniffing proxy |
+| `FLOCI_AZ_PARITY` | `compat` | How closely the ARM platform answers follow Azure: `compat` keeps every response as floci-az has always given it, `azure` gives Azure's answers (resource-group update and cascading delete, listed subscriptions), `strict` adds Azure's refusals (unknown subscription or resource group). See the [ARM docs](docs/services/arm.md#parity-levels) |
 | `FLOCI_AZ_STORAGE_MODE` | `memory` | Storage mode: `memory`, `persistent`, `hybrid`, or `wal` |
 | `FLOCI_AZ_STORAGE_PATH` | `/app/data` | Directory used for persisted state |
 | `FLOCI_AZ_DOCKER_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker socket used to spawn function and sidecar containers |

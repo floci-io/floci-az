@@ -31,7 +31,7 @@ public class BannerLogger {
     void onStart(@Observes StartupEvent ev) {
         LOGGER.info("=== FLOCI - AZ Starting ===");
         LOGGER.infof("Storage mode: %s", config.storage().mode());
-        LOGGER.info(parityLine(config));
+        LOGGER.info(parityLine(config) + parityHint(config));
         
         StringBuilder sb = new StringBuilder("\nEnabled Services:\n");
         if (config.services().blob().enabled()) {
@@ -230,6 +230,15 @@ public class BannerLogger {
             }
         });
         return line.toString();
+    }
+
+    /**
+     * Appended to the banner line at the default level, naming the variable that changes it: a mistyped
+     * variable is silently ignored, so the line that shows the level also shows how to set it.
+     */
+    public static String parityHint(EmulatorConfig config) {
+        return config.parity() == ParityLevel.COMPAT
+                ? "  (set FLOCI_AZ_PARITY=azure for Azure's ARM answers, strict to add its refusals)" : "";
     }
 
     private String getStorageMode(String service) {

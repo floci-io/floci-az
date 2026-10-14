@@ -68,6 +68,11 @@ JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
 # AksCompatibilityTest drives the mocked AKS control plane; real mode would start a k3s container.
 JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+# PARITY=azure (or strict) starts the emulator of any Docker compat session at that floci-az.parity
+# level: `make test-terraform-compat PARITY=azure`. Empty keeps the default level. The nightly parity
+# legs in .github/workflows/compatibility.yml set the same variable (emulator axis, see AGENTS.md).
+PARITY ?=
+PARITY_EMULATOR_ENV = $(if $(PARITY),-e FLOCI_AZ_PARITY=$(PARITY))
 
 # Per-suite build context and image tag, keyed by suite name.
 SUITES = python java dotnet node cpp terraform opentofu azcli
@@ -177,6 +182,7 @@ compat-run: compat-network
 		-e FLOCI_AZ_TLS_ENABLED=true \
 		-e FLOCI_AZ_HOSTNAME=floci-az \
 		$(FLOCI_AZ_COMPAT_EXTRA_ENV) \
+		$(PARITY_EMULATOR_ENV) \
 		$(FLOCI_AZ_IMAGE)
 	@echo "Waiting for floci-az Docker emulator to start on port $(PORT)..."
 	@until curl -sf http://127.0.0.1:$(PORT)/health > /dev/null; do sleep 1; done

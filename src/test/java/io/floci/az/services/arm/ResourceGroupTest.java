@@ -158,11 +158,11 @@ class ResourceGroupTest {
     }
 
     @Test
-    void aMissingGroupKeepsTheGenericNotFound() {
+    void aMissingGroupAnswersResourceGroupNotFound() {
         given().when().get(group("rg-never") + API)
             .then().statusCode(404)
-            .body("error.code", equalTo("ResourceNotFound"))
-            .body("error.message", equalTo("Resource not found: resourceGroups/rg-never"));
+            .body("error.code", equalTo("ResourceGroupNotFound"))
+            .body("error.message", equalTo("Resource group 'rg-never' could not be found."));
     }
 
     @Test

@@ -141,6 +141,10 @@ class ParityConfigTest {
     @Test
     void theBannerShowsTheLevelAndOnlyTheOverridesThatDifferFromIt() {
         assertEquals("parity: compat", BannerLogger.parityLine(config(ParityLevel.COMPAT)));
+        assertEquals("  (set FLOCI_AZ_PARITY=azure for Azure's ARM answers, strict to add its refusals)",
+            BannerLogger.parityHint(config(ParityLevel.COMPAT)));
+        assertEquals("", BannerLogger.parityHint(config(ParityLevel.AZURE)));
+        assertEquals("", BannerLogger.parityHint(config(ParityLevel.STRICT)));
         assertEquals("parity: strict", BannerLogger.parityLine(config(ParityLevel.STRICT)));
         assertEquals("parity: compat  subscription-listing:true",
             BannerLogger.parityLine(config(ParityLevel.COMPAT, Map.of("subscription-listing", true), "dev")));

@@ -123,10 +123,10 @@ floci-az:
 | `FLOCI_AZ_PARITY` | `compat` | Azure parity level: `compat`, `azure` or `strict`; the default for every `parity-overrides` key |
 | `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | _(on from `azure`)_ | List subscriptions registered on first use, and echo the directory's subscription id |
 | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | _(on from `strict`)_ | Refuse unknown subscriptions with `404 SubscriptionNotFound` |
-| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | _(on from `azure`)_ | Resource-group re-PUT answers `200`, a missing group is `404 ResourceGroupNotFound`, a resource PUT creates a missing group, and groups persist in the directory store |
-| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | _(on from `azure`)_ | Resource-group `DELETE` is a `202` long-running operation that deletes every resource in the group |
-| `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | _(on from `strict`)_ | Refuse a request for a resource under a missing group with `404 ResourceGroupNotFound` |
-| `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | Cloud of the default tenant |
+| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | _(on from `azure`)_ | Resource-group re-PUT answers `200`, a resource PUT creates a missing group, and groups persist in the directory store |
+| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | _(on from `azure`)_ | Resource-group `DELETE` is a `202` long-running operation that deletes every resource in the group; a write into a group being deleted is `409`, and `/resources` also lists Monitor, Event Grid and Email resources |
+| `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | _(on from `strict`)_ | Refuse a request for a resource under a missing group with `404 ResourceGroupNotFound`; groups persist in the directory store |
+| `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | Cloud of the default tenant. Endpoints, issuers and DNS suffixes stay the public cloud's for now |
 | `FLOCI_AZ_STORAGE_MODE` | `memory` | Global storage mode |
 | `FLOCI_AZ_STORAGE_PATH` | `/app/data` | Persistence directory |
 | `FLOCI_AZ_STORAGE_SERVICES_BLOB_MODE` | _(global)_ | Per-service blob mode |

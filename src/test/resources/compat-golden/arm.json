@@ -1494,8 +1494,8 @@
   "resource group get after delete" : {
     "body" : {
       "error" : {
-        "code" : "ResourceNotFound",
-        "message" : "Resource not found: resourceGroups/golden-rg"
+        "code" : "ResourceGroupNotFound",
+        "message" : "Resource group 'golden-rg' could not be found."
       }
     },
     "headers" : {

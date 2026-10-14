@@ -128,10 +128,10 @@ floci-az:
 | `parity` | `FLOCI_AZ_PARITY` | `compat` | The Azure parity level, `compat`, `azure` or `strict`; see [Parity levels](#parity-levels) |
 | `parity-overrides.subscription-listing` | `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | on from `azure` | `true`: `GET /subscriptions` also lists subscriptions registered on first use, and `GET /subscriptions/{sub}` echoes the directory's id rather than the path's spelling |
 | `parity-overrides.strict-subscriptions` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | on from `strict` | `true`: an unknown subscription is `404 SubscriptionNotFound`. `false`: it is registered on first use |
-| `parity-overrides.resource-group-semantics` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | on from `azure` | `true`: a resource-group re-PUT answers `200`, a missing group is `404 ResourceGroupNotFound`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
+| `parity-overrides.resource-group-semantics` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | on from `azure` | `true`: a resource-group re-PUT answers `200`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
 | `parity-overrides.resource-group-delete` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | on from `azure` | `true`: a resource-group `DELETE` deletes every resource in the group and answers `202` with a `Location` to poll; the generic listings also show Event Grid, Monitor and Email resources |
-| `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound` |
-| `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup |
+| `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound`, and groups are kept in the directory store |
+| `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup. Today it changes which cloud tenants and request scopes resolve to and the default location of a new group; endpoints, token issuers, DNS suffixes, TLS names and `/locations` stay the public cloud's, and a startup warning says so |
 | `tenants[n].*` | `FLOCI_AZ_TENANTS_<n>__ID`, `..._DISPLAY_NAME`, `..._DEFAULT_DOMAIN`, `..._CLOUD` | none | Extra tenants; see below |
 | `subscriptions[n].*` | `FLOCI_AZ_SUBSCRIPTIONS_<n>__ID`, `..._TENANT_ID`, `..._DISPLAY_NAME`, `..._STATE` | none | Extra subscriptions; see below |
 | `storage.services.directory.mode` | `FLOCI_AZ_STORAGE_SERVICES_DIRECTORY_MODE` | `storage.mode` | Storage mode of the tenant and subscription directory |
@@ -190,11 +190,16 @@ can also be set alone to opt in piecemeal:
 | Level | What changes |
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
-| `azure` | Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete` |
-| `strict` | `azure` plus every `strict-*` override: `strict-subscriptions`, `strict-resource-groups` |
+| `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete` |
+| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
-override set to a value its level would not give it.
+override set to a value its level would not give it. At the default level the line also names the
+variable that changes it, since a misspelt variable is silently ignored.
+
+When an override refuses a request, the response body is Azure's own and says nothing about floci-az; the
+emulator's log has one `INFO` line per refusal naming the override that caused it. Under `azure`, a subscription
+registered on first use is logged at `WARN`, because it is now listed where Azure would answer `404`.
 
 ### First use and strict subscriptions
 
@@ -238,10 +243,10 @@ The rest depends on the parity overrides:
 | Behaviour | Default | Override |
 |---|---|---|
 | PUT of an existing group | `201`, as for a new one | `resource-group-semantics`: `200` |
-| GET of a missing group | `404 ResourceNotFound` | `resource-group-semantics`: `404 ResourceGroupNotFound`, `Resource group '{rg}' could not be found.` |
+| GET of a missing group | `404 ResourceGroupNotFound`, `Resource group '{rg}' could not be found.`, as Azure answers | the same |
 | Resource PUT under a missing group | the resource is created, no group appears | `resource-group-semantics`: the group is created once the resource is (only after a `2xx`), in the location the resource reports, else the cloud's default location. `strict-resource-groups`: refused with `404 ResourceGroupNotFound` before the resource's handler runs, as is a read, an action or a delete of a resource under a missing group |
 | `DELETE` | `200`; only the group is removed, a missing group is `200` too | `resource-group-delete`: see below |
-| Persistence | in memory, lost on restart | `resource-group-semantics`: kept in the directory store, so they follow `storage.services.directory.mode` |
+| Persistence | in memory, lost on restart | `resource-group-semantics` or `strict-resource-groups`: kept in the directory store, so they follow `storage.services.directory.mode` |
 | Generic listings (`.../resources`) | as before: Event Grid topics, Log Analytics workspaces, data collection endpoints and rules, and Communication and Email services are not listed | `resource-group-delete`: listed, so Terraform's `prevent_deletion_if_contains_resources` sees what a delete would remove |
 
 Under `resource-group-delete` a `DELETE` of a group is the long-running operation the spec declares:

@@ -26,12 +26,13 @@ import java.util.function.UnaryOperator;
 /**
  * Every resource group, keyed case-insensitively by subscription and name, as ARM matches them.
  *
- * <p>Groups live in memory, as they always have, unless {@link EmulatorConfig#resourceGroupSemantics()} is on:
- * then they are also written through to the {@link AzureDirectory#STORE directory} store, so they persist
+ * <p>Groups live in memory, as they always have, unless {@link EmulatorConfig#resourceGroupSemantics()} or
+ * {@link EmulatorConfig#strictResourceGroups()} is on: then they are also written through to the {@link AzureDirectory#STORE directory} store, so they persist
  * under the directory's storage mode alongside the tenants and subscriptions they belong to. Keeping them in
  * memory by default is deliberate: the docs promise that ARM state does not survive a restart, and a group
  * that did while the resources the {@code ArmHandler} holds in it did not would be a change a client could
- * notice.
+ * notice. Strict groups persist for the opposite reason: with persistent service storage, a group lost at
+ * restart would turn every resource it holds into a {@code 404 ResourceGroupNotFound}.
  */
 @ApplicationScoped
 public class ResourceGroups implements Resettable {
@@ -54,7 +55,8 @@ public class ResourceGroups implements Resettable {
 
     @Inject
     public ResourceGroups(EmulatorConfig config, StorageFactory storageFactory) {
-        this(config.resourceGroupSemantics() ? storageFactory.create(AzureDirectory.STORE) : null);
+        this(config.resourceGroupSemantics() || config.strictResourceGroups()
+            ? storageFactory.create(AzureDirectory.STORE) : null);
     }
 
     /** For tests: groups over an explicit backend, or memory-only for a null one. */

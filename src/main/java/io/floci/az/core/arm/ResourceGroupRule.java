@@ -8,6 +8,7 @@ import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -39,6 +40,8 @@ import java.util.Set;
  */
 @ApplicationScoped
 public class ResourceGroupRule implements ArmRequestRule {
+
+    private static final Logger LOG = Logger.getLogger(ResourceGroupRule.class);
 
     /** Position in the gate: after the subscription rule, leaving room for the tenant and provider rules. */
     public static final int ORDER = 4;
@@ -80,6 +83,9 @@ public class ResourceGroupRule implements ArmRequestRule {
     public ArmVerdict enter(ArmCall call) {
         if (strict && isUnderResourceGroup(call)
                 && !groups.exists(call.id().subscriptionId(), call.id().resourceGroup())) {
+            LOG.infov("Refused {0}: resource group {1} does not exist and "
+                    + "floci-az.parity-overrides.strict-resource-groups is on (create the group first, or turn "
+                    + "the override off)", call.method(), call.id().resourceGroup());
             return ArmVerdict.respond(ArmErrors.resourceGroupNotFound(call.id().resourceGroup()));
         }
         if (guardDeletes && isChildWrite(call)) {

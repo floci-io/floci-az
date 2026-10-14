@@ -228,9 +228,9 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_PARITY` | `compat` | Azure parity level. `compat`: responses stay as floci-az has always answered them. `azure`: every parity override on. `strict`: `azure` plus Azure's refusals. See the [ARM page](../services/arm.md#parity-levels) |
 | `FLOCI_AZ_PARITY_OVERRIDES_SUBSCRIPTION_LISTING` | _(on from `azure`)_ | `true`: `GET /subscriptions` also lists subscriptions registered on first use, and a subscription is echoed with the directory's id |
 | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_SUBSCRIPTIONS` | _(on from `strict`)_ | `true`: an unknown subscription is `404 SubscriptionNotFound`; `false`: it is registered on first use |
-| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | _(on from `azure`)_ | `true`: a resource-group re-PUT answers `200`, a missing group is `404 ResourceGroupNotFound`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
+| `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | _(on from `azure`)_ | `true`: a resource-group re-PUT answers `200`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
 | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | _(on from `azure`)_ | `true`: a resource-group `DELETE` deletes every resource in the group and answers `202` with a `Location` to poll; `false`: `200`, only the group is removed |
-| `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | _(on from `strict`)_ | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound` |
+| `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | _(on from `strict`)_ | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound`, and groups persist in the directory store |
 | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | Cloud of the default tenant: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud` |
 
 ### Storage

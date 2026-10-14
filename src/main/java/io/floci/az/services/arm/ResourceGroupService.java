@@ -7,6 +7,8 @@ import io.floci.az.core.RequestUrls;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -120,7 +122,8 @@ public class ResourceGroupService {
 
     private Response createOrUpdate(AzureRequest req, String subscriptionId, String name) {
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
-        ResourceGroup group = new ResourceGroup(subscriptionId, name, ArmJson.string(body, "location", "eastus"),
+        ResourceGroup group = new ResourceGroup(subscriptionId, name,
+            ArmJson.string(body, "location", defaultLocation(req)),
             tags(body.get("tags")), body.get("managedBy") instanceof String managedBy ? managedBy : null,
             ResourceGroup.SUCCEEDED);
         boolean created = groups.put(group);
@@ -131,8 +134,14 @@ public class ResourceGroupService {
     private Response get(String subscriptionId, String name) {
         return groups.get(subscriptionId, name)
             .map(group -> Response.ok(group.body()).build())
-            .orElseGet(() -> semantics ? ArmErrors.resourceGroupNotFound(name)
-                : ArmErrors.notFound("Resource not found: resourceGroups/" + name));
+            .orElseGet(() -> ArmErrors.resourceGroupNotFound(name));
+    }
+
+    /** The default location of the cloud the request resolved to: the one an implicit group gets too. */
+    private static String defaultLocation(AzureRequest req) {
+        CloudProfile cloud = req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            : req.scope().cloud();
+        return cloud.effectiveDefaultLocation();
     }
 
     /** {@code ResourceGroupPatchable}: {@code tags} and {@code managedBy} replace what they name; nothing else changes. */
