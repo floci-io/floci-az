@@ -7,8 +7,13 @@ import io.floci.az.services.entra.EntraModels.ServicePrincipal;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -24,10 +29,13 @@ public class TokenEndpoint implements EntraEndpoint {
 
     private static final String V2_PATH = "oauth2/v2.0/token";
     private static final String V1_PATH = "oauth2/token";
+    private static final String BASIC_SCHEME = "Basic ";
+    private static final Logger LOG = Logger.getLogger(TokenEndpoint.class);
 
     /**
      * Client authentication methods the endpoint accepts. Credentials are not verified yet, so a
-     * secret in the form, a secret in HTTP Basic and a {@code client_assertion} are all accepted.
+     * secret in the form, a secret in HTTP Basic and a {@code client_assertion} are all accepted;
+     * the client is identified from the form, or from the HTTP Basic user when the form names none.
      */
     private static final List<String> AUTH_METHODS =
             List.of("client_secret_post", "client_secret_basic", "private_key_jwt");
@@ -90,7 +98,7 @@ public class TokenEndpoint implements EntraEndpoint {
 
     private TokenRequest tokenRequest(EntraRequest request, Map<String, String> form) {
         boolean v2 = request.path().endsWith(V2_PATH);
-        String clientId = form.get("client_id");
+        String clientId = form.containsKey("client_id") ? form.get("client_id") : basicClientId(request);
         String scope = form.getOrDefault("scope", form.get("resource"));
         AppRegistration app = clientId == null ? null : store.findAppByClientId(clientId).orElse(null);
 
@@ -102,5 +110,31 @@ public class TokenEndpoint implements EntraEndpoint {
         return new TokenRequest(form, request.tenantId(), request.baseUrl(), v2, clientId, appId,
                 clientObjectId, issuers.issuer(request.baseUrl(), request.tenantId(), v2), scope,
                 config.services().entra().tokenLifetimeSeconds());
+    }
+
+    /**
+     * The client id of an {@code Authorization: Basic} header ({@code client_secret_basic}, RFC 6749
+     * section 2.3.1: base64 of the form-encoded id, a colon and the form-encoded secret), or null
+     * when the request carries no such header or it does not decode.
+     */
+    private static String basicClientId(EntraRequest request) {
+        HttpHeaders headers = request.request().headers();
+        String authorization = headers == null ? null : headers.getHeaderString(HttpHeaders.AUTHORIZATION);
+        if (authorization == null
+                || !authorization.regionMatches(true, 0, BASIC_SCHEME, 0, BASIC_SCHEME.length())) {
+            return null;
+        }
+        try {
+            String credentials = new String(
+                    Base64.getDecoder().decode(authorization.substring(BASIC_SCHEME.length()).trim()),
+                    StandardCharsets.UTF_8);
+            int colon = credentials.indexOf(':');
+            String clientId = URLDecoder.decode(colon < 0 ? credentials : credentials.substring(0, colon),
+                    StandardCharsets.UTF_8);
+            return clientId.isEmpty() ? null : clientId;
+        } catch (IllegalArgumentException e) {
+            LOG.debugv("Entra: ignoring an Authorization: Basic header that does not decode: {0}", e.getMessage());
+            return null;
+        }
     }
 }

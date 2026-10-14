@@ -205,6 +205,66 @@ class EntraServiceTest {
     }
 
     @Test
+    void clientCredentialsGrantTakesTheClientIdFromHttpBasic() throws Exception {
+        String clientId = "22222222-2222-2222-2222-222222222222";
+
+        Response token = given()
+          .contentType("application/x-www-form-urlencoded")
+          .header("Authorization", basic(clientId, "any-secret"))
+          .formParam("grant_type", "client_credentials")
+          .formParam("scope", "api://resource/.default")
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT);
+
+        token.then().statusCode(200);
+        assertEquals(clientId, decodeJwtClaims(token.jsonPath().getString("access_token")).get("azp"),
+                "the token must be issued to the client named in the Basic header, not the dev client");
+    }
+
+    @Test
+    void authorizationCodeGrantAcceptsTheClientIdFromHttpBasic() {
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .header("Authorization", basic(EntraStore.DEV_CLIENT_ID, EntraStore.DEV_CLIENT_SECRET))
+          .formParam("grant_type", "authorization_code")
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(200)
+            .body("access_token", not(emptyOrNullString()));
+    }
+
+    @Test
+    void aBasicHeaderThatDoesNotDecodeNamesNoClient() {
+        Response authorize = given()
+          .redirects().follow(false)
+          .queryParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .queryParam("redirect_uri", "https://app.local/callback")
+          .queryParam("response_type", "code")
+          .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);
+        String code = queryParam(authorize.header("Location"), "code");
+
+        given()
+          .contentType("application/x-www-form-urlencoded")
+          .header("Authorization", "Basic not*base64")
+          .formParam("grant_type", "authorization_code")
+          .formParam("redirect_uri", "https://app.local/callback")
+          .formParam("code", code)
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(400)
+            .body("error", is("invalid_grant"));
+    }
+
+    @Test
     void authorizationCodeGrantRejectsOmittedClientId() {
         Response authorize = given()
           .redirects().follow(false)
@@ -277,6 +337,11 @@ class EntraServiceTest {
             }
         }
         throw new IllegalArgumentException("query param not found: " + name);
+    }
+
+    private static String basic(String clientId, String secret) {
+        return "Basic " + Base64.getEncoder().encodeToString(
+                (clientId + ":" + secret).getBytes(StandardCharsets.UTF_8));
     }
 
     private static Map<?, ?> decodeJwtClaims(String jwt) throws Exception {
