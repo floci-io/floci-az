@@ -393,6 +393,22 @@ class KqlEngineTest {
         assertTrue(missing.getMessage().contains("misspelledColumn"));
         assertThrows(KqlException.class, () -> run("resources | where nosuch == 1"));
         assertThrows(KqlException.class, () -> run("resources | extend x = name | project x, y"));
+        // Names are checked before the query runs, so an empty table rejects them too.
+        assertThrows(KqlException.class, () -> run("authorizationresources | project nosuchfunction(id)"));
+        assertThrows(KqlException.class, () -> run("resources | summarize nosuchagg(name)"));
+        KqlEngine.Tables published = new KqlEngine.Tables() {
+            @Override
+            public List<Map<String, Object>> rows(String table) {
+                return List.of();
+            }
+
+            @Override
+            public List<String> columns(String table) {
+                return List.of("id", "name", "properties");
+            }
+        };
+        assertThrows(KqlException.class, () -> KqlEngine.run(Kql.parse("resources | project misspelled"), published));
+        assertEquals(0, KqlEngine.run(Kql.parse("resources | project name, properties.x"), published).size());
         // Dynamic properties below a column are data, not schema.
         assertEquals(3, run("resources | project properties.nosuch").size());
         assertEquals(1, run("resources | extend x = name | project x | where x == 'sa1'").size());

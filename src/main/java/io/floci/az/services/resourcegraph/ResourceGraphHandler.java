@@ -149,19 +149,27 @@ public class ResourceGraphHandler implements AzureServiceHandler {
             return tables;
         }
         List<String> wanted = subscriptions.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList();
-        return table -> {
-            List<Map<String, Object>> rows = tables.rows(table);
-            if (rows == null) {
-                return null;
-            }
-            List<Map<String, Object>> out = new ArrayList<>();
-            for (Map<String, Object> row : rows) {
-                Object subscription = row.get("subscriptionId");
-                if (subscription == null || wanted.contains(String.valueOf(subscription).toLowerCase(Locale.ROOT))) {
-                    out.add(row);
+        return new KqlEngine.Tables() {
+            @Override
+            public List<Map<String, Object>> rows(String table) {
+                List<Map<String, Object>> rows = tables.rows(table);
+                if (rows == null) {
+                    return null;
                 }
+                List<Map<String, Object>> out = new ArrayList<>();
+                for (Map<String, Object> row : rows) {
+                    Object subscription = row.get("subscriptionId");
+                    if (subscription == null || wanted.contains(String.valueOf(subscription).toLowerCase(Locale.ROOT))) {
+                        out.add(row);
+                    }
+                }
+                return out;
             }
-            return out;
+
+            @Override
+            public List<String> columns(String table) {
+                return tables.columns(table);
+            }
         };
     }
 

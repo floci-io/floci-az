@@ -52,25 +52,40 @@ public final class KqlEngine {
     /** Where the engine reads tables from. {@link #rows} answers null for a table it does not have. */
     public interface Tables {
         List<Map<String, Object>> rows(String table);
+
+        /** The published columns of a table, so names are checked whatever the data; null when unknown. */
+        default List<String> columns(String table) {
+            return null;
+        }
     }
+
+    /** The aggregation functions {@code summarize} accepts, checked before a query runs. */
+    static final Set<String> AGGREGATES = Set.of("any", "arg_max", "arg_min", "avg", "count", "countif", "dcount",
+        "make_list", "make_set", "max", "min", "sum", "take_any");
 
     private KqlEngine() {
     }
 
     public static List<Map<String, Object>> run(Query query, Tables tables) {
-        List<Map<String, Object>> rows = switch (query.source()) {
+        List<Map<String, Object>> rows;
+        Set<String> schema;
+        switch (query.source()) {
             case TableSource table -> {
                 List<Map<String, Object>> source = tables.rows(table.name());
                 if (source == null) {
                     throw KqlException.semantic("Failed to resolve table or column expression named '" + table.name() + "'");
                 }
-                yield new ArrayList<>(source);
+                rows = new ArrayList<>(source);
+                List<String> published = tables.columns(table.name());
+                schema = published != null ? lowerCased(published) : rows.isEmpty() ? null : lowerCased(columns(rows));
             }
-            case SubquerySource sub -> run(sub.query(), tables);
-        };
-        Set<String> schema = rows.isEmpty() ? null : lowerCased(columns(rows));
+            case SubquerySource sub -> {
+                rows = run(sub.query(), tables);
+                schema = rows.isEmpty() ? null : lowerCased(columns(rows));
+            }
+        }
         for (Op op : query.ops()) {
-            schema = checkColumns(op, schema);
+            schema = checkNames(op, schema);
             rows = apply(op, rows, tables);
         }
         return rows;
@@ -79,25 +94,26 @@ public final class KqlEngine {
     // ── Column checks ───────────────────────────────────────────────────────────
 
     /**
-     * Rejects a reference to a top-level column the current schema does not have, as Kusto does before
-     * running the query, and returns the schema the operator leaves behind; null means unknown, after
-     * an operator whose output columns depend on the data (a join or a union), when nothing is checked.
+     * Rejects a function the engine does not know and, when the schema is known, a reference to a top-level
+     * column it does not have, as Kusto does before running the query; returns the schema the operator leaves
+     * behind, or null when its output columns depend on the data (a join, a union, a summary), after which
+     * only function names are checked.
      */
-    private static Set<String> checkColumns(Op op, Set<String> schema) {
-        if (schema == null) {
-            return null;
-        }
+    private static Set<String> checkNames(Op op, Set<String> schema) {
         switch (op) {
             case Where where -> {
                 checkExpr(where.predicate(), schema);
                 return schema;
             }
             case Extend extend -> {
-                Set<String> out = new LinkedHashSet<>(schema);
+                Set<String> out = schema == null ? null : new LinkedHashSet<>(schema);
                 int position = 0;
                 for (Named column : extend.columns()) {
                     checkExpr(column.expr(), schema);
-                    out.add(columnName(column, position++).toLowerCase(Locale.ROOT));
+                    if (out != null) {
+                        out.add(columnName(column, position).toLowerCase(Locale.ROOT));
+                    }
+                    position++;
                 }
                 return out;
             }
@@ -111,6 +127,9 @@ public final class KqlEngine {
                 return out;
             }
             case ProjectAway away -> {
+                if (schema == null) {
+                    return null;
+                }
                 Set<String> out = new LinkedHashSet<>(schema);
                 for (String column : away.columns()) {
                     out.remove(column.toLowerCase(Locale.ROOT));
@@ -118,16 +137,20 @@ public final class KqlEngine {
                 return out;
             }
             case Summarize summarize -> {
-                Set<String> out = new LinkedHashSet<>();
-                int position = 0;
                 for (Named by : summarize.by()) {
                     checkExpr(by.expr(), schema);
-                    out.add(columnName(by, position++).toLowerCase(Locale.ROOT));
                 }
                 for (Named aggregate : summarize.aggregates()) {
-                    checkExpr(aggregate.expr(), schema);
+                    if (aggregate.expr() instanceof Call call && !AGGREGATES.contains(call.name())) {
+                        throw KqlException.semantic("Unknown aggregation function '" + call.name() + "'");
+                    }
+                    for (Expr arg : aggregate.expr() instanceof Call call ? call.args() : List.<Expr>of()) {
+                        if (!(arg instanceof Col col && col.leaf().equals("*"))) {
+                            checkExpr(arg, schema);
+                        }
+                    }
                 }
-                return null; // aggregate names depend on the functions used
+                return null;
             }
             case OrderBy orderBy -> {
                 for (SortKey key : orderBy.keys()) {
@@ -136,14 +159,15 @@ public final class KqlEngine {
                 return schema;
             }
             case Distinct distinct -> {
+                if (distinct.columns().isEmpty() || distinct.columns().contains("*")) {
+                    return schema;
+                }
                 Set<String> out = new LinkedHashSet<>();
                 for (String column : distinct.columns()) {
-                    if (!column.equals("*")) {
-                        checkColumn(column, schema);
-                        out.add(column.toLowerCase(Locale.ROOT));
-                    }
+                    checkColumn(column, schema);
+                    out.add(column.toLowerCase(Locale.ROOT));
                 }
-                return distinct.columns().isEmpty() || distinct.columns().contains("*") ? schema : out;
+                return out;
             }
             case Take take -> {
                 return schema;
@@ -172,7 +196,12 @@ public final class KqlEngine {
                     checkColumn(col.path().getFirst(), schema);
                 }
             }
-            case Call call -> call.args().forEach(arg -> checkExpr(arg, schema));
+            case Call call -> {
+                if (!KqlFunctions.isKnown(call.name())) {
+                    throw KqlException.semantic("Unknown function '" + call.name() + "'");
+                }
+                call.args().forEach(arg -> checkExpr(arg, schema));
+            }
             case Bin bin -> {
                 checkExpr(bin.left(), schema);
                 checkExpr(bin.right(), schema);
@@ -195,7 +224,7 @@ public final class KqlEngine {
     }
 
     private static void checkColumn(String name, Set<String> schema) {
-        if (!schema.contains(name.toLowerCase(Locale.ROOT))) {
+        if (schema != null && !schema.contains(name.toLowerCase(Locale.ROOT))) {
             throw KqlException.semantic("Failed to resolve table or column expression named '" + name + "'");
         }
     }

@@ -51,6 +51,19 @@ public class GraphTables implements KqlEngine.Tables {
         this.policyStore = policyStore;
     }
 
+    /** The columns every table publishes, in the order {@link #row} writes them. */
+    static final List<String> COLUMNS = List.of("id", "name", "type", "tenantId", "kind", "location", "resourceGroup",
+        "subscriptionId", "managedBy", "sku", "plan", "properties", "tags", "identity", "zones", "extendedLocation",
+        "systemData");
+
+    @Override
+    public List<String> columns(String table) {
+        return switch (table.toLowerCase(Locale.ROOT)) {
+            case "resources", "resourcecontainers", "policyresources", "authorizationresources" -> COLUMNS;
+            default -> null;
+        };
+    }
+
     @Override
     public List<Map<String, Object>> rows(String table) {
         return switch (table.toLowerCase(Locale.ROOT)) {

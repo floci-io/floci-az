@@ -203,6 +203,12 @@ class ResourceGraphTest {
                 .then().statusCode(200)
                 .body("data.columns.name", equalTo(java.util.List.of("name", "type")))
                 .body("data.rows", hasSize(0));
+        // Names are checked against the published schema even when a table is empty.
+        query("authorizationresources | project misspelledColumn")
+                .statusCode(400).body("error.details[1].code", equalTo("SemanticError"));
+        query("authorizationresources | project nosuchfunction(id)")
+                .statusCode(400).body("error.details[1].code", equalTo("SemanticError"));
+        query("authorizationresources | project id, properties.roleName").statusCode(200).body("count", equalTo(0));
         // Container rows publish systemData too, as null.
         given().contentType("application/json")
                 .body("{\"query\": \"resourcecontainers | project id, systemData\"}")

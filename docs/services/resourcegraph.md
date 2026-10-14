@@ -23,7 +23,8 @@ against it yet.
   `resourceGroup`, `subscriptionId`, `managedBy`, `sku`, `plan`, `properties`, `tags`, `identity`,
   `zones`, `extendedLocation` and `systemData` (null when the resource carries none); `type`, `location`
   and `resourceGroup` are lowercased the way the service normalises them. A reference to a column the
-  schema does not have is a `SemanticError`, as in Kusto; properties below `properties`, `tags` and the
+  schema does not have, or to a function the engine does not know, is a `SemanticError` before the
+  query runs, whatever the table holds, as in Kusto; properties below `properties`, `tags` and the
   other dynamic columns are data and read as null when absent. Comparisons with a null operand are null,
   so `not(x < now())` keeps rows with no `x` out, as Kusto does.
 - **Operators**: `where`, `extend`, `project`, `project-away`, `summarize ... by`, `order by` /

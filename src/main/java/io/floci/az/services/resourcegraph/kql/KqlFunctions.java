@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -20,6 +21,18 @@ import java.util.regex.PatternSyntaxException;
 final class KqlFunctions {
 
     private KqlFunctions() {
+    }
+
+    /** Every scalar function the engine evaluates, checked before a query runs. */
+    static final Set<String> NAMES = Set.of("abs", "ago", "array_concat", "array_length", "bag_keys", "bag_pack", "case",
+        "ceiling", "coalesce", "extract", "floor", "format_datetime", "gettype", "iff", "iif", "indexof", "isempty",
+        "isnotempty", "isnotnull", "isnull", "not", "now", "pack", "pack_array", "pack_dictionary", "parse_json",
+        "replace_regex", "replace_string", "round", "split", "startofday", "strcat", "strcat_delim", "strcmp", "strlen",
+        "substring", "tobool", "toboolean", "todatetime", "todecimal", "todouble", "todynamic", "toint", "tolong",
+        "tolower", "toobject", "toreal", "tostring", "totimespan", "toupper", "trim", "trim_end", "trim_start", "typeof");
+
+    static boolean isKnown(String name) {
+        return NAMES.contains(name);
     }
 
     static Object call(String name, List<Expr> args, Map<String, Object> row) {
