@@ -4,9 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
-import io.floci.az.services.entra.EntraModels.Group;
-import io.floci.az.services.entra.EntraModels.User;
-import io.floci.az.services.entra.EntraStore;
+import io.floci.az.services.entra.DirectoryReader;
+import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
+import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
+import io.floci.az.services.entra.GraphDirectoryStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -23,9 +24,9 @@ import java.util.Optional;
  * Microsoft Graph emulation — a narrow slice at {@code /v1.0/...}, reached via
  * {@link io.floci.az.core.AzureRoutingFilter}'s path-shape dispatch (not account-suffix routed).
  *
- * <p>Directory data (users, groups, membership) lives in {@link EntraStore}: it is the same
- * directory the Entra token claims are drawn from, so a token's {@code oid} and a Graph lookup
- * resolve to one identity.
+ * <p>Directory data (users, groups, membership) lives in {@link GraphDirectoryStore}: it is the
+ * same directory the Entra token claims are drawn from, so a token's {@code oid} and a Graph lookup
+ * resolve to one identity. Every request acts in the default tenant's directory.
  *
  * <ul>
  *   <li>{@code GET v1.0/servicePrincipals} — service principal discovery, used by the azurerm
@@ -42,13 +43,15 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private static final Logger LOG = Logger.getLogger(GraphServiceHandler.class);
 
     private final EmulatorConfig config;
-    private final EntraStore store;
+    private final GraphDirectoryStore store;
+    private final DirectoryReader directory;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Inject
-    public GraphServiceHandler(EmulatorConfig config, EntraStore store) {
+    public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory) {
         this.config = config;
         this.store = store;
+        this.directory = directory;
     }
 
     @Override public String getServiceType() { return "graph"; }
@@ -119,16 +122,18 @@ public class GraphServiceHandler implements AzureServiceHandler {
 
     /** {@code id} may be the user's object id or userPrincipalName, as real Graph accepts both. */
     private Response getMemberGroups(String userIdOrUpn, AzureRequest request) {
-        Optional<User> user = store.getUser(userIdOrUpn).or(() -> store.findUserByUpn(userIdOrUpn));
+        String tenantId = tenantId();
+        Optional<DirectoryUser> user = directory.user(tenantId, userIdOrUpn)
+                .or(() -> directory.userByPrincipalName(tenantId, userIdOrUpn));
         if (user.isEmpty()) {
             return graphError(404, "Request_ResourceNotFound",
                     "Resource '" + userIdOrUpn + "' does not exist.");
         }
         boolean securityEnabledOnly = Boolean.TRUE.equals(readJsonBody(request).get("securityEnabledOnly"));
 
-        List<String> value = store.memberGroups(user.get().objectId()).stream()
+        List<String> value = directory.memberGroupIds(tenantId, user.get().id()).stream()
                 .filter(groupId -> !securityEnabledOnly
-                        || store.getGroup(groupId).map(Group::securityEnabled).orElse(false))
+                        || directory.group(tenantId, groupId).map(DirectoryGroup::securityEnabled).orElse(false))
                 .sorted()
                 .toList();
 
@@ -139,7 +144,8 @@ public class GraphServiceHandler implements AzureServiceHandler {
     }
 
     private Response addMember(String groupId, AzureRequest request) {
-        if (store.getGroup(groupId).isEmpty()) {
+        String tenantId = tenantId();
+        if (directory.group(tenantId, groupId).isEmpty()) {
             return graphError(404, "Request_ResourceNotFound", "Resource '" + groupId + "' does not exist.");
         }
         Object odataId = readJsonBody(request).get("@odata.id");
@@ -147,19 +153,25 @@ public class GraphServiceHandler implements AzureServiceHandler {
         if (memberId == null) {
             return graphError(400, "Request_BadRequest", "@odata.id is required.");
         }
-        store.addMember(groupId, memberId);
+        store.addLink(tenantId, groupId, GraphDirectoryStore.MEMBERS, memberId);
         return Response.noContent().build();
     }
 
     private Response removeMember(String groupId, String memberId) {
-        if (store.getGroup(groupId).isEmpty()) {
+        String tenantId = tenantId();
+        if (directory.group(tenantId, groupId).isEmpty()) {
             return graphError(404, "Request_ResourceNotFound", "Resource '" + groupId + "' does not exist.");
         }
-        store.removeMember(groupId, memberId);
+        store.removeLink(tenantId, groupId, GraphDirectoryStore.MEMBERS, memberId);
         return Response.noContent().build();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /** The directory every Graph request acts in. */
+    private String tenantId() {
+        return store.defaultTenantId();
+    }
 
     /**
      * {@code @odata.id} points at real Graph ({@code https://graph.microsoft.com/v1.0/directoryObjects/{id}}),

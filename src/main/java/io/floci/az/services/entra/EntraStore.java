@@ -7,47 +7,30 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
-import io.floci.az.services.entra.EntraModels.AppRegistration;
 import io.floci.az.services.entra.EntraModels.AuthorizationCode;
-import io.floci.az.services.entra.EntraModels.ClientSecret;
-import io.floci.az.services.entra.EntraModels.Group;
-import io.floci.az.services.entra.EntraModels.GroupMembership;
-import io.floci.az.services.entra.EntraModels.ServicePrincipal;
 import io.floci.az.services.entra.EntraModels.Tenant;
-import io.floci.az.services.entra.EntraModels.User;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.LinkedHashSet;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * {@link StorageFactory}-backed CRUD for Entra tenants, app registrations and service principals,
- * plus the out-of-the-box dev seed so {@code ClientSecretCredential} works with no setup.
- *
- * <p>The token service reads the seed and the stored users to populate token claims; client
- * credentials are not checked against the stored registrations.
+ * {@link StorageFactory}-backed state of the token service itself: tenants and single-use
+ * authorization codes. Directory objects (users, groups, applications, service principals) live in
+ * {@link GraphDirectoryStore}, which shares this store and seeds the dev fixtures named here.
  */
 @ApplicationScoped
 public class EntraStore implements Resettable {
 
-    private static final Logger LOG = Logger.getLogger(EntraStore.class);
-
     private static final String TENANT_PREFIX     = "tenant:";
-    private static final String APP_PREFIX        = "app:";
-    private static final String SP_PREFIX         = "sp:";
-    private static final String USER_PREFIX       = "user:";
-    private static final String GROUP_PREFIX      = "group:";
-    private static final String MEMBERSHIP_PREFIX = "membership:";
     private static final String AUTHCODE_PREFIX   = "authcode:";
 
     /** Well-known dev credentials, documented so SDK clients can authenticate with no setup. */
@@ -83,26 +66,22 @@ public class EntraStore implements Resettable {
         if (store.get(TENANT_PREFIX + tenantId).isEmpty()) {
             putTenant(new Tenant(tenantId, "floci-az default tenant"));
         }
-        if (findAppByClientId(DEV_CLIENT_ID).isEmpty()) {
-            putApp(new AppRegistration(
-                DEV_CLIENT_ID, DEV_APP_OBJECT_ID, "floci-az dev app", tenantId,
-                List.of(new ClientSecret("dev", DEV_CLIENT_SECRET, "flo"))));
-            putServicePrincipal(new ServicePrincipal(
-                DEV_SP_OBJECT_ID, DEV_CLIENT_ID, "floci-az dev app", tenantId));
-            LOG.infov("Seeded Entra dev app registration (client_id={0})", DEV_CLIENT_ID);
-        }
-        if (getUser(DEV_USER_OBJECT_ID).isEmpty()) {
-            putUser(new User(DEV_USER_OBJECT_ID, DEV_USER_UPN, "floci-az dev user", DEV_USER_UPN, tenantId));
-            putGroup(new Group(DEV_GROUP_OBJECT_ID, DEV_GROUP_NAME, tenantId, true));
-            addMember(DEV_GROUP_OBJECT_ID, DEV_USER_OBJECT_ID);
-            LOG.infov("Seeded Entra dev user/group (upn={0}, group={1})", DEV_USER_UPN, DEV_GROUP_NAME);
-        }
     }
 
-    /** Wipes all directory/authorization-code state, then reseeds the zero-setup dev fixtures. */
+    /**
+     * Wipes tenant and authorization-code state, then reseeds the default tenant. The directory
+     * entries sharing this store are {@link GraphDirectoryStore}'s to clear: resets run in no
+     * particular order, so each store removes only its own keys.
+     */
     @Override
-    public void clear() {
-        store.clear();
+    public synchronized void clear() {
+        Set<String> doomed = new HashSet<>();
+        for (String key : Set.copyOf(store.keys())) {
+            if (key.startsWith(TENANT_PREFIX) || key.startsWith(AUTHCODE_PREFIX)) {
+                doomed.add(key);
+            }
+        }
+        store.applyBatch(Map.of(), doomed);
         seed();
     }
 
@@ -112,75 +91,6 @@ public class EntraStore implements Resettable {
 
     public void putTenant(Tenant tenant) {
         write(TENANT_PREFIX + tenant.id(), tenant);
-    }
-
-    public Optional<AppRegistration> findAppByClientId(String clientId) {
-        return read(APP_PREFIX + clientId, AppRegistration.class);
-    }
-
-    public void putApp(AppRegistration app) {
-        write(APP_PREFIX + app.appId(), app);
-    }
-
-    public Optional<ServicePrincipal> findServicePrincipalByAppId(String appId) {
-        return read(SP_PREFIX + appId, ServicePrincipal.class);
-    }
-
-    public void putServicePrincipal(ServicePrincipal sp) {
-        write(SP_PREFIX + sp.appId(), sp);
-    }
-
-    public Optional<User> getUser(String objectId) {
-        return read(USER_PREFIX + objectId, User.class);
-    }
-
-    public Optional<User> findUserByUpn(String upn) {
-        return store.scan(key -> key.startsWith(USER_PREFIX)).stream()
-                .map(obj -> parse(obj.data(), User.class, obj.key()))
-                .filter(user -> user.upn().equalsIgnoreCase(upn))
-                .findFirst();
-    }
-
-    public void putUser(User user) {
-        write(USER_PREFIX + user.objectId(), user);
-    }
-
-    public Optional<Group> getGroup(String objectId) {
-        return read(GROUP_PREFIX + objectId, Group.class);
-    }
-
-    public void putGroup(Group group) {
-        write(GROUP_PREFIX + group.objectId(), group);
-    }
-
-    /** Synchronized so concurrent add/remove on the same group can't race each other's read-modify-write. */
-    public synchronized void addMember(String groupId, String memberObjectId) {
-        Set<String> members = new LinkedHashSet<>(membership(groupId).memberObjectIds());
-        members.add(memberObjectId);
-        write(MEMBERSHIP_PREFIX + groupId, new GroupMembership(groupId, members));
-    }
-
-    public synchronized void removeMember(String groupId, String memberObjectId) {
-        Set<String> members = new LinkedHashSet<>(membership(groupId).memberObjectIds());
-        members.remove(memberObjectId);
-        write(MEMBERSHIP_PREFIX + groupId, new GroupMembership(groupId, members));
-    }
-
-    /** Group object ids {@code memberObjectId} directly belongs to. No nested-group transitivity yet. */
-    public Set<String> memberGroups(String memberObjectId) {
-        Set<String> result = new LinkedHashSet<>();
-        for (StoredObject obj : store.scan(key -> key.startsWith(MEMBERSHIP_PREFIX))) {
-            GroupMembership membership = parse(obj.data(), GroupMembership.class, obj.key());
-            if (membership.memberObjectIds().contains(memberObjectId)) {
-                result.add(membership.groupId());
-            }
-        }
-        return result;
-    }
-
-    private GroupMembership membership(String groupId) {
-        return read(MEMBERSHIP_PREFIX + groupId, GroupMembership.class)
-                .orElse(new GroupMembership(groupId, Set.of()));
     }
 
     /** Stores a single-use authorization code; the token endpoint deletes it on redemption. */

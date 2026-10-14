@@ -9,6 +9,10 @@ import java.util.Set;
 /**
  * Domain objects for Microsoft Entra ID emulation. Kept as immutable records and serialised
  * to the {@code entra} storage backend as JSON.
+ *
+ * <p>{@link AppRegistration}, {@link ClientSecret}, {@link ServicePrincipal}, {@link User},
+ * {@link Group} and {@link GroupMembership} are the flat pre-tenant directory format. Nothing
+ * writes them any more; {@link GraphDirectoryStore} still reads entries in this format in place.
  */
 @RegisterForReflection
 public final class EntraModels {
@@ -17,7 +21,7 @@ public final class EntraModels {
 
     public record Tenant(String id, String displayName) {}
 
-    /** A client secret. For dev seeding the plaintext value is kept; PR2 will hash on registration. */
+    /** A legacy client secret, in plaintext. {@link GraphDirectoryStore} hashes it when the app is next written. */
     public record ClientSecret(String keyId, String value, String hint) {}
 
     public record AppRegistration(

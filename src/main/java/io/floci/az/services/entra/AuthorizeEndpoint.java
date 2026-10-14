@@ -1,7 +1,7 @@
 package io.floci.az.services.entra;
 
+import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.EntraModels.AuthorizationCode;
-import io.floci.az.services.entra.EntraModels.User;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -30,11 +30,13 @@ public class AuthorizeEndpoint implements EntraEndpoint {
     private static final List<String> RESPONSE_MODES = List.of("query", "fragment");
 
     private final EntraStore store;
+    private final DirectoryReader directory;
     private final EntraResponses responses;
 
     @Inject
-    public AuthorizeEndpoint(EntraStore store, EntraResponses responses) {
+    public AuthorizeEndpoint(EntraStore store, DirectoryReader directory, EntraResponses responses) {
         this.store = store;
+        this.directory = directory;
         this.responses = responses;
     }
 
@@ -69,8 +71,11 @@ public class AuthorizeEndpoint implements EntraEndpoint {
             return responses.error(AadstsError.MISSING_CLIENT_ID);
         }
 
-        User user = (loginHint == null ? Optional.<User>empty() : store.findUserByUpn(loginHint))
-                .or(() -> store.getUser(EntraStore.DEV_USER_OBJECT_ID))
+        String directoryTenantId = directory.defaultTenantId();
+        DirectoryUser user = (loginHint == null
+                ? Optional.<DirectoryUser>empty()
+                : directory.userByPrincipalName(directoryTenantId, loginHint))
+                .or(() -> directory.user(directoryTenantId, EntraStore.DEV_USER_OBJECT_ID))
                 .orElse(null);
         if (user == null) {
             return responses.error(AadstsError.NO_DEV_USER);
@@ -80,7 +85,7 @@ public class AuthorizeEndpoint implements EntraEndpoint {
         store.putAuthorizationCode(new AuthorizationCode(
                 code, request.tenantId(), clientId, redirectUri, params.get("code_challenge"),
                 params.getOrDefault("code_challenge_method", "plain"), params.get("scope"),
-                user.objectId(), params.get("nonce"), params.get("state"),
+                user.id(), params.get("nonce"), params.get("state"),
                 Instant.now().plusSeconds(300)));
 
         return Response.status(Response.Status.FOUND)

@@ -2,8 +2,8 @@ package io.floci.az.services.entra;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.FormBody;
-import io.floci.az.services.entra.EntraModels.AppRegistration;
-import io.floci.az.services.entra.EntraModels.ServicePrincipal;
+import io.floci.az.services.entra.DirectoryReader.DirectoryApplication;
+import io.floci.az.services.entra.DirectoryReader.DirectoryServicePrincipal;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -41,16 +41,16 @@ public class TokenEndpoint implements EntraEndpoint {
             List.of("client_secret_post", "client_secret_basic", "private_key_jwt");
 
     private final EmulatorConfig config;
-    private final EntraStore store;
+    private final DirectoryReader directory;
     private final IssuerFactory issuers;
     private final EntraResponses responses;
     private final Map<String, GrantHandler> grants;
 
     @Inject
-    public TokenEndpoint(EmulatorConfig config, EntraStore store, IssuerFactory issuers,
+    public TokenEndpoint(EmulatorConfig config, DirectoryReader directory, IssuerFactory issuers,
                          EntraResponses responses, Instance<GrantHandler> grantHandlers) {
         this.config = config;
-        this.store = store;
+        this.directory = directory;
         this.issuers = issuers;
         this.responses = responses;
         this.grants = indexByGrantType(grantHandlers);
@@ -100,11 +100,15 @@ public class TokenEndpoint implements EntraEndpoint {
         boolean v2 = request.path().endsWith(V2_PATH);
         String clientId = form.containsKey("client_id") ? form.get("client_id") : basicClientId(request);
         String scope = form.getOrDefault("scope", form.get("resource"));
-        AppRegistration app = clientId == null ? null : store.findAppByClientId(clientId).orElse(null);
+        String directoryTenantId = directory.defaultTenantId();
+        DirectoryApplication app = clientId == null
+                ? null
+                : directory.applicationByAppId(directoryTenantId, clientId).orElse(null);
 
         String appId = app != null ? app.appId() : (clientId != null ? clientId : EntraStore.DEV_CLIENT_ID);
         String clientObjectId = app != null
-                ? store.findServicePrincipalByAppId(appId).map(ServicePrincipal::objectId).orElse(app.objectId())
+                ? directory.servicePrincipalByAppId(directoryTenantId, appId).map(DirectoryServicePrincipal::id)
+                        .orElse(app.id())
                 : TokenIssuer.deterministicGuid(appId);
 
         return new TokenRequest(form, request.tenantId(), request.baseUrl(), v2, clientId, appId,

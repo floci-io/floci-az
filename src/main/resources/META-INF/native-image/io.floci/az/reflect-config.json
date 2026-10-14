@@ -2527,5 +2527,23 @@
     "name": "org.bouncycastle.jcajce.provider.symmetric.PBEPBKDF2$PBKDF2withSHA256",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true
+  },
+  {
+    "name": "io.floci.az.services.entra.DirectoryObject",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "io.floci.az.services.entra.DirectoryLinks",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "io.floci.az.services.entra.SecretHasher$SecretHash",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
   }
 ]

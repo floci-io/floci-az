@@ -1,7 +1,7 @@
 package io.floci.az.core;
 
-import io.floci.az.services.entra.EntraModels.User;
 import io.floci.az.services.entra.EntraStore;
+import io.floci.az.services.entra.GraphDirectoryStore;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
@@ -20,12 +20,13 @@ class AdminResetTest {
             "/subscriptions/reset-sub/resourceGroups/reset-rg"
                     + "/providers/Microsoft.ApiManagement/service/reset-apim?api-version=2024-05-01";
 
-    @Inject EntraStore entraStore;
+    @Inject GraphDirectoryStore directoryStore;
 
     @Test
-    void resetClearsGraphMembershipWrittenThroughEntraStore() {
+    void resetClearsGraphMembershipWrittenThroughTheDirectoryStore() {
         String userId = "reset-user-" + java.util.UUID.randomUUID();
-        entraStore.putUser(new User(userId, userId + "@floci-az.local", "reset test user", null, "reset-tenant"));
+        directoryStore.put(GraphDirectoryStore.user(directoryStore.defaultTenantId(), userId,
+                userId + "@floci-az.local", "reset test user", null));
 
         given()
           .contentType("application/json")
@@ -43,7 +44,7 @@ class AdminResetTest {
         given().when().post("/_admin/reset")
           .then().statusCode(204);
 
-        // EntraStore didn't self-register as Resettable before — this Graph-written
+        // The directory store didn't self-register as Resettable before: this Graph-written
         // membership (and the user backing it) used to survive a reset.
         given()
           .contentType("application/json")

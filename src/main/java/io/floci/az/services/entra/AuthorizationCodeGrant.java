@@ -1,7 +1,7 @@
 package io.floci.az.services.entra;
 
+import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.EntraModels.AuthorizationCode;
-import io.floci.az.services.entra.EntraModels.User;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -27,12 +27,15 @@ public class AuthorizationCodeGrant implements GrantHandler {
 
     private final TokenIssuer tokenIssuer;
     private final EntraStore store;
+    private final DirectoryReader directory;
     private final EntraResponses responses;
 
     @Inject
-    public AuthorizationCodeGrant(TokenIssuer tokenIssuer, EntraStore store, EntraResponses responses) {
+    public AuthorizationCodeGrant(TokenIssuer tokenIssuer, EntraStore store, DirectoryReader directory,
+                                  EntraResponses responses) {
         this.tokenIssuer = tokenIssuer;
         this.store = store;
+        this.directory = directory;
         this.responses = responses;
     }
 
@@ -69,7 +72,7 @@ public class AuthorizationCodeGrant implements GrantHandler {
         if (!verifyPkce(authCode, request.form().get("code_verifier"))) {
             return responses.error(AadstsError.PKCE_MISMATCH);
         }
-        User user = store.getUser(authCode.userObjectId()).orElse(null);
+        DirectoryUser user = directory.user(directory.defaultTenantId(), authCode.userObjectId()).orElse(null);
         if (user == null) {
             return responses.error(AadstsError.CODE_UNKNOWN_USER);
         }
@@ -78,13 +81,13 @@ public class AuthorizationCodeGrant implements GrantHandler {
         String scp = Scopes.normalize(authCode.scope());
         String accessAudience = request.v2() ? appId : Scopes.firstScope(authCode.scope(), request.baseUrl());
         String accessToken = tokenIssuer.issue(new TokenIssuer.TokenSpec(
-                request.tenantId(), request.issuer(), accessAudience, user.objectId(), user.objectId(), appId,
+                request.tenantId(), request.issuer(), accessAudience, user.id(), user.id(), appId,
                 scp, request.tokenVersion(), null, request.lifetimeSeconds()));
         // The ID token audience is always the client id, whatever the API version: that is OIDC, not Azure.
         String idToken = tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
-                request.tenantId(), request.issuer(), appId, user.objectId(), user.objectId(), appId, scp,
+                request.tenantId(), request.issuer(), appId, user.id(), user.id(), appId, scp,
                 request.tokenVersion(), null, request.lifetimeSeconds()),
-                authCode.nonce(), user.displayName(), user.upn(), user.email());
+                authCode.nonce(), user.displayName(), user.userPrincipalName(), user.mail());
         return responses.token(accessToken, idToken, request.lifetimeSeconds(), scp);
     }
 
