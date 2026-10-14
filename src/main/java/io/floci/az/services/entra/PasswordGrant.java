@@ -33,7 +33,8 @@ public class PasswordGrant implements GrantHandler {
         String scp = Scopes.normalize(request.scope());
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), audience, userOid, userOid, request.appId(), scp,
-                request.tokenVersion(), null, request.lifetimeSeconds()));
+                request.tokenVersion(), null, request.lifetimeSeconds()),
+                TokenIssuer.userClaims(request.tokenVersion(), username));
         return responses.token(token, null, request.lifetimeSeconds(), scp);
     }
 }

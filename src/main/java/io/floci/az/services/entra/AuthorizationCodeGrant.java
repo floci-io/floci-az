@@ -79,7 +79,8 @@ public class AuthorizationCodeGrant implements GrantHandler {
         String accessAudience = request.v2() ? appId : Scopes.firstScope(authCode.scope(), request.baseUrl());
         String accessToken = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), accessAudience, user.objectId(), user.objectId(), appId,
-                scp, request.tokenVersion(), null, request.lifetimeSeconds()));
+                scp, request.tokenVersion(), null, request.lifetimeSeconds()),
+                TokenIssuer.userClaims(request.tokenVersion(), user.upn()));
         // The ID token audience is always the client id, whatever the API version: that is OIDC, not Azure.
         String idToken = tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), appId, user.objectId(), user.objectId(), appId, scp,

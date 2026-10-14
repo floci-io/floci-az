@@ -3,6 +3,7 @@ package io.floci.az.services.policy;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.auth.BearerClaims;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
@@ -50,8 +51,11 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
 
     static final String SERVICE_TYPE = "policy";
     private static final String SCOPE_KEY = "_scope";
-    /** Object id reported as the author in {@code metadata} and {@code systemData}, stable across restarts. */
-    private static final String AUTHOR = TokenIssuer.deterministicGuid("policy-author");
+    /**
+     * Object id reported as the author in {@code metadata} and {@code systemData} when the request carries
+     * no bearer token that names a caller; stable across restarts.
+     */
+    static final String AUTHOR = TokenIssuer.deterministicGuid("policy-author");
     private static final Set<String> EXEMPTION_CATEGORIES = Set.of("Waiver", "Mitigated");
     private static final Set<ScopeKind> DEFINITION_SCOPES = EnumSet.of(ScopeKind.MANAGEMENT_GROUP, ScopeKind.SUBSCRIPTION);
     private static final Set<ScopeKind> ASSIGNMENT_SCOPES = EnumSet.of(ScopeKind.MANAGEMENT_GROUP,
@@ -178,12 +182,12 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         properties.put("policyType", "Custom");
         properties.put("mode", ArmJson.string(props, "mode", "Indexed"));
         putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing));
+        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
         properties.put("version", ArmJson.string(props, "version", "1.0.0"));
         putIfMap(properties, "parameters", props);
         properties.put("policyRule", rule);
 
-        Map<String, Object> resource = envelope(path, id, properties, existing);
+        Map<String, Object> resource = envelope(req, path, id, properties, existing);
         store.putDefinition(id, resource);
         // Per the policy spec, CreateOrUpdate on a definition answers 201 for both create and update.
         return Response.status(201).entity(strip(resource)).build();
@@ -285,13 +289,13 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         putIfString(properties, "displayName", props);
         properties.put("policyType", "Custom");
         putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing));
+        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
         properties.put("version", ArmJson.string(props, "version", "1.0.0"));
         putIfMap(properties, "parameters", props);
         properties.put("policyDefinitions", normalized);
         putIfList(properties, "policyDefinitionGroups", props);
 
-        Map<String, Object> resource = envelope(path, id, properties, existing);
+        Map<String, Object> resource = envelope(req, path, id, properties, existing);
         store.putSetDefinition(id, resource);
         return Response.status(existing == null ? 201 : 200).entity(strip(resource)).build();
     }
@@ -376,7 +380,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         putIfList(properties, "notScopes", props);
         putIfMap(properties, "parameters", props);
         putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing));
+        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
         properties.put("enforcementMode", ArmJson.string(props, "enforcementMode", "Default"));
         putIfList(properties, "nonComplianceMessages", props);
         putIfList(properties, "resourceSelectors", props);
@@ -392,7 +396,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (body.get("location") instanceof String location) {
             resource.put("location", location);
         }
-        resource.put("systemData", systemData(existing));
+        resource.put("systemData", systemData(existing, caller(req)));
         resource.put(SCOPE_KEY, path.scopeKey());
         store.putAssignment(id, resource);
         // Per the policy spec, Create on an assignment answers 201 for both create and update.
@@ -420,6 +424,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (patch.get("overrides") instanceof List<?> overrides) {
             properties.put("overrides", overrides);
         }
+        properties.put("metadata", auditedMetadata(properties.get("metadata"), existing, caller(req)));
         updated.put("properties", properties);
         updated.put("id", existing.get("id"));
         updated.put("type", existing.get("type"));
@@ -428,7 +433,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (location != null) {
             updated.put("location", location);
         }
-        updated.put("systemData", systemData(existing));
+        updated.put("systemData", systemData(existing, caller(req)));
         updated.put(SCOPE_KEY, existing.get(SCOPE_KEY));
         store.putAssignment(id, updated);
         return Response.ok(strip(updated)).build();
@@ -547,7 +552,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         putIfMap(properties, "metadata", props);
         putIfList(properties, "resourceSelectors", props);
 
-        Map<String, Object> resource = envelope(path, id, properties, existing);
+        Map<String, Object> resource = envelope(req, path, id, properties, existing);
         store.putExemption(id, resource);
         return Response.status(existing == null ? 201 : 200).entity(strip(resource)).build();
     }
@@ -566,7 +571,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (patch.get("assignmentScopeValidation") instanceof String validation) {
             properties.put("assignmentScopeValidation", validation);
         }
-        Map<String, Object> updated = envelope(path, id, properties, existing);
+        Map<String, Object> updated = envelope(req, path, id, properties, existing);
         store.putExemption(id, updated);
         return Response.ok(strip(updated)).build();
     }
@@ -724,14 +729,14 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
     // ── Shared: resource assembly ───────────────────────────────────────────────
 
     /** Wraps {@code properties} in the ARM envelope: properties, id, type, name, systemData. */
-    private Map<String, Object> envelope(PolicyPath path, String id, Map<String, Object> properties,
+    private Map<String, Object> envelope(AzureRequest req, PolicyPath path, String id, Map<String, Object> properties,
                                          Map<String, Object> existing) {
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("properties", properties);
         resource.put("id", id);
         resource.put("type", path.type().armType());
         resource.put("name", path.name());
-        resource.put("systemData", systemData(existing));
+        resource.put("systemData", systemData(existing, caller(req)));
         resource.put(SCOPE_KEY, path.scopeKey());
         return resource;
     }
@@ -740,7 +745,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
      * The caller-supplied {@code metadata} plus the audit keys Azure stamps on definitions, set
      * definitions and assignments. Server values always win over any audit keys echoed back by the client.
      */
-    private static Map<String, Object> auditedMetadata(Object given, Map<String, Object> existing) {
+    private static Map<String, Object> auditedMetadata(Object given, Map<String, Object> existing, Caller caller) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (given instanceof Map<?, ?> map) {
             map.forEach((key, value) -> metadata.put(String.valueOf(key), value));
@@ -748,28 +753,44 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         String now = Instant.now().toString();
         Map<String, Object> previous = existing == null ? null : ArmJson.cast(propertiesOf(existing).get("metadata"));
         if (previous == null || previous.isEmpty()) {
-            metadata.put("createdBy", AUTHOR);
+            metadata.put("createdBy", caller.objectId());
             metadata.put("createdOn", now);
         } else {
             metadata.put("createdBy", previous.get("createdBy"));
             metadata.put("createdOn", previous.get("createdOn"));
-            metadata.put("updatedBy", AUTHOR);
+            metadata.put("updatedBy", caller.friendlyName());
             metadata.put("updatedOn", now);
         }
         return metadata;
     }
 
-    private static Map<String, Object> systemData(Map<String, Object> existing) {
+    private static Map<String, Object> systemData(Map<String, Object> existing, Caller caller) {
         String now = Instant.now().toString();
         Map<String, Object> previous = existing == null ? Map.of() : ArmJson.cast(existing.get("systemData"));
         Map<String, Object> systemData = new LinkedHashMap<>();
-        systemData.put("createdBy", previous.getOrDefault("createdBy", AUTHOR));
-        systemData.put("createdByType", "Application");
+        systemData.put("createdBy", previous.getOrDefault("createdBy", caller.principal()));
+        systemData.put("createdByType", previous.getOrDefault("createdByType", caller.principalType()));
         systemData.put("createdAt", previous.getOrDefault("createdAt", now));
-        systemData.put("lastModifiedBy", AUTHOR);
-        systemData.put("lastModifiedByType", "Application");
+        systemData.put("lastModifiedBy", caller.principal());
+        systemData.put("lastModifiedByType", caller.principalType());
         systemData.put("lastModifiedAt", now);
         return systemData;
+    }
+
+    /** Who the audit fields name: the request's bearer token principal, else the fixed emulator author. */
+    /**
+     * Who made a request, in the forms Azure writes it: {@code principal} and {@code principalType} for
+     * {@code systemData}, {@code objectId} for {@code metadata.createdBy}, {@code friendlyName} for
+     * {@code metadata.updatedBy}.
+     */
+    private record Caller(String principal, String principalType, String objectId, String friendlyName) {
+    }
+
+    private static Caller caller(AzureRequest req) {
+        BearerClaims claims = BearerClaims.of(req);
+        return claims.present()
+                ? new Caller(claims.principal(), claims.principalType(), claims.objectId(), claims.friendlyName())
+                : new Caller(AUTHOR, "Application", AUTHOR, AUTHOR);
     }
 
     /** Azure hands out numeric reference ids for policy definition references that were created without one. */

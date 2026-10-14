@@ -386,7 +386,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
 
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 tenantId, issuer, resource, principalId, principalId, appId, null,
-                "1.0", "app", lifetime));
+                "1.0", "app", lifetime), Map.of("xms_mirid", found.resourceId()));
 
         // Per imds spec 2023-07-01 every value is a string.
         Map<String, Object> body = new LinkedHashMap<>();
@@ -444,7 +444,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
 
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 tenantId, issuer, resource, found.principalId(), found.principalId(), found.appId(), null,
-                "1.0", "app", lifetime));
+                "1.0", "app", lifetime), Map.of("xms_mirid", found.resourceId()));
 
         // App Service MI contract: every value is a string; expires_on is quoted epoch seconds.
         Map<String, Object> body = new LinkedHashMap<>();
@@ -460,7 +460,8 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     private sealed interface PrincipalResolution {
-        record Found(String principalId, String appId) implements PrincipalResolution {}
+        /** {@code resourceId} is the identity's ARM id, carried in tokens as {@code xms_mirid}. */
+        record Found(String principalId, String appId, String resourceId) implements PrincipalResolution {}
         enum Failure implements PrincipalResolution { MULTIPLE_SELECTORS, NOT_FOUND }
     }
 
@@ -489,14 +490,16 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
                 return PrincipalResolution.Failure.NOT_FOUND;
             }
             return new PrincipalResolution.Found(
-                    identityProperty(identity, "principalId"), identityProperty(identity, "clientId"));
+                    identityProperty(identity, "principalId"), identityProperty(identity, "clientId"),
+                    String.valueOf(identity.get("id")));
         }
 
         // System-assigned: same deterministic GUIDs as identities/default for the configured scope.
         // The emulator is not attached to a real resource, so the "own" identity scope is a config
         // knob rather than the caller's VM.
         String scope = config.services().managedIdentity().systemAssignedScope();
-        return new PrincipalResolution.Found(systemPrincipalId(scope), systemClientId(scope));
+        return new PrincipalResolution.Found(systemPrincipalId(scope), systemClientId(scope),
+                scope.startsWith("/") ? scope : "/" + scope);
     }
 
     private String resolveBaseUrl(AzureRequest request) {
