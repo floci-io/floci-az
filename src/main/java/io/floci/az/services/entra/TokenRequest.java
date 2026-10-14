@@ -7,6 +7,7 @@ import java.util.Map;
  *
  * @param form            the decoded form body
  * @param tenantId        the tenant the token is issued in
+ * @param directoryTenantId the tenant whose directory serves the request's lookups
  * @param baseUrl         the request base URL, no trailing slash
  * @param v2              whether the v2.0 endpoint was called (controls token shape and audience)
  * @param clientId        the {@code client_id} form value, or null
@@ -16,7 +17,8 @@ import java.util.Map;
  * @param scope           {@code scope}, or the v1 {@code resource} when no scope was sent
  * @param lifetimeSeconds the access token lifetime
  */
-public record TokenRequest(Map<String, String> form, String tenantId, String baseUrl, boolean v2,
+public record TokenRequest(Map<String, String> form, String tenantId, String directoryTenantId, String baseUrl,
+                           boolean v2,
                            String clientId, String appId, String clientObjectId, String issuer,
                            String scope, long lifetimeSeconds) {
 

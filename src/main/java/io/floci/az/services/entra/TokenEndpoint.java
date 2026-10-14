@@ -100,7 +100,7 @@ public class TokenEndpoint implements EntraEndpoint {
         boolean v2 = request.path().endsWith(V2_PATH);
         String clientId = form.containsKey("client_id") ? form.get("client_id") : basicClientId(request);
         String scope = form.getOrDefault("scope", form.get("resource"));
-        String directoryTenantId = directory.defaultTenantId();
+        String directoryTenantId = request.directoryTenantId();
         DirectoryApplication app = clientId == null
                 ? null
                 : directory.applicationByAppId(directoryTenantId, clientId).orElse(null);
@@ -111,7 +111,7 @@ public class TokenEndpoint implements EntraEndpoint {
                         .orElse(app.id())
                 : TokenIssuer.deterministicGuid(appId);
 
-        return new TokenRequest(form, request.tenantId(), request.baseUrl(), v2, clientId, appId,
+        return new TokenRequest(form, request.tenantId(), directoryTenantId, request.baseUrl(), v2, clientId, appId,
                 clientObjectId, issuers.issuer(request.baseUrl(), request.tenantId(), v2), scope,
                 config.services().entra().tokenLifetimeSeconds());
     }

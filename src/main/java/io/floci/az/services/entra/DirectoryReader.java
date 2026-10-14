@@ -59,11 +59,6 @@ public class DirectoryReader {
         }
     }
 
-    /** The tenant whose directory requests without a tenant of their own act in. */
-    public String defaultTenantId() {
-        return store.defaultTenantId();
-    }
-
     public Optional<DirectoryUser> user(String tenantId, String id) {
         return store.get(tenantId, DirectoryEntitySet.USERS, id).map(DirectoryReader::toUser);
     }

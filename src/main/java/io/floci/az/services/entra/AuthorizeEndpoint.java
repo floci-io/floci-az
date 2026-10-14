@@ -71,7 +71,7 @@ public class AuthorizeEndpoint implements EntraEndpoint {
             return responses.error(AadstsError.MISSING_CLIENT_ID);
         }
 
-        String directoryTenantId = directory.defaultTenantId();
+        String directoryTenantId = request.directoryTenantId();
         DirectoryUser user = (loginHint == null
                 ? Optional.<DirectoryUser>empty()
                 : directory.userByPrincipalName(directoryTenantId, loginHint))

@@ -8,6 +8,7 @@ import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.GraphDirectoryStore;
+import io.floci.az.services.entra.TenantResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -45,13 +46,16 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private final EmulatorConfig config;
     private final GraphDirectoryStore store;
     private final DirectoryReader directory;
+    private final TenantResolver tenants;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Inject
-    public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory) {
+    public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory,
+                               TenantResolver tenants) {
         this.config = config;
         this.store = store;
         this.directory = directory;
+        this.tenants = tenants;
     }
 
     @Override public String getServiceType() { return "graph"; }
@@ -168,9 +172,9 @@ public class GraphServiceHandler implements AzureServiceHandler {
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
-    /** The directory every Graph request acts in. */
+    /** The directory every Graph request acts in: the default tenant's, until callers carry their own. */
     private String tenantId() {
-        return store.defaultTenantId();
+        return tenants.defaultTenant().directoryTenantId();
     }
 
     /**

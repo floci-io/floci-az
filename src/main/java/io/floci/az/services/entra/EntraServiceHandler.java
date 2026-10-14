@@ -34,13 +34,15 @@ public class EntraServiceHandler implements AzureServiceHandler {
     private final EmulatorConfig config;
     private final Instance<EntraEndpoint> endpoints;
     private final EntraResponses responses;
+    private final TenantResolver tenants;
 
     @Inject
     public EntraServiceHandler(EmulatorConfig config, Instance<EntraEndpoint> endpoints,
-                               EntraResponses responses) {
+                               EntraResponses responses, TenantResolver tenants) {
         this.config = config;
         this.endpoints = endpoints;
         this.responses = responses;
+        this.tenants = tenants;
     }
 
     @Override public String getServiceType() { return "entra"; }
@@ -56,21 +58,14 @@ public class EntraServiceHandler implements AzureServiceHandler {
         LOG.infof("EntraService: %s %s", request.method(), path);
 
         String tenantSegment = tenantSegment(path);
-        EntraRequest entraRequest = new EntraRequest(request, path, tenantSegment, resolveTenantId(tenantSegment),
-                RequestUrls.resolveBaseUrl(request, config));
+        EntraRequest entraRequest = new EntraRequest(request, path, tenantSegment,
+                tenants.resolve(tenantSegment, null), RequestUrls.resolveBaseUrl(request, config));
         for (EntraEndpoint endpoint : endpoints) {
             if (endpoint.matches(path)) {
                 return endpoint.handle(entraRequest);
             }
         }
         return responses.error(AadstsError.UNSUPPORTED_ENDPOINT, path);
-    }
-
-    private String resolveTenantId(String tenantSegment) {
-        return switch (tenantSegment) {
-            case "common", "organizations", "consumers" -> config.services().entra().defaultTenantId();
-            default -> tenantSegment;
-        };
     }
 
     /** The first path segment is the tenant. */
