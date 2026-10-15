@@ -2,9 +2,15 @@ package io.floci.az.services.eventhub;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.services.eventhub.ArtemisConfigGenerator.EntitySpec;
+import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.filter.Filter;
+import org.apache.activemq.artemis.core.filter.impl.FilterImpl;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
+import org.apache.qpid.proton.Proton;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -157,5 +163,43 @@ class ArtemisConfigGeneratorTest {
 
         assertEquals(matches(ADDRESS_NAME, brokerXml("ns", entities)),
                 matches(ADDRESS_NAME, new ArtemisConfigGenerator(null).generate("ns", entities, List.of("localhost"))));
+    }
+
+    /**
+     * The partition plugin stamps an event's partition as a broker property, which Artemis reads
+     * after the application properties and does not send. Each partition divert must still take
+     * the events of its own partition and no other.
+     */
+    @Test
+    void partitionDivertsSelectByTheBrokerProperty() throws Exception {
+        String xml = brokerXml("ns", Map.of("eh1", new EntitySpec(4, List.of("$Default"))));
+        Matcher divert = Pattern.compile(
+                "<address>eh1</address><forwarding-address>eh1/ConsumerGroups/\\$Default/Partitions/(\\d+)"
+                        + "</forwarding-address><filter string=\"([^\"]+)\"/>").matcher(xml);
+
+        int diverts = 0;
+        while (divert.find()) {
+            String partition = divert.group(1);
+            Filter filter = FilterImpl.createFilter(divert.group(2).replace("&apos;", "'"));
+            for (int stamped = 0; stamped < 4; stamped++) {
+                assertEquals(partition.equals(Integer.toString(stamped)), filter.match(event(stamped)),
+                        "the divert of partition " + partition + " on an event stamped " + stamped);
+            }
+            diverts++;
+        }
+        assertEquals(4, diverts, xml);
+    }
+
+    /** An event as the partition plugin leaves it: its partition in a broker property only. */
+    private static AMQPStandardMessage event(int partition) {
+        // Proton's Message: Artemis has a Message type of its own.
+        org.apache.qpid.proton.message.Message message = Proton.message();
+        message.setMessageId("event-1");
+        byte[] buffer = new byte[1024];
+        int size = message.encode(buffer, 0, buffer.length);
+        AMQPStandardMessage event = new AMQPStandardMessage(0, Arrays.copyOf(buffer, size), null);
+        event.createExtraProperties().putSimpleStringProperty(
+                SimpleString.of(ArtemisConfigGenerator.PARTITION_PROPERTY), SimpleString.of(Integer.toString(partition)));
+        return event;
     }
 }

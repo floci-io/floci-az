@@ -35,7 +35,10 @@ public class ArtemisConfigGenerator {
     static final int DEFAULT_PARTITION_COUNT = 1;
     /** Azure's own per-hub limit outside dedicated clusters. */
     static final int MAX_PARTITION_COUNT = 32;
-    /** Message property carrying the assigned partition; set by the broker plugin, filtered on here. */
+    /**
+     * Broker property carrying the assigned partition: the broker plugin sets it and the partition
+     * diverts filter on it. The broker does not send a broker property, so no client receives it.
+     */
     static final String PARTITION_PROPERTY = "floci_partition";
     private static final String CBS_ADDRESS = "$cbs";
     private static final String CBS_INTERCEPT_ADDRESS = "$cbs-intercept";

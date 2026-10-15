@@ -184,3 +184,48 @@ test("receiver offsets are independent across connections", async () => {
     expect(receivedB).toContain(p);
   }
 }, 30_000);
+
+/** What these tests read of a received message: the body, its properties and its annotations. */
+type ReceivedEvent = {
+  body?: unknown;
+  application_properties?: Record<string, unknown>;
+  message_annotations?: Record<string, unknown>;
+};
+
+test("an event carries its position as Azure sends it, and no floci property", async () => {
+  if (eventHubMocked) return;
+  const payloads = ["pos-1", "pos-2", "pos-3"].map((p) => `${p}-${Date.now()}`);
+  const sentFrom = Date.now();
+
+  const conn = await openConn();
+  const receiver: Receiver = await conn.createReceiver({
+    source: { address: SEND_ADDR },
+    credit_window: 20,
+  });
+  const received: ReceivedEvent[] = [];
+  receiver.on(ReceiverEvents.message, (ctx) => {
+    if (ctx.message && payloads.includes(String(ctx.message.body))) received.push(ctx.message);
+  });
+
+  await new Promise((r) => setTimeout(r, 300));
+  await sendMessages(payloads);
+  await new Promise((r) => setTimeout(r, 1_000));
+  await conn.close();
+
+  // The broker keeps each event's partition and stream position for its own diverts and
+  // selectors. Azure sends neither as an application property, only the position, as annotations.
+  expect(received.map((m) => String(m.body))).toEqual(payloads);
+  let previous = -1;
+  for (const message of received) {
+    const internal = Object.keys(message.application_properties ?? {}).filter((k) => k.startsWith("floci_"));
+    expect(internal).toEqual([]);
+    const annotations = message.message_annotations ?? {};
+    const sequence = Number(annotations["x-opt-sequence-number"]);
+    expect(sequence).toBeGreaterThan(previous);
+    expect(annotations["x-opt-offset"]).toBe(String(sequence));
+    const enqueued = new Date(annotations["x-opt-enqueued-time"] as Date | number).getTime();
+    expect(enqueued).toBeGreaterThanOrEqual(sentFrom - 1_000);
+    expect(enqueued).toBeLessThanOrEqual(Date.now());
+    previous = sequence;
+  }
+}, 30_000);

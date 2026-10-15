@@ -5,6 +5,8 @@ import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ServerSession;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
+import org.apache.activemq.artemis.utils.collections.TypedProperties;
 
 import java.util.Date;
 import java.util.HashMap;
@@ -113,16 +115,14 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
         int partition = pinnedByAddress >= 0 && pinnedByAddress < partitionCount ? pinnedByAddress
                 : partitionCount <= 1 ? 0
                 : choosePartition(message, hub, partitionCount);
-        // Stamped as a string, and compared as one by the generated divert filters. That mirrors
-        // the CBS divert, the one filter on an AMQP application property already known to work
-        // here.
-        message.putStringProperty(PARTITION_PROPERTY, Integer.toString(partition));
+        // Stamped as a string, and compared as one by the generated divert filters.
+        putBrokerProperty(message, PARTITION_PROPERTY, Integer.toString(partition));
         // Keyed by the hub, not the address: a send pinned to {hub}/Partitions/{id} and one to
         // {hub} land in the same partition queue, so they have to draw from the same counter or
         // consumers would see the offset go backwards.
         stampStreamPosition(message, hub, partition);
-        // An AMQP message serves its properties from its encoded form, so a property set here is
-        // invisible to the divert filters until the message is re-encoded.
+        // An AMQP message is sent from its encoded form, so the annotations set here reach the
+        // consumer only once the message is encoded again.
         message.reencode();
     }
 
@@ -133,11 +133,11 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
      * number of the last event they handled from {@code x-opt-offset} and
      * {@code x-opt-sequence-number}, and store them as the checkpoint they later resume from.
      *
-     * <p>The properties are what the broker matches a resume point against. A start position
-     * reaches Artemis as a selector over those same annotations, which the AMQP patch rewrites
-     * onto these names — hyphens are not legal in a selector identifier, and Artemis compares a
-     * number to a quoted constant only under a thread-local flag, so a parseable selector needs
-     * both an underscored name and a numeric value to match.
+     * <p>The broker properties are what the broker matches a resume point against. A start
+     * position reaches Artemis as a selector over those same annotations, which the AMQP patch
+     * rewrites onto these names: hyphens are not legal in a selector identifier, and Artemis
+     * compares a number to a quoted constant only under a thread-local flag, so a parseable
+     * selector needs both an underscored name and a numeric value to match.
      *
      * <p>Offsets and sequence numbers are the same counter here: Artemis keeps neither, and a
      * consumer only needs them to be monotonic per partition for a resume point to mean anything.
@@ -153,9 +153,30 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
         message.setAnnotation(SimpleString.of(SEQUENCE_NUMBER_ANNOTATION), sequence);
         message.setAnnotation(SimpleString.of(ENQUEUED_TIME_ANNOTATION), new Date(enqueuedTime));
 
-        message.putLongProperty(OFFSET_PROPERTY, sequence);
-        message.putLongProperty(SEQUENCE_NUMBER_PROPERTY, sequence);
-        message.putLongProperty(ENQUEUED_TIME_PROPERTY, enqueuedTime);
+        putBrokerProperty(message, OFFSET_PROPERTY, sequence);
+        putBrokerProperty(message, SEQUENCE_NUMBER_PROPERTY, sequence);
+        putBrokerProperty(message, ENQUEUED_TIME_PROPERTY, enqueuedTime);
+    }
+
+    /**
+     * Sets a property that only the broker reads: the partition diverts and the start-position
+     * selectors filter on it. It is a broker property of the AMQP message (its extra properties),
+     * which Artemis looks a selector's property up in after the application properties, and which
+     * the broker does not send. Azure sends no such property, so the client receives the event
+     * without it.
+     *
+     * <p>A client property of the same name is removed: a filter reads the application properties
+     * first, so it would decide the partition and the stream position in place of the plugin.
+     */
+    private static void putBrokerProperty(Message message, String name, Object value) {
+        if (!(message instanceof AMQPMessage event)) {
+            // Only AMQP reaches this broker. A message of another protocol keeps the property where
+            // the plugin has always put it.
+            message.putObjectProperty(name, value);
+            return;
+        }
+        event.removeProperty(name);
+        TypedProperties.setObjectProperty(SimpleString.of(name), value, event.createExtraProperties());
     }
 
     private int choosePartition(Message message, String hub, int partitionCount) {

@@ -1,5 +1,13 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
+import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.filter.Filter;
+import org.apache.activemq.artemis.core.filter.impl.FilterImpl;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
+import org.apache.activemq.artemis.utils.collections.TypedProperties;
+import org.apache.qpid.proton.Proton;
+import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -7,6 +15,9 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.net.URLClassLoader;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -80,6 +91,56 @@ class EventHubFilterSupportTest {
                 rewrite("amqp.annotation.x-opt-enqueued-time > '1756400000000'"));
         assertEquals("floci_enqueued_time > 1756400000000",
                 rewrite("amqp.annotation.x-opt-enqueued-time > 1756400000000"));
+    }
+
+    /**
+     * The partition plugin keeps an event's stream position as broker properties, which Artemis
+     * reads after the application properties and does not send. Every start position must still
+     * select by them: an event at or after the position passes, an event before it does not.
+     */
+    @Test
+    @DisplayName("every start position selects events by the stream position the broker keeps")
+    void startPositionsSelectByTheBrokerProperties() throws Exception {
+        long now = System.currentTimeMillis();
+        AMQPMessage before = event(4, now - 60_000);
+        AMQPMessage at = event(5, now - 30_000);
+        AMQPMessage after = event(6, now + 60_000);
+        List<AMQPMessage> events = List.of(before, at, after);
+
+        assertSelects("amqp.annotation.x-opt-offset > '-1'", events, before, at, after);
+        assertSelects("amqp.annotation.x-opt-offset > '@latest'", events, after);
+        assertSelects("amqp.annotation.x-opt-offset > '5'", events, after);
+        assertSelects("amqp.annotation.x-opt-offset >= '5'", events, at, after);
+        assertSelects("amqp.annotation.x-opt-sequence-number > '4'", events, at, after);
+        assertSelects("amqp.annotation.x-opt-sequence-number >= 6", events, after);
+        assertSelects("amqp.annotation.x-opt-enqueued-time > '" + (now - 30_000) + "'", events, after);
+        assertSelects("amqp.annotation.x-opt-enqueued-time >= " + (now - 30_000), events, at, after);
+    }
+
+    private static void assertSelects(String selector, List<AMQPMessage> events, AMQPMessage... selected)
+            throws Exception {
+        Filter filter = FilterImpl.createFilter(rewrite(selector));
+        List<AMQPMessage> expected = List.of(selected);
+        for (AMQPMessage event : events) {
+            assertEquals(expected.contains(event), filter.match(event),
+                    selector + " on the event at offset " + event.getExtraProperties().getProperty(
+                            SimpleString.of("floci_offset")));
+        }
+    }
+
+    /** An event as the partition plugin leaves it: its stream position in broker properties only. */
+    private static AMQPMessage event(long sequence, long enqueuedTime) {
+        // Proton's Message: Artemis has a Message type of its own.
+        org.apache.qpid.proton.message.Message message = Proton.message();
+        message.setApplicationProperties(new ApplicationProperties(Map.of("testId", "abc")));
+        byte[] buffer = new byte[1024];
+        int size = message.encode(buffer, 0, buffer.length);
+        AMQPStandardMessage event = new AMQPStandardMessage(0, Arrays.copyOf(buffer, size), null);
+        TypedProperties brokerProperties = event.createExtraProperties();
+        brokerProperties.putLongProperty(SimpleString.of("floci_offset"), sequence);
+        brokerProperties.putLongProperty(SimpleString.of("floci_sequence_number"), sequence);
+        brokerProperties.putLongProperty(SimpleString.of("floci_enqueued_time"), enqueuedTime);
+        return event;
     }
 
     /** Anything that is not an Event Hubs start position is somebody else's selector. */

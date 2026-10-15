@@ -6,9 +6,12 @@ import java.util.regex.Pattern;
 public final class EventHubFilterSupport {
 
    /**
-    * Properties the partition plugin stamps, one per annotation an Event Hubs start position can
-    * be expressed against. The names are duplicated in {@code EventHubPartitionPlugin}: the plugin
-    * and this patch are built into separate jars, so neither can see the other's constants.
+    * Broker properties the partition plugin stamps, one per annotation an Event Hubs start position
+    * can be expressed against. Artemis looks a selector's property up in an AMQP message's broker
+    * properties after its application properties, so the rewritten selector matches them, and the
+    * broker does not send them to the client. The names are duplicated in
+    * {@code EventHubPartitionPlugin}: the plugin and this patch are built into separate jars, so
+    * neither can see the other's constants.
     */
    public static final String OFFSET_PROPERTY = "floci_offset";
    public static final String SEQUENCE_NUMBER_PROPERTY = "floci_sequence_number";
