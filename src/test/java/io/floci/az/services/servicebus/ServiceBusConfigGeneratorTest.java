@@ -1,19 +1,30 @@
 package io.floci.az.services.servicebus;
 
 import io.floci.az.config.EmulatorConfig;
+import org.apache.activemq.artemis.core.config.Configuration;
+import org.apache.activemq.artemis.core.config.impl.ConfigurationImpl;
+import org.apache.activemq.artemis.core.deployers.impl.FileConfigurationParser;
+import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
+import org.apache.activemq.artemis.core.settings.impl.HierarchicalObjectRepository;
+import org.apache.activemq.artemis.utils.XMLUtil;
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Element;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.List;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.jar.JarInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -39,7 +50,7 @@ class ServiceBusConfigGeneratorTest {
         assertTrue(brokerXml.contains(
                 "class-name=\"io.floci.az.artemis.ServiceBusExpiryPlugin\""));
         assertTrue(brokerXml.contains(
-                "class-name=\"io.floci.az.artemis.ServiceBusPeekPlugin\""));
+                "class-name=\"io.floci.az.artemis.ServiceBusManagementPlugin\""));
         assertTrue(brokerXml.contains("<enable-ingress-timestamp>true</enable-ingress-timestamp>"));
     }
 
@@ -56,10 +67,45 @@ class ServiceBusConfigGeneratorTest {
 
         assertTrue(brokerXml.contains("<address>$cbs</address>"));
         assertTrue(brokerXml.contains("<forwarding-address>$cbs-intercept</forwarding-address>"));
-        assertTrue(brokerXml.contains("<filter string=\"operation = &apos;put-token&apos;\"/>"));
+        assertTrue(brokerXml.contains("<filter string=\"operation IS NOT NULL\"/>"));
         assertTrue(brokerXml.contains("<exclusive>true</exclusive>"));
         assertTrue(brokerXml.contains("<address name=\"$cbs\"><multicast/></address>"));
         assertTrue(brokerXml.contains("<queue name=\"$cbs-intercept\"/>"));
+    }
+
+    /**
+     * A message gets its enqueued time from the ingress timestamp, so every entity keeps it. A CBS
+     * reply must not carry it: Azure sends no annotation on a CBS reply. Checked with Artemis's own
+     * parser and address-setting lookup, which merges a specific match over "#".
+     */
+    @Test
+    void stampsTheIngressTimeOnMessagesButNotOnTheCbsNode() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(serviceBus.maxDeliveryCount()).thenReturn(10);
+        String brokerXml = new ServiceBusConfigGenerator(config).generate("default");
+
+        Element core = (Element) XMLUtil.streamToElement(
+                new ByteArrayInputStream(brokerXml.getBytes(StandardCharsets.UTF_8))).getElementsByTagName("core").item(0);
+        // The parser loads each broker plugin, whose classes are built into the broker's jar alone.
+        core.removeChild(core.getElementsByTagName("broker-plugins").item(0));
+        Configuration parsed = new ConfigurationImpl();
+        new FileConfigurationParser().parseMainConfig(core, parsed);
+        HierarchicalObjectRepository<AddressSettings> settings =
+                new HierarchicalObjectRepository<>(parsed.getWildcardConfiguration());
+        parsed.getAddressSettings().forEach(settings::addMatch);
+
+        for (String address : List.of("orders", "orders.v1", "topic/Subscriptions/audit", "DLQ")) {
+            assertTrue(settings.getMatch(address).isEnableIngressTimestamp(), address);
+        }
+        for (String address : List.of("$cbs", "$cbs-intercept")) {
+            assertFalse(settings.getMatch(address).isEnableIngressTimestamp(), address);
+            assertEquals(10, settings.getMatch(address).getMaxDeliveryAttempts(), address);
+            assertFalse(settings.getMatch(address).isAutoCreateAddresses(), address);
+        }
     }
 
     @Test
@@ -95,7 +141,7 @@ class ServiceBusConfigGeneratorTest {
                 Set<String> expectedClasses = Set.of(
                         "io/floci/az/artemis/ServiceBusExpiryPlugin.class",
                         "io/floci/az/artemis/ServiceBusExpiryPluginMBean.class",
-                        "io/floci/az/artemis/ServiceBusPeekPlugin.class");
+                        "io/floci/az/artemis/ServiceBusManagementPlugin.class");
                 Set<String> packagedClasses = new HashSet<>();
                 for (var entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
                     if (expectedClasses.contains(entry.getName())) {

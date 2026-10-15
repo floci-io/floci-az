@@ -48,6 +48,23 @@ class ArtemisConfigGeneratorTest {
      * Azure allows a dot in a hub name and Artemis names should not carry one, so two hubs that
      * differ only there would reduce to the same divert name.
      */
+    /**
+     * Every request on $cbs and $management goes to its responder, which answers each one. A
+     * divert that took only the operations a responder implements would leave the others to reach
+     * no one, and the client would wait for a reply until it timed out.
+     */
+    @Test
+    void sendsEveryCbsAndManagementRequestToItsResponder() {
+        String xml = brokerXml("ns", Map.of("eh1", new EntitySpec(1, List.of("$Default"))));
+
+        Matcher cbs = Pattern.compile("<divert name=\"cbs-request-intercept\">(.*?)</divert>", Pattern.DOTALL).matcher(xml);
+        Matcher management = Pattern.compile("<divert name=\"management-request-intercept\">(.*?)</divert>", Pattern.DOTALL).matcher(xml);
+        assertTrue(cbs.find(), xml);
+        assertTrue(management.find(), xml);
+        assertTrue(cbs.group(1).contains("<filter string=\"operation IS NOT NULL\"/>"), cbs.group(1));
+        assertTrue(management.group(1).contains("<filter string=\"operation IS NOT NULL\"/>"), management.group(1));
+    }
+
     @Test
     void hubNamesThatSanitizeAlikeKeepDistinctDivertNames() {
         assertAllDistinct(matches(DIVERT_NAME, brokerXml("ns", Map.of(

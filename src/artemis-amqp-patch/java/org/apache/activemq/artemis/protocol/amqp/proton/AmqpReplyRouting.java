@@ -1,6 +1,5 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-import java.util.Map;
 import java.util.UUID;
 
 import org.apache.activemq.artemis.api.core.Message;
@@ -24,16 +23,24 @@ import org.apache.qpid.proton.engine.Record;
  * <p>So the broker stamps each request with the id of the connection that sent it, each
  * responder copies the stamp onto its reply, and a subscription on a reply address matches only
  * the stamp of its own connection.
+ *
+ * <p>Azure sends no such property, so the client must not receive the stamp. A request carries it
+ * as an application property, because the responder that answers it reads the request over AMQP.
+ * A reply carries it as a broker property ({@link AMQPMessage#getExtraProperties()}): the broker
+ * filters on a broker property but does not send it, so the client receives the reply with only
+ * the properties Azure sends.
  */
 public final class AmqpReplyRouting {
 
    /**
-    * Application property that carries the id of the requesting connection. The responders that
-    * copy it are built into other jars and cannot see this constant, so the name is duplicated in
-    * {@code ServiceBusCbsResponder} (which the Event Hubs management responder uses as well) and in
-    * {@code ServiceBusPeekPlugin}.
+    * Name of the stamp: the id of the requesting connection. The code that copies it onto replies
+    * is built into other jars and cannot see this constant, so the name is duplicated in
+    * {@code AmqpManagementReply} (which both responders build their replies with) and in
+    * {@code ServiceBusManagementPlugin}.
     */
    public static final String CONNECTION_ID_PROPERTY = "floci_connection_id";
+
+   private static final SimpleString STAMP = SimpleString.of(CONNECTION_ID_PROPERTY);
 
    /** Every CBS and management request names its operation. A reply never does. */
    private static final String OPERATION = "operation";
@@ -62,47 +69,84 @@ public final class AmqpReplyRouting {
    }
 
    /**
-    * Stamps a request with the id of the connection that sent it.
+    * Handles a message that arrives on a reply address, before the broker routes it.
     *
-    * <p>Only a request is stamped. The responders send their replies to the same address, and a
-    * reply keeps the stamp it copied from its request. A stamp the client set itself is
+    * <p>A request gets the id of the connection that sent it. A stamp the client set itself is
     * overwritten, so a client cannot ask for the replies of another connection.
+    *
+    * <p>A reply comes from a responder, which copied the stamp of its request as an application
+    * property. The stamp moves to the broker properties of the reply, so the client does not
+    * receive it.
     *
     * @param linkAddress the target address of the link the message arrived on; null on an
     *                    anonymous relay link, where the message carries its own address
     */
-   public static void stampRequest(AMQPConnectionContext connection, SimpleString linkAddress, Message message) {
+   public static void onReceive(AMQPConnectionContext connection, SimpleString linkAddress, Message message) {
       SimpleString address = linkAddress != null ? linkAddress : message.getAddressSimpleString();
-      if (!isReplyAddress(address) || !(message instanceof AMQPMessage)
-          || message.getObjectProperty(OPERATION) == null) {
+      if (!isReplyAddress(address) || !(message instanceof AMQPMessage amqpMessage)) {
          return;
       }
-      message.putStringProperty(CONNECTION_ID_PROPERTY, connectionId(connection));
-      // An AMQP message is sent from its encoded form, so the responder would not see a property
-      // set here unless the message is encoded again.
-      message.reencode();
+      if (amqpMessage.getObjectProperty(OPERATION) != null) {
+         stampRequest(connection, amqpMessage);
+      } else {
+         hideStamp(amqpMessage);
+      }
    }
 
-   /** Copies the stamp of a request onto the application properties of its reply. */
-   public static void copyStamp(Message request, Map<String, Object> replyProperties) {
+   /**
+    * Copies the stamp of a request onto a reply the broker builds itself. The stamp goes to the
+    * broker properties of the reply, so the client does not receive it.
+    */
+   public static void copyStamp(Message request, AMQPMessage reply) {
       Object connectionId = request.getObjectProperty(CONNECTION_ID_PROPERTY);
       if (connectionId != null) {
-         replyProperties.put(CONNECTION_ID_PROPERTY, connectionId.toString());
+         holdStamp(reply, connectionId);
       }
    }
 
    /**
     * The selector of a subscription on {@code address}. On a reply address it matches only the
-    * replies stamped with this connection's id, and the client's own selector, if it sent one, is
-    * kept in parentheses so that an {@code OR} in it cannot widen the match. On any other address
-    * the client's selector is returned unchanged.
+    * replies stamped with this connection's id, and never a request: a client receives replies
+    * only, as in Azure. The client's own selector, if it sent one, is kept in parentheses so that
+    * an {@code OR} in it cannot widen the match. On any other address the client's selector is
+    * returned unchanged.
+    *
+    * <p>Artemis looks a selector's property up in the application properties first and in the
+    * broker properties next ({@code AMQPMessage#getObjectPropertyForFilter}), so the selector
+    * matches the stamp on a reply, where it is a broker property.
     */
    public static String replySelector(AMQPConnectionContext connection, SimpleString address, String selector) {
       if (!isReplyAddress(address)) {
          return selector;
       }
-      String ownReplies = CONNECTION_ID_PROPERTY + " = '" + connectionId(connection) + "'";
+      String ownReplies = CONNECTION_ID_PROPERTY + " = '" + connectionId(connection) + "' AND " + OPERATION + " IS NULL";
       return selector == null || selector.isBlank() ? ownReplies : "(" + selector + ") AND " + ownReplies;
+   }
+
+   private static void stampRequest(AMQPConnectionContext connection, AMQPMessage request) {
+      request.putStringProperty(CONNECTION_ID_PROPERTY, connectionId(connection));
+      // An AMQP message is sent from its encoded form, so the responder would not see a property
+      // set here unless the message is encoded again.
+      request.reencode();
+   }
+
+   /**
+    * Moves the stamp of a reply from its application properties, which the client receives, to
+    * its broker properties, which the client does not. The reply is not routed yet, so no other
+    * queue or consumer holds it.
+    */
+   private static void hideStamp(AMQPMessage reply) {
+      Object connectionId = reply.removeProperty(CONNECTION_ID_PROPERTY);
+      if (connectionId == null) {
+         return;
+      }
+      // Encoded again for the same reason as a request: the reply is sent from its encoded form.
+      reply.reencode();
+      holdStamp(reply, connectionId);
+   }
+
+   private static void holdStamp(AMQPMessage reply, Object connectionId) {
+      reply.createExtraProperties().putSimpleStringProperty(STAMP, SimpleString.of(connectionId.toString()));
    }
 
    /**

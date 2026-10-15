@@ -1,6 +1,7 @@
 package io.floci.az.services.servicebus;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AmqpManagementReply;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -18,6 +19,10 @@ public class ServiceBusConfigGenerator {
 
     static final int AMQP_INTERNAL_PORT = 5672;
     static final int AMQPS_INTERNAL_PORT = 5671;
+    /** The CBS node: the address clients send requests to and receive replies on. */
+    private static final String CBS_ADDRESS = "$cbs";
+    /** The queue the CBS responder reads the requests from. */
+    private static final String CBS_INTERCEPT_ADDRESS = "$cbs-intercept";
 
     private final EmulatorConfig config;
 
@@ -58,7 +63,7 @@ public class ServiceBusConfigGenerator {
                           "io.floci.az.artemis.ServiceBusExpiryPlugin")
                   .end("broker-plugin")
                   .startAttr("broker-plugin", "class-name",
-                          "io.floci.az.artemis.ServiceBusPeekPlugin")
+                          "io.floci.az.artemis.ServiceBusManagementPlugin")
                   .end("broker-plugin")
                 .end("broker-plugins")
                 .start("address-settings")
@@ -69,12 +74,24 @@ public class ServiceBusConfigGenerator {
                     .elem("auto-create-addresses", false)
                     .elem("enable-ingress-timestamp", true)
                   .end("address-setting")
+                  // A message gets its enqueued time from the ingress timestamp, which Artemis
+                  // adds as an annotation when a client or a responder sends it. A CBS reply is
+                  // sent by the responder, and Azure sends no annotation on it, so the CBS node
+                  // has no ingress timestamp. Every other setting comes from "#". The replies on
+                  // an entity management node are built by the broker and routed without a send,
+                  // so they never get one.
+                  .startAttr("address-setting", "match", CBS_ADDRESS)
+                    .elem("enable-ingress-timestamp", false)
+                  .end("address-setting")
+                  .startAttr("address-setting", "match", CBS_INTERCEPT_ADDRESS)
+                    .elem("enable-ingress-timestamp", false)
+                  .end("address-setting")
                 .end("address-settings")
                 .start("diverts")
                   .startAttr("divert", "name", "cbs-request-intercept")
-                    .elem("address", "$cbs")
-                    .elem("forwarding-address", "$cbs-intercept")
-                    .selfClose("filter", "string", "operation = 'put-token'")
+                    .elem("address", CBS_ADDRESS)
+                    .elem("forwarding-address", CBS_INTERCEPT_ADDRESS)
+                    .selfClose("filter", "string", AmqpManagementReply.REQUEST_FILTER)
                     .elem("exclusive", true)
                   .end("divert")
                 .end("diverts")
@@ -84,12 +101,12 @@ public class ServiceBusConfigGenerator {
                       .selfClose("queue", "name", "DLQ")
                     .end("anycast")
                   .end("address")
-                  .startAttr("address", "name", "$cbs")
+                  .startAttr("address", "name", CBS_ADDRESS)
                     .selfClose("multicast")
                   .end("address")
-                  .startAttr("address", "name", "$cbs-intercept")
+                  .startAttr("address", "name", CBS_INTERCEPT_ADDRESS)
                     .start("anycast")
-                      .selfClose("queue", "name", "$cbs-intercept")
+                      .selfClose("queue", "name", CBS_INTERCEPT_ADDRESS)
                     .end("anycast")
                   .end("address")
                 .end("addresses")

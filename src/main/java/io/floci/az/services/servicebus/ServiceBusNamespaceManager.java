@@ -50,7 +50,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     private static final Logger LOG = Logger.getLogger(ServiceBusNamespaceManager.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
+    public static final String ARTEMIS_EXTENSION_RESOURCE = "/artemis/servicebus-artemis-extension.jar";
     static final String PROTON_PATCH_RESOURCE = ArtemisPatchVersions.PROTON_PATCH_RESOURCE;
     static final String ARTEMIS_AMQP_PATCH_RESOURCE = ArtemisPatchVersions.ARTEMIS_AMQP_PATCH_RESOURCE;
     private static final String ARTEMIS_EXTENSION_PATH =

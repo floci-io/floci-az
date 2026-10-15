@@ -2,14 +2,15 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
+import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
 import org.apache.qpid.proton.amqp.messaging.AmqpValue;
 import org.apache.qpid.proton.amqp.messaging.Properties;
@@ -87,16 +88,16 @@ public final class ServiceBusLockRenewalSupport {
       }
       Properties replyProperties = new Properties();
       replyProperties.setCorrelationId(request.getProperties().getMessageId());
-      Map<String, Object> applicationProperties = new HashMap<>(status == 200
+      Map<String, Object> applicationProperties = status == 200
          ? Map.of("statusCode", status, "statusDescription", "OK")
          : Map.of("statusCode", status, "statusDescription", "Lock renewal failed",
-            "errorCondition", org.apache.qpid.proton.amqp.Symbol.valueOf(condition)));
+            "errorCondition", Symbol.valueOf(condition));
+      ActiveMQServer server = connection.getProtocolManager().getServer();
+      AMQPStandardMessage reply = AMQPStandardMessage.createMessage(server.getStorageManager().generateID(), 0,
+         null, null, replyProperties, null, null, applicationProperties, null, new AmqpValue(response));
       // The reply goes to every receiver on the management address; the stamp keeps it to the
       // connection that asked.
-      AmqpReplyRouting.copyStamp(request, applicationProperties);
-      var server = connection.getProtocolManager().getServer();
-      var reply = AMQPStandardMessage.createMessage(server.getStorageManager().generateID(), 0,
-         null, null, replyProperties, null, null, applicationProperties, null, new AmqpValue(response));
+      AmqpReplyRouting.copyStamp(request, reply);
       reply.setAddress(address);
       server.getPostOffice().route(reply, false);
       delivery.disposition(Accepted.getInstance());

@@ -1,6 +1,7 @@
 package io.floci.az.services.eventhub;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AmqpManagementReply;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -220,24 +221,23 @@ public class ArtemisConfigGenerator {
                   .end("address")
                 .end("addresses");
 
-        // The CBS divert is unconditional: every Azure SDK puts a token on $cbs before
-        // opening entity links, and it is the CbsResponder — attached to the intercept
-        // queue — that answers. Without it the put-token reply carries no status-code
-        // and the SDK cannot authorize.
+        // Every request on $cbs and $management goes to its responder, which answers each one:
+        // put-token and READ as Azure does, any other operation with 501. Every Azure SDK puts a
+        // token on $cbs before it opens entity links, and the CBS responder, attached to the
+        // intercept queue, answers it. Without it the put-token reply carries no status-code and
+        // the SDK cannot authorize.
         xml.start("diverts")
              .raw(diverts.build())
              .startAttr("divert", "name", "cbs-request-intercept")
                .elem("address", CBS_ADDRESS)
                .elem("forwarding-address", CBS_INTERCEPT_ADDRESS)
-               .selfClose("filter", "string", "operation = 'put-token'")
+               .selfClose("filter", "string", AmqpManagementReply.REQUEST_FILTER)
                .elem("exclusive", true)
              .end("divert")
-             // Requests only. Without the filter the responder's own replies, which go back on
-             // $management, would divert straight back to it in a loop.
              .startAttr("divert", "name", "management-request-intercept")
                .elem("address", MANAGEMENT_ADDRESS)
                .elem("forwarding-address", MANAGEMENT_INTERCEPT_ADDRESS)
-               .selfClose("filter", "string", "operation = 'READ'")
+               .selfClose("filter", "string", AmqpManagementReply.REQUEST_FILTER)
                .elem("exclusive", true)
              .end("divert")
            .end("diverts");

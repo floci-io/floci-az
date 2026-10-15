@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Assigns each message an Event Hubs partition as it is routed.
+ * Assigns each event an Event Hubs partition as it is routed.
  *
  * <p>Artemis has no notion of partitions, so the emulated ones are ordinary queues selected by a
  * filter. This plugin supplies what that filter matches on: it stamps {@value #PARTITION_PROPERTY}
@@ -101,7 +101,7 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
     public void beforeSend(ServerSession session, Transaction tx, Message message,
                            boolean direct, boolean noAutoCreateQueue) {
         String address = message.getAddress();
-        if (address == null) {
+        if (address == null || !namesAHub(address)) {
             return;
         }
         String hub = hubOf(address);
@@ -196,6 +196,22 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
     private static Object addressingHint(Message message, String name) {
         Object annotation = message.getAnnotation(SimpleString.of(name));
         return annotation != null ? annotation : message.getObjectProperty(name);
+    }
+
+    /**
+     * True if {@code address} names one of this broker's hubs, in any form a producer sends to:
+     * {@code {hub}}, {@code {hub}/Partitions/{id}}, and the namespace-carrying {@code {namespace}/{hub}}
+     * and {@code amqp://{host}/{namespace}/{hub}}.
+     *
+     * <p>Only an event belongs to a partition. The broker also routes the CBS and management
+     * requests and replies ({@code $cbs}, {@code $management} and their intercept addresses), and a
+     * partition stamp on one of those is a property and annotations Azure never sends. The hubs are
+     * the ones the broker config names in the {@value #ENTITIES_PROPERTY} property, the list it
+     * declares their addresses from, so the check needs no list of addresses to skip.
+     */
+    private boolean namesAHub(String address) {
+        String hub = hubOf(address);
+        return partitionCounts.containsKey(hub.substring(hub.lastIndexOf('/') + 1));
     }
 
     /** The partition a {@code {hub}/Partitions/{id}} address pins, or -1 if it pins none. */

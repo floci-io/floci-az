@@ -1,6 +1,6 @@
 package io.floci.az.services.eventhub;
 
-import io.floci.az.services.servicebus.ServiceBusCbsResponder;
+import io.floci.az.core.AmqpManagementReply;
 import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
 import org.apache.qpid.proton.amqp.messaging.AmqpValue;
@@ -35,6 +35,9 @@ import java.util.Map;
  * queue this attaches to, and the reply goes back on {@code $management}, which is both the address
  * SDKs send to and the one they receive on. Like the CBS reply, it carries the id of the requesting
  * connection, so that only that connection receives it.
+ *
+ * <p>The divert sends every request on {@code $management} here, and every request gets a reply.
+ * An operation other than READ gets 501 (Not Implemented), which names the operation.
  */
 public class EventHubManagementResponder {
 
@@ -43,6 +46,8 @@ public class EventHubManagementResponder {
     private static final String MANAGEMENT_INTERCEPT_ADDRESS = "$management-intercept";
     private static final long RECONNECT_BACKOFF_MS = 2_000;
 
+    /** The one management operation Event Hubs answers. */
+    private static final String READ = "READ";
     /** The entity type the SDKs name when asking about a hub. */
     private static final String EVENTHUB_ENTITY_TYPE = "com.microsoft:eventhub";
 
@@ -162,72 +167,65 @@ public class EventHubManagementResponder {
             request.decode(buf, 0, n);
 
             Map<String, Object> props = applicationProperties(request);
-            String entityType = string(props.get("type"));
-            String name = string(props.get("name"));
-            LOG.debugv("Management request received: type={0}, name={1}", entityType, name);
+            LOG.debugv("Management request received: operation={0}, type={1}, name={2}",
+                    props.get("operation"), props.get("type"), props.get("name"));
 
-            sendResponse(request, entityType, name);
+            byte[] encoded = AmqpManagementReply.encode(replyTo(request));
+            byte[] tag = Integer.toString(deliveryTag++).getBytes(StandardCharsets.UTF_8);
+            Delivery resp = responseSender.delivery(tag);
+            responseSender.send(encoded, 0, encoded.length);
+            responseSender.advance();
+            resp.settle();
 
             delivery.disposition(Accepted.getInstance());
             delivery.settle();
             receiver.flow(1);
         }
+    }
 
-        private void sendResponse(Message request, String entityType, String name) {
-            ArtemisConfigGenerator.EntitySpec spec = name == null ? null : entities.get(name);
-
-            Message response = Message.Factory.create();
-            response.setCorrelationId(request.getMessageId());
-            Map<String, Object> responseProps = new HashMap<>();
-
-            if (!EVENTHUB_ENTITY_TYPE.equals(entityType)) {
-                // Partition properties (com.microsoft:partition) would have to report sequence
-                // numbers and offsets, which Artemis does not keep. Saying so is better than
-                // inventing values a consumer may branch on.
-                responseProps.put("status-code", 501);
-                responseProps.put("status-description",
-                        "floci-az emulates " + EVENTHUB_ENTITY_TYPE + " only, not " + entityType);
-            } else if (spec == null) {
-                responseProps.put("status-code", 404);
-                responseProps.put("status-description", "Event hub '" + name + "' not found");
-            } else {
-                responseProps.put("status-code", 200);
-                responseProps.put("status-description", "OK");
-                response.setBody(new AmqpValue(hubProperties(name, spec)));
-            }
-            ServiceBusCbsResponder.copyConnectionId(request, responseProps);
-
-            response.setApplicationProperties(new ApplicationProperties(responseProps));
-
-            byte[] encoded = new byte[4096];
-            int len = response.encode(encoded, 0, encoded.length);
-
-            byte[] tag = Integer.toString(deliveryTag++).getBytes(StandardCharsets.UTF_8);
-            Delivery resp = responseSender.delivery(tag);
-            responseSender.send(encoded, 0, len);
-            responseSender.advance();
-            resp.settle();
+    /** The reply to a management request: a READ as Azure answers it, and 501 to any other operation. */
+    Message replyTo(Message request) {
+        String operation = AmqpManagementReply.operation(request);
+        if (!READ.equals(operation)) {
+            return AmqpManagementReply.notImplemented(request, operation);
         }
-
-        /**
-         * The attributes the SDKs read back. Every one is required — a missing field fails the
-         * call outright rather than degrading.
-         *
-         * <p>{@code partition_ids} is a Java array so it encodes as an AMQP array; a List would
-         * encode as an AMQP list, which the SDKs reject.
-         */
-        private Map<String, Object> hubProperties(String name, ArtemisConfigGenerator.EntitySpec spec) {
-            String[] partitionIds = new String[spec.partitionCount()];
-            for (int i = 0; i < partitionIds.length; i++) {
-                partitionIds[i] = Integer.toString(i);
-            }
-            Map<String, Object> body = new HashMap<>();
-            body.put("name", name);
-            body.put("created_at", createdAt);
-            body.put("partition_count", spec.partitionCount());
-            body.put("partition_ids", partitionIds);
-            return body;
+        Map<String, Object> props = applicationProperties(request);
+        String entityType = string(props.get("type"));
+        String name = string(props.get("name"));
+        if (!EVENTHUB_ENTITY_TYPE.equals(entityType)) {
+            // Partition properties (com.microsoft:partition) would have to report sequence
+            // numbers and offsets, which Artemis does not keep. Saying so is better than
+            // inventing values a consumer may branch on.
+            return AmqpManagementReply.to(request, AmqpManagementReply.NOT_IMPLEMENTED,
+                    "floci-az emulates " + EVENTHUB_ENTITY_TYPE + " only, not " + entityType);
         }
+        ArtemisConfigGenerator.EntitySpec spec = name == null ? null : entities.get(name);
+        if (spec == null) {
+            return AmqpManagementReply.to(request, 404, "Event hub '" + name + "' not found");
+        }
+        Message response = AmqpManagementReply.to(request, 200, "OK");
+        response.setBody(new AmqpValue(hubProperties(name, spec)));
+        return response;
+    }
+
+    /**
+     * The attributes the SDKs read back. Every one is required: a missing field fails the call
+     * outright rather than degrading.
+     *
+     * <p>{@code partition_ids} is a Java array so it encodes as an AMQP array; a List would
+     * encode as an AMQP list, which the SDKs reject.
+     */
+    private Map<String, Object> hubProperties(String name, ArtemisConfigGenerator.EntitySpec spec) {
+        String[] partitionIds = new String[spec.partitionCount()];
+        for (int i = 0; i < partitionIds.length; i++) {
+            partitionIds[i] = Integer.toString(i);
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", name);
+        body.put("created_at", createdAt);
+        body.put("partition_count", spec.partitionCount());
+        body.put("partition_ids", partitionIds);
+        return body;
     }
 
     @SuppressWarnings("unchecked")

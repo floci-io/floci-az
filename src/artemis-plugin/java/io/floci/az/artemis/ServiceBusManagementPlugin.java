@@ -28,11 +28,18 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Implements Azure Service Bus non-destructive peek requests on entity management nodes. */
-public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
+/**
+ * Answers the requests on Service Bus entity management nodes ({@code {entity}/$management}).
+ *
+ * <p>It implements non-destructive peek. Lock renewal is answered before routing, in the AMQP
+ * layer, so it never reaches this plugin. Every other operation gets 501 (Not Implemented),
+ * which names the operation: a request that reached routing unanswered would otherwise reach no
+ * one, and the client would wait for a reply until it timed out.
+ */
+public final class ServiceBusManagementPlugin implements ActiveMQServerPlugin {
 
     private static final System.Logger LOG =
-            System.getLogger(ServiceBusPeekPlugin.class.getName());
+            System.getLogger(ServiceBusManagementPlugin.class.getName());
     private static final String MANAGEMENT_SUFFIX = "/$management";
     private static final String PEEK_OPERATION = "com.microsoft:peek-message";
     private static final String OPERATION = "operation";
@@ -44,11 +51,13 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
     private static final String MESSAGE = "message";
     private static final String STATUS_CODE = "statusCode";
     private static final String STATUS_DESCRIPTION = "statusDescription";
+    private static final int NOT_IMPLEMENTED = 501;
     /**
      * The id of the connection that sent the request, stamped by the AMQP layer. The name is
      * duplicated from {@code AmqpReplyRouting}, which is built into the AMQP protocol jar.
      */
     private static final String CONNECTION_ID_PROPERTY = "floci_connection_id";
+    private static final SimpleString CONNECTION_ID = SimpleString.of(CONNECTION_ID_PROPERTY);
     private static final int MAX_MESSAGE_COUNT = 250;
     private static final int MAX_RESPONSE_PAYLOAD_BYTES = 1_048_576;
     private static final Symbol SEQUENCE_NUMBER = Symbol.valueOf("x-opt-sequence-number");
@@ -69,20 +78,26 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
     @Override
     public void beforeMessageRoute(
             Message message, RoutingContext context, boolean direct, boolean rejectDuplicates) {
-        if (!(message instanceof AMQPMessage request) || !isPeekRequest(request)) {
+        if (!(message instanceof AMQPMessage request) || !isManagementRequest(request)) {
             return;
         }
 
         // The multicast management address lets Artemis create one response subscription per
-        // client. Peek requests are handled here and must never reach those subscriptions.
+        // client. Requests are answered here and must never reach those subscriptions.
         context.clear();
+        String operation = operation(request);
         try {
-            sendPeekResponse(request);
+            if (PEEK_OPERATION.equals(operation)) {
+                sendPeekResponse(request);
+            } else {
+                sendResponse(request, NOT_IMPLEMENTED,
+                        "floci-az does not implement the operation '" + operation + "'", Map.of());
+            }
         } catch (IllegalArgumentException e) {
-            LOG.log(System.Logger.Level.WARNING, "Invalid Service Bus peek request", e);
+            LOG.log(System.Logger.Level.WARNING, "Invalid Service Bus management request", e);
             sendErrorResponse(request, 400, "Bad Request");
         } catch (Exception e) {
-            LOG.log(System.Logger.Level.ERROR, "Could not process Service Bus peek request", e);
+            LOG.log(System.Logger.Level.ERROR, "Could not process Service Bus management request", e);
             sendErrorResponse(request, 500, "Internal Server Error");
         }
     }
@@ -92,18 +107,20 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
             sendResponse(request, statusCode, description, Map.of());
         } catch (Exception responseError) {
             LOG.log(System.Logger.Level.ERROR,
-                    "Could not send Service Bus peek error response", responseError);
+                    "Could not send Service Bus management error response", responseError);
         }
     }
 
-    private static boolean isPeekRequest(AMQPMessage request) {
+    /** A request names its operation; a reply, which goes to the same address, never does. */
+    private static boolean isManagementRequest(AMQPMessage request) {
         String address = request.getAddress();
-        if (address == null || !address.endsWith(MANAGEMENT_SUFFIX)) {
-            return false;
-        }
+        return address != null && address.endsWith(MANAGEMENT_SUFFIX) && operation(request) != null;
+    }
+
+    private static String operation(AMQPMessage request) {
         ApplicationProperties applicationProperties = request.getApplicationProperties();
-        return applicationProperties != null
-                && PEEK_OPERATION.equals(applicationProperties.getValue().get(OPERATION));
+        Object operation = applicationProperties == null ? null : applicationProperties.getValue().get(OPERATION);
+        return operation == null ? null : operation.toString();
     }
 
     private void sendPeekResponse(AMQPMessage request) throws Exception {
@@ -248,7 +265,7 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
             throws Exception {
         Properties requestProperties = request.getProperties();
         if (requestProperties == null || requestProperties.getMessageId() == null) {
-            throw new IllegalArgumentException("Peek request is missing message-id");
+            throw new IllegalArgumentException("Management request is missing message-id");
         }
 
         Properties responseProperties = new Properties();
@@ -256,10 +273,6 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
         Map<String, Object> applicationProperties = new HashMap<>();
         applicationProperties.put(STATUS_CODE, statusCode);
         applicationProperties.put(STATUS_DESCRIPTION, description);
-        Object connectionId = request.getObjectProperty(CONNECTION_ID_PROPERTY);
-        if (connectionId != null) {
-            applicationProperties.put(CONNECTION_ID_PROPERTY, connectionId.toString());
-        }
 
         ActiveMQServer activeServer = requireServer();
         AMQPStandardMessage response = AMQPStandardMessage.createMessage(
@@ -273,16 +286,30 @@ public final class ServiceBusPeekPlugin implements ActiveMQServerPlugin {
                 applicationProperties,
                 null,
                 body.isEmpty() ? null : new AmqpValue(body));
-        // Each client has its own subscription on the management address, and the stamp copied
-        // above lets only the requesting connection's subscription take the response.
+        // Each client has its own subscription on the management address, and the stamp lets
+        // only the requesting connection's subscription take the response.
+        copyConnectionId(request, response);
         response.setAddress(request.getAddress());
         activeServer.getPostOffice().route(response, false);
+    }
+
+    /**
+     * Copies the stamp of the request onto the response as a broker property. The subscription
+     * filter reads a broker property, but the broker does not send it, so the client receives the
+     * response without the stamp, as Azure sends it.
+     */
+    private static void copyConnectionId(AMQPMessage request, AMQPMessage response) {
+        Object connectionId = request.getObjectProperty(CONNECTION_ID_PROPERTY);
+        if (connectionId != null) {
+            response.createExtraProperties()
+                    .putSimpleStringProperty(CONNECTION_ID, SimpleString.of(connectionId.toString()));
+        }
     }
 
     private ActiveMQServer requireServer() {
         ActiveMQServer activeServer = server;
         if (activeServer == null) {
-            throw new IllegalStateException("Service Bus peek plugin is not registered");
+            throw new IllegalStateException("Service Bus management plugin is not registered");
         }
         return activeServer;
     }

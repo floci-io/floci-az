@@ -46,7 +46,8 @@ public final class ServiceBusMessageMetadataSupport {
          return original;
       }
       Map<Symbol, Object> annotations = original == null ? new HashMap<>() : new HashMap<>(original.getValue());
-      // Match ServiceBusPeekPlugin's entity-local identity and original broker ingress time.
+      // Match what a peek reports (ServiceBusManagementPlugin): entity-local identity and original
+      // broker ingress time.
       annotations.put(SEQUENCE_NUMBER, reference.getMessageID());
       annotations.put(ENQUEUED_TIME, new Date(enqueuedTime(message)));
       return ServiceBusMessageLockSupport.annotationsForDelivery(new MessageAnnotations(annotations), reference);

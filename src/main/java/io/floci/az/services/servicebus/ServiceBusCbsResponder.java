@@ -1,8 +1,8 @@
 package io.floci.az.services.servicebus;
 
+import io.floci.az.core.AmqpManagementReply;
 import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
-import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
 import org.apache.qpid.proton.amqp.messaging.Source;
 import org.apache.qpid.proton.amqp.messaging.Target;
 import org.apache.qpid.proton.engine.BaseHandler;
@@ -18,7 +18,6 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Daemon thread that handles AMQP CBS (Claims Based Security) for a namespace.
@@ -33,9 +32,13 @@ import java.util.Map;
  * put-token. Some SDK stacks accept 200; others reject anything but 202 (the Rust
  * {@code fe2o3-amqp-cbs} hard-codes it), so the specified code is the interoperable one.
  *
+ * The divert sends every request on {@code $cbs} here, and every request gets a reply. An
+ * operation other than put-token gets 501 (Not Implemented), which names the operation.
+ *
  * The reply reaches only the connection that sent the request, as in Azure: the broker stamps
  * each request with the id of its connection, a receiver on {@code $cbs} gets only the messages
- * stamped with its own connection's id, and the reply carries the stamp back.
+ * stamped with its own connection's id, and the reply carries the stamp back. The broker keeps
+ * the stamp of a reply to itself, so the client receives the reply without it.
  *
  * Uses proton-j directly since it is the same low-level AMQP library the SDK uses internally.
  */
@@ -46,12 +49,7 @@ public class ServiceBusCbsResponder {
     private static final String CBS_INTERCEPT_ADDRESS = "$cbs-intercept";
     private static final long RECONNECT_BACKOFF_MS = 2_000;
 
-    /**
-     * Application property that carries the id of the connection that sent a request. The
-     * broker's AMQP layer ({@code AmqpReplyRouting}) sets it and filters on it. That class is built
-     * into the patched AMQP protocol jar, so the name is duplicated here.
-     */
-    static final String CONNECTION_ID_PROPERTY = "floci_connection_id";
+    private static final String PUT_TOKEN = "put-token";
 
     private final String host;
     private final int port;
@@ -125,16 +123,12 @@ public class ServiceBusCbsResponder {
         }
     }
 
-    /**
-     * Copies the id of the requesting connection onto the application properties of a reply. A
-     * reply without it reaches no receiver.
-     */
-    public static void copyConnectionId(Message request, Map<String, Object> replyProperties) {
-        ApplicationProperties props = request.getApplicationProperties();
-        Object connectionId = props == null ? null : props.getValue().get(CONNECTION_ID_PROPERTY);
-        if (connectionId != null) {
-            replyProperties.put(CONNECTION_ID_PROPERTY, connectionId);
-        }
+    /** The reply to a CBS request: 202 to a put-token, and 501 to any other operation. */
+    static Message replyTo(Message request) {
+        String operation = AmqpManagementReply.operation(request);
+        return PUT_TOKEN.equals(operation)
+                ? AmqpManagementReply.to(request, 202, "Accepted")
+                : AmqpManagementReply.notImplemented(request, operation);
     }
 
     private class CbsHandler extends BaseHandler {
@@ -179,31 +173,21 @@ public class ServiceBusCbsResponder {
             Message request = Message.Factory.create();
             request.decode(buf, 0, n);
 
-            Object messageId = request.getMessageId();
-            LOG.debugv("CBS put-token received, messageId={0}", messageId);
+            LOG.debugv("CBS request received, operation={0}, messageId={1}",
+                    AmqpManagementReply.operation(request), request.getMessageId());
 
-            sendOkResponse(request);
+            send(replyTo(request));
 
             delivery.disposition(Accepted.getInstance());
             delivery.settle();
             receiver.flow(1);
         }
 
-        private void sendOkResponse(Message request) {
-            Message response = Message.Factory.create();
-            response.setCorrelationId(request.getMessageId());
-            Map<String, Object> props = new HashMap<>();
-            props.put("status-code", 202);
-            props.put("status-description", "Accepted");
-            copyConnectionId(request, props);
-            response.setApplicationProperties(new ApplicationProperties(props));
-
-            byte[] encoded = new byte[512];
-            int len = response.encode(encoded, 0, encoded.length);
-
+        private void send(Message response) {
+            byte[] encoded = AmqpManagementReply.encode(response);
             byte[] tag = Integer.toString(deliveryTag++).getBytes(StandardCharsets.UTF_8);
             Delivery resp = responseSender.delivery(tag);
-            responseSender.send(encoded, 0, len);
+            responseSender.send(encoded, 0, encoded.length);
             responseSender.advance();
             resp.settle();
         }
