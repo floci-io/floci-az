@@ -54,7 +54,7 @@ public final class EventHubPartitionPlugin implements ActiveMQServerPlugin {
      */
     private static final String OFFSET_PROPERTY = "floci_offset";
     private static final String SEQUENCE_NUMBER_PROPERTY = "floci_sequence_number";
-    private static final String ENQUEUED_TIME_PROPERTY = "floci_enqueued_time";
+    static final String ENQUEUED_TIME_PROPERTY = "floci_enqueued_time";
     /** Segment a producer address carries when the caller pinned a partition. */
     private static final String PARTITIONS_SEGMENT = "/Partitions/";
     /** Plugin property: "eh1:4,eh2:2". */

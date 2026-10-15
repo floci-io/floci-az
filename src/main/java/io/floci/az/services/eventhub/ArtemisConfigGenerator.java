@@ -6,6 +6,8 @@ import io.floci.az.core.docker.ContainerStorageHelper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,6 +80,8 @@ public class ArtemisConfigGenerator {
         XmlBuilder diverts = new XmlBuilder();
         // Passed to the partition plugin so it knows how many partitions each hub has.
         StringBuilder partitionSpec = new StringBuilder();
+        // Passed to the retention plugin: each consumer group queue, and how long it keeps events.
+        StringBuilder retentionSpec = new StringBuilder();
 
         for (Map.Entry<String, EntitySpec> entry : entities.entrySet()) {
             String entityName = entry.getKey();
@@ -91,15 +95,23 @@ public class ArtemisConfigGenerator {
 
             // The namespace-carrying family, addressed by path (multicast) or by URI (anycast).
             // Both predate partitions and neither is what an Azure SDK sends.
-            appendMulticastAddress(addresses, namespace + "/" + entityName, cgs);
+            List<String> consumerGroupQueues = new ArrayList<>(
+                    appendMulticastAddress(addresses, namespace + "/" + entityName, cgs));
             for (String hostname : hostnames) {
-                appendAnycastTopology(addresses, diverts, hostname, namespace, entityName, cgs);
+                consumerGroupQueues.addAll(
+                        appendAnycastTopology(addresses, diverts, hostname, namespace, entityName, cgs));
             }
             // The family the Azure SDKs use, declared once: the AMQP layer reduces every scheme
             // and host spelling of it to this one path.
-            appendPartitionTopology(addresses, diverts, entityName, cgs, partitions);
+            consumerGroupQueues.addAll(appendPartitionTopology(addresses, diverts, entityName, cgs, partitions));
+            for (String queue : consumerGroupQueues) {
+                if (!retentionSpec.isEmpty()) {
+                    retentionSpec.append(',');
+                }
+                retentionSpec.append(queue).append('=').append(entry.getValue().retention().toMillis());
+            }
         }
-        return buildBrokerXml(addresses, diverts, partitionSpec.toString());
+        return buildBrokerXml(addresses, diverts, partitionSpec.toString(), retentionSpec.toString());
     }
 
     /** Returns broker.xml using the default namespace/entities from config. */
@@ -108,11 +120,39 @@ public class ArtemisConfigGenerator {
         return generate(eh.defaultNamespace(), parseEntities(eh.entities(), eh.consumerGroups()));
     }
 
-    /** An event hub's partition count and its consumer groups. */
-    public record EntitySpec(int partitionCount, List<String> consumerGroups) {}
+    /**
+     * The queue attribute that makes every consumer group queue non-destructive. In Event Hubs a
+     * read never removes an event: each receiver reads the stream from its own start position, and
+     * an event stays until its hub's retention ends. On a non-destructive queue Artemis gives each
+     * consumer its own cursor over the queue and ignores the acknowledgement, so every receiver
+     * sees every event, including the ones sent after it attached. {@code EventHubRetentionPlugin}
+     * removes an event once its retention has passed.
+     */
+    static final String NON_DESTRUCTIVE = "non-destructive";
+
+    /** Azure's default retention, for a hub configured without one. */
+    static final Duration DEFAULT_RETENTION = Duration.ofHours(1);
+    /** Azure's longest retention, on the premium and dedicated tiers. */
+    static final Duration MAX_RETENTION = Duration.ofDays(90);
 
     /**
-     * Parses "eh1:4,eh2:2" and a consumer groups string into entityName → {@link EntitySpec}.
+     * An event hub's partition count, its consumer groups, and how long it keeps an event after it
+     * was enqueued. Reading an event does not remove it; its retention does.
+     */
+    public record EntitySpec(int partitionCount, List<String> consumerGroups, Duration retention) {
+
+        /** A hub with Azure's default retention. */
+        public EntitySpec(int partitionCount, List<String> consumerGroups) {
+            this(partitionCount, consumerGroups, DEFAULT_RETENTION);
+        }
+    }
+
+    /**
+     * Parses "eh1:4,eh2:2:PT10M" and a consumer groups string into entityName → {@link EntitySpec}.
+     *
+     * The third field is the hub's retention as an ISO-8601 duration. A hub named without one
+     * keeps events for {@link #DEFAULT_RETENTION}, Azure's default; the longest Azure allows is
+     * {@link #MAX_RETENTION}.
      *
      * A hub named without a count gets {@link #DEFAULT_PARTITION_COUNT}, which keeps the single
      * undivided stream this emulated before partitions existed. The count is now load-bearing —
@@ -131,12 +171,32 @@ public class ArtemisConfigGenerator {
         for (String token : entitiesStr.split(",")) {
             token = token.trim();
             if (token.isEmpty()) continue;
-            String[] parts = token.split(":", 2);
+            String[] parts = token.split(":", 3);
             String name = parts[0].trim();
             if (name.isEmpty()) continue;
-            result.put(name, new EntitySpec(parsePartitionCount(name, parts), groups));
+            result.put(name, new EntitySpec(parsePartitionCount(name, parts), groups, parseRetention(name, parts)));
         }
         return result;
+    }
+
+    private static Duration parseRetention(String entityName, String[] parts) {
+        if (parts.length < 3 || parts[2].isBlank()) {
+            return DEFAULT_RETENTION;
+        }
+        String raw = parts[2].trim();
+        Duration retention;
+        try {
+            retention = Duration.parse(raw);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(
+                    "Event hub '" + entityName + "': retention '" + raw + "' is not an ISO-8601 duration");
+        }
+        if (retention.isNegative() || retention.isZero() || retention.compareTo(MAX_RETENTION) > 0) {
+            throw new IllegalArgumentException(
+                    "Event hub '" + entityName + "': retention " + raw + " must be longer than zero and at most "
+                    + MAX_RETENTION);
+        }
+        return retention;
     }
 
     private static int parsePartitionCount(String entityName, String[] parts) {
@@ -165,7 +225,8 @@ public class ArtemisConfigGenerator {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private String buildBrokerXml(XmlBuilder addresses, XmlBuilder diverts, String partitionSpec) {
+    private String buildBrokerXml(XmlBuilder addresses, XmlBuilder diverts, String partitionSpec,
+                                  String retentionSpec) {
         XmlBuilder xml = new XmlBuilder()
             .start("configuration", "urn:activemq")
               .start("core", "urn:activemq:core")
@@ -190,6 +251,10 @@ public class ArtemisConfigGenerator {
                   .startAttr("broker-plugin", "class-name",
                           "io.floci.az.artemis.EventHubPartitionPlugin")
                     .selfClose("property", "key", "entities", "value", partitionSpec)
+                  .end("broker-plugin")
+                  .startAttr("broker-plugin", "class-name",
+                          "io.floci.az.artemis.EventHubRetentionPlugin")
+                    .selfClose("property", "key", "retention", "value", retentionSpec)
                   .end("broker-plugin")
                 .end("broker-plugins")
                 .start("address-settings")
@@ -246,11 +311,16 @@ public class ArtemisConfigGenerator {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" + xml.build();
     }
 
-    /** MULTICAST address with one queue per consumer group (for rhea-promise / Node.js). */
-    private void appendMulticastAddress(XmlBuilder builder, String addr, List<String> consumerGroups) {
+    /**
+     * MULTICAST address with one queue per consumer group (for rhea-promise / Node.js). Returns the
+     * consumer group queues, which are non-destructive like every consumer group queue.
+     */
+    private List<String> appendMulticastAddress(XmlBuilder builder, String addr, List<String> consumerGroups) {
         XmlBuilder queues = new XmlBuilder();
+        List<String> names = new ArrayList<>();
         for (String cg : consumerGroups) {
-            queues.selfClose("queue", "name", addr + "/" + cg);
+            names.add(addr + "/" + cg);
+            queues.selfClose("queue", "name", addr + "/" + cg, NON_DESTRUCTIVE, "true");
         }
         builder
             .startAttr("address", "name", addr)
@@ -258,16 +328,19 @@ public class ArtemisConfigGenerator {
                 .raw(queues.build())
               .end("multicast")
             .end("address");
+        return names;
     }
 
     /**
      * Appends ANYCAST addresses, durable queues, and exclusive diverts for the Python uamqp SDK,
-     * which uses full AMQP URI addressing: {@code amqp://hostname/namespace/entity}.
+     * which uses full AMQP URI addressing: {@code amqp://hostname/namespace/entity}. Returns the
+     * consumer group queues, which are non-destructive.
      */
-    private void appendAnycastTopology(XmlBuilder addresses, XmlBuilder diverts,
-                                        String hostname, String namespace, String entity,
-                                        List<String> consumerGroups) {
+    private List<String> appendAnycastTopology(XmlBuilder addresses, XmlBuilder diverts,
+                                                String hostname, String namespace, String entity,
+                                                List<String> consumerGroups) {
         String entityAddr = anycastEntityAddress(hostname, namespace, entity);
+        List<String> names = new ArrayList<>();
 
         // An explicit (non-durable) queue at the entity address lets the sender link attach.
         // The exclusive diverts below intercept all messages before they reach this queue,
@@ -283,10 +356,11 @@ public class ArtemisConfigGenerator {
         for (String cg : consumerGroups) {
             String cgAddr = entityAddr + "/" + cg;
             String divertName = anycastDivertName(hostname, entity, cg);
+            names.add(cgAddr);
 
             addresses.startAttr("address", "name", cgAddr)
                        .start("anycast")
-                         .startAttr("queue", "name", cgAddr)
+                         .startAttr("queue", "name", cgAddr, NON_DESTRUCTIVE, "true")
                            .elem("durable", true)
                          .end("queue")
                        .end("anycast")
@@ -298,11 +372,13 @@ public class ArtemisConfigGenerator {
                      .elem("exclusive", true)
                    .end("divert");
         }
+        return names;
     }
 
     /**
      * Appends the partitioned topology for one hub: the addresses a producer sends to and one
-     * durable queue per (consumer group, partition) for consumers to attach to.
+     * durable, non-destructive queue per (consumer group, partition) for consumers to attach to.
+     * Returns those queues.
      *
      * Everything hangs off the bare entity path, once. That is what the AMQP layer reduces every
      * address to ({@link org.apache.activemq.artemis.protocol.amqp.proton.AmqpEntityAddress}), so
@@ -326,8 +402,9 @@ public class ArtemisConfigGenerator {
      * message therefore reaches exactly one partition per consumer group, which is the Event Hubs
      * guarantee: every consumer group sees the whole stream, each event in one partition of it.
      */
-    private void appendPartitionTopology(XmlBuilder addresses, XmlBuilder diverts, String entity,
-                                         List<String> consumerGroups, int partitionCount) {
+    private List<String> appendPartitionTopology(XmlBuilder addresses, XmlBuilder diverts, String entity,
+                                                 List<String> consumerGroups, int partitionCount) {
+        List<String> names = new ArrayList<>();
         appendSenderAddress(addresses, entity);
         for (int partition = 0; partition < partitionCount; partition++) {
             appendSenderAddress(addresses, partitionSenderAddress(entity, partition));
@@ -337,10 +414,11 @@ public class ArtemisConfigGenerator {
             for (int partition = 0; partition < partitionCount; partition++) {
                 String partitionAddr =
                         entity + "/ConsumerGroups/" + cg + "/Partitions/" + partition;
+                names.add(partitionAddr);
 
                 addresses.startAttr("address", "name", partitionAddr)
                            .start("anycast")
-                             .startAttr("queue", "name", partitionAddr)
+                             .startAttr("queue", "name", partitionAddr, NON_DESTRUCTIVE, "true")
                                .elem("durable", true)
                              .end("queue")
                            .end("anycast")
@@ -365,6 +443,7 @@ public class ArtemisConfigGenerator {
                 }
             }
         }
+        return names;
     }
 
     /** The address the Java SDK sends to when the caller pins a partition. */

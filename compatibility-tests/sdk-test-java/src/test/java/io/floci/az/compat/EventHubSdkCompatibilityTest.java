@@ -15,6 +15,7 @@ import jakarta.jms.TextMessage;
 import org.junit.jupiter.api.*;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -44,14 +45,19 @@ class EventHubSdkCompatibilityTest {
     private static final String CONSUMER_GROUP = "$Default";
     private static final Duration RECEIVE_TIMEOUT = Duration.ofSeconds(3);
     private static final int EVENT_COUNT = 8;
-    /**
-     * How many events one read takes off a partition. Comfortably more than this test sends, so an
-     * earlier test's leftovers cannot fill the read and starve out this test's own events.
-     */
+    /** How many events one read takes off a partition. Comfortably more than this test sends. */
     private static final int RECEIVE_LIMIT = EVENT_COUNT * 4;
 
     private EventHubProducerClient producer;
     private String testId;
+    /**
+     * Where a test reads its own events back from. A read removes no event, so every earlier test's
+     * events stay in the partitions until the hub's retention ends, and a read from the earliest
+     * event would fill up with them before it reached this test's. A second before the test starts
+     * leaves room for the clocks of the test and the broker to differ a little; the events of that
+     * second are too few to fill a read.
+     */
+    private EventPosition testStart;
 
     @BeforeAll
     void setup() throws Exception {
@@ -72,6 +78,7 @@ class EventHubSdkCompatibilityTest {
     @BeforeEach
     void newTestId() {
         testId = UUID.randomUUID().toString().replace("-", "");
+        testStart = EventPosition.fromEnqueuedTime(Instant.now().minusSeconds(1));
     }
 
     @Test
@@ -99,7 +106,7 @@ class EventHubSdkCompatibilityTest {
         Set<String> partitionsUsed = new HashSet<>();
         int received = 0;
         for (String partitionId : partitionIds) {
-            List<String> bodies = receiveFrom(partitionId, EventPosition.earliest());
+            List<String> bodies = receiveFrom(partitionId, testStart);
             received += bodies.size();
             if (!bodies.isEmpty()) {
                 partitionsUsed.add(partitionId);
@@ -126,7 +133,7 @@ class EventHubSdkCompatibilityTest {
         Set<String> partitionsUsed = new HashSet<>();
         int received = 0;
         for (String partitionId : partitionIds()) {
-            List<String> bodies = receiveFrom(partitionId, EventPosition.earliest());
+            List<String> bodies = receiveFrom(partitionId, testStart);
             received += bodies.size();
             if (!bodies.isEmpty()) {
                 partitionsUsed.add(partitionId);
@@ -159,7 +166,7 @@ class EventHubSdkCompatibilityTest {
         }
 
         for (String partitionId : partitionIds) {
-            List<String> bodies = receiveFrom(partitionId, EventPosition.earliest());
+            List<String> bodies = receiveFrom(partitionId, testStart);
             if (partitionId.equals(target)) {
                 assertEquals(EVENT_COUNT, bodies.size(),
                         "partition " + target + " did not receive the events addressed to it");
@@ -213,7 +220,7 @@ class EventHubSdkCompatibilityTest {
 
         int received = 0;
         for (String partitionId : partitionIds()) {
-            received += receiveFrom(partitionId, EventPosition.earliest()).size();
+            received += receiveFrom(partitionId, testStart).size();
         }
         assertEquals(EVENT_COUNT, received,
                 "events sent to " + uriForm + " did not reach the partitions the SDK reads");

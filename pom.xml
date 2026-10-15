@@ -346,6 +346,14 @@
                                     token="SimpleString simpleStringSelector = SimpleString.of(selector);"
                                     value="selector = AmqpReplyRouting.replySelector(connection, addressToUse, selector);&#10;            SimpleString simpleStringSelector = SimpleString.of(selector);"
                                     failOnNoReplacements="true" />
+                                <!-- An Event Hubs partition admits a limited number of receivers per consumer
+                                     group (EventHubReceivers). The receiver's consumer is created only once
+                                     it is admitted. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java"
+                                    token="return sessionSPI.createSender(senderContext, queue, multicast ? null : selector, browseOnly, consumerPriority);"
+                                    value="return EventHubReceivers.attach(sessionSPI.getProtocolManager().getServer(), queue, protonSender,&#10;         () -> sessionSPI.createSender(senderContext, queue, multicast ? null : selector, browseOnly, consumerPriority));"
+                                    failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
                                     token="address = SimpleString.of(targetAddress);"
