@@ -5,15 +5,17 @@ Compatible with the `Microsoft.Authorization` policy management plane used by th
 `azurerm_policy_set_definition`, `azurerm_*_policy_assignment`, `azurerm_*_policy_exemption`) and the
 Azure SDKs (`azure-resourcemanager-resources`, `armpolicy`, `azure-mgmt-resource`). Covers **policy
 definitions**, **policy set definitions** (initiatives), **policy assignments** and **policy
-exemptions** at every scope the real service accepts.
+exemptions** at every scope the real service accepts, and **evaluates the assigned rules** on every
+resource write: `deny` refuses the request with `RequestDisallowedByPolicy`, `append` amends it and
+`audit` is recorded.
 
 > **HTTP-only, no Docker.** All policy state is in-memory and ephemeral, like the rest of the ARM
 > control plane.
 
-> **Control plane only.** Definitions are stored and validated structurally, but policy rules are
-> never evaluated against resource requests: nothing is denied, audited or remediated, and there is no
-> compliance state (`Microsoft.PolicyInsights` is not implemented). Use this to exercise the code that
-> authors and deploys policies, not the code that reacts to their effects.
+> **Request-time effects only.** `deny`, `append` and `audit` fire when a resource is written; there is
+> no compliance scan of existing resources, no remediation and no compliance state
+> (`Microsoft.PolicyInsights` is not implemented). A rule the engine cannot evaluate denies the request
+> rather than standing aside, so a broken rule fails loudly.
 
 ---
 
@@ -45,6 +47,10 @@ exemptions** at every scope the real service accepts.
   `PolicyAssignmentNotFound`, `PolicyExemptionNotFound`, `InvalidPolicyRule`,
   `InvalidCreatePolicySetDefinitionRequest`, `InvalidPolicyDefinitionReference`, `MissingSubscription`
   for tenant-level writes, and ARM's `InvalidRequestContent` for malformed JSON
+- **Rule evaluation on writes** (see [Rule evaluation](#rule-evaluation)): every PUT and PATCH of a
+  resource is checked against the assignments covering its scope, with `deny`, `append` and `audit`
+  effects, overrides, exemptions, `notScopes`, `enforcementMode`, parameters, `Indexed` / `All` modes,
+  array aliases, `count` expressions and the ARM template functions
 
 ---
 
@@ -159,6 +165,72 @@ resource "azurerm_resource_group_policy_assignment" "enforce" {
 
 ---
 
+## Rule evaluation
+
+Every PUT and PATCH of a provider resource or a resource group passes through the ARM request gate,
+where the assigned policies are evaluated before the handler runs, the way Azure evaluates them before
+a request reaches its resource provider. A PATCH is judged on the resource it produces: the stored
+resource (read through its own GET) with the patch applied the way Resource Manager applies one,
+`properties` merged and `tags` replaced as a whole. A tag update on a compliant resource therefore
+passes, and a PATCH that drops a required tag or sets a forbidden property is refused. As in Azure, a
+PATCH that changes only `tags` is evaluated only against the definitions whose condition inspects a
+tags field (`tags`, `tags.name`, `tags['name']`, a parameterised field resolving to one, or
+`field('tags...')` in an expression), so a tag update never trips a rule about other properties. When
+an `append` fires on a PATCH, its amendments are added to the caller's patch, so the handler still
+receives a PATCH.
+
+1. The assignments whose scope covers the resource are collected: the resource itself, its parents,
+   its resource group, its subscription and any management group. `notScopes` and `resourceSelectors`
+   narrow them, and an unexpired exemption for the assignment (matching the reference id when it names
+   one) removes it.
+2. Each assigned definition, or each member of an assigned set definition, has its parameters resolved
+   (assignment values, then set-definition values, then declared defaults) and its effect resolved:
+   an `overrides` entry of kind `policyEffect` wins over the definition's `then.effect`, which may
+   itself be a parameter expression.
+3. The `if` condition is evaluated against the request content, with `type`, `name` and `id` filled
+   from the URL. `field` conditions cover the fixed fields (`name`, `fullName`, `type`, `kind`,
+   `location`, `id`, `identity.type`, `tags`, `tags['x']`) and property aliases; `value` conditions
+   and `count` expressions take the ARM template functions (`parameters`, `field`, `current`,
+   `requestContext`, `policy`, `resourceGroup`, `subscription`, `if`, `equals`, `contains`,
+   `empty`, `length`, `split`, `concat`, `toLower`, `int`, `union`, `tryGet`, `ipRangeContains` and
+   the rest of the documented set). All documented operators are supported, with Azure's case rules.
+4. Effects run in Azure's order. `append` writes its `details` into the body the handler then reads,
+   and denies on a conflicting existing value. `deny` answers `403 RequestDisallowedByPolicy` with
+   the message Azure writes (the assignment's `nonComplianceMessages` as the reason, else the policy
+   identifiers) and an `additionalInfo[].info` of type `PolicyViolation` carrying the evaluated
+   expressions. `audit` is recorded once the handler has answered with a 2xx. Under
+   `enforcementMode: DoNotEnforce` the rules are evaluated but nothing is applied or recorded.
+
+`requestContext().identity` is read from the bearer token of the request (`idtyp`, `appid`, `oid`),
+so rules that gate on the caller type behave as they do in Azure when the request carries a token
+from the emulator's Entra endpoint.
+
+### Inspecting what fired
+
+Every effect that fired is kept in memory, newest last, with the fields the Activity Log carries for a
+`Microsoft.Authorization/policies/{deny|audit|append}/action` event:
+
+```bash
+curl -s "http://localhost:4577/_admin/policy/evaluations" | jq .
+curl -s "http://localhost:4577/_admin/policy/evaluations?effect=deny&resourceId=/subscriptions/.../storageAccounts/sa1"
+curl -s -X DELETE "http://localhost:4577/_admin/policy/evaluations"
+```
+
+Each entry names the resource, the assignment, the definition, the set definition and reference id when
+there is one, the resolved effect, the enforcement mode, the caller and claims, the correlation id and
+the `evaluatedExpressions`. `POST /_admin/reset` empties the log too.
+
+### Alias resolution
+
+Azure resolves an alias through a per-api-version path table. The emulator has no table, so it resolves
+an alias by convention: the alias must start with the resource's type, and the remainder is a property
+path read from the request content, looking under `properties` when a segment is not a top-level key.
+That is how the published aliases map for the resources the emulator serves, nested children included:
+`Microsoft.Network/networkSecurityGroups/securityRules[*].access` reads each rule's
+`properties.access`. An alias whose type is not the resource's type resolves to nothing, as in Azure.
+
+---
+
 ## Configuration
 
 ```yaml
@@ -166,20 +238,35 @@ floci-az:
   services:
     policy:
       enabled: true
+      enforcement: true
 ```
 
 | Property | Env var | Default | Description |
 |---|---|---|---|
 | `enabled` | `FLOCI_AZ_SERVICES_POLICY_ENABLED` | `true` | Enables the `Microsoft.Authorization` policy resources. When disabled, their paths fall through to the generic ARM handler and answer `404` |
+| `enforcement` | `FLOCI_AZ_SERVICES_POLICY_ENFORCEMENT` | `true` | Evaluates the assigned rules on every resource write. When off, policies are stored but no request is denied, amended or audited |
 
 ---
 
 ## Intentional deviations
 
-- **No enforcement and no compliance data.** Policy rules are stored, not evaluated. Resource
-  requests are never denied with `RequestDisallowedByPolicy`, `audit` / `modify` /
-  `deployIfNotExists` effects do nothing, and `Microsoft.PolicyInsights` (policy states, remediations,
-  compliance summaries) is not implemented.
+- **Request-time evaluation only.** `deny`, `append` and `audit` fire on writes; `modify`,
+  `denyAction`, `auditIfNotExists`, `deployIfNotExists`, `manual`, `mutate` and the resource-provider
+  modes (`Microsoft.Kubernetes.Data` and the like) evaluate to nothing. There is no compliance scan of
+  existing resources and `Microsoft.PolicyInsights` (policy states, remediations, compliance summaries)
+  is not implemented. A PATCH of a resource that cannot be read back (none stored, or a handler that
+  answers something other than 200) is evaluated on the body it carries, and the merge is generic:
+  a provider that replaces a nested collection on PATCH (a Redis cache's `redisConfiguration`, say)
+  stores less than the policy saw when the patch supplies only part of it.
+- **Management-group assignments apply to every subscription.** The emulator has no management-group
+  hierarchy, so an assignment at `Microsoft.Management/managementGroups/{mg}` covers all subscriptions.
+- **`Indexed` mode is approximated** as top-level provider resources: nested child types, extension
+  resources and `Microsoft.Authorization` / `Microsoft.Resources` resources are skipped, resource
+  groups are evaluated in `All` mode only.
+- **Aliases resolve by convention**, not from Azure's alias table (see [Alias resolution](#alias-resolution)).
+  A definition referenced through a built-in id evaluates nothing, since built-ins are not seeded.
+- **Audit and deny events are kept in memory**, readable at `/_admin/policy/evaluations`; the Activity
+  Log endpoint does not serve them yet.
 - **No built-in definitions.** Azure ships thousands of built-in definitions and initiatives; none are
   seeded. Tenant-rooted listings return an empty collection, tenant-rooted reads return
   `PolicyDefinitionNotFound` / `PolicySetDefinitionNotFound`, and built-in ids

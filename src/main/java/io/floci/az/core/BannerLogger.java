@@ -192,7 +192,8 @@ public class BannerLogger {
         }
         sb.append(String.format("   %-9s [%s]  %s\n", "policy",
                 config.services().policy().enabled() ? "enabled " : "disabled",
-                "Microsoft.Authorization policy (definitions, set definitions, assignments, exemptions)"));
+                "Microsoft.Authorization policy (definitions, set definitions, assignments, exemptions"
+                        + (config.services().policy().enforcement() ? ", rule evaluation on writes)" : ", no evaluation)")));
         if (config.services().eventGrid().enabled()) {
             sb.append(serviceStatus("eventgrid", true, getStorageMode("eventgrid")));
         }

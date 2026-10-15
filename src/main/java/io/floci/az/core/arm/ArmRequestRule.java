@@ -12,6 +12,15 @@ public interface ArmRequestRule {
     int order();
 
     /**
+     * Whether this rule reads the body of a PUT or PATCH. When any rule does, the gate buffers the body once
+     * on entry, hands it to every rule as {@link ArmCall#body()}, and the handler reads it again afterwards,
+     * amendments included.
+     */
+    default boolean readsBody() {
+        return false;
+    }
+
+    /**
      * Runs before the handler. A {@link ArmVerdict.Respond} answers the request in the handler's place: the
      * rules after this one are not entered and the handler does not run.
      */

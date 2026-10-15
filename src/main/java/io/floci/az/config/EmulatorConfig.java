@@ -369,12 +369,20 @@ public interface EmulatorConfig {
     }
 
     /**
-     * Azure Policy control plane under Microsoft.Authorization: policy definitions, set definitions,
-     * assignments and exemptions. Control plane only; rules are stored, never evaluated.
+     * Azure Policy under Microsoft.Authorization: policy definitions, set definitions, assignments and
+     * exemptions, and the evaluation of assigned rules on resource writes.
      */
     interface PolicyConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * Evaluates assigned policy rules on every PUT and PATCH of a resource: {@code deny} refuses the
+         * request with {@code RequestDisallowedByPolicy}, {@code append} amends it, {@code audit} is recorded.
+         * Off, the control plane still stores policies but nothing is evaluated.
+         */
+        @WithDefault("true")
+        boolean enforcement();
     }
 
     /** Microsoft Entra ID (Azure AD) emulation — local OpenID Connect provider. */

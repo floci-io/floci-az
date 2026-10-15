@@ -120,7 +120,12 @@ public record AzureRequest(
 
     /** Returns a copy of this request marked as inside the ARM request gate with {@code call}. */
     public AzureRequest withArm(ArmCall call) {
-        return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
+        return withArm(call, bodyStream);
+    }
+
+    /** Returns a copy of this request inside the gate with {@code call}, reading its body from {@code body}. */
+    public AzureRequest withArm(ArmCall call, InputStream body) {
+        return new AzureRequest(method, accountName, serviceType, resourcePath, headers, body,
              queryParams, queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, authority,
              scope, call);
     }

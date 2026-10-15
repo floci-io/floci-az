@@ -323,7 +323,8 @@ floci-az:
       app-service-path: msi/token            # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_PATH
       app-service-header-secret: floci-az-msi-secret   # FLOCI_AZ_SERVICES_MANAGED_IDENTITY_APP_SERVICE_HEADER_SECRET
     policy:
-      enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions (control plane only, no rule evaluation)
+      enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions
+      enforcement: true   # FLOCI_AZ_SERVICES_POLICY_ENFORCEMENT: evaluate assigned rules on resource writes (deny, append, audit)
 
   auth:
     # Not enforced yet: every value behaves like dev, accepting any credentials without

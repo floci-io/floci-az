@@ -32,10 +32,12 @@ public class ArmRequestGate {
     private static final Logger LOG = Logger.getLogger(ArmRequestGate.class);
 
     private final List<ArmRequestRule> rules;
+    private final boolean buffersBody;
 
     @Inject
     public ArmRequestGate(@All List<ArmRequestRule> rules) {
         this.rules = ordered(rules);
+        this.buffersBody = this.rules.stream().anyMatch(ArmRequestRule::readsBody);
         LOG.debugv("ARM request gate: {0} rules", this.rules.size());
     }
 
@@ -68,17 +70,26 @@ public class ArmRequestGate {
                     return response;
                 }
             }
-            response = handler.apply(request.withArm(call));
+            response = handler.apply(call.body() == null
+                ? request.withArm(call)
+                : request.withArm(call, call.body().stream()));
             return response;
         } finally {
             exit(call, response, entered);
         }
     }
 
-    /** Builds the {@link ArmCall} the rules and the handler see for {@code request}. */
+    /**
+     * Builds the {@link ArmCall} the rules and the handler see for {@code request}. The body of a PUT or PATCH
+     * is buffered when a rule reads bodies, so the handler reads the bytes the rules saw, or replaced.
+     */
     public ArmCall call(AzureRequest request) {
+        String method = request.method() == null ? null : request.method().toUpperCase(Locale.ROOT);
+        ArmRequestBody body = buffersBody && ("PUT".equals(method) || "PATCH".equals(method))
+            ? ArmRequestBody.read(request.bodyStream())
+            : null;
         return new ArmCall(request.scope(), ArmResourceId.parse(request.resourcePath()).orElse(null),
-            null, request.method() == null ? null : request.method().toUpperCase(Locale.ROOT), null);
+            null, method, null, body, request);
     }
 
     /** Runs the exit hook of the first {@code entered} rules; {@code response} is null when something threw. */
