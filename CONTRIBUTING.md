@@ -127,11 +127,12 @@ Once your current pull requests are reviewed, merged, or closed, you are welcome
 
 ## Release Process (maintainers)
 
-Stable releases ship on the **1st and 3rd Tuesday of each month**. Merging to `main` does
-not cut a release: the change rides the next train, and reaches the `nightly` image on the
-next nightly build.
+Stable releases ship on the **15th and the last day of each month**. Merging to `main`
+does not cut a release: the change rides the next train, and reaches the `nightly` image on
+the next nightly build.
 
-Releases are cut from `main` with the **Release Cut** workflow
+Releases are cut from `main` by the **Release Cut** workflow, which runs on a schedule at
+00:30 US Central time (America/Chicago) on those days. Maintainers can also run it by hand
 (Actions → Release Cut → Run workflow). semantic-release analyzes the
 Conventional Commits since the last tag, bumps `pom.xml`, regenerates
 `CHANGELOG.md`, commits, tags, and publishes the GitHub Release; the tag
