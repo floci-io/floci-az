@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -99,7 +100,7 @@ final class PolicyRuleEvaluator {
         throw new EvaluationException("A condition must have a field, value or count");
     }
 
-    private static final Pattern TAGS_FIELD_CALL = Pattern.compile("field\\s*\\(\\s*'tags\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern FIELD_CALL = Pattern.compile("field\\s*\\(", Pattern.CASE_INSENSITIVE);
 
     /**
      * True when {@code condition} inspects a tags field anywhere: a {@code field} (or {@code count.field}) naming
@@ -128,7 +129,64 @@ final class PolicyRuleEvaluator {
             }
             return false;
         }
-        return condition instanceof String text && text.trim().startsWith("[") && TAGS_FIELD_CALL.matcher(text).find();
+        return condition instanceof String text && text.trim().startsWith("[") && expressionInspectsTags(text, ctx);
+    }
+
+    /**
+     * True when a value expression reads a tags field through {@code field()}: a literal name, or one an
+     * expression names once its parameters resolve. An argument the context cannot settle keeps the rule
+     * eligible, since skipping it could admit a write Azure would deny.
+     */
+    private static boolean expressionInspectsTags(String text, EvaluationContext ctx) {
+        Matcher call = FIELD_CALL.matcher(text);
+        while (call.find()) {
+            String argument = argumentAt(text, call.end());
+            if (argument == null) {
+                return true;
+            }
+            String trimmed = argument.trim();
+            if (trimmed.startsWith("'")) {
+                if (isTagsName(trimmed.substring(1))) {
+                    return true;
+                }
+                continue;
+            }
+            try {
+                if (isTagsName(ArmExpressions.stringify(ArmExpressions.evaluate("[" + trimmed + "]", ctx)))) {
+                    return true;
+                }
+            } catch (RuntimeException e) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The text of a call's first argument starting at {@code from}, up to its closing parenthesis; null when unbalanced. */
+    private static String argumentAt(String text, int from) {
+        int depth = 0;
+        boolean quoted = false;
+        for (int i = from; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\'') {
+                quoted = !quoted;
+            } else if (!quoted) {
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    if (depth == 0) {
+                        return text.substring(from, i);
+                    }
+                    depth--;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isTagsName(String field) {
+        String name = field == null ? "" : field.trim().toLowerCase(Locale.ROOT);
+        return name.equals("tags") || name.startsWith("tags.") || name.startsWith("tags[") || name.startsWith("tags'");
     }
 
     private static boolean isTagsField(Object fieldName, EvaluationContext ctx) {
@@ -138,8 +196,7 @@ final class PolicyRuleEvaluator {
         } catch (RuntimeException e) {
             return String.valueOf(fieldName).toLowerCase(Locale.ROOT).contains("tags");
         }
-        String name = field == null ? "" : field.trim().toLowerCase(Locale.ROOT);
-        return name.equals("tags") || name.startsWith("tags.") || name.startsWith("tags[");
+        return isTagsName(field);
     }
 
     /** The {@code location} field compares normalised on both sides: {@code East US 2} equals {@code eastus2}. */

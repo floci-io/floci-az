@@ -113,6 +113,24 @@ class PolicyPatchEvaluationTest {
     }
 
     @Test
+    void aTagsOnlyPatchIsEvaluatedAgainstAValueExpressionThatNamesTheTagField() {
+        // The tag field arrives through a parameter inside field(): resolved, not matched as a literal.
+        given().contentType("application/json").body("""
+                {"properties": {"mode": "Indexed",
+                  "parameters": {"tagField": {"type": "String", "defaultValue": "tags['owner']"}},
+                  "policyRule": {"if": {"value": "[empty(field(parameters('tagField')))]", "equals": true},
+                                 "then": {"effect": "deny"}}}}""")
+                .when().put(DEFINITIONS + "/require-owner" + POLICY_API).then().statusCode(201);
+        assign("require-owner", DEFINITIONS + "/require-owner");
+
+        cache("{\"location\": \"eastus\", \"tags\": {\"owner\": \"team\"}, \"properties\": {\"minimumTlsVersion\": \"1.2\", "
+                + "\"sku\": {\"name\": \"Basic\", \"family\": \"C\", \"capacity\": 0}}}").statusCode(isOneOf(200, 201));
+        patch("{\"tags\": {\"env\": \"dev\"}}").statusCode(403)
+                .body("error.code", equalTo("RequestDisallowedByPolicy"));
+        patch("{\"tags\": {\"owner\": \"team\", \"env\": \"dev\"}}").statusCode(200).body("tags.env", equalTo("dev"));
+    }
+
+    @Test
     void anAppendOnAPatchAmendsTheCallersPatch() {
         // The condition inspects the tag, as Azure's tag-append definitions do, so a tags-only PATCH evaluates it.
         definition("cost-center", """

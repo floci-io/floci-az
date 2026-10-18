@@ -181,6 +181,18 @@ class PolicyRuleEvaluatorTest {
         assertFalse(inspectsTags("{\"value\": \"[resourceGroup().tags]\", \"exists\": \"true\"}", ctx));
     }
 
+    @Test
+    void inspectsTagsResolvesTheFieldAValueExpressionNames() {
+        EvaluationContext ctx = nsg();
+        ctx.parameters = Map.of("tagField", "tags['owner']", "tagName", "costCenter", "property", "location");
+        assertTrue(inspectsTags("{\"value\": \"[field(parameters('tagField'))]\", \"exists\": \"false\"}", ctx));
+        assertTrue(inspectsTags("{\"value\": \"[empty(field(concat('tags[', parameters('tagName'), ']')))]\", \"equals\": true}", ctx));
+        assertFalse(inspectsTags("{\"value\": \"[field(parameters('property'))]\", \"equals\": \"eastus\"}", ctx));
+        assertFalse(inspectsTags("{\"value\": \"[toLower(field('location'))]\", \"equals\": \"eastus\"}", ctx));
+        // An argument the context cannot settle keeps the rule eligible.
+        assertTrue(inspectsTags("{\"value\": \"[field(parameters('missing'))]\", \"exists\": \"false\"}", ctx));
+    }
+
     private static boolean inspectsTags(String condition, EvaluationContext ctx) {
         try {
             return PolicyRuleEvaluator.inspectsTags(MAPPER.readValue(condition, Map.class), ctx);
