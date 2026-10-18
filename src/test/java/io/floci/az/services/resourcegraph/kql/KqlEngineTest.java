@@ -458,6 +458,14 @@ class KqlEngineTest {
         assertEquals("A", row.get("u"));
         assertEquals("a 'b'", row.get("v"));
         assertEquals(java.time.Duration.ofMinutes(90), row.get("span"));
+        Map<String, Object> spans = run("resources | take 1 | project neg = -90m, micro = 7microseconds, ticks = 7ticks, one = 1tick").getFirst();
+        assertEquals(java.time.Duration.ofMinutes(-90), spans.get("neg"));
+        assertEquals(java.time.Duration.ofNanos(7_000), spans.get("micro"));
+        assertEquals(java.time.Duration.ofNanos(700), spans.get("ticks"));
+        assertEquals(java.time.Duration.ofNanos(100), spans.get("one"));
+        // now(-7d) is seven days ago, not the current time.
+        assertEquals(1, run("resources | where todatetime(properties.creationTime) < now(-7d)").size());
+        assertEquals(0, run("resources | where todatetime(properties.creationTime) > now(-7d)").size());
     }
 
     @Test

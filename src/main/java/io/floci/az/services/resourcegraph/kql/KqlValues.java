@@ -26,7 +26,10 @@ import java.util.regex.Pattern;
 public final class KqlValues {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final Pattern TIMESPAN = Pattern.compile("(?i)^(\\d+(?:\\.\\d+)?)(d|h|m|s|ms|microsecond|tick)$");
+    /** The units a timespan literal takes, singular or plural, the same list the parser accepts. */
+    static final String TIMESPAN_UNITS = "d|h|m|s|ms|microsecond|microseconds|tick|ticks";
+
+    private static final Pattern TIMESPAN = Pattern.compile("(?i)^(\\d+(?:\\.\\d+)?)(" + TIMESPAN_UNITS + ")$");
 
     private KqlValues() {
     }
@@ -201,7 +204,7 @@ public final class KqlValues {
                 case "m" -> Duration.ofMillis((long) (amount * 60_000));
                 case "s" -> Duration.ofMillis((long) (amount * 1_000));
                 case "ms" -> Duration.ofMillis((long) amount);
-                case "microsecond" -> Duration.ofNanos((long) (amount * 1_000));
+                case "microsecond", "microseconds" -> Duration.ofNanos((long) (amount * 1_000));
                 default -> Duration.ofNanos((long) (amount * 100));
             };
         }

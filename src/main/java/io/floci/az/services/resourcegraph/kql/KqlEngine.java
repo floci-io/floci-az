@@ -724,7 +724,7 @@ public final class KqlEngine {
             case Index index -> KqlValues.element(eval(index.target(), row), eval(index.index(), row));
             case Neg neg -> {
                 Object v = eval(neg.expr(), row);
-                yield v instanceof Long l ? -l : v instanceof Double d ? -d : null;
+                yield v instanceof Long l ? -l : v instanceof Double d ? -d : v instanceof Duration t ? t.negated() : null;
             }
             case Not not -> {
                 Boolean b = KqlValues.toBool(eval(not.expr(), row));

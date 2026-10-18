@@ -743,7 +743,7 @@ public final class Kql {
         }
 
         private static final Pattern DURATION_LITERAL =
-            Pattern.compile("^\\d+(\\.\\d+)?(d|h|m|s|ms|microsecond|microseconds|tick|ticks)$");
+            Pattern.compile("^\\d+(\\.\\d+)?(" + KqlValues.TIMESPAN_UNITS + ")$");
 
         private static Object number(String text) {
             if (DURATION_LITERAL.matcher(text).matches()) {
