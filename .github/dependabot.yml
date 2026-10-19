@@ -71,6 +71,11 @@ updates:
       compat-node:
         patterns:
           - "*"
+    ignore:
+      # ts-jest 29 accepts only typescript <7 as a peer, so a typescript 7 bump fails npm ci and
+      # holds back the whole group. Drop this once a ts-jest release accepts typescript 7.
+      - dependency-name: "typescript"
+        versions: [">=7.0.0"]
     commit-message:
       prefix: "build"
       include: "scope"
