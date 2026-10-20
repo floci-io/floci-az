@@ -1,5 +1,6 @@
 package io.floci.az.services.entra;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -14,6 +15,7 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @QuarkusTest
 class EntraServiceTest {
@@ -83,6 +85,27 @@ class EntraServiceTest {
             .body("token_type", is("Bearer"))
             .body("scope", is("api://resource/user_impersonation"))
             .body("access_token", not(emptyOrNullString()));
+    }
+
+    @Test
+    void passwordGrantReturnsAnIdTokenAndClientInfoForMsal() throws Exception {
+        String clientInfo = given()
+          .contentType("application/x-www-form-urlencoded")
+          .formParam("grant_type", "password")
+          .formParam("client_id", EntraStore.DEV_CLIENT_ID)
+          .formParam("username", "dev-user@floci-az.local")
+          .formParam("password", "whatever")
+          .formParam("scope", "api://resource/user_impersonation openid profile offline_access")
+          .formParam("client_info", "1")
+          .when().post("/{tenant}/oauth2/v2.0/token", TENANT)
+          .then()
+            .statusCode(200)
+            .body("id_token", matchesPattern("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*"))
+            .extract().path("client_info");
+
+        JsonNode info = new ObjectMapper().readTree(Base64.getUrlDecoder().decode(clientInfo));
+        assertEquals(TENANT, info.path("utid").asText());
+        assertFalse(info.path("uid").asText().isBlank());
     }
 
     @Test

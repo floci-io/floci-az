@@ -11,6 +11,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,11 @@ public class EntraResponses {
 
     /** A token response; {@code scope} and {@code idToken} are included only when present. */
     public Response token(String accessToken, String idToken, long expiresIn, String scope) {
+        return token(accessToken, idToken, expiresIn, scope, null);
+    }
+
+    /** A token response that also carries {@code client_info} when it is not null. */
+    public Response token(String accessToken, String idToken, long expiresIn, String scope, String clientInfo) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("token_type", "Bearer");
         body.put("expires_in", expiresIn);
@@ -55,7 +61,27 @@ public class EntraResponses {
         if (idToken != null) {
             body.put("id_token", idToken);
         }
+        if (clientInfo != null) {
+            body.put("client_info", clientInfo);
+        }
         return json(body);
+    }
+
+    /**
+     * {@code client_info}: base64url JSON naming the user ({@code uid}) and its home tenant ({@code utid}),
+     * returned when the token request sends {@code client_info=1}. MSAL keys its account on it, and MSAL4J
+     * builds no account at all from a response that lacks it.
+     */
+    public String clientInfo(String userObjectId, String tenantId) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("uid", userObjectId);
+        info.put("utid", tenantId);
+        try {
+            return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(mapper.writeValueAsBytes(info));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("client_info could not be serialised", e);
+        }
     }
 
     /**

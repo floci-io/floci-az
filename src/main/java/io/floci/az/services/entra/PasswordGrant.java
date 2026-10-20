@@ -4,6 +4,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.Arrays;
+
 /**
  * {@code grant_type=password} (resource owner password credentials): a delegated token for
  * {@code username}. The password is not checked.
@@ -34,6 +36,21 @@ public class PasswordGrant implements GrantHandler {
         String token = tokenIssuer.issue(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), audience, userOid, userOid, request.appId(), scp,
                 request.tokenVersion(), null, request.lifetimeSeconds()));
-        return responses.token(token, null, request.lifetimeSeconds(), scp);
+        // MSAL asks for openid and client_info=1 on every password grant, and MSAL4J returns no account
+        // (which azure-identity dereferences) unless the response carries both an ID token and client_info.
+        String idToken = requestsOpenId(request.scope())
+                ? tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
+                        request.tenantId(), request.issuer(), request.appId(), userOid, userOid, request.appId(),
+                        scp, request.tokenVersion(), null, request.lifetimeSeconds()),
+                        null, null, username, null)
+                : null;
+        String clientInfo = "1".equals(request.form().get("client_info"))
+                ? responses.clientInfo(userOid, request.tenantId())
+                : null;
+        return responses.token(token, idToken, request.lifetimeSeconds(), scp, clientInfo);
+    }
+
+    private static boolean requestsOpenId(String scope) {
+        return scope != null && Arrays.asList(scope.trim().split("\\s+")).contains("openid");
     }
 }
