@@ -20,7 +20,10 @@ import java.util.Map;
 @ApplicationScoped
 public class UserRealmEndpoint implements EntraEndpoint {
 
-    private static final String CLOUD_INSTANCE_NAME = "microsoftonline.com";
+    // Public-cloud values, as the discovery document's cloud_instance_name. On a Managed realm MSAL reads
+    // neither field: MSAL4J does not parse cloud_instance_name, and cloud_audience_urn only feeds the
+    // WS-Trust step of a Federated realm. No reference gives the national-cloud values to vary them by.
+    private static final String CLOUD_INSTANCE_NAME = "microsoftonline.com"; // cloud-literal: unread on a Managed realm, national values unknown
     private static final String CLOUD_AUDIENCE_URN = "urn:federation:MicrosoftOnline";
 
     private final EntraResponses responses;
