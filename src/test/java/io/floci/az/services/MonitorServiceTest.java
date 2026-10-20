@@ -5,9 +5,13 @@ import io.restassured.http.ContentType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPOutputStream;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -201,5 +205,77 @@ public class MonitorServiceTest {
             .body("tables[0].rows.size()", equalTo(2)) // Error and Warning are within 1h, Info is not.
             .body("tables[0].rows[0][1]", equalTo("Error"))
             .body("tables[0].rows[1][1]", equalTo("Warning"));
+    }
+    @Test
+    void aGzippedIngestionBodyIsDecodedAndItsRowsAreQueryable() throws IOException {
+        String workspacePath = workspacePath();
+        String customerId = createWorkspace(workspacePath);
+        String immutableId = createDcrFor(workspacePath);
+        String logs = "[{\"TimeGenerated\":\"" + Instant.now() + "\",\"Level\":\"Error\",\"Message\":\"gzipped\"},"
+            + "{\"TimeGenerated\":\"" + Instant.now() + "\",\"Level\":\"Info\",\"Message\":\"also gzipped\"}]";
+
+        given()
+            .contentType(ContentType.JSON)
+            .header("Content-Encoding", "gzip")
+            .body(gzip(logs))
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", immutableId, STREAM)
+            .then().statusCode(204);
+
+        given()
+            .contentType(ContentType.JSON)
+            .body(Map.of("query", STREAM + " | where Level == \"Error\" | project Message"))
+            .when().post("/v1/workspaces/{workspaceId}/query", customerId)
+            .then().statusCode(200)
+            .body("tables[0].rows.size()", equalTo(1))
+            .body("tables[0].rows[0][0]", equalTo("gzipped"));
+    }
+
+    @Test
+    void aBodyThatClaimsGzipButIsNotGzipIsRejected() {
+        String workspacePath = workspacePath();
+        createWorkspace(workspacePath);
+        String immutableId = createDcrFor(workspacePath);
+
+        given()
+            .contentType(ContentType.JSON)
+            .header("Content-Encoding", "gzip")
+            .body("[{\"Message\":\"plain\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", immutableId, STREAM)
+            .then().statusCode(400);
+    }
+
+    private static String workspacePath() {
+        return String.format("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.OperationalInsights/workspaces/%s", SUB, RG, WORKSPACE_NAME);
+    }
+
+    private static String createWorkspace(String workspacePath) {
+        return given()
+            .contentType(ContentType.JSON)
+            .body(Map.of("location", "eastus"))
+            .when().put(workspacePath)
+            .then().statusCode(201)
+            .extract().path("properties.customerId");
+    }
+
+    private static String createDcrFor(String workspacePath) {
+        String dcrPath = String.format("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Insights/dataCollectionRules/%s", SUB, RG, DCR_NAME);
+        return given()
+            .contentType(ContentType.JSON)
+            .body(Map.of("location", "eastus", "properties", Map.of(
+                "destinations", Map.of(
+                    "logAnalytics", List.of(Map.of("workspaceResourceId", workspacePath, "name", "la-destination"))
+                )
+            )))
+            .when().put(dcrPath)
+            .then().statusCode(201)
+            .extract().path("properties.immutableId");
+    }
+
+    private static byte[] gzip(String text) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (GZIPOutputStream out = new GZIPOutputStream(bytes)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+        }
+        return bytes.toByteArray();
     }
 }

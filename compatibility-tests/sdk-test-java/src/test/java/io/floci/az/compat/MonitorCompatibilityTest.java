@@ -16,7 +16,6 @@ import com.azure.monitor.query.logs.models.LogsTableRow;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -176,8 +175,6 @@ class MonitorCompatibilityTest {
 
     @Test
     @Order(6)
-    @Disabled("floci-az does not decode Content-Encoding: gzip on the Logs Ingestion API; "
-            + "LogsIngestionClient always gzips the upload, so it gets a 400 'Failed to parse request body'")
     void uploadThroughTheLogsIngestionClient() {
         LogsIngestionClient ingestionClient = new LogsIngestionClientBuilder()
                 .endpoint(ingestionEndpoint.replace("http://", "https://"))

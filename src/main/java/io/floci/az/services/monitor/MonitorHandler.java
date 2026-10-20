@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -33,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
 
 @ApplicationScoped
 public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProviderService,
@@ -340,6 +342,22 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     // Logs Ingestion API
     // -------------------------------------------------------------------------
 
+    /**
+     * The Logs Ingestion API declares an optional {@code Content-Encoding} header whose only value is
+     * {@code gzip}, and both the Java and Python {@code LogsIngestionClient} compress every upload.
+     */
+    private static InputStream decodedBody(AzureRequest req) throws IOException {
+        InputStream body = req.bodyStream();
+        if (body == null) {
+            return InputStream.nullInputStream();
+        }
+        String encoding = req.headers() == null ? null : req.headers().getHeaderString("Content-Encoding");
+        if (encoding != null && encoding.trim().equalsIgnoreCase("gzip")) {
+            return new GZIPInputStream(body);
+        }
+        return body;
+    }
+
     @SuppressWarnings("unchecked")
     private Response handleIngestion(AzureRequest req) {
         String path = req.resourcePath();
@@ -394,10 +412,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             workspaceId = (String) workspace.get("name");
         }
 
-        // Parse log records array from body stream
+        // Parse log records array from body stream; the ingestion clients gzip every upload
         List<Map<String, Object>> records;
-        try {
-            records = MAPPER.readValue(req.bodyStream(), new TypeReference<List<Map<String, Object>>>() {});
+        try (InputStream body = decodedBody(req)) {
+            records = MAPPER.readValue(body, new TypeReference<List<Map<String, Object>>>() {});
         } catch (IOException e) {
             return Response.status(400).entity("Failed to parse request body as log records: " + e.getMessage()).build();
         }

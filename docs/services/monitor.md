@@ -20,7 +20,7 @@ the **Log Analytics query API** (read them back with a subset of KQL), all in-pr
 - **Data Collection Rules (DCR)**: `Microsoft.Insights/dataCollectionRules` CreateOrUpdate, Get,
   Delete; an `immutableId` is generated when not supplied and used to route ingestion
 - **Logs Ingestion API**: `POST /dataCollectionRules/{immutableId}/streams/{stream}` accepts a JSON
-  array of log records, resolves the DCR's Log Analytics destination, and stores each record against
+  array of log records (plain or `Content-Encoding: gzip`, which the ingestion SDKs always send), resolves the DCR's Log Analytics destination, and stores each record against
   the destination workspace (`TimeGenerated` is honoured or defaulted to now)
 - **Log query API**: `POST /v1/workspaces/{workspaceId}/query` runs a KQL subset over the stored
   records and returns the standard `{tables:[{name,columns,rows}]}` shape with inferred column types
