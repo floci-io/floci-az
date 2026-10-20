@@ -42,6 +42,7 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 | `GET /{tenant}/v2.0/.well-known/openid-configuration` | OpenID discovery |
 | `GET /{tenant}/.well-known/openid-configuration` | OpenID discovery |
 | `GET /{tenant}/discovery/v2.0/keys` | JWKS |
+| `GET /common/userrealm/{username}?api-version=1.0` | Home realm discovery: always `account_type: Managed`, so MSAL username-password sign-in goes straight to the password grant |
 
 ## Discovery document
 

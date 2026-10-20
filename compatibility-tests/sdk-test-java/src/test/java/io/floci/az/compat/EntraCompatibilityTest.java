@@ -8,7 +8,6 @@ import com.azure.identity.UsernamePasswordCredentialBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -113,9 +112,6 @@ class EntraCompatibilityTest {
     }
 
     @Test
-    @Disabled("MSAL4J runs user realm discovery (GET /common/userrealm/{upn}?api-version=1.0) before the "
-            + "password grant; floci-az does not serve that endpoint, the request falls through to Blob "
-            + "Storage and the XML 404 fails MSAL's JSON parsing")
     void usernamePasswordCredentialAcquiresADelegatedToken() throws Exception {
         TokenCredential credential = new UsernamePasswordCredentialBuilder()
                 .tenantId(TENANT)

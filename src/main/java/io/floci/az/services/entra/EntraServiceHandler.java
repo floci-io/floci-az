@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
  *   <li>{@code {tenant}/discovery/v2.0/keys}: {@link JwksEndpoint}</li>
  *   <li>{@code {tenant}/v2.0/.well-known/openid-configuration} and
  *       {@code {tenant}/.well-known/openid-configuration}: {@link DiscoveryEndpoint}</li>
+ *   <li>{@code common/userrealm/{username}}: {@link UserRealmEndpoint}</li>
  * </ul>
  * where {@code tenant} may be a tenant id or {@code common}/{@code organizations}/{@code consumers}.
  *

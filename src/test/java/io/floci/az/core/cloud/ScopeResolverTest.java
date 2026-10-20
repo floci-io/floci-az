@@ -72,6 +72,15 @@ class ScopeResolverTest {
     }
 
     @Test
+    void userRealmIsAnEntraPathOnlyUnderCommonWithOneUsernameSegment() {
+        assertTrue(ScopeResolver.isEntraPath("common/userrealm/dev@floci.example"));
+        assertFalse(ScopeResolver.isEntraPath("common/userrealm/"));
+        assertFalse(ScopeResolver.isEntraPath("common/userrealm/blob/nested"));
+        assertFalse(ScopeResolver.isEntraPath("t1/userrealm/dev@floci.example"));
+        assertNull(resolver.resolve("common/userrealm/dev@floci.example", null).tenantId());
+    }
+
+    @Test
     void entraAliasesFallThroughToTheLoginHost() {
         for (String alias : new String[] {"common", "organizations", "consumers", "Common"}) {
             ScopeContext scope = resolver.resolve(alias + "/oauth2/v2.0/token", "login.microsoftonline.us");

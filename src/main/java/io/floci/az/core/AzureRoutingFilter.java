@@ -434,7 +434,7 @@ public class AzureRoutingFilter {
      * Microsoft Entra ID (OpenID Connect provider) — tenant-rooted paths at the ARM base URL:
      * {@code {tenant}/oauth2/v2.0/authorize}, {@code {tenant}/oauth2/v2.0/token},
      * {@code {tenant}/oauth2/token}, {@code {tenant}/discovery/v2.0/keys},
-     * {@code {tenant}[/v2.0]/.well-known/openid-configuration},
+     * {@code {tenant}[/v2.0]/.well-known/openid-configuration}, {@code common/userrealm/{username}},
      * where {@code {tenant}} is a tenant id or common/organizations/consumers.
      */
     private RouteOutcome routeEntra(RoutingContext ctx) {

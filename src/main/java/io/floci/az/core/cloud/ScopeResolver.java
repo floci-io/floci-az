@@ -47,6 +47,8 @@ public class ScopeResolver {
     /** First segments of Entra paths that carry no tenant segment. */
     private static final Set<String> TENANTLESS_ENTRA_ROOTS = Set.of("oauth2", "discovery", ".well-known", "v2.0");
 
+    private static final String USER_REALM_PREFIX = "common/userrealm/";
+
     private final Function<String, String> tenantOfSubscription;
     private final Function<String, CloudProfile> cloudOfTenant;
     private final CloudProfile defaultCloud;
@@ -73,13 +75,27 @@ public class ScopeResolver {
     /**
      * Whether {@code path} is one of the Entra (OpenID Connect) endpoints served at the ARM base URL:
      * {@code {tenant}/oauth2/v2.0/authorize}, {@code {tenant}/oauth2/v2.0/token}, {@code {tenant}/oauth2/token},
-     * {@code {tenant}/discovery/v2.0/keys} and {@code {tenant}[/v2.0]/.well-known/openid-configuration}.
+     * {@code {tenant}/discovery/v2.0/keys}, {@code {tenant}[/v2.0]/.well-known/openid-configuration} and
+     * {@code common/userrealm/{username}}.
      */
     public static boolean isEntraPath(String path) {
         return path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
             || path.contains("oauth2/v2.0/authorize")
             || path.endsWith("discovery/v2.0/keys")
-            || path.endsWith(".well-known/openid-configuration");
+            || path.endsWith(".well-known/openid-configuration")
+            || isUserRealmPath(path);
+    }
+
+    /**
+     * {@code common/userrealm/{username}}: home realm discovery, which MSAL4J and MSAL Python call on
+     * the authority host before a username-password grant. Entra serves it only under {@code common},
+     * so a storage account named {@code common} is the only path it can shadow.
+     */
+    public static boolean isUserRealmPath(String path) {
+        if (!path.startsWith(USER_REALM_PREFIX) || path.length() == USER_REALM_PREFIX.length()) {
+            return false;
+        }
+        return path.indexOf('/', USER_REALM_PREFIX.length()) < 0;
     }
 
     /**
