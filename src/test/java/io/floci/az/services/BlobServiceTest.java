@@ -743,6 +743,73 @@ public class BlobServiceTest {
     }
 
     @Test
+    void putBlobAnswersAQuotedHexEtag() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("data")
+            .put("/{account}/{container}/etag-format.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .header("ETag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"));
+    }
+
+    @Test
+    void listBlobsReportsTheEtagWithoutQuotes() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("data")
+            .put("/{account}/{container}/etag-listed.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        given()
+            .when().get("/{account}/{container}?restype=container&comp=list&prefix=etag-listed", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Blobs.Blob.Properties.Etag", equalTo(etag.substring(1, etag.length() - 1)));
+    }
+
+    @Test
+    void ifMatchWithTheQuotedEtagFromPutBlobMatches() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("data")
+            .put("/{account}/{container}/etag-match.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        given()
+            .header("If-Match", etag)
+            .when().get("/{account}/{container}/etag-match.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void copyBlobAnswersAQuotedHexEtag() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("data")
+            .put("/{account}/{container}/etag-copy-source.txt", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-copy-source",
+                    "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/etag-copy-source.txt")
+            .when()
+            .put("/{account}/{container}/etag-copy.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(202)
+            .header("ETag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"));
+    }
+
+    @Test
     void putBlobWithIfNoneMatchStarOverAnExistingBlobIsBlobAlreadyExists() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

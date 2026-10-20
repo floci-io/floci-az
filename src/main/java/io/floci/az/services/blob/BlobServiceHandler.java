@@ -105,6 +105,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private final DataLakePathOperations dataLakePathOperations;
 
     private final BlobLeaseService leaseService;
+    private final BlobEtags etags = new BlobEtags();
 
     @Inject
     public BlobServiceHandler(StorageFactory storageFactory, EmulatorConfig config,
@@ -489,7 +490,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
         return Response.ok()
                 .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                .header("ETag", UUID.randomUUID().toString())
+                .header("ETag", etags.next())
                 // Get Container Properties always reports the lease state, and strict SDK clients
                 // read it unconditionally. Leases are not modelled, so a container is always available.
                 .header("x-ms-lease-state", "available")
@@ -517,7 +518,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             store.put(key, NS_SENTINEL);
             return Response.status(Response.Status.CREATED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                    .header("ETag", UUID.randomUUID().toString())
+                    .header("ETag", etags.next())
                     .build();
         });
     }
@@ -585,7 +586,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .map(k -> k.substring(NS_PREFIX.length() + request.accountName().length() + 1))
                 .map(name -> new BlobModels.ContainerItem(name, new BlobModels.ContainerProperties(
                         RFC1123_DATE_TIME.format(Instant.now()),
-                        UUID.randomUUID().toString()
+                        etags.next()
                 )))
                 .collect(Collectors.toList());
 
@@ -661,7 +662,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
                 }
 
-                String etag = UUID.randomUUID().toString();
+                String etag = etags.next();
                 store.put(objKey(request.accountName(), containerName, blobName),
                         new StoredObject(blobName, data, metadata, Instant.now(), etag));
                 if ("file".equals(dataLakeResourceType)) {
@@ -785,7 +786,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             Instant now = Instant.now();
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             String copyId = UUID.randomUUID().toString();
             store.put(objKey(request.accountName(), containerName, blobName),
                     new StoredObject(blobName,
@@ -848,7 +849,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             metadata.put(DATALAKE_FILESYSTEM_PROPERTIES_KEY,
                     headerOrEmpty(request, "x-ms-properties"));
             metadata.put(CREATION_TIME_KEY, now.toString());
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             store.put(key, new StoredObject("", new byte[0], metadata, now, etag));
             return Response.status(Response.Status.CREATED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(now))
@@ -921,7 +922,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             metadata.put(DATALAKE_FILESYSTEM_PROPERTIES_KEY, headerOrEmpty(request, "x-ms-properties"));
             ensureDataLakeDefaults(metadata, true);
             Instant now = Instant.now();
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             store.put(key, new StoredObject(current.key(), current.data(), metadata, now, etag));
             return Response.ok()
                     .header("Last-Modified", RFC1123_DATE_TIME.format(now))
@@ -1049,7 +1050,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             if (customerProvidedKeySha256 != null) {
                 metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
             }
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             Instant now = Instant.now();
             store.put(key, new StoredObject(path, new byte[0], metadata, now, etag));
             if (!directory) {
@@ -1096,7 +1097,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> metadata = new HashMap<>(current.metadata());
             metadata.put(DATALAKE_PROPERTIES_KEY, headerOrEmpty(request, "x-ms-properties"));
             ensureDataLakeDefaults(metadata, state.directory());
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             Instant now = Instant.now();
             String storageKey = root ? nsKey(request.accountName(), filesystem)
                     : objKey(request.accountName(), filesystem, path);
@@ -1216,7 +1217,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             Instant now = Instant.now();
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             String storageKey = root ? nsKey(request.accountName(), filesystem)
                     : objKey(request.accountName(), filesystem, path);
             store.put(storageKey, new StoredObject(current.key(), current.data(), metadata, now, etag));
@@ -1318,7 +1319,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         metadata.put(DATALAKE_RESOURCE_TYPE_KEY, "directory");
         metadata.put(CREATION_TIME_KEY, state.object().lastModified().toString());
         ensureDataLakeDefaults(metadata, true);
-        String etag = UUID.randomUUID().toString();
+        String etag = etags.next();
         StoredObject marker = new StoredObject(normalized, new byte[0], metadata,
                 Instant.now(), etag);
         store.put(objKey(account, filesystem, normalized), marker);
@@ -1666,7 +1667,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             String movedPath = destinationKey.substring(destinationObjectPrefix.length());
             Map<String, String> metadata = new HashMap<>(sourceObject.metadata());
             metadata.put("Name", movedPath);
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
 
             puts.put(destinationKey,
                     new StoredObject(movedPath, sourceObject.data(), metadata, renamedAt, etag));
@@ -1998,7 +1999,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     Map<String, String> metadata = new HashMap<>(existing.get().metadata());
                     metadata.put(DATALAKE_RESOURCE_TYPE_KEY, "file");
                     metadata.put("Name", path);
-                    String etag = UUID.randomUUID().toString();
+                    String etag = etags.next();
                     Instant now = Instant.now();
                     store.put(key, new StoredObject(path, committed, metadata, now, etag));
                     boolean flush = Boolean.parseBoolean(request.queryParams().getOrDefault("flush", "false"));
@@ -2013,7 +2014,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 Map<String, String> metadata = Map.of(
                         "DataLakeAppendPosition", Long.toString(position),
                         "Name", path);
-                store.put(stageKey, new StoredObject(path, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+                store.put(stageKey, new StoredObject(path, data, metadata, Instant.now(), etags.next()));
 
                 if (Boolean.parseBoolean(request.queryParams().getOrDefault("flush", "false"))) {
                     return flushDataLakePathLocked(request, filesystem, path, position + data.length);
@@ -2154,7 +2155,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         Map<String, String> metadata = new HashMap<>(current.metadata());
         metadata.put("DataLakeResourceType", "file");
         metadata.put("Name", path);
-        String etag = UUID.randomUUID().toString();
+        String etag = etags.next();
         store.put(key, new StoredObject(path, committed, metadata, Instant.now(), etag));
 
         boolean retainUncommitted = Boolean.parseBoolean(
@@ -2463,7 +2464,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 Map<String, String> metadata = new HashMap<>(blob.metadata());
                 int blockCount = Integer.parseInt(metadata.getOrDefault("AppendBlockCount", "0")) + 1;
                 metadata.put("AppendBlockCount", Integer.toString(blockCount));
-                String etag = UUID.randomUUID().toString();
+                String etag = etags.next();
                 store.put(key, new StoredObject(blobName, data, metadata, Instant.now(), etag));
                 return Response.status(Response.Status.CREATED)
                         .header("ETag", etag)
@@ -2678,7 +2679,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             });
             metadata.putAll(readUserMetadata(request));
 
-            String etag = UUID.randomUUID().toString();
+            String etag = etags.next();
             store.put(objKey(request.accountName(), containerName, blobName),
                     new StoredObject(so.key(), so.data(), metadata, Instant.now(), etag));
 
@@ -2934,7 +2935,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
             blobs.add(new BlobModels.BlobItem(name, new BlobModels.BlobProperties(
                     RFC1123_DATE_TIME.format(so.lastModified()),
-                    so.etag(),
+                    unquote(so.etag()),
                     (long) so.data().length,
                     usableContentType(so.metadata().get("Content-Type")),
                     so.metadata().getOrDefault("BlobType", "BlockBlob")
@@ -3209,7 +3210,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 }
                 store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
                         new StoredObject(blockId, data, metadata, Instant.now(),
-                                UUID.randomUUID().toString()));
+                                etags.next()));
                 return Response.status(Response.Status.CREATED)
                         .header("x-ms-request-server-encrypted", "true")
                         .header("Content-Length", 0)
@@ -3337,7 +3338,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, expectedCustomerProvidedKeySha256);
                 }
 
-                String etag = UUID.randomUUID().toString();
+                String etag = etags.next();
                 store.put(objKey(request.accountName(), containerName, blobName),
                         new StoredObject(blobName, assembled, metadata, Instant.now(), etag));
 
@@ -3615,7 +3616,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             metadata.put("Content-Type", usableContentType(contentType));
             metadata.put("Name", blobName);
             metadata.put(CREATION_TIME_KEY, createdOn(store.get(key)).toString());
-            store.put(key, new StoredObject(blobName, data, metadata, Instant.now(), UUID.randomUUID().toString()));
+            store.put(key, new StoredObject(blobName, data, metadata, Instant.now(), etags.next()));
             written.set(true);
         });
         return written.get();
@@ -3758,7 +3759,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String unquote(String value) {
-        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+        if (value != null && value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
             return value.substring(1, value.length() - 1);
         }
         return value;

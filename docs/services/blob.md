@@ -46,6 +46,8 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   sequential append positions, including append requests carrying `flush=true` / `close=true`.
 - **Range download**: `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download**: `If-Match` / `If-None-Match` honored; a stale ETag is rejected
+- **ETags**: sent in the quoted `0x` hex form the Blob service uses (`"0x8DC1A2B3C4D5E6F"`). List
+  Blobs reports each blob's ETag without the quotes, as Azurite does
 - **Metadata**: `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
 - **Blob index tags**: Get and Set Blob Tags (`?comp=tags`, including on a snapshot), `x-ms-tags` on
   Put Blob and Put Block List, and `x-ms-tag-count` on Get Blob and Get Blob Properties. Tag sets
