@@ -15,6 +15,8 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aks.AksModels.AgentPoolProfile;
@@ -315,7 +317,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response acceptedDelete(AzureRequest req, String sub, String location) {
-        String loc = (location == null || location.isBlank()) ? "eastus" : location;
+        String loc = (location == null || location.isBlank()) ? defaultLocation(req) : location;
         String operationId = UUID.randomUUID().toString();
         // Built from the caller's own scheme and host, like the ACI monitors: a client that reached
         // us over TLS refuses to send credentials to a downgraded http:// poll URL.
@@ -328,6 +330,13 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .header("Location", locationBase + "/operationresults/" + operationId + query)
                 .header("Retry-After", "1")
                 .build();
+    }
+
+    /** The default location of the cloud the request resolved to, for a cluster stored without one. */
+    private static String defaultLocation(AzureRequest req) {
+        CloudProfile cloud = req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            : req.scope().cloud();
+        return cloud.effectiveDefaultLocation();
     }
 
     private static Response operationStatusResponse(String operationId) {
