@@ -13,6 +13,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.Socket;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,9 @@ public class MySqlServerManager {
     private static final Logger LOG = Logger.getLogger(MySqlServerManager.class);
 
     private static final int MYSQL_CONTAINER_PORT = 3306;
+
+    /** Carries the rotation statement to the shell, so it never appears in an argv. */
+    static final String ROTATION_SQL_ENV = "FLOCI_ROTATION_SQL";
 
     @Inject EmulatorConfig config;
     @Inject ContainerLifecycleManager containerManager;
@@ -231,6 +235,12 @@ public class MySqlServerManager {
      * rotation through ARM keeps the data plane reachable. The root password is rotated in
      * the same batch: it starts equal to the create-time admin password, and keeping the two
      * in lockstep lets every future rotation authenticate with the state's current password.
+     *
+     * <p>Neither password reaches a command line, where any process in the container could
+     * list it: the client authenticates with the current password through {@code MYSQL_PWD},
+     * and the statement carrying the new one travels in the exec's environment and reaches the
+     * client on stdin through the shell's {@code printf} builtin. Both passwords are redacted
+     * from the error raised on failure.
      */
     public void rotateAdminPassword(MySqlState.ServerEntry entry, String newPassword) {
         String sql = "ALTER USER '" + sqlQuote(entry.administratorLogin()) + "'@'%' IDENTIFIED BY '"
@@ -238,12 +248,25 @@ public class MySqlServerManager {
                 + "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + sqlQuote(newPassword) + "'; "
                 + "FLUSH PRIVILEGES;";
         ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
-            entry.containerId(), "mysql", "-uroot", "-p" + entry.administratorLoginPassword(), "-e", sql);
+            entry.containerId(),
+            List.of("MYSQL_PWD=" + entry.administratorLoginPassword(), ROTATION_SQL_ENV + "=" + sql),
+            "sh", "-c", "printf '%s\\n' \"$" + ROTATION_SQL_ENV + "\" | mysql -uroot");
         if (result.exitCode() != 0) {
             throw new RuntimeException("Password rotation failed for MySQL server '"
-                + entry.serverName() + "': " + result.output());
+                + entry.serverName() + "': "
+                + redact(result.output(), newPassword, entry.administratorLoginPassword()));
         }
         LOG.infof("Rotated admin password for MySQL server %s", entry.serverName());
+    }
+
+    private static String redact(String output, String... secrets) {
+        String redacted = output == null ? "" : output;
+        for (String secret : secrets) {
+            if (secret != null && !secret.isEmpty()) {
+                redacted = redacted.replace(secret, "***");
+            }
+        }
+        return redacted;
     }
 
     private static String sqlQuote(String s) {

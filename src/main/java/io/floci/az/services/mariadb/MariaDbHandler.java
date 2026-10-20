@@ -235,11 +235,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                 }
             }
 
-            MariaDbState.ServerEntry existing = state.getServer(serverName).get();
             String password = props.path("administratorLoginPassword").asText("");
-            String version  = props.path("version").asText(existing.version());
-            int storageMB   = props.path("storageProfile").path("storageMB").asInt(existing.storageMB());
-            Map<String, String> mergedTags = body.has("tags") ? tags : existing.tags();
 
             // Rotate-then-commit runs under the start lock so a concurrent /connect or GET
             // cannot start a container with the pre-update password between the rotation
@@ -250,7 +246,22 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
             MariaDbState.ServerEntry updated;
             Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
             synchronized (lock) {
-                MariaDbState.ServerEntry live = state.getServer(serverName).orElse(existing);
+                Optional<MariaDbState.ServerEntry> current = state.getServer(serverName);
+                if (current.isEmpty()) {
+                    return notFound("Server '" + serverName + "' not found");
+                }
+                // Everything below reads the entry as it is now. The wait for the lock can outlast
+                // a delete and another scope's claim of the name, and an earlier queued update may
+                // have changed the fields this request leaves out.
+                MariaDbState.ServerEntry live = current.get();
+                Optional<Response> foreign = foreignEntry(request, live);
+                if (foreign.isPresent()) {
+                    return foreign.get();
+                }
+                String version  = props.path("version").asText(live.version());
+                int storageMB   = props.path("storageProfile").path("storageMB").asInt(live.storageMB());
+                Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
+
                 boolean passwordChanged = !password.isBlank()
                     && !password.equals(live.administratorLoginPassword());
                 if (passwordChanged && !config.services().mariaDb().mocked() && live.containerId() != null) {
@@ -264,7 +275,11 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                     live.containerId(), live.hostPort(), live.host(), mergedTags,
                     live.databases(), live.firewallRules(), live.configurations(),
                     live.createdAt());
-                state.putServer(updated);
+                // Delete does not take the start lock, so the server can go away while the
+                // rotation runs. Writing it back would resurrect a name another scope may claim.
+                if (!state.replaceServer(live, updated)) {
+                    return notFound("Server '" + serverName + "' not found");
+                }
             }
             if (!config.services().mariaDb().mocked()) {
                 updated = ensureStarted(updated);
@@ -486,13 +501,23 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
         Object lock = startLocks.computeIfAbsent(entry.serverName().toLowerCase(), k -> new Object());
         synchronized (lock) {
-            MariaDbState.ServerEntry current = state.getServer(entry.serverName()).orElse(entry);
+            Optional<MariaDbState.ServerEntry> found = state.getServer(entry.serverName());
+            if (found.isEmpty()) {
+                // Deleted since the caller read it: starting a container would bring it back.
+                return entry;
+            }
+            MariaDbState.ServerEntry current = found.get();
             if (current.containerId() != null) {
                 return current;
             }
             MariaDbState.ServerEntry started = serverManager.startServer(current);
-            state.putServer(started);
-            return started;
+            Optional<MariaDbState.ServerEntry> attached = state.attachContainer(started);
+            if (attached.isEmpty()) {
+                // Deleted while its container started, which delete does not wait for.
+                stopQuietly(started);
+                return entry;
+            }
+            return attached.get();
         }
     }
 
@@ -674,6 +699,18 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
             .map(s -> createsServer
                 ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
                 : notFound("Server '" + serverName + "' not found"));
+    }
+
+    /** The owner check of {@link #foreignServer}, for a server update against an entry already read. */
+    private Optional<Response> foreignEntry(AzureRequest request, MariaDbState.ServerEntry entry) {
+        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        if (scope.isEmpty() || scope.get().owns(entry.subscriptionId(), entry.resourceGroupName())) {
+            return Optional.empty();
+        }
+        boolean createsServer = "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
+        return Optional.of(createsServer
+            ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
+            : notFound("Server '" + entry.serverName() + "' not found"));
     }
 
     private static Response notFound(String message) {
