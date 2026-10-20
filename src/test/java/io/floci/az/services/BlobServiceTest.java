@@ -743,6 +743,80 @@ public class BlobServiceTest {
     }
 
     @Test
+    void putBlobWithIfNoneMatchStarOverAnExistingBlobIsBlobAlreadyExists() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("If-None-Match", "*")
+            .body("first")
+            .put("/{account}/{container}/create-only.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("If-None-Match", "*")
+            .body("second")
+            .put("/{account}/{container}/create-only.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(409)
+            .header("x-ms-error-code", "BlobAlreadyExists");
+
+        given()
+            .when().get("/{account}/{container}/create-only.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body(equalTo("first"));
+    }
+
+    @Test
+    void putBlobWithIfNoneMatchStarReportsAnActiveLeaseBeforeTheBlobExists() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("leased")
+            .put("/{account}/{container}/create-only-leased.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201);
+        given()
+            .header("x-ms-lease-action", "acquire")
+            .header("x-ms-lease-duration", "-1")
+            .put("/{account}/{container}/create-only-leased.txt?comp=lease", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("If-None-Match", "*")
+            .body("second")
+            .put("/{account}/{container}/create-only-leased.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "LeaseIdMissing");
+    }
+
+    @Test
+    void putBlobWithIfNoneMatchOfTheCurrentEtagIsConditionNotMet() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        String etag = given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("first")
+            .put("/{account}/{container}/etag-guarded.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("If-None-Match", etag)
+            .body("second")
+            .put("/{account}/{container}/etag-guarded.txt", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(412)
+            .header("x-ms-error-code", "ConditionNotMet");
+    }
+
+    @Test
     void snapshotScopedSasCanReadOnlyItsSnapshot() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
