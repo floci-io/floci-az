@@ -3,10 +3,12 @@ package io.floci.az.services.aks;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -125,6 +127,60 @@ class AksHandlerTest {
         given()
             .when().get(BASE + "/managedClusters/del-cluster?api-version=2024-04-01")
             .then().statusCode(404);
+    }
+
+    @Test
+    @DisplayName("DELETE cluster hands out LRO monitors that report Succeeded")
+    void deletingAClusterReturnsPollableAsyncOperationHeaders() {
+        given()
+            .contentType("application/json")
+            .body("{\"location\":\"westus2\",\"properties\":{}}")
+            .put(BASE + "/managedClusters/lro-cluster?api-version=2025-10-01")
+            .then().statusCode(201);
+
+        Response deleted = given()
+            .when().delete(BASE + "/managedClusters/lro-cluster?api-version=2025-10-01");
+        deleted.then()
+            .statusCode(202)
+            .header("Retry-After", "1")
+            .header("Azure-AsyncOperation", allOf(
+                containsString("/subscriptions/" + SUB
+                        + "/providers/Microsoft.ContainerService/locations/westus2/operations/"),
+                endsWith("?api-version=2025-10-01")))
+            .header("Location", allOf(
+                containsString("/subscriptions/" + SUB
+                        + "/providers/Microsoft.ContainerService/locations/westus2/operationresults/"),
+                endsWith("?api-version=2025-10-01")));
+
+        given()
+            .when().get(pathOf(deleted.header("Azure-AsyncOperation")))
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("Succeeded"));
+
+        given()
+            .when().get(pathOf(deleted.header("Location")))
+            .then()
+            .statusCode(204);
+
+        given()
+            .when().get(BASE + "/managedClusters/lro-cluster?api-version=2025-10-01")
+            .then().statusCode(404);
+    }
+
+    @Test
+    @DisplayName("DELETE of a cluster that does not exist returns 204")
+    void deletingAMissingClusterReturnsNoContent() {
+        given()
+            .when().delete(BASE + "/managedClusters/never-created?api-version=2025-10-01")
+            .then()
+            .statusCode(204)
+            .header("Azure-AsyncOperation", nullValue());
+    }
+
+    private static String pathOf(String url) {
+        URI uri = URI.create(url);
+        return uri.getRawPath() + "?" + uri.getRawQuery();
     }
 
     // ── LIST by resource group ─────────────────────────────────────────────────

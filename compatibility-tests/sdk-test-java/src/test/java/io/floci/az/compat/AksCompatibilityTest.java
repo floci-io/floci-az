@@ -18,7 +18,6 @@ import com.azure.resourcemanager.containerservice.models.ManagedClusterIdentity;
 import com.azure.resourcemanager.containerservice.models.OSType;
 import com.azure.resourcemanager.containerservice.models.ResourceIdentityType;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -144,9 +143,6 @@ class AksCompatibilityTest {
 
     @Test
     @Order(5)
-    @Disabled("floci-az answers DELETE managedClusters with a bare 202 and no Azure-AsyncOperation or Location "
-            + "header, which ManagedClusters_Delete declares; the SDK poller then fails with "
-            + "'Long running operation failed'")
     void deleteClusterThroughTheSdkPoller() {
         clusters.delete(RESOURCE_GROUP, CLUSTER);
 
@@ -155,14 +151,15 @@ class AksCompatibilityTest {
 
     @Test
     @Order(6)
-    void deleteClusterThenGetIsNotFound() throws Exception {
+    void deletingAnAlreadyDeletedClusterIsNoContent() throws Exception {
+        // ManagedClusters_Delete declares 204 "Resource does not exist"; the SDK poller above removed it.
         // java.net.http.HttpClient is qualified: the imported HttpClient is azure-core's, used for the SDK pipeline.
         HttpResponse<Void> deleted = java.net.http.HttpClient.newHttpClient().send(
                 HttpRequest.newBuilder(URI.create(ENDPOINT + "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/"
                         + RESOURCE_GROUP + "/providers/Microsoft.ContainerService/managedClusters/" + CLUSTER
                         + "?api-version=2024-04-01")).DELETE().build(),
                 HttpResponse.BodyHandlers.discarding());
-        assertEquals(202, deleted.statusCode());
+        assertEquals(204, deleted.statusCode());
 
         assertNotFound();
     }

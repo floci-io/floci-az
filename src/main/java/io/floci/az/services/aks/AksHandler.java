@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
@@ -50,6 +51,8 @@ import java.util.concurrent.TimeUnit;
  *   GET    subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}
  *   PUT    subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}
  *   DELETE subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}
+ *   GET    subscriptions/{sub}/providers/Microsoft.ContainerService/locations/{loc}/operations/{opId}        (LRO status)
+ *   GET    subscriptions/{sub}/providers/Microsoft.ContainerService/locations/{loc}/operationresults/{opId}  (LRO result)
  *   POST   subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}/listClusterAdminCredential
  *   POST   subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ContainerService/managedClusters/{name}/listClusterUserCredential
  * </pre>
@@ -68,6 +71,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final String TYPE = "Microsoft.ContainerService/managedClusters";
+    private static final String PROVIDER_PREFIX = "/providers/Microsoft.ContainerService/";
 
     private final EmulatorConfig config;
     private final AksClusterManager clusterManager;
@@ -133,6 +137,15 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
         // Extract the path segment after "Microsoft.ContainerService/"
         String tail = extractAksPath(fullPath);
 
+        // ── LRO status monitors handed out by DELETE ────────────────────────
+        // locations/{loc}/operations/{opId} and locations/{loc}/operationresults/{opId}
+        if ("GET".equals(method) && tail.matches("(?i)locations/[^/]+/operations/[^/]+")) {
+            return operationStatusResponse(segment(tail, 3));
+        }
+        if ("GET".equals(method) && tail.matches("(?i)locations/[^/]+/operationresults/[^/]+")) {
+            return Response.noContent().build();
+        }
+
         // ── LIST all clusters in subscription ──────────────────────────────
         // subscriptions/{sub}/providers/Microsoft.ContainerService/managedClusters
         if (tail.equalsIgnoreCase("managedClusters") && !fullPath.contains("/resourceGroups/")) {
@@ -180,7 +193,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
             return switch (method) {
                 case "GET"    -> handleGet(sub, rg, clusterName);
                 case "PUT"    -> handleCreateOrUpdate(sub, rg, clusterName, req);
-                case "DELETE" -> handleDelete(sub, rg, clusterName);
+                case "DELETE" -> handleDelete(req, sub, rg, clusterName);
                 case "PATCH"  -> handleUpdateTags(sub, rg, clusterName, req);
                 default       -> methodNotAllowed();
             };
@@ -276,11 +289,17 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .orElseGet(() -> notFound("Managed cluster '" + clusterName + "' not found."));
     }
 
-    private Response handleDelete(String sub, String rg, String clusterName) {
+    /**
+     * ManagedClusters_Delete is a long-running operation (final-state-via azure-async-operation)
+     * declaring only 202, with Azure-AsyncOperation, Location and Retry-After, and 204 when the
+     * cluster does not exist. The cluster is removed before answering, so the status monitor
+     * already reports Succeeded on the first poll.
+     */
+    private Response handleDelete(AzureRequest req, String sub, String rg, String clusterName) {
         String key = storageKey(sub, rg, clusterName);
         Optional<ManagedCluster> found = getCluster(key);
         if (found.isEmpty()) {
-            return notFound("Managed cluster '" + clusterName + "' not found.");
+            return Response.noContent().build();
         }
         ManagedCluster cluster = found.get();
         cluster.setProvisioningState("Deleting");
@@ -292,7 +311,30 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
             }
         }
         storage.delete(key);
-        return Response.status(202).build();
+        return acceptedDelete(req, sub, cluster.getLocation());
+    }
+
+    private Response acceptedDelete(AzureRequest req, String sub, String location) {
+        String loc = (location == null || location.isBlank()) ? "eastus" : location;
+        String operationId = UUID.randomUUID().toString();
+        // Built from the caller's own scheme and host, like the ACI monitors: a client that reached
+        // us over TLS refuses to send credentials to a downgraded http:// poll URL.
+        String locationBase = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
+                + PROVIDER_PREFIX + "locations/" + loc;
+        String apiVersion = req.queryParams() == null ? null : req.queryParams().get("api-version");
+        String query = apiVersion == null || apiVersion.isBlank() ? "" : "?api-version=" + apiVersion;
+        return Response.status(202)
+                .header("Azure-AsyncOperation", locationBase + "/operations/" + operationId + query)
+                .header("Location", locationBase + "/operationresults/" + operationId + query)
+                .header("Retry-After", "1")
+                .build();
+    }
+
+    private static Response operationStatusResponse(String operationId) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", operationId);
+        body.put("status", "Succeeded");
+        return Response.ok(body).type("application/json").build();
     }
 
     private Response handleUpdateTags(String sub, String rg, String clusterName, AzureRequest req) {
@@ -598,9 +640,9 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static String extractAksPath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf("/providers/Microsoft.ContainerService/");
+        int idx = fullPath.indexOf(PROVIDER_PREFIX);
         if (idx >= 0) {
-            return fullPath.substring(idx + "/providers/Microsoft.ContainerService/".length());
+            return fullPath.substring(idx + PROVIDER_PREFIX.length());
         }
         return fullPath;
     }
