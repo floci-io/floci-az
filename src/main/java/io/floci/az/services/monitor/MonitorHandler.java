@@ -13,12 +13,15 @@ import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.quarkus.runtime.configuration.MemorySize;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -59,11 +62,15 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     private final StorageBackend<String, StoredObject> store;
     private final EmulatorConfig config;
+    private final long maxDecodedBodyBytes;
 
     @Inject
-    public MonitorHandler(StorageFactory factory, EmulatorConfig config) {
+    public MonitorHandler(StorageFactory factory, EmulatorConfig config,
+                          @ConfigProperty(name = "quarkus.http.limits.max-body-size", defaultValue = "2G")
+                          MemorySize maxBodySize) {
         this.store = factory.create("monitor");
         this.config = config;
+        this.maxDecodedBodyBytes = maxBodySize.asLongValue();
     }
 
     @Override
@@ -345,17 +352,67 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     /**
      * The Logs Ingestion API declares an optional {@code Content-Encoding} header whose only value is
      * {@code gzip}, and both the Java and Python {@code LogsIngestionClient} compress every upload.
+     * A gzipped body is held to the same size limit as a plain one once decoded, so a small
+     * compressed upload cannot expand past what the HTTP layer would accept.
      */
-    private static InputStream decodedBody(AzureRequest req) throws IOException {
-        InputStream body = req.bodyStream();
+    static InputStream decodedBody(InputStream body, String contentEncoding, long maxDecodedBytes)
+            throws IOException {
         if (body == null) {
             return InputStream.nullInputStream();
         }
-        String encoding = req.headers() == null ? null : req.headers().getHeaderString("Content-Encoding");
-        if (encoding != null && encoding.trim().equalsIgnoreCase("gzip")) {
-            return new GZIPInputStream(body);
+        if (contentEncoding != null && contentEncoding.trim().equalsIgnoreCase("gzip")) {
+            return new DecodedSizeLimit(new GZIPInputStream(body), maxDecodedBytes);
         }
         return body;
+    }
+
+    /** Thrown when a decoded body passes {@link #decodedBody}'s limit. */
+    static final class DecodedBodyTooLargeException extends IOException {
+        DecodedBodyTooLargeException(long limit) {
+            super("decoded request body exceeds " + limit + " bytes");
+        }
+    }
+
+    private static final class DecodedSizeLimit extends FilterInputStream {
+        private final long limit;
+        private long count;
+
+        DecodedSizeLimit(InputStream in, long limit) {
+            super(in);
+            this.limit = limit;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b >= 0) {
+                counted(1);
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int n = super.read(buffer, offset, length);
+            if (n > 0) {
+                counted(n);
+            }
+            return n;
+        }
+
+        @Override
+        public long skip(long n) throws IOException {
+            long skipped = super.skip(n);
+            counted(skipped);
+            return skipped;
+        }
+
+        private void counted(long n) throws IOException {
+            count += n;
+            if (count > limit) {
+                throw new DecodedBodyTooLargeException(limit);
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -414,8 +471,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
         // Parse log records array from body stream; the ingestion clients gzip every upload
         List<Map<String, Object>> records;
-        try (InputStream body = decodedBody(req)) {
+        String encoding = req.headers() == null ? null : req.headers().getHeaderString("Content-Encoding");
+        try (InputStream body = decodedBody(req.bodyStream(), encoding, maxDecodedBodyBytes)) {
             records = MAPPER.readValue(body, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (DecodedBodyTooLargeException e) {
+            return Response.status(413).entity("Failed to parse request body as log records: " + e.getMessage()).build();
         } catch (IOException e) {
             return Response.status(400).entity("Failed to parse request body as log records: " + e.getMessage()).build();
         }
