@@ -102,6 +102,32 @@ class MariaDbPasswordRotationTest {
         verify(serverManager, times(1)).startServer(any());
     }
 
+    @Test
+    void aServerDeletedWhileItsContainerStartsStaysDeletedAndTheContainerIsStopped() throws Exception {
+        // The create stores the server with no container, so the GET below has to start one.
+        doAnswer(invocation -> invocation.getArgument(0)).when(serverManager).startServer(any());
+        createServer("starting-mariadb");
+        CountDownLatch starting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            starting.countDown();
+            assertTrue(release.await(10, TimeUnit.SECONDS), "startup was never released");
+            MariaDbState.ServerEntry entry = invocation.getArgument(0);
+            return entry.withContainer("cid-" + entry.serverName(), 3306, "localhost");
+        }).when(serverManager).startServer(any());
+
+        CompletableFuture<Integer> read = CompletableFuture.supplyAsync(() -> given()
+                .get(BASE + "starting-mariadb" + API).statusCode());
+        assertTrue(starting.await(10, TimeUnit.SECONDS), "startup never began");
+
+        given().delete(BASE + "starting-mariadb" + API).then().statusCode(204);
+        release.countDown();
+
+        read.get(20, TimeUnit.SECONDS);
+        given().get(BASE + "starting-mariadb" + API).then().statusCode(404);
+        verify(serverManager).stopServer(argThat(entry -> "cid-starting-mariadb".equals(entry.containerId())));
+    }
+
     private static void createServer(String name) {
         given().contentType("application/json").body(SERVER_BODY)
                 .when().put(BASE + name + API)

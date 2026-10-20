@@ -257,7 +257,7 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
                 // a delete and another scope's claim of the name, and an earlier queued update may
                 // have changed the fields this request leaves out.
                 MySqlState.ServerEntry live = current.get();
-                Optional<Response> foreign = foreignEntry(request, live);
+                Optional<Response> foreign = foreignEntry(request, live, serverName, true);
                 if (foreign.isPresent()) {
                     return foreign.get();
                 }
@@ -693,30 +693,26 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
         if (!tail.matches("flexibleServers/[^/]+(/.*)?")) {
             return Optional.empty();
         }
-        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
-        if (scope.isEmpty()) {
-            return Optional.empty();
-        }
         String serverName = segment(tail, 1);
-        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+")
-            && scope.get().resourceGroup() != null;
-        return state.getServer(serverName)
-            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
-            .map(s -> createsServer
-                ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
-                : notFound("Server '" + serverName + "' not found"));
+        boolean targetsServer = tail.matches("flexibleServers/[^/]+");
+        return state.getServer(serverName).flatMap(s -> foreignEntry(request, s, serverName, targetsServer));
     }
 
-    /** The owner check of {@link #foreignServer}, for a server update against an entry already read. */
-    private Optional<Response> foreignEntry(AzureRequest request, MySqlState.ServerEntry entry) {
+    /**
+     * The owner check of {@link #foreignServer} against an entry already read, so an update can repeat it
+     * under the start lock. {@code targetsServer} is true when the path names the server itself, where a
+     * PUT from another scope is a create and so a name conflict.
+     */
+    private Optional<Response> foreignEntry(AzureRequest request, MySqlState.ServerEntry entry, String serverName,
+                                            boolean targetsServer) {
         Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
         if (scope.isEmpty() || scope.get().owns(entry.subscriptionId(), entry.resourceGroupName())) {
             return Optional.empty();
         }
-        boolean createsServer = "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
+        boolean createsServer = targetsServer && "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
         return Optional.of(createsServer
             ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
-            : notFound("Server '" + entry.serverName() + "' not found"));
+            : notFound("Server '" + serverName + "' not found"));
     }
 
     private static Response notFound(String message) {
