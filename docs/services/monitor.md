@@ -13,8 +13,9 @@ the **Log Analytics query API** (read them back with a subset of KQL), all in-pr
 ## Features
 
 - **Log Analytics workspaces**: `Microsoft.OperationalInsights/workspaces` CreateOrUpdate, Get,
-  Delete; a `customerId` (workspace GUID) is generated when not supplied and indexed for query
-  resolution
+  Delete; a `customerId` (workspace GUID) is generated when not supplied, kept across redeploys, and
+  indexed for query resolution. `sharedKeys` (and the `listKeys` form ARM templates call) answer
+  `primarySharedKey` and `secondarySharedKey`, stable for the workspace's life
 - **Data Collection Endpoints (DCE)**: `Microsoft.Insights/dataCollectionEndpoints` CreateOrUpdate,
   Get, Delete; the returned `logsIngestion.endpoint` points back at the emulator base URL
 - **Data Collection Rules (DCR)**: `Microsoft.Insights/dataCollectionRules` CreateOrUpdate, Get,
@@ -35,6 +36,8 @@ Management operations use ARM paths; ingestion and query use the Monitor data-pl
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
+POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/sharedKeys
+POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/listKeys
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}

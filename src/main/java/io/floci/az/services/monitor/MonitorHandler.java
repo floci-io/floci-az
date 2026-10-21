@@ -25,8 +25,11 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -48,6 +51,9 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     private static final Pattern WORKSPACE_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.OperationalInsights/workspaces/([^/?]+)", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern WORKSPACE_KEYS_ACTION = Pattern.compile(
+        "/workspaces/[^/]+/(sharedKeys|listKeys)$", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern DCE_PATTERN = Pattern.compile(
         "subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/Microsoft\\.Insights/dataCollectionEndpoints/([^/?]+)", Pattern.CASE_INSENSITIVE);
@@ -185,11 +191,16 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         String name = m.group(3);
         String key = String.format("workspace/%s/%s/%s", sub, rg, name);
 
+        if (WORKSPACE_KEYS_ACTION.matcher(path).find()) {
+            return "POST".equals(method) ? sharedKeys(key) : Response.status(405).build();
+        }
+
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
             String location = (String) body.getOrDefault("location", "eastus");
             Map<String, Object> props = (Map<String, Object>) body.getOrDefault("properties", new HashMap<>());
-            String customerId = (String) props.get("customerId");
+            String customerId = store.get(key).map(obj -> obj.metadata().get("customerId"))
+                .orElse((String) props.get("customerId"));
             if (customerId == null || customerId.isBlank()) {
                 customerId = UUID.randomUUID().toString();
             }
@@ -233,6 +244,31 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return Response.ok().build();
         }
         return Response.status(405).build();
+    }
+
+    /** The workspace's shared keys, derived from its customer id so they hold for the workspace's life. */
+    private Response sharedKeys(String key) {
+        Optional<StoredObject> obj = store.get(key);
+        if (obj.isEmpty()) {
+            return Response.status(404)
+                .entity(Map.of("error", Map.of("code", "ResourceNotFound", "message", "Workspace not found")))
+                .type(MediaType.APPLICATION_JSON).build();
+        }
+        String customerId = obj.get().metadata().get("customerId");
+        Map<String, Object> keys = new LinkedHashMap<>();
+        keys.put("primarySharedKey", sharedKey("primary", customerId));
+        keys.put("secondarySharedKey", sharedKey("secondary", customerId));
+        return Response.ok(keys).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    private static String sharedKey(String slot, String customerId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-512")
+                .digest((slot + ":" + customerId).getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-512 unavailable", e);
+        }
     }
 
     // -------------------------------------------------------------------------
