@@ -321,7 +321,9 @@ transitional state would only make them wait.
 By default every namespace is `Registered`, so nothing ever needs registering, as before. With
 `strict-providers` (on from `parity: strict`) every namespace but `Microsoft.Resources` starts
 `NotRegistered` in each subscription, and a request for one of its resource types is refused with Azure's
-`409 MissingSubscriptionRegistration` until the namespace is registered. The Go, Java and Python SDKs
+`409 MissingSubscriptionRegistration` until the namespace is registered. A `DELETE` is never refused, so
+resources created before their namespace was unregistered can still be deleted, by a client or by a resource
+group delete. The Go, Java and Python SDKs
 catch that error, register the namespace and retry on their own; azurerm with
 `resource_provider_registrations` set registers what it needs at configure time. Registrations then persist
 in the directory store, alongside the subscriptions they belong to.

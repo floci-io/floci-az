@@ -26,7 +26,8 @@ class ProviderStrictTest {
     public static class StrictProvidersOnly implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.strict-providers", "true");
+            return Map.of("floci-az.parity-overrides.strict-providers", "true",
+                "floci-az.parity-overrides.resource-group-delete", "true");
         }
     }
 
@@ -69,5 +70,20 @@ class ProviderStrictTest {
             .then().statusCode(200);
         given().when().get(ACCOUNT + STORAGE_API).then().statusCode(200)
             .body("properties.provisioningState", equalTo("Succeeded"));
+    }
+
+    @Test
+    void aGroupDeleteRemovesResourcesOfANamespaceUnregisteredSinceTheyWereCreated() {
+        given().contentType("application/json").body("{\"location\":\"eastus\"}")
+            .when().put("/subscriptions/" + SUB + "/resourceGroups/rg-providers" + API).then().statusCode(201);
+        given().when().post(PROVIDERS + "/Microsoft.Storage/register" + API).then().statusCode(200);
+        given().contentType("application/json").body(STORAGE_BODY).when().put(ACCOUNT + STORAGE_API)
+            .then().statusCode(200);
+        given().when().post(PROVIDERS + "/Microsoft.Storage/unregister" + API).then().statusCode(200);
+
+        given().when().delete("/subscriptions/" + SUB + "/resourceGroups/rg-providers" + API).then().statusCode(202);
+
+        given().when().post(PROVIDERS + "/Microsoft.Storage/register" + API).then().statusCode(200);
+        given().when().get(ACCOUNT + STORAGE_API).then().statusCode(404);
     }
 }

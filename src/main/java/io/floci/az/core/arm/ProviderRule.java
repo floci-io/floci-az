@@ -12,9 +12,11 @@ import org.jboss.logging.Logger;
  * is refused before its handler runs with {@code 409 MissingSubscriptionRegistration}, ARM's answer. The Go,
  * Java and Python SDKs then register the namespace and retry on their own.
  *
- * <p>Only a request for a declared type counts ({@link ArmCall#type()}), whatever its method. The Providers API
- * itself addresses no type, so a client can always read and register a namespace. Without the switch every
- * request passes, since every namespace starts registered.
+ * <p>Only a request for a declared type counts ({@link ArmCall#type()}). The Providers API itself addresses no
+ * type, so a client can always read and register a namespace. A {@code DELETE} always passes: the refusals Azure
+ * records are writes, and a namespace unregistered after its resources were created must not strand them, least of
+ * all when a resource group delete removes the group's resources one by one. Without the switch every request
+ * passes, since every namespace starts registered.
  */
 @ApplicationScoped
 public class ProviderRule implements ArmRequestRule {
@@ -44,7 +46,7 @@ public class ProviderRule implements ArmRequestRule {
 
     @Override
     public ArmVerdict enter(ArmCall call) {
-        if (!strict || call.type() == null || call.id().subscriptionId() == null) {
+        if (!strict || call.type() == null || call.id().subscriptionId() == null || "DELETE".equals(call.method())) {
             return ArmVerdict.proceed();
         }
         // The namespace as the request spells it: the Go policy reads it from the URL, the others from the body.

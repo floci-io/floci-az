@@ -54,13 +54,14 @@ class ProviderRuleTest {
     }
 
     @Test
-    void anUnregisteredNamespaceIsRefusedAgain() {
+    void anUnregisteredNamespaceIsRefusedAgainButItsResourcesCanStillBeDeleted() {
         ProviderRegistrations registrations = notRegisteredByDefault();
         registrations.register(SUB, "Microsoft.Storage");
         registrations.unregister(SUB, "Microsoft.Storage");
         ProviderRule rule = new ProviderRule(registrations, true);
 
-        assertInstanceOf(ArmVerdict.Respond.class, rule.enter(call("DELETE", ACCOUNT, STORAGE_ACCOUNTS)));
+        assertInstanceOf(ArmVerdict.Respond.class, rule.enter(call("PUT", ACCOUNT, STORAGE_ACCOUNTS)));
+        assertEquals(ArmVerdict.proceed(), rule.enter(call("DELETE", ACCOUNT, STORAGE_ACCOUNTS)));
     }
 
     @Test
