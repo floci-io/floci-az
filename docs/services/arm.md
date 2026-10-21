@@ -358,6 +358,10 @@ subscription's cloud does not offer is refused before its handler runs with Azur
 version '<version>' for type '<type>'. The supported api-versions are '…'. The supported locations are
 '…'." `global` is always accepted. A PATCH, a child resource and a global type are never refused.
 
+Both run before policy evaluation, so policy conditions see the canonical location. A location a policy
+`append` adds or changes is checked again after policy, the same way: normalized under `location-normalize`
+and refused under `strict-locations`.
+
 Emulator choices, with no Azure source to settle them: which declared types count as global follows each
 service's declaration; the supported locations in the message are every location of the cloud, where Azure
 lists the ones the type is offered in.

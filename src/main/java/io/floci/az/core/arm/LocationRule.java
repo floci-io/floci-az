@@ -102,6 +102,9 @@ public class LocationRule implements ArmRequestRule {
 
     /** The location the resource ends up with, or null when the body names none and none is inherited. */
     private String canonical(ArmCall call, ArmResourceType type, CloudProfile cloud, String sent) {
+        if (type.location() == LocationPolicy.NONE) {
+            return null;
+        }
         if (type.location() == LocationPolicy.GLOBAL) {
             return sent != null || "PUT".equals(call.method()) ? GLOBAL : null;
         }
@@ -122,7 +125,7 @@ public class LocationRule implements ArmRequestRule {
     private static boolean refused(ArmCall call, ArmResourceType type, CloudProfile cloud, String sent,
                                    String canonical) {
         return "PUT".equals(call.method()) && sent != null && type.location() != LocationPolicy.GLOBAL
-            && !type.isChild() && !GLOBAL.equals(canonical) && cloud.location(canonical).isEmpty();
+            && type.location() != LocationPolicy.NONE && !type.isChild() && !GLOBAL.equals(canonical) && cloud.location(canonical).isEmpty();
     }
 
     private static String apiVersion(ArmCall call) {
