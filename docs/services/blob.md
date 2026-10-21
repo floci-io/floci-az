@@ -58,6 +58,12 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **`x-ms-if-tags` conditions**: honored on Get Blob, Get Blob Properties, Put Blob, Append Block,
   Delete Blob, Get/Set Blob Metadata, Snapshot Blob and Get/Set Blob Tags (which also take `x-ms-blob-if-match` and
   `x-ms-blob-if-none-match`); the expression also accepts `OR` and `<>`
+- **Copy Blob and Copy Blob From URL**: `PUT` with `x-ms-copy-source` (and `x-ms-requires-sync: true`
+  for Copy Blob From URL) copies a blob, or a snapshot of one with `?snapshot=`, from any container or
+  account in the emulator. The source may be a path-style URL, a host-style URL
+  (`{account}.blob.{host}`) or a bare `/{account}/{container}/{blob}` path. Metadata is the source's,
+  or the `x-ms-meta-*` headers when the request sends any; destination conditions and leases are
+  enforced. Both answer `202` with `x-ms-copy-status: success`
 - **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 
@@ -152,6 +158,11 @@ floci-az:
   Account SAS, stored access policies, IP/protocol restrictions, and the full SAS feature matrix
   are not fully modeled. User delegation keys are protected by a process-local secret, so SAS
   tokens issued by a previous emulator process are invalid after restart.
+- **Copies complete at once and stay inside the emulator.** Copy Blob reports `success` in its
+  `202`, so there is no pending state to poll and Abort Copy Blob is not served. A source outside
+  the emulator, the `x-ms-source-if-*` conditions, the source's own SAS, and Get Blob Properties'
+  `x-ms-copy-*` fields are not modeled. Put Blob From URL (`x-ms-blob-type` with `x-ms-copy-source`)
+  answers `501`.
 - **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
   and deletion. Listing snapshots with `include=snapshots` on List Blobs is not modeled. Deleting a
   base blob with snapshots requires `x-ms-delete-snapshots: include` or `only`; mutations other than
