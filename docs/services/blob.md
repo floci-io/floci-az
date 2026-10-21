@@ -63,7 +63,10 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   account in the emulator. The source may be a path-style URL, a host-style URL
   (`{account}.blob.{host}`) or a bare `/{account}/{container}/{blob}` path. Metadata is the source's,
   or the `x-ms-meta-*` headers when the request sends any; destination conditions and leases are
-  enforced. Both answer `202` with `x-ms-copy-status: success`
+  enforced, and an existing destination must be of the source's blob type (`409 InvalidBlobType`).
+  A SAS on the source URL is checked as a read of the source, as Azurite checks it, and a failed check
+  is `CannotVerifyCopySource` with the status the read got. Both answer `202` with
+  `x-ms-copy-status: success`
 - **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 
@@ -160,8 +163,9 @@ floci-az:
   tokens issued by a previous emulator process are invalid after restart.
 - **Copies complete at once and stay inside the emulator.** Copy Blob reports `success` in its
   `202`, so there is no pending state to poll and Abort Copy Blob is not served. A source outside
-  the emulator, the `x-ms-source-if-*` conditions, the source's own SAS, and Get Blob Properties'
-  `x-ms-copy-*` fields are not modeled. Put Blob From URL (`x-ms-blob-type` with `x-ms-copy-source`)
+  the emulator, the `x-ms-source-if-*` conditions, `x-ms-copy-source-authorization`, and Get Blob
+  Properties' `x-ms-copy-*` fields are not modeled. A source without a SAS is read like any other
+  request, since the emulator enforces only SAS tokens. Put Blob From URL (`x-ms-blob-type` with `x-ms-copy-source`)
   answers `501`.
 - **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
   and deletion. Listing snapshots with `include=snapshots` on List Blobs is not modeled. Deleting a

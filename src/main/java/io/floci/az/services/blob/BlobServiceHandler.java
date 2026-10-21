@@ -8,6 +8,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.SyntheticHttpHeaders;
 import io.floci.az.core.XmlBuilder;
 import io.floci.az.core.XmlUtils;
 import io.floci.az.core.auth.StorageSasAuthorization;
@@ -22,6 +23,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -664,6 +666,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
         CopySource copySource = parsedSource.get();
+        Response sourceAccess = authorizeCopySource(request, copySource);
+        if (sourceAccess != null) {
+            return sourceAccess;
+        }
 
         return leaseService.exclusively(() -> {
             // Validate destination container exists
@@ -698,6 +704,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             StoredObject source = sourceObject.get();
+            String sourceType = source.metadata().getOrDefault("BlobType", "BlockBlob");
+            if (existing.isPresent()
+                    && !sourceType.equalsIgnoreCase(existing.get().metadata().getOrDefault("BlobType", "BlockBlob"))) {
+                return new AzureErrorResponse("InvalidBlobType", "The blob type is invalid for this operation.")
+                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+            }
 
             // Build destination metadata: if the request carries x-ms-meta-* headers,
             // use those; otherwise copy metadata from the source.
@@ -729,6 +741,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     new StoredObject(blobName,
                             Arrays.copyOf(source.data(), source.data().length),
                             destMeta, now, etag));
+            // As Put Blob does: appends staged against the old blob must not be flushed into the copy.
+            clearDataLakeAppendChunks(request.accountName(), containerName, blobName);
 
             Response.ResponseBuilder rb = Response.status(Response.Status.ACCEPTED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(now))
@@ -739,6 +753,30 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .header("Content-Length", 0);
             return rb.build();
         });
+    }
+
+    /**
+     * The access check Azurite makes on a copy source that carries a SAS: the source is read as an anonymous request
+     * with the source URL's query, in the source's account, and a failed check is answered
+     * {@code CannotVerifyCopySource} with the status that read got. A source without a SAS needs no check, since
+     * floci-az enforces only SAS tokens and lets every other read through.
+     */
+    private Response authorizeCopySource(AzureRequest request, CopySource source) {
+        Map<String, String> query = source.singleQuery();
+        Optional<StorageSasToken> token = StorageSasToken.from(query);
+        if (token.isEmpty()) {
+            return null;
+        }
+        String path = source.container() + "/" + source.blob();
+        AzureRequest sourceRead = new AzureRequest("GET", source.account(), request.serviceType(), path,
+                new SyntheticHttpHeaders(Map.of()), InputStream.nullInputStream(), query, source.query(), null,
+                request.secure(), request.host(), request.remoteAddress(), path, null, request.authority());
+        return sasAuthorization.authorizeRead(sourceRead, source.container(), source.blob(), token.get())
+                .map(denied -> new AzureErrorResponse("CannotVerifyCopySource",
+                        "Server failed to authenticate the request. Make sure the value of Authorization header is "
+                                + "formed correctly including the signature.")
+                        .toXmlResponse(denied.getStatus()))
+                .orElse(null);
     }
 
     // ── ADLS Gen2 filesystem/path compatibility for Hadoop ABFS 3.3.4 ───────

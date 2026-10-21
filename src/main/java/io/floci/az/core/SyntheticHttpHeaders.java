@@ -16,11 +16,11 @@ import java.util.Map;
  * match case-insensitively, as they do on the wire. The underlying map is {@link #map() mutable}, because
  * routing stamps one header of its own on a request.
  */
-final class SyntheticHttpHeaders implements HttpHeaders {
+public final class SyntheticHttpHeaders implements HttpHeaders {
 
     private final MultivaluedMap<String, String> headers = new MultivaluedHashMap<>();
 
-    SyntheticHttpHeaders(Map<String, String> initial) {
+    public SyntheticHttpHeaders(Map<String, String> initial) {
         initial.forEach((name, value) -> {
             if (value != null) {
                 headers.putSingle(name, value);

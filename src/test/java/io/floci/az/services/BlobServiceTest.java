@@ -9,15 +9,18 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -3832,6 +3835,109 @@ public class BlobServiceTest {
             .when().put("/{account}/{container}/never.txt", ACCOUNT, CONTAINER)
             .then().statusCode(400)
             .header("x-ms-error-code", "InvalidHeaderValue");
+    }
+
+    @Test
+    void copyBlobOntoABlobOfAnotherTypeIsInvalidBlobType() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        given()
+            .header("x-ms-blob-type", "AppendBlob")
+            .put("/{account}/{container}/append.log", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+            .when().put("/{account}/{container}/append.log", ACCOUNT, CONTAINER)
+            .then().statusCode(409)
+            .header("x-ms-error-code", "InvalidBlobType");
+
+        given()
+            .when().head("/{account}/{container}/append.log", ACCOUNT, CONTAINER)
+            .then().statusCode(200).header("x-ms-blob-type", "AppendBlob");
+    }
+
+    @Test
+    void copyBlobDropsAppendsStagedAgainstTheBlobItReplaces() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body("fresh copy")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("x-ms-version", "2023-11-03")
+            .when().put("/{container}/staged.txt?resource=file", CONTAINER)
+            .then().statusCode(201);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .contentType("application/octet-stream")
+            .body("stale".getBytes(StandardCharsets.UTF_8))
+            .queryParam("action", "append")
+            .queryParam("position", 0)
+            .when().put("/{container}/staged.txt", CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+            .when().put("/{account}/{container}/staged.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+        given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .header("X-Http-Method-Override", "PATCH")
+            .queryParam("action", "flush")
+            .queryParam("position", 10)
+            .when().put("/{container}/staged.txt", CONTAINER);
+
+        given()
+            .when().get("/{account}/{container}/staged.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo("fresh copy"));
+    }
+
+    @Test
+    void copyBlobChecksTheSasASourceCarries() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String source = "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB + "?";
+        String readSas = urlEncoded(sas("r", "b", CONTAINER, BLOB));
+
+        given()
+            .header("x-ms-copy-source", source + readSas)
+            .when().put("/{account}/{container}/sas-copy.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+        given()
+            .header("x-ms-copy-source", source + urlEncoded(sas("w", "b", CONTAINER, BLOB)))
+            .when().put("/{account}/{container}/no-read.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(403)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+        given()
+            .header("x-ms-copy-source", source + readSas.replaceAll("sig=[^&]+", "sig=AAAA"))
+            .when().put("/{account}/{container}/bad-sig.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(403)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+    }
+
+    /**
+     * {@code sas} with each value percent-encoded, as a client builds a source URL: the signature is base64, and an
+     * unencoded {@code +} in it would be read back as a space.
+     */
+    private static String urlEncoded(String sas) {
+        return Arrays.stream(sas.split("&"))
+            .map(pair -> {
+                int eq = pair.indexOf('=');
+                return pair.substring(0, eq + 1) + URLEncoder.encode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            })
+            .collect(Collectors.joining("&"));
     }
 
     // ── Blob index tags ──────────────────────────────────────────────────────
