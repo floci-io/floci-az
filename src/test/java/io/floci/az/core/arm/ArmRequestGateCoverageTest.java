@@ -81,11 +81,12 @@ class ArmRequestGateCoverageTest {
 
     @Test
     void theRecordingRuleRunsAheadOfTheProductionRules() {
-        assertEquals(4, gate.rules().size(), "rules: " + gate.rules());
+        assertEquals(5, gate.rules().size(), "rules: " + gate.rules());
         assertInstanceOf(RecordingArmRequestRule.class, gate.rules().getFirst());
         assertInstanceOf(SubscriptionRule.class, gate.rules().get(1));
-        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(2));
-        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(3));
+        assertInstanceOf(ProviderRule.class, gate.rules().get(2));
+        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(3));
+        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(4));
     }
 
     // ── Requests floci-az makes to itself ───────────────────────────────────────

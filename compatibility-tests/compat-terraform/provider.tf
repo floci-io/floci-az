@@ -24,8 +24,7 @@ variable "metadata_host" {
 
 provider "azurerm" {
   features {}
-  skip_provider_registration = true
-  use_cli                    = false
+  use_cli = false
 
   environment   = "stack"
   metadata_host = var.metadata_host

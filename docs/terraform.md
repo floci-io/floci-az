@@ -56,8 +56,7 @@ terraform {
 
 provider "azurerm" {
   features {}
-  skip_provider_registration = true
-  use_cli                    = false
+  use_cli = false
 
   environment   = "stack"            # use a custom cloud described by metadata_host
   metadata_host = "localhost:4577"   # floci-az serves /metadata/endpoints over HTTPS here
@@ -68,6 +67,10 @@ provider "azurerm" {
   client_secret   = "fake-secret"    # credentials are not validated
 }
 ```
+
+No `skip_provider_registration` (3.x) or `resource_provider_registrations = "none"` (4.x) is needed:
+floci-az lists every namespace it serves as already registered, so the provider has nothing to register.
+See [Resource providers](services/arm.md#resource-providers).
 
 Then the usual flow works:
 

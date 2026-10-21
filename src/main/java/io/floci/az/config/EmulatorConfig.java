@@ -125,6 +125,16 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether resource providers start {@code NotRegistered} in each subscription, so a request for a resource
+     * type of an unregistered namespace is refused with {@code 409 MissingSubscriptionRegistration} until the
+     * namespace is registered. On from {@code parity: strict}; {@code parity-overrides.strict-providers}
+     * overrides it either way.
+     */
+    default boolean strictProviders() {
+        return parityOverrides().strictProviders().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -143,6 +153,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictResourceGroups()}. */
         Optional<Boolean> strictResourceGroups();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictProviders()}. */
+        Optional<Boolean> strictProviders();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */

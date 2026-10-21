@@ -10,6 +10,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmRequestGate;
 import io.floci.az.core.arm.ArmResourceFilter;
+import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
@@ -98,13 +99,17 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     /** Resource groups: their own operations and the cascade a delete runs. */
     private final ResourceGroupService resourceGroups;
 
+    /** The Providers API: the namespaces floci-az serves and the subscription's registration with each. */
+    private final ProviderService providerService;
+
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                       FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
                       Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate,
-                      AzureDirectory directory, ResourceGroupService resourceGroups) {
+                      AzureDirectory directory, ResourceGroupService resourceGroups,
+                      ProviderService providerService) {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
@@ -117,6 +122,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         this.gate                 = gate;
         this.directory            = directory;
         this.resourceGroups       = resourceGroups;
+        this.providerService      = providerService;
     }
 
     /**
@@ -171,6 +177,14 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         String method = req.method().toUpperCase();
 
         LOG.debugf("ArmHandler %s %s", method, path);
+
+        // ── Providers API ─────────────────────────────────────────────────────
+        // First, because register and unregister carry the namespace's /providers/Microsoft.X/ segment
+        // (Microsoft.Network's included), and the provider list and a single namespace have no type segment.
+        Response providers = providers(path, method);
+        if (providers != null) {
+            return providers;
+        }
 
         // ── Network Provider (subscription & resource-group levels) ───────────
         // Network is dispatched here, NOT via the providerLane map: subscription-scoped Network list
@@ -258,13 +272,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                     .map(ArmHandler::stripInternal)
                     .toList();
             return Response.ok(Map.of("value", hsms)).build();
-        }
-
-        // ── Provider registration check (skip_provider_registration=true still calls this) ──
-        // Only matches /subscriptions/{sub}/providers or /subscriptions/{sub}/providers/{namespace}
-        // (no resource type segment), so the more-specific handlers above take precedence.
-        if (path.matches("subscriptions/[^/]+/providers(/[^/]+)?([?].*)?")) {
-            return Response.ok(Map.of("value", List.of())).build();
         }
 
         // ── Subscription-level resource listing ──────────────────────────────
@@ -1025,6 +1032,32 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         keyVaults.clear();
         managedHsms.clear();
         webApps.clear();
+    }
+
+    /**
+     * {@code subscriptions/{sub}/providers}, {@code .../providers/{namespace}} and its {@code register} and
+     * {@code unregister} actions, served by {@link ProviderService}; null for any other path.
+     */
+    private Response providers(String path, String method) {
+        boolean registration = ArmPaths.isProviderRegistration(path);
+        if (!registration && !path.matches("subscriptions/[^/?]+/providers(/[^/?]+)?([?].*)?")) {
+            return null;
+        }
+        ArmResourceId id = ArmResourceId.parse(path).orElseThrow();
+        String sub = id.subscriptionId();
+        if (registration) {
+            if (!"POST".equals(method)) {
+                return Response.status(405).build();
+            }
+            return id.types().getFirst().equalsIgnoreCase("register")
+                ? providerService.register(sub, id.providerNamespace())
+                : providerService.unregister(sub, id.providerNamespace());
+        }
+        if (!"GET".equals(method)) {
+            return Response.status(405).build();
+        }
+        return id.providerNamespace() == null ? providerService.list(sub)
+            : providerService.get(sub, id.providerNamespace());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

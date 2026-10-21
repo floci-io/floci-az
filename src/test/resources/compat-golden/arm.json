@@ -1188,7 +1188,624 @@
   },
   "providers list" : {
     "body" : {
-      "value" : [ ]
+      "value" : [ {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ApiManagement",
+        "namespace" : "Microsoft.ApiManagement",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "service"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/apis"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/apis/operations"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/apis/operations/policies"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/apis/policies"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/backends"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/namedValues"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/policies"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/products"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/products/apis"
+        }, {
+          "apiVersions" : [ "2025-09-01-preview", "2025-03-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-05-01", "2023-09-01-preview", "2023-05-01-preview", "2023-03-01-preview", "2022-09-01-preview", "2022-08-01", "2022-04-01-preview", "2021-12-01-preview", "2021-08-01", "2021-04-01-preview", "2021-01-01-preview", "2020-12-01", "2020-06-01-preview", "2019-12-01", "2019-12-01-preview", "2019-01-01", "2018-06-01-preview", "2018-01-01", "2017-03-01", "2016-10-10", "2016-07-07" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "service/subscriptions"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.App",
+        "namespace" : "Microsoft.App",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-01-01", "2025-10-02-preview", "2025-07-01", "2025-02-02-preview", "2025-01-01", "2024-10-02-preview", "2024-08-02-preview", "2024-03-01", "2024-02-02-preview", "2023-11-02-preview", "2023-08-01-preview", "2023-05-02-preview", "2023-05-01", "2023-04-01-preview", "2022-11-01-preview", "2022-10-01", "2022-06-01-preview", "2022-03-01", "2022-01-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "containerApps"
+        }, {
+          "apiVersions" : [ "2026-01-01", "2025-10-02-preview", "2025-07-01", "2025-02-02-preview", "2025-01-01", "2024-10-02-preview", "2024-08-02-preview", "2024-03-01", "2024-02-02-preview", "2023-11-02-preview", "2023-08-01-preview", "2023-05-02-preview", "2023-05-01", "2023-04-01-preview", "2022-11-01-preview", "2022-10-01", "2022-06-01-preview", "2022-03-01", "2022-01-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "containerApps/revisions"
+        }, {
+          "apiVersions" : [ "2026-01-01", "2025-10-02-preview", "2025-07-01", "2025-02-02-preview", "2025-01-01", "2024-10-02-preview", "2024-08-02-preview", "2024-03-01", "2024-02-02-preview", "2023-11-02-preview", "2023-08-01-preview", "2023-05-02-preview", "2023-05-01", "2023-04-01-preview", "2022-11-01-preview", "2022-10-01", "2022-06-01-preview", "2022-03-01", "2022-01-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "managedEnvironments"
+        }, {
+          "apiVersions" : [ "2026-01-01", "2025-10-02-preview", "2025-07-01", "2025-02-02-preview", "2025-01-01", "2024-10-02-preview", "2024-08-02-preview", "2024-03-01", "2024-02-02-preview", "2023-11-02-preview", "2023-08-01-preview", "2023-05-02-preview", "2023-05-01", "2023-04-01-preview", "2022-11-01-preview", "2022-10-01", "2022-06-01-preview", "2022-03-01", "2022-01-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "managedEnvironments/storages"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Authorization",
+        "namespace" : "Microsoft.Authorization",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-07-01", "2026-06-01", "2026-01-01-preview", "2025-12-01-preview", "2025-11-01", "2025-03-01", "2025-01-01", "2024-05-01", "2024-04-01", "2023-04-01", "2022-06-01", "2021-06-01", "2020-09-01", "2020-03-01", "2019-09-01", "2019-06-01", "2019-01-01", "2018-05-01", "2018-03-01", "2017-06-01-preview", "2016-12-01", "2016-04-01", "2015-11-01", "2015-10-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "policyAssignments"
+        }, {
+          "apiVersions" : [ "2026-07-01", "2026-06-01", "2026-01-01-preview", "2025-12-01-preview", "2025-11-01", "2025-03-01", "2025-01-01", "2024-05-01", "2023-04-01", "2021-06-01", "2020-09-01", "2020-03-01", "2019-09-01", "2019-06-01", "2019-01-01", "2018-05-01", "2018-03-01", "2016-12-01", "2016-04-01", "2015-11-01", "2015-10-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "policyDefinitions"
+        }, {
+          "apiVersions" : [ "2026-01-01-preview", "2025-12-01-preview", "2024-12-01-preview", "2022-07-01-preview", "2020-07-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "policyExemptions"
+        }, {
+          "apiVersions" : [ "2026-07-01", "2026-06-01", "2026-01-01-preview", "2025-12-01-preview", "2025-11-01", "2025-03-01", "2025-01-01", "2024-05-01", "2023-04-01", "2021-06-01", "2020-09-01", "2020-03-01", "2019-09-01", "2019-06-01", "2019-01-01", "2018-05-01", "2018-03-01", "2017-06-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "policySetDefinitions"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Cache",
+        "namespace" : "Microsoft.Cache",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-08-01-preview", "2024-11-01", "2024-04-01-preview", "2024-03-01", "2023-08-01", "2023-05-01-preview", "2023-04-01", "2022-06-01", "2022-05-01", "2021-06-01", "2020-12-01", "2020-06-01", "2019-07-01", "2018-03-01", "2017-10-01", "2017-02-01", "2016-04-01", "2015-08-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "redis"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Communication",
+        "namespace" : "Microsoft.Communication",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-03-18", "2025-09-01", "2025-05-01", "2025-05-01-preview", "2024-09-01-preview", "2023-06-01-preview", "2023-04-01", "2023-04-01-preview", "2023-03-31", "2023-03-01-preview", "2022-07-01-preview", "2021-10-01-preview", "2020-08-20", "2020-08-20-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "global" ],
+          "resourceType" : "communicationServices"
+        }, {
+          "apiVersions" : [ "2026-03-18", "2025-09-01", "2025-05-01", "2025-05-01-preview", "2024-09-01-preview", "2023-06-01-preview", "2023-04-01", "2023-04-01-preview", "2023-03-31", "2023-03-01-preview", "2022-07-01-preview", "2021-10-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "global" ],
+          "resourceType" : "emailServices"
+        }, {
+          "apiVersions" : [ "2026-03-18", "2025-09-01", "2025-05-01", "2025-05-01-preview", "2024-09-01-preview", "2023-06-01-preview", "2023-04-01", "2023-04-01-preview", "2023-03-31", "2023-03-01-preview", "2022-07-01-preview", "2021-10-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "emailServices/domains"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Compute",
+        "namespace" : "Microsoft.Compute",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-03-01", "2025-11-01", "2025-04-01", "2024-11-01", "2024-07-01", "2024-03-01", "2023-09-01", "2023-07-01", "2023-03-01", "2022-11-01", "2022-08-01", "2022-03-01", "2021-11-01", "2021-07-01", "2021-04-01", "2021-03-01", "2020-12-01", "2020-06-01", "2019-12-01", "2019-07-01", "2019-03-01", "2018-10-01", "2018-06-01", "2018-04-01", "2017-12-01", "2017-03-30", "2016-04-30-preview", "2016-03-30", "2015-06-15" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "virtualMachines"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ContainerInstance",
+        "namespace" : "Microsoft.ContainerInstance",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-08-01-preview", "2026-07-01", "2026-06-01-preview", "2025-09-01", "2024-11-01-preview", "2024-10-01-preview", "2024-09-01-preview", "2024-05-01-preview", "2023-05-01", "2023-02-01-preview", "2022-10-01-preview", "2022-09-01", "2021-10-01", "2021-09-01", "2021-07-01", "2021-03-01", "2020-11-01", "2019-12-01", "2018-10-01", "2018-09-01", "2018-06-01", "2018-04-01", "2018-02-01-preview", "2017-12-01-preview", "2017-10-01-preview", "2017-08-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "containerGroups"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ContainerRegistry",
+        "namespace" : "Microsoft.ContainerRegistry",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-03-01-preview", "2026-01-01-preview", "2025-11-01", "2025-06-01-preview", "2025-05-01-preview", "2025-04-01", "2025-03-01-preview", "2024-11-01-preview", "2023-11-01-preview", "2023-08-01-preview", "2023-07-01", "2023-06-01-preview", "2023-01-01-preview", "2022-12-01", "2022-02-01-preview", "2021-12-01-preview", "2021-09-01", "2021-08-01-preview", "2021-06-01-preview", "2020-11-01-preview", "2019-12-01-preview", "2019-05-01", "2017-10-01", "2017-03-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "registries"
+        }, {
+          "apiVersions" : [ "2026-03-01-preview", "2026-01-01-preview", "2025-11-01", "2025-06-01-preview", "2025-05-01-preview", "2025-04-01", "2025-03-01-preview", "2024-11-01-preview", "2023-11-01-preview", "2023-08-01-preview", "2023-07-01", "2023-06-01-preview", "2023-01-01-preview", "2022-12-01", "2022-02-01-preview", "2021-12-01-preview", "2021-09-01", "2021-08-01-preview", "2021-06-01-preview", "2020-11-01-preview", "2019-12-01-preview", "2019-05-01", "2017-10-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "registries/replications"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ContainerService",
+        "namespace" : "Microsoft.ContainerService",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-05-02-preview", "2026-05-01", "2026-04-02-preview", "2026-04-01", "2026-03-02-preview", "2026-03-01", "2026-02-02-preview", "2026-02-01", "2026-01-02-preview", "2026-01-01", "2025-10-02-preview", "2025-10-01", "2025-09-02-preview", "2025-09-01", "2025-08-02-preview", "2025-08-01", "2025-07-02-preview", "2025-07-01", "2025-06-02-preview", "2025-05-02-preview", "2025-05-01", "2025-04-02-preview", "2025-04-01", "2025-03-02-preview", "2025-03-01", "2025-02-02-preview", "2025-02-01", "2025-01-02-preview", "2025-01-01", "2024-10-02-preview", "2024-10-01", "2024-09-02-preview", "2024-09-01", "2024-08-01", "2024-07-02-preview", "2024-07-01", "2024-06-02-preview", "2024-05-02-preview", "2024-05-01", "2024-04-02-preview", "2024-03-02-preview", "2024-02-02-preview", "2024-02-01", "2024-01-02-preview", "2024-01-01", "2023-11-02-preview", "2023-11-01", "2023-10-02-preview", "2023-10-01", "2023-09-02-preview", "2023-09-01", "2023-08-02-preview", "2023-08-01", "2023-07-02-preview", "2023-07-01", "2023-06-02-preview", "2023-06-01", "2023-05-02-preview", "2023-05-01", "2023-04-02-preview", "2023-04-01", "2023-03-02-preview", "2023-03-01", "2023-02-02-preview", "2023-02-01", "2023-01-02-preview", "2023-01-01", "2022-11-02-preview", "2022-11-01", "2022-10-02-preview", "2022-09-02-preview", "2022-09-01", "2022-08-03-preview", "2022-08-02-preview", "2022-07-02-preview", "2022-07-01", "2022-06-02-preview", "2022-06-01", "2022-05-02-preview", "2022-04-02-preview", "2022-04-01", "2022-03-02-preview", "2022-03-01", "2022-02-02-preview", "2022-02-01", "2022-01-02-preview", "2022-01-01", "2021-11-01-preview", "2021-10-01", "2021-09-01", "2021-08-01", "2021-07-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-12-01", "2020-11-01", "2020-09-01", "2020-07-01", "2020-06-01", "2020-04-01", "2020-03-01", "2020-02-01", "2020-01-01", "2019-11-01", "2019-10-01", "2019-08-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-08-01-preview", "2018-03-31", "2017-08-31" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "managedClusters"
+        }, {
+          "apiVersions" : [ "2026-05-02-preview", "2026-05-01", "2026-04-02-preview", "2026-04-01", "2026-03-02-preview", "2026-03-01", "2026-02-02-preview", "2026-02-01", "2026-01-02-preview", "2026-01-01", "2025-10-02-preview", "2025-10-01", "2025-09-02-preview", "2025-09-01", "2025-08-02-preview", "2025-08-01", "2025-07-02-preview", "2025-07-01", "2025-06-02-preview", "2025-05-02-preview", "2025-05-01", "2025-04-02-preview", "2025-04-01", "2025-03-02-preview", "2025-03-01", "2025-02-02-preview", "2025-02-01", "2025-01-02-preview", "2025-01-01", "2024-10-02-preview", "2024-10-01", "2024-09-02-preview", "2024-09-01", "2024-08-01", "2024-07-02-preview", "2024-07-01", "2024-06-02-preview", "2024-05-02-preview", "2024-05-01", "2024-04-02-preview", "2024-03-02-preview", "2024-02-02-preview", "2024-02-01", "2024-01-02-preview", "2024-01-01", "2023-11-02-preview", "2023-11-01", "2023-10-02-preview", "2023-10-01", "2023-09-02-preview", "2023-09-01", "2023-08-02-preview", "2023-08-01", "2023-07-02-preview", "2023-07-01", "2023-06-02-preview", "2023-06-01", "2023-05-02-preview", "2023-05-01", "2023-04-02-preview", "2023-04-01", "2023-03-02-preview", "2023-03-01", "2023-02-02-preview", "2023-02-01", "2023-01-02-preview", "2023-01-01", "2022-11-02-preview", "2022-11-01", "2022-10-02-preview", "2022-09-02-preview", "2022-09-01", "2022-08-03-preview", "2022-08-02-preview", "2022-07-02-preview", "2022-07-01", "2022-06-02-preview", "2022-06-01", "2022-05-02-preview", "2022-04-02-preview", "2022-04-01", "2022-03-02-preview", "2022-03-01", "2022-02-02-preview", "2022-02-01", "2022-01-02-preview", "2022-01-01", "2021-11-01-preview", "2021-10-01", "2021-09-01", "2021-08-01", "2021-07-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-12-01", "2020-11-01", "2020-09-01", "2020-07-01", "2020-06-01", "2020-04-01", "2020-03-01", "2020-02-01", "2020-01-01", "2019-11-01", "2019-10-01", "2019-08-01", "2019-06-01", "2019-04-01", "2019-02-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "managedClusters/agentPools"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.DBforMariaDB",
+        "namespace" : "Microsoft.DBforMariaDB",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2018-06-01", "2018-06-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "servers"
+        }, {
+          "apiVersions" : [ "2018-06-01", "2018-06-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/configurations"
+        }, {
+          "apiVersions" : [ "2018-06-01", "2018-06-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases"
+        }, {
+          "apiVersions" : [ "2018-06-01", "2018-06-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/firewallRules"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.DBforMySQL",
+        "namespace" : "Microsoft.DBforMySQL",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-12-01-preview", "2025-06-01-preview", "2024-12-30", "2024-12-01-preview", "2024-10-01-preview", "2024-06-01-preview", "2024-02-01-preview", "2023-12-30", "2023-12-01-preview", "2023-10-01-preview", "2023-06-30", "2023-06-01-preview", "2022-09-30-preview", "2022-01-01", "2021-12-01-preview", "2021-05-01", "2021-05-01-preview", "2020-07-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "flexibleServers"
+        }, {
+          "apiVersions" : [ "2025-12-01-preview", "2025-06-01-preview", "2024-12-30", "2024-12-01-preview", "2023-12-30", "2023-06-30", "2023-06-01-preview", "2022-01-01", "2021-12-01-preview", "2021-05-01", "2021-05-01-preview", "2020-07-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/configurations"
+        }, {
+          "apiVersions" : [ "2025-12-01-preview", "2025-06-01-preview", "2024-12-30", "2024-12-01-preview", "2023-12-30", "2023-06-30", "2023-06-01-preview", "2022-01-01", "2021-12-01-preview", "2021-05-01", "2021-05-01-preview", "2020-07-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/databases"
+        }, {
+          "apiVersions" : [ "2025-12-01-preview", "2025-06-01-preview", "2024-12-30", "2024-12-01-preview", "2023-12-30", "2023-06-30", "2023-06-01-preview", "2022-01-01", "2021-12-01-preview", "2021-05-01", "2021-05-01-preview", "2020-07-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/firewallRules"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.DBforPostgreSQL",
+        "namespace" : "Microsoft.DBforPostgreSQL",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview", "2022-01-20-preview", "2021-06-01", "2021-06-01-preview", "2020-02-14-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "flexibleServers"
+        }, {
+          "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview", "2022-01-20-preview", "2021-06-01", "2021-06-01-preview", "2020-02-14-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/configurations"
+        }, {
+          "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview", "2022-01-20-preview", "2021-06-01", "2021-06-01-preview", "2020-11-05-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/databases"
+        }, {
+          "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview", "2022-01-20-preview", "2021-06-01", "2021-06-01-preview", "2020-02-14-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/firewallRules"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.EventGrid",
+        "namespace" : "Microsoft.EventGrid",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-07-15-preview", "2025-04-01-preview", "2025-02-15", "2024-12-15-preview", "2024-06-01-preview", "2023-12-15-preview", "2023-06-01-preview", "2022-06-15", "2021-12-01", "2021-10-15-preview", "2021-06-01-preview", "2020-10-15-preview", "2020-06-01", "2020-04-01-preview", "2020-01-01-preview", "2019-06-01", "2019-02-01-preview", "2019-01-01", "2018-09-15-preview", "2018-05-01-preview", "2018-01-01", "2017-09-15-preview", "2017-06-15-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "topics"
+        }, {
+          "apiVersions" : [ "2025-07-15-preview", "2025-04-01-preview", "2025-02-15", "2024-12-15-preview", "2024-06-01-preview", "2023-12-15-preview", "2023-06-01-preview", "2022-06-15", "2021-12-01", "2021-10-15-preview", "2021-06-01-preview", "2020-10-15-preview", "2020-06-01", "2020-04-01-preview", "2020-01-01-preview", "2019-06-01", "2019-02-01-preview", "2019-01-01", "2018-09-15-preview", "2018-05-01-preview", "2018-01-01", "2017-09-15-preview", "2017-06-15-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "eventSubscriptions"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Insights",
+        "namespace" : "Microsoft.Insights",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2024-03-11", "2023-03-11", "2022-06-01", "2021-09-01-preview", "2021-04-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "dataCollectionEndpoints"
+        }, {
+          "apiVersions" : [ "2024-03-11", "2023-03-11", "2022-06-01", "2021-09-01-preview", "2021-04-01", "2019-11-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "dataCollectionRules"
+        }, {
+          "apiVersions" : [ "2021-05-01-preview", "2020-01-01-preview", "2017-05-01-preview", "2016-09-01", "2015-07-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "diagnosticSettings"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.KeyVault",
+        "namespace" : "Microsoft.KeyVault",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-03-01-preview", "2026-02-01", "2025-05-01", "2024-12-01-preview", "2024-11-01", "2024-04-01-preview", "2023-07-01", "2023-02-01", "2022-11-01", "2022-07-01", "2022-02-01-preview", "2021-11-01-preview", "2021-10-01", "2021-06-01-preview", "2021-04-01-preview", "2020-04-01-preview", "2019-09-01", "2018-02-14", "2018-02-14-preview", "2016-10-01", "2015-06-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "vaults"
+        }, {
+          "apiVersions" : [ "2026-03-01-preview", "2026-02-01", "2025-05-01", "2024-12-01-preview", "2024-11-01", "2024-04-01-preview", "2023-07-01", "2023-02-01", "2022-11-01", "2022-07-01", "2022-02-01-preview", "2021-11-01-preview", "2021-10-01", "2021-06-01-preview", "2021-04-01-preview", "2020-04-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "managedHSMs"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ManagedIdentity",
+        "namespace" : "Microsoft.ManagedIdentity",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-05-31-preview", "2025-01-31-preview", "2024-11-30", "2023-07-31-preview", "2023-01-31", "2022-01-31-preview", "2021-09-30-preview", "2018-11-30", "2015-08-31-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "identities"
+        }, {
+          "apiVersions" : [ "2025-05-31-preview", "2025-01-31-preview", "2024-11-30", "2023-07-31-preview", "2023-01-31", "2022-01-31-preview", "2021-09-30-preview", "2018-11-30", "2015-08-31-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "userAssignedIdentities"
+        }, {
+          "apiVersions" : [ "2025-05-31-preview", "2025-01-31-preview", "2024-11-30", "2023-07-31-preview", "2023-01-31", "2022-01-31-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "userAssignedIdentities/federatedIdentityCredentials"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Network",
+        "namespace" : "Microsoft.Network",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "applicationGateways"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "loadBalancers"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "loadBalancers/backendAddressPools"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "networkInterfaces"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "networkSecurityGroups"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "networkSecurityGroups/defaultSecurityRules"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "networkSecurityGroups/securityRules"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2018-10-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "privateEndpoints"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateEndpoints/privateDnsZoneGroups"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2018-10-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "privateLinkServices"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "publicIPAddresses"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "virtualNetworks"
+        }, {
+          "apiVersions" : [ "2025-07-01", "2025-05-01", "2025-03-01", "2025-01-01", "2024-10-01", "2024-07-01", "2024-05-01", "2024-03-01", "2024-01-01", "2023-11-01", "2023-09-01", "2023-06-01", "2023-05-01", "2023-04-01", "2023-02-01", "2022-11-01", "2022-09-01", "2022-07-01", "2022-05-01", "2022-01-01", "2021-08-01", "2021-05-01", "2021-03-01", "2021-02-01", "2020-11-01", "2020-08-01", "2020-07-01", "2020-06-01", "2020-05-01", "2020-04-01", "2020-03-01", "2019-12-01", "2019-11-01", "2019-09-01", "2019-08-01", "2019-07-01", "2019-06-01", "2019-04-01", "2019-02-01", "2018-12-01", "2018-11-01", "2018-10-01", "2018-08-01", "2018-07-01", "2018-06-01", "2018-04-01", "2018-02-01", "2018-01-01", "2017-11-01", "2017-10-01", "2017-09-01", "2017-08-01", "2017-06-01", "2017-03-30", "2017-03-01", "2016-12-01", "2016-09-01", "2016-06-01", "2016-03-30", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "virtualNetworks/subnets"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "global" ],
+          "resourceType" : "dnsZones"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/A"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/AAAA"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/CAA"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/CNAME"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/MX"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/NS"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/SOA"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/SRV"
+        }, {
+          "apiVersions" : [ "2023-07-01-preview", "2018-05-01", "2018-03-01-preview", "2017-10-01", "2017-09-01", "2016-04-01", "2015-05-04-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "dnsZones/TXT"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "global" ],
+          "resourceType" : "privateDnsZones"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/virtualNetworkLinks"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/A"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/AAAA"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/CNAME"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/MX"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/PTR"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/SOA"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/SRV"
+        }, {
+          "apiVersions" : [ "2024-06-01", "2020-06-01", "2020-01-01", "2018-09-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "privateDnsZones/TXT"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.OperationalInsights",
+        "namespace" : "Microsoft.OperationalInsights",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-07-01", "2025-02-01", "2023-09-01", "2022-10-01", "2021-12-01-preview", "2021-06-01", "2020-10-01", "2020-08-01", "2020-03-01-preview", "2015-11-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "workspaces"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Resources",
+        "namespace" : "Microsoft.Resources",
+        "registrationPolicy" : "RegistrationFree",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-04-01", "2025-03-01", "2024-11-01", "2024-07-01", "2024-03-01", "2023-07-01", "2022-09-01", "2021-04-01", "2021-01-01", "2020-10-01", "2020-08-01", "2020-06-01", "2019-10-01", "2019-08-01", "2019-07-01", "2019-05-10", "2019-05-01", "2019-03-01", "2018-05-01", "2018-02-01", "2017-05-10", "2016-09-01", "2016-07-01", "2016-02-01", "2015-11-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "resourceGroups"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Sql",
+        "namespace" : "Microsoft.Sql",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2019-06-01-preview", "2015-05-01-preview", "2014-04-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "servers"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/connectionPolicies"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2019-06-01-preview", "2017-10-01-preview", "2017-03-01-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2015-05-01-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/firewallRules"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage",
+        "namespace" : "Microsoft.Storage",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01", "2018-03-01-preview", "2018-02-01", "2017-10-01", "2017-06-01", "2016-12-01", "2016-05-01", "2016-01-01", "2015-06-15", "2015-05-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "storageAccounts"
+        }, {
+          "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "storageAccounts/blobServices"
+        }, {
+          "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01", "2018-03-01-preview", "2018-02-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "storageAccounts/blobServices/containers"
+        }, {
+          "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "storageAccounts/queueServices"
+        }, {
+          "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "storageAccounts/queueServices/queues"
+        } ]
+      }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Web",
+        "namespace" : "Microsoft.Web",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2025-03-01", "2024-11-01", "2024-04-01", "2023-12-01", "2023-01-01", "2022-09-01", "2022-03-01", "2021-03-01", "2021-02-01", "2021-01-15", "2021-01-01", "2020-12-01", "2020-10-01", "2020-09-01", "2020-06-01", "2019-08-01", "2018-11-01", "2018-02-01", "2016-08-01", "2015-08-01" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "sites"
+        }, {
+          "apiVersions" : [ "2025-03-01", "2024-11-01", "2024-04-01", "2023-12-01", "2023-01-01", "2022-09-01", "2022-03-01", "2021-03-01", "2021-02-01", "2021-01-15", "2021-01-01", "2020-12-01", "2020-10-01", "2020-09-01", "2020-06-01", "2019-08-01", "2018-11-01", "2018-02-01", "2016-08-01", "2015-08-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "sites/config"
+        } ]
+      } ]
     },
     "headers" : {
       "Content-Type" : "application/json;charset=UTF-8"
@@ -1198,7 +1815,36 @@
   },
   "provider get, Microsoft.Storage" : {
     "body" : {
-      "value" : [ ]
+      "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage",
+      "namespace" : "Microsoft.Storage",
+      "registrationPolicy" : "RegistrationRequired",
+      "registrationState" : "Registered",
+      "resourceTypes" : [ {
+        "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01", "2018-03-01-preview", "2018-02-01", "2017-10-01", "2017-06-01", "2016-12-01", "2016-05-01", "2016-01-01", "2015-06-15", "2015-05-01-preview" ],
+        "capabilities" : "SupportsTags, SupportsLocation",
+        "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+        "resourceType" : "storageAccounts"
+      }, {
+        "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01" ],
+        "capabilities" : "None",
+        "locations" : [ ],
+        "resourceType" : "storageAccounts/blobServices"
+      }, {
+        "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01", "2019-04-01", "2018-11-01", "2018-07-01", "2018-03-01-preview", "2018-02-01" ],
+        "capabilities" : "None",
+        "locations" : [ ],
+        "resourceType" : "storageAccounts/blobServices/containers"
+      }, {
+        "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01" ],
+        "capabilities" : "None",
+        "locations" : [ ],
+        "resourceType" : "storageAccounts/queueServices"
+      }, {
+        "apiVersions" : [ "2026-04-01", "2025-08-01", "2025-06-01", "2025-01-01", "2024-01-01", "2023-05-01", "2023-04-01", "2023-01-01", "2022-09-01", "2022-05-01", "2021-09-01", "2021-08-01", "2021-06-01", "2021-04-01", "2021-02-01", "2021-01-01", "2020-08-01-preview", "2019-06-01" ],
+        "capabilities" : "None",
+        "locations" : [ ],
+        "resourceType" : "storageAccounts/queueServices/queues"
+      } ]
     },
     "headers" : {
       "Content-Type" : "application/json;charset=UTF-8"

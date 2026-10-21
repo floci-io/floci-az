@@ -32,7 +32,8 @@ class ParityConfigTest {
         "strict-subscriptions", ParityLevel.STRICT,
         "resource-group-semantics", ParityLevel.AZURE,
         "resource-group-delete", ParityLevel.AZURE,
-        "strict-resource-groups", ParityLevel.STRICT);
+        "strict-resource-groups", ParityLevel.STRICT,
+        "strict-providers", ParityLevel.STRICT);
 
     private record Override(String name, Predicate<EmulatorConfig> resolver) {
     }
@@ -42,7 +43,8 @@ class ParityConfigTest {
         new Override("strict-subscriptions", EmulatorConfig::strictSubscriptions),
         new Override("resource-group-semantics", EmulatorConfig::resourceGroupSemantics),
         new Override("resource-group-delete", EmulatorConfig::resourceGroupDelete),
-        new Override("strict-resource-groups", EmulatorConfig::strictResourceGroups));
+        new Override("strict-resource-groups", EmulatorConfig::strictResourceGroups),
+        new Override("strict-providers", EmulatorConfig::strictProviders));
 
     private static EmulatorConfig config(ParityLevel level, Map<String, Boolean> explicit, String authMode) {
         EmulatorConfig config = mock(EmulatorConfig.class, CALLS_REAL_METHODS);
@@ -59,6 +61,7 @@ class ParityConfigTest {
         when(overrides.resourceGroupDelete()).thenReturn(Optional.ofNullable(explicit.get("resource-group-delete")));
         when(overrides.strictResourceGroups())
             .thenReturn(Optional.ofNullable(explicit.get("strict-resource-groups")));
+        when(overrides.strictProviders()).thenReturn(Optional.ofNullable(explicit.get("strict-providers")));
         return config;
     }
 

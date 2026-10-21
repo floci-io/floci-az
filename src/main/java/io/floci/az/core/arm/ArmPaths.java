@@ -21,7 +21,20 @@ public final class ArmPaths {
     /** Compiled {@link #resourceName} patterns, keyed by resource type (a small, fixed set). */
     private static final ConcurrentMap<String, Pattern> RESOURCE_NAME_PATTERNS = new ConcurrentHashMap<>();
 
+    /** {@code subscriptions/{sub}/providers/{namespace}/register} or {@code .../unregister}, in any casing. */
+    private static final Pattern PROVIDER_REGISTRATION = Pattern.compile(
+        "subscriptions/[^/?]+/providers/[^/?]+/(register|unregister)([?].*)?", Pattern.CASE_INSENSITIVE);
+
     private ArmPaths() {
+    }
+
+    /**
+     * True for a subscription's register or unregister of a provider namespace ({@code Providers_Register},
+     * {@code Providers_Unregister}). Its path carries the namespace's {@code /providers/Microsoft.X/} marker, so
+     * the provider stage must leave it to the generic ARM handler, which owns registration for every namespace.
+     */
+    public static boolean isProviderRegistration(String path) {
+        return path != null && PROVIDER_REGISTRATION.matcher(path).matches();
     }
 
     /** Segment after the case-sensitive {@code subscriptions} segment. */

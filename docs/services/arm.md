@@ -36,9 +36,10 @@ Managed Identity, and the other `Microsoft.*` providers).
   [Blob](blob.md) and [Queue](queue.md) backends, returning the well-known development account key
 - **Key vaults**: an ARM shell for `Microsoft.KeyVault/vaults` whose `vaultUri` points at the
   live [Key Vault](key-vault.md) handler
-- **Resource & provider listing**: `GET /subscriptions/{sub}/resources`,
-  `GET /subscriptions/{sub}/providers[/{namespace}]`, and
+- **Resource listing**: `GET /subscriptions/{sub}/resources` and
   `POST .../{namespace}/checkNameAvailability`
+- **Resource providers**: every namespace floci-az serves, with its resource types and Azure's
+  api-versions, and `register`/`unregister` (see [Resource providers](#resource-providers))
 - **Provider fallthrough**: management-plane paths for providers without a dedicated handler are
   answered here so Terraform reads and dependency lookups resolve
 
@@ -62,6 +63,8 @@ GET    /subscriptions/{sub}/operationresults/{operationId}   # poll of a resourc
 
 GET    /subscriptions/{sub}/resources
 GET    /subscriptions/{sub}/providers[/{namespace}]
+POST   /subscriptions/{sub}/providers/{namespace}/register
+POST   /subscriptions/{sub}/providers/{namespace}/unregister
 POST   /subscriptions/{sub}/providers/{namespace}/checkNameAvailability
 
 # ARM shells (bridge to the live data-plane handlers)
@@ -76,12 +79,11 @@ account returns the well-known development key and the vault's `vaultUri` points
 ## Quickstart
 
 Point Terraform at the emulator with a minimal `azurerm` provider block (see the
-[Terraform guide](../terraform.md) for the full skip-provider-registration setup):
+[Terraform guide](../terraform.md) for the full setup):
 
 ```hcl
 provider "azurerm" {
   features {}
-  skip_provider_registration = true
   # metadata_host / endpoints redirected at localhost:4577: see the Terraform guide
 }
 
@@ -111,6 +113,7 @@ floci-az:
   #   resource-group-semantics: true # default: on from azure
   #   resource-group-delete: true    # default: on from azure
   #   strict-resource-groups: true   # default: on from strict
+  #   strict-providers: true         # default: on from strict
   cloud:
     default: AzureCloud
   services:
@@ -217,7 +220,7 @@ can also be set alone to opt in piecemeal:
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
 | `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete` |
-| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups` |
+| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
 override set to a value its level would not give it. At the default level the line also names the
@@ -301,6 +304,33 @@ a write under a group that is being deleted answers `409` with the message `The 
 in deprovisioning state and cannot perform this operation.` (Azure documents the
 `ResourceGroupBeingDeleted` code, with the advice to wait for the deletion to complete, but not its
 status or message).
+
+## Resource providers
+
+`GET /subscriptions/{sub}/providers` lists every namespace floci-az serves, and only those: a namespace it
+does not serve is left out, which azurerm reads as nothing to register, and any request naming one is
+`404 InvalidResourceNamespace`. Each namespace carries the resource types floci-az serves in it, with
+Azure's api-versions newest first, the regions a type can be created in by display name, and
+`registrationPolicy`: `RegistrationFree` for `Microsoft.Resources`, `RegistrationRequired` for the rest.
+
+`register` and `unregister` answer `200` with the `Provider` body in its final state, `Registered` or
+`Unregistered`, at once and every time. Azure passes through `Registering` and `Unregistering` first, but
+`az provider register --wait` and the Python SDK's auto-register policy poll without a limit, so a
+transitional state would only make them wait.
+
+By default every namespace is `Registered`, so nothing ever needs registering, as before. With
+`strict-providers` (on from `parity: strict`) every namespace but `Microsoft.Resources` starts
+`NotRegistered` in each subscription, and a request for one of its resource types is refused with Azure's
+`409 MissingSubscriptionRegistration` until the namespace is registered. The Go, Java and Python SDKs
+catch that error, register the namespace and retry on their own; azurerm with
+`resource_provider_registrations` set registers what it needs at configure time. Registrations then persist
+in the directory store, alongside the subscriptions they belong to.
+
+Emulator choices, with no Azure source to settle them: the status and message of
+`InvalidResourceNamespace` (Azure documents the code for an unknown namespace, but no recording shows the
+Providers API answering one), and the `capabilities` string (`SupportsTags, SupportsLocation` for a type
+with a location of its own, `None` otherwise). `defaultApiVersion`, `apiProfiles`, `zoneMappings` and
+`authorizations` are optional in Azure's answer and omitted.
 
 ## Resource names across subscriptions
 

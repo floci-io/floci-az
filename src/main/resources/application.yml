@@ -105,6 +105,10 @@ floci-az:
     # strict-resource-groups: true  # FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS; default on from strict.
     #                               # A request for a resource under a missing group is 404 ResourceGroupNotFound,
     #                               # and groups persist in the directory store
+    # strict-providers: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_PROVIDERS; default on from strict.
+    #                               # Resource providers start NotRegistered in each subscription; a request for
+    #                               # a type of an unregistered namespace is 409 MissingSubscriptionRegistration
+    #                               # until it is registered, and registrations persist in the directory store
 
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:

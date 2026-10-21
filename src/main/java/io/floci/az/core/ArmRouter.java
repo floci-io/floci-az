@@ -3,6 +3,7 @@ package io.floci.az.core;
 import io.floci.az.core.RouteOutcome.Fallthrough;
 import io.floci.az.core.RouteOutcome.Handled;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmRequestGate;
 import io.floci.az.core.cloud.ScopeResolver;
 import io.floci.az.services.arm.ArmHandler;
@@ -260,7 +261,7 @@ public class ArmRouter {
     RouteOutcome routeArmProviders(RoutingContext ctx) {
         String path = ctx.path();
         boolean tenantRooted = path.startsWith("providers/");
-        if (!path.startsWith("subscriptions/") && !tenantRooted) {
+        if ((!path.startsWith("subscriptions/") && !tenantRooted) || ArmPaths.isProviderRegistration(path)) {
             return Fallthrough.TO_NEXT_STAGE;
         }
         // A tenant-rooted path has no segment before "providers/", so the "/providers/<ns>/" marker is
