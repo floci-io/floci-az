@@ -3927,6 +3927,56 @@ public class BlobServiceTest {
             .header("x-ms-error-code", "CannotVerifyCopySource");
     }
 
+    @Test
+    void copyBlobToANewBlobNeedsOnlyCreatePermission() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String source = "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB;
+
+        given()
+            .header("x-ms-copy-source", source)
+            .when().put("/{account}/{container}/create-only.txt?{sas}", ACCOUNT, CONTAINER,
+                sas("c", "b", CONTAINER, "create-only.txt"))
+            .then().statusCode(202);
+        given()
+            .header("x-ms-copy-source", source)
+            .when().put("/{account}/{container}/create-only.txt?{sas}", ACCOUNT, CONTAINER,
+                sas("c", "b", CONTAINER, "create-only.txt"))
+            .then().statusCode(403)
+            .header("x-ms-error-code", "AuthorizationPermissionMismatch");
+    }
+
+    @Test
+    void copyBlobTakesTheRequestsTagsNotTheSources() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-tags", "origin=source")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String source = "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB;
+
+        given().header("x-ms-copy-source", source)
+            .when().put("/{account}/{container}/untagged.txt", ACCOUNT, CONTAINER).then().statusCode(202);
+        given().header("x-ms-copy-source", source).header("x-ms-tags", "origin=request")
+            .when().put("/{account}/{container}/tagged.txt", ACCOUNT, CONTAINER).then().statusCode(202);
+        given().header("x-ms-copy-source", source).header("x-ms-requires-sync", "true")
+            .header("x-ms-copy-source-tag-option", "COPY")
+            .when().put("/{account}/{container}/kept.txt", ACCOUNT, CONTAINER).then().statusCode(202);
+
+        given().when().head("/{account}/{container}/untagged.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).header("x-ms-tag-count", nullValue());
+        given().when().get("/{account}/{container}/tagged.txt?comp=tags", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(containsString("<Value>request</Value>"));
+        given().when().get("/{account}/{container}/kept.txt?comp=tags", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(containsString("<Value>source</Value>"));
+    }
+
     /**
      * {@code sas} with each value percent-encoded, as a client builds a source URL: the signature is base64, and an
      * unencoded {@code +} in it would be read back as a space.

@@ -653,11 +653,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      * snapshot of one, held by this handler, in any account.</p>
      */
     private Response copyBlob(AzureRequest request, String containerName, String blobName) {
-        Response authFailure = authorizeWrite(request, containerName, blobName);
-        if (authFailure != null) {
-            return authFailure;
-        }
-
         Optional<CopySource> parsedSource =
                 CopySource.parse(request.headers().getHeaderString("x-ms-copy-source"));
         if (parsedSource.isEmpty()) {
@@ -672,6 +667,16 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         return leaseService.exclusively(() -> {
+            // As Put Blob does: a new destination needs create permission, an existing one write permission.
+            Optional<StoredObject> existing = store.get(
+                    objKey(request.accountName(), containerName, blobName));
+            Response authFailure = existing.isPresent()
+                    ? authorizeWrite(request, containerName, blobName)
+                    : authorizeCreate(request, containerName, blobName);
+            if (authFailure != null) {
+                return authFailure;
+            }
+
             // Validate destination container exists
             if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
                 return new AzureErrorResponse("ContainerNotFound",
@@ -691,8 +696,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             // Validate conditions on the destination
-            Optional<StoredObject> existing = store.get(
-                    objKey(request.accountName(), containerName, blobName));
             Response conditionFailure = validateBlobConditions(request, existing);
             if (conditionFailure != null) {
                 return conditionFailure;
@@ -716,7 +719,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             Map<String, String> destMeta = new HashMap<>();
             // Carry over structural metadata from the source
             source.metadata().forEach((key, value) -> {
-                if (!key.startsWith(USER_METADATA_PREFIX)) {
+                if (!key.startsWith(USER_METADATA_PREFIX) && !BlobTags.METADATA_KEY.equals(key)) {
                     destMeta.put(key, value);
                 }
             });
@@ -733,6 +736,17 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
             destMeta.put("Name", blobName);
             destMeta.put(CREATION_TIME_KEY, createdOn(existing).toString());
+            // Tags are the request's, as Azurite sets them; Copy Blob From URL may keep the source's instead.
+            boolean copySourceTags = "true".equalsIgnoreCase(request.headers().getHeaderString("x-ms-requires-sync"))
+                    && "COPY".equalsIgnoreCase(request.headers().getHeaderString("x-ms-copy-source-tag-option"));
+            if (copySourceTags) {
+                BlobTags.store(destMeta, BlobTags.of(source.metadata()));
+            } else {
+                Response tagFailure = applyRequestTags(request, destMeta);
+                if (tagFailure != null) {
+                    return tagFailure;
+                }
+            }
 
             Instant now = Instant.now();
             String etag = UUID.randomUUID().toString();

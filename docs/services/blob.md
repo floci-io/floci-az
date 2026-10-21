@@ -64,6 +64,9 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   (`{account}.blob.{host}`) or a bare `/{account}/{container}/{blob}` path. Metadata is the source's,
   or the `x-ms-meta-*` headers when the request sends any; destination conditions and leases are
   enforced, and an existing destination must be of the source's blob type (`409 InvalidBlobType`).
+  A new destination needs create permission and an existing one write permission, as for Put Blob. Tags
+  are the request's `x-ms-tags`, never the source's, except that Copy Blob From URL with
+  `x-ms-copy-source-tag-option: COPY` keeps the source's.
   A SAS on the source URL is checked as a read of the source, as Azurite checks it, and a failed check
   is `CannotVerifyCopySource` with the status the read got. Both answer `202` with
   `x-ms-copy-status: success`
