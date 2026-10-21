@@ -52,7 +52,7 @@ early with a clear message instead of calling a route that does not exist:
 
 | Field | Value |
 |---|---|
-| `issuer` | `{base}/{tenant}/v2.0`, echoing the tenant segment as requested (`common` stays `common`) |
+| `issuer` | The configured `issuer`, or `{base}/{tenant}/v2.0` when unset (`common` stays `common`) |
 | `authorization_endpoint`, `token_endpoint`, `jwks_uri` | the routes in the table above |
 | `grant_types_supported` | `authorization_code`, `client_credentials`, `password` |
 | `response_types_supported` | `code` |
@@ -65,6 +65,11 @@ the device code grant and the `offline_access` scope are not listed, because non
 implemented yet. msal-python's `initiate_device_flow` therefore stops with "You need to provide
 device authorization endpoint" before sending any request. `end_session_endpoint` is listed even though logout is not served yet, because
 MSAL.js refuses to log out without it.
+
+When `FLOCI_AZ_SERVICES_ENTRA_ISSUER` is set, discovery and issued tokens use that same issuer,
+regardless of the hostname used to fetch discovery. This supports clients reaching Floci-AZ
+through different host and Docker addresses. Endpoint URLs still use the request base URL so
+the caller can reach them. Without an override, discovery keeps its request-derived issuer.
 
 ## Default tenant & dev credentials
 

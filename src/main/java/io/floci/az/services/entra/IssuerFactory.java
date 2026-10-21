@@ -7,8 +7,8 @@ import jakarta.inject.Inject;
 /**
  * The one place that decides what the token service calls itself: the {@code iss} claim, the
  * discovery {@code issuer} and the login host error links point to. Everything here is derived
- * from the request base URL (see {@code RequestUrls.resolveBaseUrl}), so a caller reaching the
- * emulator over a Docker bridge or a TLS proxy sees URLs it can follow.
+ * from the request base URL (see {@code RequestUrls.resolveBaseUrl}) unless an explicit issuer
+ * is configured. Endpoint URLs remain reachable over the caller's Docker bridge or TLS proxy.
  */
 @ApplicationScoped
 public class IssuerFactory {
@@ -34,11 +34,11 @@ public class IssuerFactory {
 
     /**
      * The {@code issuer} a discovery document reports for the tenant segment it was requested
-     * under. It echoes the segment (so {@code /common} reports {@code .../common/v2.0}) because
-     * msal4j's {@code OidcAuthority} requires the discovery issuer to equal the authority URL.
+     * under. An explicit issuer must match the tokens. Without one, it echoes the segment
+     * (so {@code /common} reports {@code .../common/v2.0}) for msal4j's authority validation.
      */
     public String discoveryIssuer(String baseUrl, String tenantSegment) {
-        return baseUrl + "/" + tenantSegment + "/v2.0";
+        return issuer(baseUrl, tenantSegment, true);
     }
 
     /** The login host that {@code error_uri} links point to. */
