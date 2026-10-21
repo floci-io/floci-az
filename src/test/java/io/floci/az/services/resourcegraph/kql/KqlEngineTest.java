@@ -489,4 +489,24 @@ class KqlEngineTest {
         assertEquals(0, run("resources | where tags.Env == 'prod'").size());
         assertEquals(1, run("resources | where isnull(tags.Env) and isnotnull(tags.env)").size());
     }
+
+    @Test
+    void unionsSumsCollectionsAndTermsFollowKusto() {
+        List<Map<String, Object>> inner = run("resources | project id, name | union kind=inner (resourcecontainers | project id, type)");
+        assertEquals(5, inner.size());
+        for (Map<String, Object> row : inner) {
+            assertEquals(List.of("id"), new ArrayList<>(row.keySet()));
+        }
+        assertEquals(5, run("resources | project id, name | union (resourcecontainers | project id, type) | where isnotnull(type) or isnotnull(name)").size());
+        Map<String, Object> sums = run("resources | take 1 | summarize exact = sum(9007199254740993), real = sum(1.5), mixed = sum(1)").getFirst();
+        assertEquals(9007199254740993L, sums.get("exact"));
+        assertEquals(1.5, (Double) sums.get("real"), 1e-12);
+        assertEquals(1L, sums.get("mixed"));
+        Map<String, Object> lists = run("resources | summarize one = make_list(name, 1), two = make_set(location, 2), all = make_list(name)").getFirst();
+        assertEquals(1, ((List<?>) lists.get("one")).size());
+        assertEquals(2, ((List<?>) lists.get("two")).size());
+        assertEquals(3, ((List<?>) lists.get("all")).size());
+        assertEquals(3, run("resources | where 'prod_vm' has 'prod'").size());
+        assertEquals(0, run("resources | where 'production' has 'prod'").size());
+    }
 }

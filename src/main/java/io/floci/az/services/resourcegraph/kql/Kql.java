@@ -70,7 +70,8 @@ public final class Kql {
     public record Take(long count) implements Op {
     }
 
-    public record Union(List<Query> queries) implements Op {
+    /** {@code inner} keeps only the columns every input has; {@code outer}, the default, keeps them all. */
+    public record Union(List<Query> queries, boolean inner) implements Op {
     }
 
     public record Join(String kind, Query right, List<JoinKey> keys) implements Op {
@@ -426,10 +427,15 @@ public final class Kql {
                     return new Take(Long.parseLong(count.text()));
                 }
                 case "union" -> {
+                    boolean inner = false;
                     if (isWord("kind")) {
                         next();
                         expectOp("=");
-                        expect(Kind.IDENT);
+                        String kind = expect(Kind.IDENT).text().toLowerCase(Locale.ROOT);
+                        if (!kind.equals("inner") && !kind.equals("outer")) {
+                            throw KqlException.parse("Unknown union kind '" + kind + "'");
+                        }
+                        inner = kind.equals("inner");
                     }
                     List<Query> queries = new ArrayList<>();
                     do {
@@ -442,7 +448,7 @@ public final class Kql {
                             queries.add(new Query(new TableSource(table.text()), List.of()));
                         }
                     } while (comma());
-                    return new Union(List.copyOf(queries));
+                    return new Union(List.copyOf(queries), inner);
                 }
                 case "join" -> {
                     String kind = "innerunique";

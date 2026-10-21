@@ -333,10 +333,27 @@ public final class KqlEngine {
             case Take take -> rows.size() <= take.count() ? rows : new ArrayList<>(rows.subList(0, (int) take.count()));
             case Union union -> {
                 List<Map<String, Object>> out = new ArrayList<>(rows);
+                Set<String> shared = union.inner() ? new LinkedHashSet<>(columns(rows)) : null;
                 for (Query query : union.queries()) {
-                    out.addAll(run(query, tables));
+                    List<Map<String, Object>> more = run(query, tables);
+                    if (shared != null) {
+                        shared.retainAll(columns(more));
+                    }
+                    out.addAll(more);
                 }
-                yield out;
+                if (shared == null) {
+                    yield out;
+                }
+                // kind=inner: only the columns every input has, as Kusto defines it.
+                List<Map<String, Object>> projected = new ArrayList<>(out.size());
+                for (Map<String, Object> row : out) {
+                    Map<String, Object> kept = new LinkedHashMap<>();
+                    for (String name : shared) {
+                        kept.put(name, row.get(name));
+                    }
+                    projected.add(kept);
+                }
+                yield projected;
             }
             case Join join -> join(join, rows, run(join.right(), tables));
             case Count ignored -> {
@@ -536,18 +553,32 @@ public final class KqlEngine {
             }
             case "sum", "avg" -> {
                 double total = 0;
+                long exact = 0;
+                boolean integral = true;
                 long n = 0;
                 for (Map<String, Object> row : group) {
-                    Double v = KqlValues.toDouble(eval(args.getFirst(), row));
-                    if (v != null) {
-                        total += v;
-                        n++;
+                    Object raw = KqlValues.normalize(eval(args.getFirst(), row));
+                    Double v = KqlValues.toDouble(raw);
+                    if (v == null) {
+                        continue;
+                    }
+                    total += v;
+                    n++;
+                    if (integral && raw instanceof Long l) {
+                        try {
+                            exact = Math.addExact(exact, l);
+                        } catch (ArithmeticException overflow) {
+                            integral = false;
+                        }
+                    } else {
+                        integral = false;
                     }
                 }
                 if (call.name().equals("avg")) {
                     return n == 0 ? null : total / n;
                 }
-                return total == Math.rint(total) ? (Object) (long) total : (Object) total;
+                // An integer sum stays exact; a real-valued one is a real.
+                return integral ? (Object) exact : (Object) total;
             }
             case "min", "max" -> {
                 Object best = null;
@@ -566,7 +597,11 @@ public final class KqlEngine {
             case "make_list", "make_set" -> {
                 List<Object> values = new ArrayList<>();
                 Set<String> seen = new HashSet<>();
+                long limit = args.size() > 1 ? Math.max(0, KqlValues.toLong(eval(args.get(1), group.isEmpty() ? Map.of() : group.getFirst()))) : 1_048_576L;
                 for (Map<String, Object> row : group) {
+                    if (values.size() >= limit) {
+                        break;
+                    }
                     Object v = eval(args.getFirst(), row);
                     if (v == null) {
                         continue;
@@ -871,7 +906,7 @@ public final class KqlEngine {
         if (term.isEmpty()) {
             return false;
         }
-        String[] terms = text.split("[^\\p{L}\\p{N}_]+");
+        String[] terms = text.split("[^\\p{L}\\p{N}]+"); // Kusto terms end at any non-alphanumeric character
         for (String candidate : terms) {
             String a = caseSensitive ? candidate : candidate.toLowerCase(Locale.ROOT);
             String b = caseSensitive ? term : term.toLowerCase(Locale.ROOT);
