@@ -104,6 +104,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Network/virtualNetworks                                              RESOURCE_GROUP  REQUIRED  ARM_HANDLER
         Microsoft.Network/virtualNetworks/subnets                                      RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.OperationalInsights/workspaces                                       RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
+        Microsoft.PolicyInsights/policyMetadata                                        TENANT          NONE      FILTER
         Microsoft.Resources/resourceGroups                                             SUBSCRIPTION    REQUIRED  ARM_HANDLER
         Microsoft.Sql/servers                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers/connectionPolicies                                       RESOURCE_GROUP  OPTIONAL  FILTER

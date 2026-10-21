@@ -158,6 +158,10 @@ class PolicyInsightsTest {
     void operationsAndUnknownPaths() {
         given().when().get("/providers/Microsoft.PolicyInsights/operations" + INSIGHTS_API)
                 .then().statusCode(200).body("value.name", hasItems("Microsoft.PolicyInsights/policyStates/queryResults/action"));
+        given().when().get("/providers/Microsoft.PolicyInsights/policyMetadata" + INSIGHTS_API)
+                .then().statusCode(200).body("value", hasSize(0));
+        given().when().get("/providers/Microsoft.PolicyInsights/policyMetadata/ACF1000" + INSIGHTS_API)
+                .then().statusCode(404).body("error.code", equalTo("PolicyMetadataNotFound"));
         given().when().get(SUB_SCOPE + "/providers/Microsoft.PolicyInsights/remediations" + INSIGHTS_API)
                 .then().statusCode(404).body("error.code", equalTo("InvalidResourceType"));
     }

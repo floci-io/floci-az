@@ -2922,6 +2922,23 @@
       ]
     },
     {
+      "namespace": "Microsoft.PolicyInsights",
+      "resourceTypes": [
+        {
+          "resourceType": "attestations",
+          "apiVersions": ["2024-10-01", "2022-09-01", "2021-01-01"]
+        },
+        {
+          "resourceType": "policyMetadata",
+          "apiVersions": ["2024-10-01"]
+        },
+        {
+          "resourceType": "remediations",
+          "apiVersions": ["2024-10-01", "2021-10-01", "2019-07-01", "2018-07-01-preview"]
+        }
+      ]
+    },
+    {
       "namespace": "Microsoft.Resources",
       "resourceTypes": [
         {

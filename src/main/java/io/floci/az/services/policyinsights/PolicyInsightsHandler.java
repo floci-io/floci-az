@@ -99,6 +99,15 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
         if (tailLower.equals("operations")) {
             return method.equals("GET") ? operations() : methodNotAllowed(method);
         }
+        if (tailLower.equals("policymetadata")) {
+            // Metadata describes built-in definitions, none of which are seeded.
+            return method.equals("GET") ? Response.ok(Map.of("value", List.of())).build() : methodNotAllowed(method);
+        }
+        if (tailLower.startsWith("policymetadata/")) {
+            return method.equals("GET")
+                ? ArmErrors.error(404, "PolicyMetadataNotFound", "The policy metadata '" + tail.substring("policyMetadata/".length()) + "' could not be found.")
+                : methodNotAllowed(method);
+        }
         return ArmErrors.error(404, "InvalidResourceType", "The resource type could not be found in the namespace 'Microsoft.PolicyInsights'.");
     }
 
