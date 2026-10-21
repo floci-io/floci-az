@@ -10,11 +10,13 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
- * {@code parity-overrides.location-normalize} alone: a display-name location is stored and echoed canonically,
- * and a global type is {@code global} whatever its casing.
+ * {@code parity-overrides.location-normalize} alone: a display-name location is stored and echoed canonically by
+ * every service, and the names built from it (the ACI FQDN, the AKS FQDN and node resource group) use the
+ * canonical form too.
  */
 @QuarkusTest
 @TestProfile(LocationNormalizeTest.NormalizeOnly.class)
@@ -24,7 +26,10 @@ class LocationNormalizeTest {
     public static class NormalizeOnly implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.location-normalize", "true");
+            return Map.of(
+                "floci-az.parity-overrides.location-normalize", "true",
+                "floci-az.services.aci.mocked", "true",
+                "floci-az.services.aks.mocked", "true");
         }
     }
 
@@ -45,6 +50,45 @@ class LocationNormalizeTest {
             .body("location", equalTo("eastus2"));
         given().when().get(account + "?api-version=2023-01-01").then().statusCode(200)
             .body("location", equalTo("eastus2"));
+    }
+
+    @Test
+    void theAciFqdnUsesTheCanonicalLocation() {
+        given().contentType("application/json").body("""
+                {
+                  "location": "West Europe",
+                  "properties": {
+                    "containers": [{"name": "app", "properties": {"image": "busybox:latest"}}],
+                    "osType": "linux",
+                    "ipAddress": {"type": "public", "ports": [{"port": 80, "protocol": "tcp"}],
+                                  "dnsNameLabel": "locapp"}
+                  }
+                }
+                """)
+            .when().put(RG + "/providers/Microsoft.ContainerInstance/containerGroups/locgroup?api-version=2023-05-01")
+            .then().statusCode(201)
+            .body("location", equalTo("westeurope"))
+            .body("properties.ipAddress.fqdn", equalTo("locapp.westeurope.azurecontainer.io"));
+    }
+
+    @Test
+    void theAksFqdnAndNodeResourceGroupUseTheCanonicalLocation() {
+        given().contentType("application/json").body("""
+                {
+                  "location": "East US",
+                  "properties": {
+                    "kubernetesVersion": "1.29",
+                    "dnsPrefix": "locaks",
+                    "agentPoolProfiles": [{"name": "nodepool1", "count": 1, "vmSize": "Standard_DS2_v2",
+                                           "osType": "Linux", "mode": "System"}]
+                  }
+                }
+                """)
+            .when().put(RG + "/providers/Microsoft.ContainerService/managedClusters/loccluster?api-version=2024-04-01")
+            .then().statusCode(201)
+            .body("location", equalTo("eastus"))
+            .body("properties.fqdn", endsWith(".hcp.eastus.azmk8s.io"))
+            .body("properties.nodeResourceGroup", equalTo("MC_rg-loc_loccluster_eastus"));
     }
 
     @Test

@@ -339,14 +339,15 @@ with a location of its own, `None` otherwise). `defaultApiVersion`, `apiProfiles
 ## Resource locations
 
 By default a resource's `location` is stored and echoed exactly as the client sent it, so `"East US"` and
-`eastus` are two different values.
+`eastus` are two different values, and names built from it keep the spelling: a container group's FQDN,
+an AKS cluster's FQDN and its `MC_<group>_<cluster>_<location>` node resource group.
 
 With `location-normalize` (on from `parity: azure`) the request gate rewrites the `location` of every
 PUT or PATCH body of a served resource type before its handler runs, for the cloud the subscription
 belongs to, as Azure stores it:
 
 - a display name or any casing becomes the canonical name: `"East US 2"` is stored and echoed as
-  `eastus2`
+  `eastus2`, and the ACI and AKS names above use it
 - a global type (DNS zones, private DNS zones and their virtual network links, Communication and Email
   services) is `global` whatever the client sends, and a PUT that names no location gets `global`
 - a type whose location defaults to its group's gets the group's location when a PUT names none
