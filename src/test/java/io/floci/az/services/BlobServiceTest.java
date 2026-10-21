@@ -3551,7 +3551,7 @@ public class BlobServiceTest {
     }
 
     @Test
-    void copyBlobFromUrlSyncReturns200() {
+    void copyBlobFromUrlSyncAnswers202() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
         given()
@@ -3568,7 +3568,7 @@ public class BlobServiceTest {
             .when()
             .put("/{account}/{container}/sync-copied.txt", ACCOUNT, CONTAINER)
             .then()
-            .statusCode(200)
+            .statusCode(202)
             .header("x-ms-copy-status", "success")
             .header("x-ms-copy-id", notNullValue());
 
@@ -3754,6 +3754,84 @@ public class BlobServiceTest {
             .then()
             .statusCode(200)
             .body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void copyBlobFromAHostStyleSourceUrl() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-copy-source", "http://" + ACCOUNT + ".blob.localhost:4577/" + CONTAINER + "/" + BLOB)
+            .when().put("/{account}/{container}/host-style-copy.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .when().get("/{account}/{container}/host-style-copy.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void copyBlobFromASnapshotCopiesTheSnapshotNotTheLiveBlob() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body("as snapshotted")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+        String snapshot = given()
+            .when().put("/{account}/{container}/{blob}?comp=snapshot", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201)
+            .extract().header("x-ms-snapshot");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body("changed since")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB);
+
+        given()
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB
+                + "?snapshot=" + snapshot)
+            .when().put("/{account}/{container}/from-snapshot.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .when().get("/{account}/{container}/from-snapshot.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo("as snapshotted"));
+    }
+
+    @Test
+    void copyBlobKeepsALiteralPlusInTheSourceName() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("text/plain")
+            .body(BLOB_CONTENT)
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "report+2024.txt");
+
+        given()
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/report+2024.txt")
+            .when().put("/{account}/{container}/plus-copy.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+
+        given()
+            .when().get("/{account}/{container}/plus-copy.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void copyBlobWithAMalformedSourceIsInvalidHeaderValue() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+
+        given()
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/bad%ZZ.txt")
+            .when().put("/{account}/{container}/never.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(400)
+            .header("x-ms-error-code", "InvalidHeaderValue");
     }
 
     // ── Blob index tags ──────────────────────────────────────────────────────

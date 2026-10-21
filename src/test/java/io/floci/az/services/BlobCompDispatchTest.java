@@ -126,13 +126,28 @@ public class BlobCompDispatchTest {
     void copyBlobIsNotMistakenForPutBlob() {
         given()
                 .header("x-ms-copy-source",
-                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/source.txt")
+                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
                 .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "copy-target.txt")
-                .then().statusCode(501);
+                .then().statusCode(202);
 
-        // The destination must not exist: the old behaviour created an empty blob and reported 201.
+        // The copy holds the source's bytes: Put Blob would have replaced it with the empty request body.
+        assertBlobIntact();
         given()
                 .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "copy-target.txt")
+                .then().statusCode(200).body(equalTo(CONTENT));
+    }
+
+    @Test
+    void putBlobFromUrlIsNeitherCopiedNorMistakenForPutBlob() {
+        given()
+                .header("x-ms-blob-type", "BlockBlob")
+                .header("x-ms-copy-source",
+                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+                .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "from-url.txt")
+                .then().statusCode(501);
+
+        given()
+                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "from-url.txt")
                 .then().statusCode(404);
     }
 

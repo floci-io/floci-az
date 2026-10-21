@@ -340,8 +340,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "blocklist".equals(comp)) {
                     response = getBlockList(request, containerName, blobName);
-                } else if ("PUT".equalsIgnoreCase(method) && comp == null
-                        && request.headers().getHeaderString("x-ms-copy-source") != null) {
+                } else if ("PUT".equalsIgnoreCase(method) && isCopyBlob(request, comp)) {
                     response = copyBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && isPutBlob(request, comp)) {
                     response = putBlob(request, containerName, blobName);
@@ -433,6 +432,18 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      * with the request body — usually empty — and answers 201, so the caller sees success while the
      * content is destroyed. Only an unqualified PUT is a PutBlob.
      */
+    /**
+     * Copy Blob ({@code Blob_StartCopyFromURL}) or Copy Blob From URL ({@code Blob_CopyFromURL}, with
+     * {@code x-ms-requires-sync: true}): an unqualified PUT naming {@code x-ms-copy-source}. Put Blob From URL
+     * ({@code BlockBlob_PutBlobFromUrl}) sends the same header with {@code x-ms-blob-type} and is a different
+     * operation (201, content headers), so it is left to the not-implemented answer rather than copied.
+     */
+    private boolean isCopyBlob(AzureRequest request, String comp) {
+        return comp == null
+                && request.headers().getHeaderString("x-ms-copy-source") != null
+                && request.headers().getHeaderString("x-ms-blob-type") == null;
+    }
+
     private boolean isPutBlob(AzureRequest request, String comp) {
         return comp == null
                 && request.headers().getHeaderString("x-ms-copy-source") == null
@@ -631,18 +642,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
     }
 
-
     /**
-     * PUT /{container}/{blob} with {@code x-ms-copy-source} — Copy Blob.
+     * PUT /{container}/{blob} with {@code x-ms-copy-source}: Copy Blob, or Copy Blob From URL when
+     * {@code x-ms-requires-sync: true} is sent. Both answer {@code 202 Accepted}, the only status the spec
+     * declares for either; the emulator copies at once, so the copy status is already {@code success}.
      *
-     * <p>When {@code x-ms-requires-sync: true} is present the caller expects a synchronous
-     * copy (Copy Blob From URL) and the response is {@code 200 OK}. Otherwise this is
-     * the standard asynchronous Copy Blob; for a local emulator the copy always completes
-     * immediately, so we short-circuit to {@code success} and respond {@code 202 Accepted}.
-     *
-     * <p>Only intra-emulator copies (source URL resolvable to an account/container/blob
-     * managed by this handler) are supported. Cross-account copies within the emulator
-     * work as long as both accounts use the same handler instance.</p>
+     * <p>Only intra-emulator copies are supported: the source ({@link CopySource}) must name a blob, or a
+     * snapshot of one, held by this handler, in any account.</p>
      */
     private Response copyBlob(AzureRequest request, String containerName, String blobName) {
         Response authFailure = authorizeWrite(request, containerName, blobName);
@@ -650,47 +656,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
 
-        String copySource = request.headers().getHeaderString("x-ms-copy-source");
-        boolean syncCopy = "true".equalsIgnoreCase(
-                request.headers().getHeaderString("x-ms-requires-sync"));
-
-        // Parse the source URL to extract account/container/blob.
-        // Accepted shapes:
-        //   http(s)://host(:port)/{account}/{container}/{blob}(?query)
-        //   /{account}/{container}/{blob}(?query)
-        String sourcePath = copySource;
-        if (sourcePath.contains("://")) {
-            // Strip scheme + authority
-            int pathStart = sourcePath.indexOf('/', sourcePath.indexOf("://") + 3);
-            if (pathStart < 0) {
-                return new AzureErrorResponse("InvalidHeaderValue",
-                        "The value for one of the HTTP headers is not in the correct format.")
-                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
-            }
-            sourcePath = sourcePath.substring(pathStart);
-        }
-        // Strip query string (SAS tokens, snapshot, etc.)
-        int queryIdx = sourcePath.indexOf('?');
-        if (queryIdx >= 0) {
-            sourcePath = sourcePath.substring(0, queryIdx);
-        }
-        // Decode percent-encoded characters
-        sourcePath = URLDecoder.decode(sourcePath, StandardCharsets.UTF_8);
-        // Remove leading slash
-        if (sourcePath.startsWith("/")) {
-            sourcePath = sourcePath.substring(1);
-        }
-
-        // Expect at least account/container/blob
-        String[] sourceParts = sourcePath.split("/", 3);
-        if (sourceParts.length < 3 || sourceParts[2].isEmpty()) {
+        Optional<CopySource> parsedSource =
+                CopySource.parse(request.headers().getHeaderString("x-ms-copy-source"));
+        if (parsedSource.isEmpty()) {
             return new AzureErrorResponse("InvalidHeaderValue",
                     "The value for one of the HTTP headers is not in the correct format.")
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
-        String sourceAccount = sourceParts[0];
-        String sourceContainer = sourceParts[1];
-        String sourceBlob = sourceParts[2];
+        CopySource copySource = parsedSource.get();
 
         return leaseService.exclusively(() -> {
             // Validate destination container exists
@@ -701,8 +674,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
 
             // Validate source blob exists
-            Optional<StoredObject> sourceObject = store.get(
-                    objKey(sourceAccount, sourceContainer, sourceBlob));
+            Optional<StoredObject> sourceObject = store.get(copySource.snapshot() == null
+                    ? objKey(copySource.account(), copySource.container(), copySource.blob())
+                    : snapshotKey(copySource.account(), copySource.container(), copySource.blob(),
+                            copySource.snapshot()));
             if (sourceObject.isEmpty()) {
                 return new AzureErrorResponse("BlobNotFound",
                         "The specified blob does not exist.")
@@ -755,7 +730,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                             Arrays.copyOf(source.data(), source.data().length),
                             destMeta, now, etag));
 
-            Response.ResponseBuilder rb = Response.status(syncCopy ? 200 : 202)
+            Response.ResponseBuilder rb = Response.status(Response.Status.ACCEPTED)
                     .header("Last-Modified", RFC1123_DATE_TIME.format(now))
                     .header("ETag", etag)
                     .header("x-ms-copy-id", copyId)
