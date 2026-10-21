@@ -6,6 +6,7 @@ import io.floci.az.core.arm.ArmScopeKind;
 import io.floci.az.core.arm.ArmSurface;
 import io.floci.az.core.arm.ArmTypeRegistry;
 import io.floci.az.core.arm.LocationPolicy;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.directory.ProviderRegistrations;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,10 +28,10 @@ import java.util.Map;
  * <p>Wire contract, Resources spec 2025-04-01, which the 2024-11-01 the az CLI pins and the 2022-09-01 azurerm
  * pins agree with: every operation answers 200 with a {@code Provider} body, which the list wraps in
  * {@code value}. Register and unregister answer the final state at once, never {@code Registering}, and are
- * idempotent. Each type lists the regions it can be created in by display name, as Azure does: every public
- * region for a regional top-level type, {@code global} for a global one, and none for a child or a type with no
- * location of its own. Azure's {@code defaultApiVersion}, {@code apiProfiles}, {@code zoneMappings} and
- * {@code authorizations} are optional and have no local source, so they are omitted.
+ * idempotent. Each type lists the regions it can be created in by display name, as Azure does: every region of
+ * the subscription's cloud for a regional top-level type, {@code global} for a global one, and none for a child or
+ * a type with no location of its own. Azure's {@code defaultApiVersion}, {@code apiProfiles}, {@code zoneMappings}
+ * and {@code authorizations} are optional and have no local source, so they are omitted.
  */
 @ApplicationScoped
 public class ProviderService {
@@ -48,50 +49,50 @@ public class ProviderService {
     }
 
     /** {@code GET subscriptions/{sub}/providers}. */
-    public Response list(String subscriptionId) {
+    public Response list(CloudProfile cloud, String subscriptionId) {
         return Response.ok(Map.of("value", types.surfaces().stream()
-            .map(surface -> body(subscriptionId, surface)).toList())).build();
+            .map(surface -> body(cloud, subscriptionId, surface)).toList())).build();
     }
 
     /** {@code GET subscriptions/{sub}/providers/{namespace}}. */
-    public Response get(String subscriptionId, String namespace) {
+    public Response get(CloudProfile cloud, String subscriptionId, String namespace) {
         return types.surface(namespace)
-            .map(surface -> Response.ok(body(subscriptionId, surface)).build())
+            .map(surface -> Response.ok(body(cloud, subscriptionId, surface)).build())
             .orElseGet(() -> ArmErrors.invalidResourceNamespace(namespace));
     }
 
     /** {@code POST subscriptions/{sub}/providers/{namespace}/register}. */
-    public Response register(String subscriptionId, String namespace) {
+    public Response register(CloudProfile cloud, String subscriptionId, String namespace) {
         return types.surface(namespace).map(surface -> {
             registrations.register(subscriptionId, surface.namespace());
-            return Response.ok(body(subscriptionId, surface)).build();
+            return Response.ok(body(cloud, subscriptionId, surface)).build();
         }).orElseGet(() -> ArmErrors.invalidResourceNamespace(namespace));
     }
 
     /** {@code POST subscriptions/{sub}/providers/{namespace}/unregister}. */
-    public Response unregister(String subscriptionId, String namespace) {
+    public Response unregister(CloudProfile cloud, String subscriptionId, String namespace) {
         return types.surface(namespace).map(surface -> {
             if (!ProviderRegistrations.isRegistrationFree(surface.namespace())) {
                 registrations.unregister(subscriptionId, surface.namespace());
             }
-            return Response.ok(body(subscriptionId, surface)).build();
+            return Response.ok(body(cloud, subscriptionId, surface)).build();
         }).orElseGet(() -> ArmErrors.invalidResourceNamespace(namespace));
     }
 
     /** The {@code Provider} body, in the key order Azure records it. */
-    private Map<String, Object> body(String subscriptionId, ArmSurface surface) {
+    private Map<String, Object> body(CloudProfile cloud, String subscriptionId, ArmSurface surface) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("id", "/subscriptions/" + subscriptionId + "/providers/" + surface.namespace());
         body.put("namespace", surface.namespace());
-        body.put("resourceTypes", surface.types().stream().map(this::resourceType).toList());
+        body.put("resourceTypes", surface.types().stream().map(type -> resourceType(cloud, type)).toList());
         body.put("registrationState", registrations.state(subscriptionId, surface.namespace()).wireName());
         body.put("registrationPolicy", ProviderRegistrations.isRegistrationFree(surface.namespace())
             ? REGISTRATION_FREE : REGISTRATION_REQUIRED);
         return body;
     }
 
-    private Map<String, Object> resourceType(ArmResourceType type) {
-        List<String> locations = locations(type);
+    private Map<String, Object> resourceType(CloudProfile cloud, ArmResourceType type) {
+        List<String> locations = locations(cloud, type);
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("resourceType", type.typePath());
         entry.put("locations", locations);
@@ -100,7 +101,7 @@ public class ProviderService {
         return entry;
     }
 
-    private static List<String> locations(ArmResourceType type) {
+    private static List<String> locations(CloudProfile cloud, ArmResourceType type) {
         boolean ownLocation = !type.isChild() && type.scope() != ArmScopeKind.EXTENSION
             && type.scope() != ArmScopeKind.TENANT && type.location() != LocationPolicy.NONE;
         if (!ownLocation) {
@@ -109,6 +110,6 @@ public class ProviderService {
         if (type.location() == LocationPolicy.GLOBAL) {
             return List.of("global");
         }
-        return AzureLocations.ALL.stream().map(AzureLocations.Location::displayName).toList();
+        return AzureLocations.displayNames(cloud);
     }
 }

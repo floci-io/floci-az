@@ -25,7 +25,7 @@ Managed Identity, and the other `Microsoft.*` providers).
   owned by one tenant, in one state). `GET /tenants` and `GET /subscriptions` (enumeration, used by
   `az login`) list it; an unknown subscription id is registered on first use, or refused with
   `404 SubscriptionNotFound` under `parity: strict`
-- **Locations**: `GET /subscriptions/{sub}/locations`, the public-cloud region catalog read by
+- **Locations**: `GET /subscriptions/{sub}/locations`, the region catalog of the subscription's cloud, read by
   `az account list-locations`, the CLI's display-name location translation (`-l "East US"`), and
   Terraform's `data.azurerm_location`
 - **Resource groups**: CreateOrUpdate, Get, CheckExistence (`HEAD`), Update (`PATCH`), Delete, List
@@ -136,7 +136,7 @@ floci-az:
 | `parity-overrides.resource-group-semantics` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_SEMANTICS` | on from `azure` | `true`: a resource-group re-PUT answers `200`, a resource PUT under a missing group creates the group, and groups persist in the directory store |
 | `parity-overrides.resource-group-delete` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | on from `azure` | `true`: a resource-group `DELETE` deletes every resource in the group and answers `202` with a `Location` to poll; the generic listings also show Event Grid, Monitor and Email resources |
 | `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound`, and groups are kept in the directory store |
-| `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup. Today it changes which cloud tenants and request scopes resolve to and the default location of a new group; endpoints, token issuers, DNS suffixes, TLS names and `/locations` stay the public cloud's, and a startup warning says so |
+| `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup. Today it changes which cloud tenants and request scopes resolve to and the default location of a new group; endpoints, token issuers, DNS suffixes and TLS names stay the public cloud's, and a startup warning says so |
 | `tenants[n].*` | `FLOCI_AZ_TENANTS_<n>__ID`, `..._DISPLAY_NAME`, `..._DEFAULT_DOMAIN`, `..._CLOUD` | none | Extra tenants; see below |
 | `subscriptions[n].*` | `FLOCI_AZ_SUBSCRIPTIONS_<n>__ID`, `..._TENANT_ID`, `..._DISPLAY_NAME`, `..._STATE` | none | Extra subscriptions; see below |
 | `storage.services.directory.mode` | `FLOCI_AZ_STORAGE_SERVICES_DIRECTORY_MODE` | `storage.mode` | Storage mode of the tenant and subscription directory |
@@ -378,7 +378,8 @@ servers is not publicly documented either; `409` is the likeliest.
   configured with its own subscription id keeps working. ARM state is kept per subscription.
 - **The caller's tenant is the default tenant**: `GET /subscriptions` and `GET /tenants` are not yet
   scoped by the token's tenant.
-- **Locations are a static public-cloud catalog**: region names and display names come from the
+- **Locations are a static catalog per cloud**: a subscription lists the regions of the cloud its tenant
+  belongs to (the public cloud's 51, US Gov's 6 or China's 6), with names and display names from the
   Azure SDK's region list; every entry is a physical region with zones 1 to 3 mapped to
   `<region>-az<n>`. `regionalDisplayName` repeats `displayName`, and `geography`, `geographyGroup`,
   `latitude`, `longitude`, `physicalLocation` and `pairedRegion` are omitted. There are no edge zones,

@@ -14,6 +14,8 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.directory.DirectoryOrigin;
 import io.floci.az.core.directory.Subscription;
@@ -181,7 +183,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // ── Providers API ─────────────────────────────────────────────────────
         // First, because register and unregister carry the namespace's /providers/Microsoft.X/ segment
         // (Microsoft.Network's included), and the provider list and a single namespace have no type segment.
-        Response providers = providers(path, method);
+        Response providers = providers(req, path, method);
         if (providers != null) {
             return providers;
         }
@@ -230,7 +232,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // GET /subscriptions/{sub}/locations — `az account list-locations`, the CLI's display-name
         // location translation, and azurerm's data.azurerm_location all read this.
         if (path.matches("subscriptions/[^/?]+/locations([?].*)?")) {
-            return Response.ok(Map.of("value", AzureLocations.forSubscription(extractSub(path)))).build();
+            return Response.ok(Map.of("value", AzureLocations.forSubscription(cloud(req), extractSub(path)))).build();
         }
 
         // ── checkNameAvailability ──────────────────────────────────────────────
@@ -1038,7 +1040,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      * {@code subscriptions/{sub}/providers}, {@code .../providers/{namespace}} and its {@code register} and
      * {@code unregister} actions, served by {@link ProviderService}; null for any other path.
      */
-    private Response providers(String path, String method) {
+    private Response providers(AzureRequest req, String path, String method) {
         boolean registration = ArmPaths.isProviderRegistration(path);
         if (!registration && !path.matches("subscriptions/[^/?]+/providers(/[^/?]+)?([?].*)?")) {
             return null;
@@ -1050,14 +1052,19 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                 return Response.status(405).build();
             }
             return id.types().getFirst().equalsIgnoreCase("register")
-                ? providerService.register(sub, id.providerNamespace())
-                : providerService.unregister(sub, id.providerNamespace());
+                ? providerService.register(cloud(req), sub, id.providerNamespace())
+                : providerService.unregister(cloud(req), sub, id.providerNamespace());
         }
         if (!"GET".equals(method)) {
             return Response.status(405).build();
         }
-        return id.providerNamespace() == null ? providerService.list(sub)
-            : providerService.get(sub, id.providerNamespace());
+        return id.providerNamespace() == null ? providerService.list(cloud(req), sub)
+            : providerService.get(cloud(req), sub, id.providerNamespace());
+    }
+
+    /** The cloud the request's subscription belongs to, as the routing filter resolved it; public without a scope. */
+    private static CloudProfile cloud(AzureRequest req) {
+        return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

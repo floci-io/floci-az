@@ -80,8 +80,8 @@ public class AzureDirectory implements Resettable {
             subscriptions.size(), seed.defaultCloud().name());
         if (!CloudCatalog.PUBLIC_CLOUD.equals(seed.defaultCloud().name())) {
             LOG.warnv("floci-az.cloud.default is {0}: tenants and request scopes resolve to that cloud, but "
-                + "endpoints, token issuers, DNS suffixes, TLS names and /locations are still the public "
-                + "cloud''s", seed.defaultCloud().name());
+                + "endpoints, token issuers, DNS suffixes and TLS names are still the public cloud''s",
+                seed.defaultCloud().name());
         }
     }
 
