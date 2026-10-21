@@ -152,6 +152,24 @@ class ArmResourceStoreTest {
     }
 
     @Test
+    void storesOfTwoTypesShareABackendWithoutSeeingEachOther() throws Exception {
+        String other = "/subscriptions/Sub-1/resourceGroups/RG-One/providers/Microsoft.Test/others/a";
+        ArmResourceStore<Thing> things = ArmResourceStore.over(backend, "shared", "Microsoft.Test/things",
+            Thing.class, Thing::id, key -> key.startsWith("thing/"));
+        ArmResourceStore<Thing> others = ArmResourceStore.over(backend, "shared", "Microsoft.Test/others",
+            Thing.class, Thing::id, key -> key.startsWith("other/"));
+        things.put(new Thing(ID, "thing"));
+        others.put(new Thing(other, "other"));
+        putLegacy("other/sub-1/rg-one/b", new Thing(other.replace("/a", "/b"), "legacy other"));
+
+        assertEquals(List.of("thing"), things.all().stream().map(stored -> stored.value().label()).toList());
+        assertEquals(2, others.all().size());
+        things.clear();
+        assertEquals(2, others.all().size());
+        assertTrue(things.all().isEmpty());
+    }
+
+    @Test
     void writesFindLegacyEntriesWithoutWalkingEveryKey() throws Exception {
         CountingStorage counting = new CountingStorage();
         ArmResourceStore<Thing> indexed = ArmResourceStore.over(counting, "things", Thing.class, Thing::id, key -> true);

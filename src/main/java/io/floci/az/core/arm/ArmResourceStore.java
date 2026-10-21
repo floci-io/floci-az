@@ -42,6 +42,10 @@ import java.util.function.UnaryOperator;
  * The store indexes them by canonical key on first use, and a write or a delete looks its resource up in that index
  * instead of walking every key; {@link #clear()} drops the index with the entries.
  *
+ * <p><b>Shared backends.</b> A service that keeps several resource types in one backend gives each store its type
+ * ({@link #create(StorageFactory, String, String, Class, Function, Predicate)}); the store then owns only the
+ * canonical keys of that type, and its {@code legacyKey} tells its legacy entries apart from the other types'.
+ *
  * @param <T> the stored model, Jackson-serializable and reflection-registered for the native image
  */
 public final class ArmResourceStore<T> {
@@ -72,11 +76,14 @@ public final class ArmResourceStore<T> {
     private final Predicate<String> legacyKey;
     /** Legacy backend keys by the canonical key of the resource they hold; null until first needed. */
     private Map<String, List<String>> legacyIndex;
+    /** The resource type whose canonical keys this store owns, or null for every canonical key. */
+    private final String resourceType;
 
-    private ArmResourceStore(String name, StorageBackend<String, StoredObject> backend, Class<T> type,
-                             Function<T, String> idOf, Predicate<String> legacyKey) {
+    private ArmResourceStore(String name, StorageBackend<String, StoredObject> backend, String resourceType,
+                             Class<T> type, Function<T, String> idOf, Predicate<String> legacyKey) {
         this.name = name;
         this.backend = backend;
+        this.resourceType = resourceType;
         this.type = type;
         this.idOf = idOf;
         this.legacyKey = legacyKey;
@@ -90,13 +97,29 @@ public final class ArmResourceStore<T> {
      */
     public static <T> ArmResourceStore<T> create(StorageFactory factory, String storeName, Class<T> type,
                                                  Function<T, String> idOf, Predicate<String> legacyKey) {
-        return over(factory.create(storeName), storeName, type, idOf, legacyKey);
+        return new ArmResourceStore<>(storeName, factory.create(storeName), null, type, idOf, legacyKey);
+    }
+
+    /**
+     * A store for one {@code resourceType} (such as {@code Microsoft.App/containerApps}) of a backend that holds
+     * other types too: it owns only the canonical keys of that type.
+     */
+    public static <T> ArmResourceStore<T> create(StorageFactory factory, String storeName, String resourceType,
+                                                 Class<T> type, Function<T, String> idOf, Predicate<String> legacyKey) {
+        return new ArmResourceStore<>(storeName, factory.create(storeName), resourceType, type, idOf, legacyKey);
     }
 
     /** A store over {@code backend}, for tests. */
     static <T> ArmResourceStore<T> over(StorageBackend<String, StoredObject> backend, String storeName, Class<T> type,
                                         Function<T, String> idOf, Predicate<String> legacyKey) {
-        return new ArmResourceStore<>(storeName, backend, type, idOf, legacyKey);
+        return new ArmResourceStore<>(storeName, backend, null, type, idOf, legacyKey);
+    }
+
+    /** A store of one {@code resourceType} over {@code backend}, for tests. */
+    static <T> ArmResourceStore<T> over(StorageBackend<String, StoredObject> backend, String storeName,
+                                        String resourceType, Class<T> type, Function<T, String> idOf,
+                                        Predicate<String> legacyKey) {
+        return new ArmResourceStore<>(storeName, backend, resourceType, type, idOf, legacyKey);
     }
 
     /** The resource {@code id} names, in canonical or legacy form. */
@@ -168,7 +191,7 @@ public final class ArmResourceStore<T> {
         for (String key : backend.keys()) {
             if (isCanonical(key)) {
                 backend.get(key).flatMap(this::decode).ifPresent(stored -> byKey.put(key, stored));
-            } else if (legacyKey.test(key)) {
+            } else if (!isAnyCanonical(key) && legacyKey.test(key)) {
                 backend.get(key).flatMap(this::decode).ifPresent(stored ->
                     newestLegacy.merge(stored.id().canonicalKey(), stored, ArmResourceStore::newer));
             }
@@ -180,7 +203,7 @@ public final class ArmResourceStore<T> {
     /** Removes every entry this store owns, legacy ones included: {@code POST /_admin/reset}. */
     public synchronized void clear() {
         for (String key : backend.keys()) {
-            if (isCanonical(key) || legacyKey.test(key)) {
+            if (isCanonical(key) || (!isAnyCanonical(key) && legacyKey.test(key))) {
                 backend.delete(key);
             }
         }
@@ -239,7 +262,7 @@ public final class ArmResourceStore<T> {
         if (legacyIndex == null) {
             legacyIndex = new HashMap<>();
             for (String key : backend.keys()) {
-                if (!isCanonical(key) && legacyKey.test(key)) {
+                if (!isAnyCanonical(key) && legacyKey.test(key)) {
                     backend.get(key).flatMap(this::decode).ifPresent(stored -> legacyIndex
                         .computeIfAbsent(stored.id().canonicalKey(), ignored -> new ArrayList<>()).add(key));
                 }
@@ -257,7 +280,18 @@ public final class ArmResourceStore<T> {
         return BY_LAST_MODIFIED.compare(b, a) > 0 ? b : a;
     }
 
-    private static boolean isCanonical(String key) {
+    /** A canonical key this store owns: any id, or one of {@link #resourceType} when the backend is shared. */
+    private boolean isCanonical(String key) {
+        if (!key.startsWith("/")) {
+            return false;
+        }
+        return resourceType == null || ArmResourceId.parse(key)
+            .map(id -> resourceType.equalsIgnoreCase(id.typePath()))
+            .orElse(false);
+    }
+
+    /** Any canonical key, owned by this store or by another type's store over the same backend. */
+    private static boolean isAnyCanonical(String key) {
         return key.startsWith("/");
     }
 

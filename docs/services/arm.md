@@ -395,6 +395,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 
 | Type | Rule |
 |---|---|
+| `Microsoft.App/containerApps` | 2 to 32 lowercase letters, digits and hyphens, starting with a letter and ending with a letter or digit |
 | `Microsoft.Cache/redis` | 1 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.Compute/virtualMachines` | 1 to 64 characters with no spaces or special characters (`_` included), not ending with a period or hyphen; Linux's bound, Windows' 15 is not checked |
 | `Microsoft.ContainerInstance/containerGroups` | 1 to 63 lowercase letters, digits and hyphens, no leading, trailing or consecutive hyphen |

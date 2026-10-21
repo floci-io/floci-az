@@ -11,12 +11,12 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.docker.ContainerLifecycleManager;
-import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.ManagedEnvironmentState;
@@ -56,7 +56,14 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     private final EmulatorConfig config;
     private final ContainerAppRuntimeManager runtimeManager;
     private final ContainerAppIngressProxy ingressProxy;
-    private final StorageBackend<String, StoredObject> storage;
+    /**
+     * Environments and apps share the {@code containerapps} backend, each store owning its own type's canonical
+     * keys. Before the stores, they were kept under lowercased {@code environment/sub/rg/name} and
+     * {@code app/sub/rg/name}; those entries are read as they are and move to their canonical key on their next
+     * write.
+     */
+    private final ArmResourceStore<ManagedEnvironmentState> environmentStore;
+    private final ArmResourceStore<ContainerAppState> appStore;
     private final Map<String, AtomicInteger> trafficCounters = new ConcurrentHashMap<>();
 
     @Inject
@@ -67,7 +74,11 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         this.config = config;
         this.runtimeManager = runtimeManager;
         this.ingressProxy = ingressProxy;
-        this.storage = storageFactory.create("containerapps");
+        this.environmentStore = ArmResourceStore.create(storageFactory, "containerapps",
+                "Microsoft.App/managedEnvironments", ManagedEnvironmentState.class,
+                ContainerAppsHandler::environmentId, key -> key.startsWith(ENV_PREFIX));
+        this.appStore = ArmResourceStore.create(storageFactory, "containerapps", "Microsoft.App/containerApps",
+                ContainerAppState.class, ContainerAppsHandler::appId, key -> key.startsWith(APP_PREFIX));
     }
 
     @Override
@@ -168,8 +179,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!"POST".equals(method)) {
             return methodNotAllowed();
         }
-        if (read(environmentKey(subscription, resourceGroup, environmentName),
-                ManagedEnvironmentState.class).isEmpty()) {
+        if (environmentStore.get(environmentKey(subscription, resourceGroup, environmentName)).isEmpty()) {
             return ArmErrors.notFound("Managed Environment '" + environmentName + "' was not found.");
         }
         ObjectNode body = readObject(request);
@@ -188,7 +198,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
 
     private Response handleEnvironment(String method, String subscription, String resourceGroup,
                                        String name, AzureRequest request) throws IOException {
-        String key = environmentKey(subscription, resourceGroup, name);
+        ArmResourceId key = environmentKey(subscription, resourceGroup, name);
         return switch (method) {
             case "GET" -> getEnvironment(key, name);
             case "PUT", "PATCH" -> putEnvironment(key, subscription, resourceGroup, name, request, method);
@@ -197,15 +207,15 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         };
     }
 
-    private Response getEnvironment(String key, String name) {
-        return read(key, ManagedEnvironmentState.class)
+    private Response getEnvironment(ArmResourceId key, String name) {
+        return environmentStore.get(key).map(ArmResourceStore.Stored::value)
                 .map(environment -> Response.ok(environmentResponse(environment)).build())
                 .orElseGet(() -> ArmErrors.notFound("Managed Environment '" + name + "' was not found."));
     }
 
-    private Response putEnvironment(String key, String subscription, String resourceGroup,
+    private Response putEnvironment(ArmResourceId key, String subscription, String resourceGroup,
                                     String name, AzureRequest request, String method) throws IOException {
-        Optional<ManagedEnvironmentState> existing = read(key, ManagedEnvironmentState.class);
+        Optional<ManagedEnvironmentState> existing = environmentStore.get(key).map(ArmResourceStore.Stored::value);
         ObjectNode incoming = readObject(request);
         ObjectNode document = "PATCH".equals(method) && existing.isPresent()
                 ? deepMerge((ObjectNode) existing.get().getDocument().deepCopy(), incoming)
@@ -221,19 +231,19 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (environment.getDefaultDomain() == null || environment.getDefaultDomain().isBlank()) {
             environment.setDefaultDomain(generateDefaultDomain(subscription, resourceGroup, name));
         }
-        write(key, environment);
+        environmentStore.put(environment);
         return Response.status(existing.isPresent() ? 200 : 201)
                 .entity(environmentResponse(environment)).build();
     }
 
-    private Response deleteEnvironment(String key, String subscription, String resourceGroup, String name) {
+    private Response deleteEnvironment(ArmResourceId key, String subscription, String resourceGroup, String name) {
         String environmentId = environmentId(subscription, resourceGroup, name);
         boolean inUse = apps().stream().anyMatch(app -> environmentId.equalsIgnoreCase(environmentId(app)));
         if (inUse) {
             return ArmErrors.error(409, "ManagedEnvironmentInUse",
                     "Managed Environment '" + name + "' still contains Container Apps.");
         }
-        storage.delete(key);
+        environmentStore.delete(key);
         return Response.noContent().build();
     }
 
@@ -252,7 +262,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
 
     private Response handleApp(String method, String subscription, String resourceGroup,
                                String name, AzureRequest request) throws IOException {
-        String key = appKey(subscription, resourceGroup, name);
+        ArmResourceId key = appKey(subscription, resourceGroup, name);
         return switch (method) {
             case "GET" -> getApp(key, name);
             case "PUT", "PATCH" -> putApp(key, subscription, resourceGroup, name, request, method);
@@ -261,15 +271,15 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         };
     }
 
-    private Response getApp(String key, String name) {
-        return read(key, ContainerAppState.class)
+    private Response getApp(ArmResourceId key, String name) {
+        return readApp(key)
                 .map(app -> Response.ok(appResponse(app)).build())
                 .orElseGet(() -> ArmErrors.notFound("Container App '" + name + "' was not found."));
     }
 
-    private synchronized Response putApp(String key, String subscription, String resourceGroup, String name,
+    private synchronized Response putApp(ArmResourceId key, String subscription, String resourceGroup, String name,
                                          AzureRequest request, String method) throws IOException {
-        Optional<ContainerAppState> existing = read(key, ContainerAppState.class);
+        Optional<ContainerAppState> existing = readApp(key);
         ObjectNode incoming = readObject(request);
         ObjectNode document = "PATCH".equals(method) && existing.isPresent()
                 ? deepMerge((ObjectNode) existing.get().getDocument().deepCopy(), incoming)
@@ -293,7 +303,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         } else if (!previousMode.equalsIgnoreCase(newMode) && "Single".equalsIgnoreCase(newMode)) {
             enforceSingleRevisionMode(app);
         }
-        write(key, app);
+        appStore.put(app);
         return Response.status(existing.isPresent() ? 200 : 201).entity(appResponse(app)).build();
     }
 
@@ -407,17 +417,17 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         }
     }
 
-    private Response deleteApp(String key, String name) {
-        Optional<ContainerAppState> existing = read(key, ContainerAppState.class);
+    private Response deleteApp(ArmResourceId key, String name) {
+        Optional<ContainerAppState> existing = readApp(key);
         existing.ifPresent(runtimeManager::stopApp);
-        storage.delete(key);
-        trafficCounters.remove(key);
+        appStore.delete(key);
+        trafficCounters.remove(key.canonicalKey());
         LOG.infov("Deleted Container App {0}", name);
         return Response.noContent().build();
     }
 
     private Response listSecrets(String subscription, String resourceGroup, String appName) {
-        return read(appKey(subscription, resourceGroup, appName), ContainerAppState.class)
+        return readApp(appKey(subscription, resourceGroup, appName))
                 .map(app -> {
                     ArrayNode secrets = MAPPER.createArrayNode();
                     app.getDocument().path("properties").path("configuration").path("secrets")
@@ -433,7 +443,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!"GET".equals(method)) {
             return methodNotAllowed();
         }
-        return read(appKey(subscription, resourceGroup, appName), ContainerAppState.class)
+        return readApp(appKey(subscription, resourceGroup, appName))
                 .map(app -> Response.ok(Map.of("value", app.getRevisions().stream()
                         .map(revision -> revisionResponse(app, revision)).toList())).build())
                 .orElseGet(() -> ArmErrors.notFound("Container App '" + appName + "' was not found."));
@@ -444,7 +454,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!"GET".equals(method)) {
             return methodNotAllowed();
         }
-        Optional<ContainerAppState> app = read(appKey(subscription, resourceGroup, appName), ContainerAppState.class);
+        Optional<ContainerAppState> app = readApp(appKey(subscription, resourceGroup, appName));
         if (app.isEmpty()) {
             return ArmErrors.notFound("Container App '" + appName + "' was not found.");
         }
@@ -458,8 +468,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!"POST".equals(method)) {
             return methodNotAllowed();
         }
-        String key = appKey(subscription, resourceGroup, appName);
-        Optional<ContainerAppState> appResult = read(key, ContainerAppState.class);
+        Optional<ContainerAppState> appResult = readApp(appKey(subscription, resourceGroup, appName));
         if (appResult.isEmpty()) {
             return ArmErrors.notFound("Container App '" + appName + "' was not found.");
         }
@@ -478,7 +487,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
             deactivate(app, revision);
             activate(app, revision);
         }
-        write(key, app);
+        appStore.put(app);
         return Response.ok().build();
     }
 
@@ -579,7 +588,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                 runtimeManager.startRevision(app, revision, properties.path("configuration"),
                         replicaCount, targetPort(properties));
                 revision.setReplicas(replicaCount);
-                write(appKey(app.getSubscriptionId(), app.getResourceGroup(), app.getName()), app);
+                appStore.put(app);
                 endpoint = runtimeManager.endpoint(app, revision.getName());
             } catch (RuntimeException e) {
                 LOG.errorf(e, "Failed to scale Container App revision %s from zero", revision.getName());
@@ -610,7 +619,8 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
             }
             int totalWeight = weighted.values().stream().mapToInt(Integer::intValue).sum();
             if (totalWeight > 0) {
-                String counterKey = appKey(app.getSubscriptionId(), app.getResourceGroup(), app.getName());
+                String counterKey = appKey(app.getSubscriptionId(), app.getResourceGroup(), app.getName())
+                        .canonicalKey();
                 AtomicInteger counter = trafficCounters.computeIfAbsent(counterKey, ignored -> new AtomicInteger());
                 int selectedWeight = Math.floorMod(counter.getAndIncrement(), totalWeight);
                 int cumulativeWeight = 0;
@@ -809,22 +819,29 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                 + "/providers/Microsoft.App/containerApps/" + app.getName();
     }
 
-    private static String environmentKey(String subscription, String resourceGroup, String name) {
-        return ENV_PREFIX + subscription.toLowerCase(Locale.ROOT) + "/"
-                + resourceGroup.toLowerCase(Locale.ROOT) + "/" + name.toLowerCase(Locale.ROOT);
+    private static String environmentId(ManagedEnvironmentState environment) {
+        return environmentId(environment.getSubscriptionId(), environment.getResourceGroup(), environment.getName());
     }
 
-    private static String appKey(String subscription, String resourceGroup, String name) {
-        return APP_PREFIX + subscription.toLowerCase(Locale.ROOT) + "/"
-                + resourceGroup.toLowerCase(Locale.ROOT) + "/" + name.toLowerCase(Locale.ROOT);
+    private static ArmResourceId environmentKey(String subscription, String resourceGroup, String name) {
+        return ArmResourceId.parse(environmentId(subscription, resourceGroup, name)).orElseThrow();
+    }
+
+    private static ArmResourceId appKey(String subscription, String resourceGroup, String name) {
+        return ArmResourceId.parse("/subscriptions/" + subscription + "/resourceGroups/" + resourceGroup
+                + "/providers/Microsoft.App/containerApps/" + name).orElseThrow();
+    }
+
+    private Optional<ContainerAppState> readApp(ArmResourceId key) {
+        return appStore.get(key).map(ArmResourceStore.Stored::value);
     }
 
     private List<ManagedEnvironmentState> environments() {
-        return scan(ENV_PREFIX, ManagedEnvironmentState.class);
+        return environmentStore.all().stream().map(ArmResourceStore.Stored::value).toList();
     }
 
     private List<ContainerAppState> apps() {
-        return scan(APP_PREFIX, ContainerAppState.class);
+        return appStore.all().stream().map(ArmResourceStore.Stored::value).toList();
     }
 
     @Override
@@ -874,38 +891,6 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         return entry;
     }
 
-    private <T> List<T> scan(String prefix, Class<T> type) {
-        List<T> values = new ArrayList<>();
-        storage.scan(key -> key.startsWith(prefix)).forEach(stored -> {
-            try {
-                values.add(MAPPER.readValue(stored.data(), type));
-            } catch (IOException e) {
-                LOG.warnv("Skipping unreadable Container Apps state {0}: {1}", stored.key(), e.getMessage());
-            }
-        });
-        return values;
-    }
-
-    private <T> Optional<T> read(String key, Class<T> type) {
-        return storage.get(key).flatMap(stored -> {
-            try {
-                return Optional.of(MAPPER.readValue(stored.data(), type));
-            } catch (IOException e) {
-                LOG.warnv("Failed to deserialize Container Apps state {0}: {1}", key, e.getMessage());
-                return Optional.empty();
-            }
-        });
-    }
-
-    private void write(String key, Object value) {
-        try {
-            storage.put(key, new StoredObject(key, MAPPER.writeValueAsBytes(value), Map.of(),
-                    Instant.now(), Integer.toHexString(value.hashCode())));
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to serialize Container Apps state " + key, e);
-        }
-    }
-
     private static ObjectNode readObject(AzureRequest request) throws IOException {
         JsonNode body = request.bodyStream() == null ? null : MAPPER.readTree(request.bodyStream());
         if (!(body instanceof ObjectNode object)) {
@@ -949,7 +934,8 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     public void clear() {
         runtimeManager.stopAll();
         trafficCounters.clear();
-        storage.clear();
+        environmentStore.clear();
+        appStore.clear();
     }
 
     private static final class InvalidRequestException extends RuntimeException {
