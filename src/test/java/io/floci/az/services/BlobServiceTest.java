@@ -125,6 +125,83 @@ public class BlobServiceTest {
     }
 
     @Test
+    void rootEndpointUsesSharedKeyAccountForContainerAndBlobOperations() {
+        String account = "issue191account";
+        String container = "issue191-container";
+        String blob = "small-upload.txt";
+        String authorization = "SharedKey " + account + ":signature";
+
+        given()
+            .header("Authorization", authorization)
+            .queryParam("restype", "container")
+            .when().put("/{container}", container)
+            .then().statusCode(201);
+
+        given()
+            .header("Authorization", authorization)
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("application/octet-stream")
+            .body(BLOB_CONTENT.getBytes(StandardCharsets.UTF_8))
+            .when().put("/{container}/{blob}", container, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", account, container, blob)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+
+        String pathStyleContainer = "issue191-path-style";
+        given()
+            .header("Authorization", authorization)
+            .queryParam("restype", "container")
+            .when().put("/{account}/{container}", account, pathStyleContainer)
+            .then().statusCode(201);
+
+        given()
+            .header("Authorization", authorization)
+            .header("x-ms-blob-type", "BlockBlob")
+            .contentType("application/octet-stream")
+            .body(BLOB_CONTENT.getBytes(StandardCharsets.UTF_8))
+            .when().put("/{account}/{container}/{blob}", account, pathStyleContainer, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", account, pathStyleContainer, blob)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void rootEndpointRoutesBlockUploadToBlobWhenBlobPathContainsMessages() {
+        String account = "issue191blockaccount";
+        String container = "issue191-blocks";
+        String blob = "messages.txt";
+        String authorization = "SharedKey " + account + ":signature";
+        String blockId = Base64.getEncoder().encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
+        String blockList = "<BlockList><Latest>" + blockId + "</Latest></BlockList>";
+
+        given()
+            .header("Authorization", authorization)
+            .queryParam("restype", "container")
+            .when().put("/{container}", container)
+            .then().statusCode(201);
+
+        given()
+            .header("Authorization", authorization)
+            .body(BLOB_CONTENT)
+            .when().put("/{container}/{blob}?comp=block&blockid={id}", container, blob, blockId)
+            .then().statusCode(201);
+
+        given()
+            .header("Authorization", authorization)
+            .body(blockList)
+            .when().put("/{container}/{blob}?comp=blocklist", container, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", account, container, blob)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
     void putBlobPersistsBlobHttpHeaders() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
 
