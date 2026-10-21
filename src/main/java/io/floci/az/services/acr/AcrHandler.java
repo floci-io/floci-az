@@ -10,13 +10,18 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
-import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.acr.AcrModels.Registry;
 import jakarta.annotation.PostConstruct;
@@ -40,6 +45,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -82,12 +88,9 @@ import java.util.function.Consumer;
  * resolver points the whole {@code .azurecr.io} space here, but only created registries exist.</p>
  */
 @ApplicationScoped
-public class AcrHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class AcrHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(AcrHandler.class);
-
-    /** Guards the check-and-claim of a global resource name across concurrent creates. */
-    private final Object nameClaims = new Object();
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -110,7 +113,12 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     private final AcrRegistryManager registryManager;
     private final AcrTokenService tokenService;
     private final AcrRegistryProxy registryProxy;
-    private final StorageBackend<String, StoredObject> storage;
+    private final GlobalNameRegistry names;
+    /**
+     * Every registry, keyed by its canonical id. Before the store, registries were kept under raw-case
+     * {@code sub/rg/name}; those entries are read as they are and move to their canonical key on their next write.
+     */
+    private final ArmResourceStore<Registry> store;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "acr-readiness-poller");
         t.setDaemon(true);
@@ -122,12 +130,14 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                       AcrRegistryManager registryManager,
                       AcrTokenService tokenService,
                       AcrRegistryProxy registryProxy,
-                      StorageFactory storageFactory) {
+                      StorageFactory storageFactory,
+                      GlobalNameRegistry names) {
         this.config = config;
         this.registryManager = registryManager;
         this.tokenService = tokenService;
         this.registryProxy = registryProxy;
-        this.storage = storageFactory.create("acr");
+        this.names = names;
+        this.store = ArmResourceStore.create(storageFactory, "acr", Registry.class, Registry::armId, key -> true);
     }
 
     @PostConstruct
@@ -360,47 +370,37 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode sku = body.path("sku");
             JsonNode props = body.path("properties");
 
-            String storageKey = storageKey(sub, rg, registryName);
+            // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before this runs, so a
+            // name another subscription owns never reaches here.
+            Optional<Registry> existing = getRegistry(registryId(sub, rg, registryName));
+            boolean isNew = existing.isEmpty();
             Registry registry;
-            boolean isNew;
-            // The ownership check and the write that claims the name happen under one lock, so two
-            // subscriptions creating the same name at once cannot both pass the check.
-            synchronized (nameClaims) {
-                if (ownedElsewhere(sub, rg, registryName)) {
-                    return ArmErrors.error(409, "AlreadyInUse", "The registry DNS name " + registryName
-                            + ".azurecr.io is already in use. You can check if the name is already claimed using following API: "
-                            + "https://docs.microsoft.com/en-us/rest/api/containerregistry/registries/checknameavailability");
-                }
-                Optional<Registry> existing = getRegistry(storageKey);
-                isNew = existing.isEmpty();
-
-                if (isNew) {
-                    registry = new Registry();
-                    registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                    registry.setSubscriptionId(sub);
-                    registry.setResourceGroup(rg);
-                    registry.setName(registryName);
-                    registry.setCreatedAt(Instant.now());
-                    registry.setUsername(registryName);
-                    registry.setPassword(generatePassword());
-                    registry.setPassword2(generatePassword());
-                } else {
-                    registry = existing.get();
-                }
-
-                registry.setLocation(location);
-                registry.setSkuName(sku.path("name").asText("Basic"));
-                registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
-                registry.setTags(parseStringMap(body.path("tags")));
-
-                registry.setLoginServer(loginServer(registryName));
-                if (config.services().acr().mocked()) {
-                    registry.setProvisioningState("Succeeded");
-                } else if (isNew) {
-                    registry.setProvisioningState("Creating");
-                }
-                putRegistry(storageKey, registry);
+            if (isNew) {
+                registry = new Registry();
+                registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                registry.setSubscriptionId(sub);
+                registry.setResourceGroup(rg);
+                registry.setName(registryName);
+                registry.setCreatedAt(Instant.now());
+                registry.setUsername(registryName);
+                registry.setPassword(generatePassword());
+                registry.setPassword2(generatePassword());
+            } else {
+                registry = existing.get();
             }
+
+            registry.setLocation(location);
+            registry.setSkuName(sku.path("name").asText("Basic"));
+            registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
+            registry.setTags(parseStringMap(body.path("tags")));
+
+            registry.setLoginServer(loginServer(registryName));
+            if (config.services().acr().mocked()) {
+                registry.setProvisioningState("Succeeded");
+            } else if (isNew) {
+                registry.setProvisioningState("Creating");
+            }
+            store.put(registry);
 
             if (!config.services().acr().mocked() && isNew) {
                 String provisioningState;
@@ -411,7 +411,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                     LOG.errorf(e, "Failed to start shared ACR registry for %s", registryName);
                     provisioningState = "Failed";
                 }
-                // A DELETE may have removed the claim while the registry started; writing the record
+                // A DELETE may have removed the registry while it started; writing the record
                 // back would resurrect a name another subscription may have claimed since.
                 String startedState = provisioningState;
                 registry.setProvisioningState(startedState);
@@ -434,14 +434,13 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleGet(String sub, String rg, String registryName) {
-        return getRegistry(storageKey(sub, rg, registryName))
+        return getRegistry(registryId(sub, rg, registryName))
                 .map(r -> Response.ok(toArmResponse(r)).type("application/json").build())
                 .orElseGet(() -> notFound("Registry '" + registryName + "' not found."));
     }
 
     private Response handlePatch(String sub, String rg, String registryName, AzureRequest req) {
-        String key = storageKey(sub, rg, registryName);
-        Optional<Registry> found = getRegistry(key);
+        Optional<Registry> found = getRegistry(registryId(sub, rg, registryName));
         if (found.isEmpty()) {
             return notFound("Registry '" + registryName + "' not found.");
         }
@@ -458,7 +457,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             if (props.has("adminUserEnabled")) {
                 registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean());
             }
-            putRegistry(key, registry);
+            store.put(registry);
             return Response.ok(toArmResponse(registry)).type("application/json").build();
         } catch (Exception e) {
             return badRequest("Invalid request: " + e.getMessage());
@@ -466,51 +465,40 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleDelete(String sub, String rg, String registryName) {
-        String key = storageKey(sub, rg, registryName);
-        Optional<Registry> found = getRegistry(key);
-        if (found.isEmpty()) {
+        ArmResourceId id = registryId(sub, rg, registryName);
+        if (getRegistry(id).isEmpty()) {
             return notFound("Registry '" + registryName + "' not found.");
         }
         // The backing registry is shared across all registries, so deleting one only removes its
         // metadata; its repositories remain in the shared registry until garbage collection.
-        synchronized (nameClaims) {
-            storage.delete(key);
-        }
+        store.delete(id);
         return Response.status(202).build();
     }
 
     private Response handleListByResourceGroup(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String rg = extractResourceGroup(fullPath);
-        String prefix = sub + "/" + rg.toLowerCase() + "/";
-        List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(r -> r.storageKey().toLowerCase().startsWith(prefix))
-                .forEach(r -> items.add(toArmResponse(r)));
-        return Response.ok(Map.of("value", items)).type("application/json").build();
+        return list(new ArmScope(extractSubscriptionId(fullPath), extractResourceGroup(fullPath)));
     }
 
     private Response handleListSubscription(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String prefix = sub + "/";
+        return list(new ArmScope(extractSubscriptionId(fullPath), null));
+    }
+
+    private Response list(ArmScope scope) {
         List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(r -> r.storageKey().startsWith(prefix))
-                .forEach(r -> items.add(toArmResponse(r)));
+        store.list(scope).forEach(stored -> items.add(toArmResponse(stored.value())));
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
     // ── Credential operations ──────────────────────────────────────────────────────
 
     private Response handleListCredentials(String sub, String rg, String registryName) {
-        return getRegistry(storageKey(sub, rg, registryName))
+        return getRegistry(registryId(sub, rg, registryName))
                 .map(r -> Response.ok(credentials(r)).type("application/json").build())
                 .orElseGet(() -> notFound("Registry '" + registryName + "' not found."));
     }
 
     private Response handleRegenerateCredential(String sub, String rg, String registryName, AzureRequest req) {
-        String key = storageKey(sub, rg, registryName);
-        Optional<Registry> found = getRegistry(key);
+        Optional<Registry> found = getRegistry(registryId(sub, rg, registryName));
         if (found.isEmpty()) {
             return notFound("Registry '" + registryName + "' not found.");
         }
@@ -521,12 +509,12 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         } else {
             registry.setPassword(generatePassword());
         }
-        putRegistry(key, registry);
+        store.put(registry);
         return Response.ok(credentials(registry)).type("application/json").build();
     }
 
     private Response handleListUsages(String sub, String rg, String registryName) {
-        Optional<Registry> found = getRegistry(storageKey(sub, rg, registryName));
+        Optional<Registry> found = getRegistry(registryId(sub, rg, registryName));
         if (found.isEmpty()) {
             return notFound("Registry '" + registryName + "' not found.");
         }
@@ -538,10 +526,11 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         return Response.ok(Map.of("value", List.of(storageUsage))).type("application/json").build();
     }
 
+    /** {@code Registries_CheckNameAvailability}: whether the name is owned in the caller's cloud. */
     private Response handleCheckNameAvailability(AzureRequest req) {
         JsonNode body = readBody(req.bodyStream());
         String name = body.path("name").asText("");
-        boolean taken = scanAll().stream().anyMatch(r -> r.getName().equalsIgnoreCase(name));
+        boolean taken = names.owner(cloud(req), CloudSuffix.ACR, name).isPresent();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("nameAvailable", !taken);
         if (taken) {
@@ -556,7 +545,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     private void startReadinessPoller() {
         poller.scheduleAtFixedRate(() -> {
             try {
-                scanAll().forEach(reg -> {
+                store.all().stream().map(ArmResourceStore.Stored::value).forEach(reg -> {
                     if ("Creating".equals(reg.getProvisioningState())) {
                         // Recovers the shared registry if it died after its initial start,
                         // so a pending registry cannot stay Creating forever.
@@ -575,24 +564,8 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     // ── Storage helpers ──────────────────────────────────────────────────────────
 
-    private Optional<Registry> getRegistry(String key) {
-        return storage.get(key).map(so -> {
-            try {
-                return MAPPER.readValue(so.data(), Registry.class);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deserialize ACR registry {0}: {1}", key, e.getMessage());
-                return null;
-            }
-        });
-    }
-
-    private void putRegistry(String key, Registry registry) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(registry);
-            storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize ACR registry: " + key, e);
-        }
+    private Optional<Registry> getRegistry(ArmResourceId id) {
+        return store.get(id).map(ArmResourceStore.Stored::value);
     }
 
     /**
@@ -602,15 +575,15 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
      * again.
      */
     private Optional<Registry> updateIfSameInstance(Registry registry, Consumer<Registry> change) {
-        synchronized (nameClaims) {
-            Optional<Registry> stored = getRegistry(registry.storageKey());
-            if (stored.isEmpty() || !registry.getInstanceId().equals(stored.get().getInstanceId())) {
-                return Optional.empty();
+        AtomicBoolean same = new AtomicBoolean();
+        Optional<ArmResourceStore.Stored<Registry>> stored = store.update(registryId(registry), current -> {
+            if (registry.getInstanceId().equals(current.getInstanceId())) {
+                same.set(true);
+                change.accept(current);
             }
-            change.accept(stored.get());
-            putRegistry(registry.storageKey(), stored.get());
-            return stored;
-        }
+            return current;
+        });
+        return same.get() ? stored.map(ArmResourceStore.Stored::value) : Optional.empty();
     }
 
     /**
@@ -618,27 +591,21 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
      * plane knows only the name: {@code {name}.azurecr.io} carries no ARM scope.
      */
     private boolean registryExists(String registryName) {
-        return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName()));
+        return store.all().stream().anyMatch(stored -> registryName.equalsIgnoreCase(stored.value().getName()));
     }
 
-    /** Whether a registry of this name exists under a subscription or resource group other than this one. */
-    private boolean ownedElsewhere(String sub, String rg, String registryName) {
-        ArmScope scope = new ArmScope(sub, rg);
-        return scanAll().stream().anyMatch(r -> registryName.equalsIgnoreCase(r.getName())
-                && !scope.owns(r.getSubscriptionId(), r.getResourceGroup()));
+    private static ArmResourceId registryId(String sub, String rg, String registryName) {
+        return ArmResourceId.parse(String.format(
+                "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerRegistry/registries/%s",
+                sub, rg, registryName)).orElseThrow();
     }
 
-    private List<Registry> scanAll() {
-        List<Registry> result = new ArrayList<>();
-        storage.scan(k -> true).forEach(so -> {
-            try {
-                Registry r = MAPPER.readValue(so.data(), Registry.class);
-                if (r != null) { result.add(r); }
-            } catch (Exception e) {
-                LOG.debugv("Skipping unreadable ACR registry entry: {0}", e.getMessage());
-            }
-        });
-        return result;
+    private static ArmResourceId registryId(Registry registry) {
+        return ArmResourceId.parse(registry.armId()).orElseThrow();
+    }
+
+    private static CloudProfile cloud(AzureRequest req) {
+        return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
     }
 
     // ── ARM response builders ──────────────────────────────────────────────────────
@@ -729,10 +696,6 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         return index < parts.length ? parts[index] : "";
     }
 
-    private static String storageKey(String sub, String rg, String registryName) {
-        return sub + "/" + rg + "/" + registryName;
-    }
-
     private static Map<String, String> parseStringMap(JsonNode node) {
         Map<String, String> map = new LinkedHashMap<>();
         if (node != null && node.isObject()) {
@@ -767,7 +730,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     /** Wipes all ACR data — used by {@code POST /_admin/reset}. */
     public void clear() {
-        storage.clear();
+        store.clear();
     }
 
     // ── ResourceIndexContributor ────────────────────────────────────────────────
@@ -779,19 +742,27 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries((sub + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, null));
     }
 
-    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
-        return scanAll().stream()
-                .filter(registry -> registry.storageKey().toLowerCase().startsWith(storageKeyPrefix))
-                .map(registry -> ArmResources.indexEntry(registry.armId(), registry.getName(), TYPE,
-                        registry.getLocation(), registry.getTags()))
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return store.list(scope).stream()
+                .map(stored -> ArmResources.indexEntry(stored.value().armId(), stored.value().getName(), TYPE,
+                        stored.value().getLocation(), stored.value().getTags()))
+                .toList();
+    }
+
+    // ── GlobalNameSource ────────────────────────────────────────────────────────
+
+    @Override
+    public List<Claim> globalNames() {
+        return store.all().stream()
+                .map(stored -> new Claim(CloudSuffix.ACR, stored.value().getName(), stored.id()))
                 .toList();
     }
 }

@@ -83,10 +83,5 @@ public class AcrModels {
                 "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerRegistry/registries/%s",
                 subscriptionId, resourceGroup, name);
         }
-
-        /** Storage key: subscriptionId/resourceGroup/name */
-        public String storageKey() {
-            return subscriptionId + "/" + resourceGroup + "/" + name;
-        }
     }
 }

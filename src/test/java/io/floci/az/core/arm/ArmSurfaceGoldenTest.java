@@ -122,6 +122,7 @@ class ArmSurfaceGoldenTest {
     /** The types that declare a name rule or a global DNS name: their bounds, suffix and conflict answer. */
     private static final String NAMED = """
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
+        Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         """;
 
     @Inject

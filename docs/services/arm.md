@@ -391,10 +391,15 @@ lists the ones the type is offered in.
 
 With `strict-names` (on from `parity: strict`) a PUT whose resource name breaks its type's naming rule
 (`resource-name-rules.md`) is refused before its handler runs with `400 InvalidResourceName`. Without it every name
-passes, as floci-az has always accepted them. So far only Azure Cache for Redis declares its rule (1 to 63 letters,
-digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens); the other types declare
-theirs as they move to the shared resource store. The code is an emulator choice: no local source records Azure's
-answer for a bad cache name.
+passes, as floci-az has always accepted them. The types that declare their rule so far:
+
+| Type | Rule |
+|---|---|
+| `Microsoft.Cache/redis` | 1 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
+| `Microsoft.ContainerRegistry/registries` | 5 to 50 letters and digits |
+
+The other types declare theirs as they move to the shared resource store. The code is an emulator choice: no local
+source records Azure's answer for a name outside the rule.
 
 ## Resource names across subscriptions
 

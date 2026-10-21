@@ -7,9 +7,9 @@ src/main/java/io/floci/az/core/tls/TlsConfigSource.java	cloud-literal	3
 src/main/java/io/floci/az/services/aci/AciHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/aci/AciHandler.java	location-literal	2
 src/main/java/io/floci/az/services/aci/AciHandler.java	scope-parse	2
-src/main/java/io/floci/az/services/acr/AcrHandler.java	cloud-literal	2
+src/main/java/io/floci/az/services/acr/AcrArmSurface.java	cloud-literal	1
+src/main/java/io/floci/az/services/acr/AcrHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/acr/AcrHandler.java	location-literal	1
-src/main/java/io/floci/az/services/acr/AcrHandler.java	name-guard	2
 src/main/java/io/floci/az/services/acr/AcrHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/aks/AksHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/aks/AksHandler.java	location-literal	1

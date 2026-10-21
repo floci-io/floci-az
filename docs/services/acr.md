@@ -32,6 +32,12 @@ GET                   .../registries/{name}/listUsages
 POST                  /subscriptions/{s}/providers/Microsoft.ContainerRegistry/checkNameAvailability
 ```
 
+A registry name is a global DNS name: the first subscription to create it owns it in its cloud, and another
+subscription's create is `409 AlreadyInUse` until the owner deletes it. `checkNameAvailability` answers from the
+same ownership, so it reports a name taken in any subscription of the caller's cloud. Paths that differ only in case
+address the same registry. With `parity-overrides.strict-names` a name outside 5 to 50 letters and digits is refused
+with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
+
 The data plane has two surfaces onto the same storage.
 
 **The registry container's published port** is the zero-configuration one. It is plain HTTP,
