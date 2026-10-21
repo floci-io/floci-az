@@ -1,10 +1,14 @@
 package io.floci.az.services.resourcegraph;
 
+import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.AzureRequest;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
-import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ResourceIndexContributor;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.time.Instant;
@@ -20,10 +24,11 @@ import java.util.regex.Pattern;
 /**
  * The namespace's one resource type, {@code Microsoft.ResourceGraph/queries}: shared queries saved in a
  * resource group, as the {@code GraphQuery} resource of the Resource Graph specification. In memory and
- * global, like the service's.
+ * global, like the service's. Registered in the ARM resource index, so generic listings, the
+ * {@code resources} table and a resource-group delete see them.
  */
 @ApplicationScoped
-public class SharedQueries implements Resettable {
+public class SharedQueries implements Resettable, ResourceIndexContributor {
 
     static final String TYPE = "Microsoft.ResourceGraph/queries";
 
@@ -31,12 +36,50 @@ public class SharedQueries implements Resettable {
         "(?i)^subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/providers/microsoft\\.resourcegraph/queries(?:/([^/]+))?$");
 
     private final Map<String, Map<String, Object>> queries = new LinkedHashMap<>();
+    private final EmulatorConfig config;
 
-    /** True when {@code resource} (lower-cased, without its query string) addresses shared queries. */
+    @Inject
+    public SharedQueries(EmulatorConfig config) {
+        this.config = config;
+    }
+
+    /** True when {@code resource} (without its query string, any case) addresses shared queries. */
     static boolean matches(String resource) {
         return PATH.matcher(resource).matches();
     }
 
+    @Override
+    public List<Map<String, Object>> listRgResources(String sub, String rg) {
+        return indexEntries(sub, rg);
+    }
+
+    @Override
+    public List<Map<String, Object>> listSubscriptionResources(String sub) {
+        return indexEntries(sub, null);
+    }
+
+    @Override
+    public boolean indexEnabled() {
+        return config.services().resourceGraph().enabled();
+    }
+
+    /** Joined the index after the default listings were pinned: listed under {@code resource-group-delete} only. */
+    @Override
+    public boolean inDefaultListing() {
+        return false;
+    }
+
+    private synchronized List<Map<String, Object>> indexEntries(String sub, String rg) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> query : queries.values()) {
+            if (ArmResources.inScope(query.get("id"), sub, rg)) {
+                out.add(ArmResources.indexEntry(query));
+            }
+        }
+        return out;
+    }
+
+    /** Serves a shared-queries path; {@code resource} keeps the caller's casing, which the names and ids echo. */
     synchronized Response handle(AzureRequest req, String resource) {
         Matcher m = PATH.matcher(resource);
         if (!m.matches()) {
@@ -97,7 +140,12 @@ public class SharedQueries implements Resettable {
         if (existing == null) {
             return notFound(name);
         }
-        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> body;
+        try {
+            body = ArmJson.parseBodyStrict(req);
+        } catch (ArmJson.InvalidBodyException e) {
+            return ArmErrors.error(400, "InvalidRequestContent", "The request content was invalid and could not be deserialized.");
+        }
         Map<String, Object> properties = ArmJson.cast(existing.get("properties"));
         Map<String, Object> given = ArmJson.cast(body.get("properties"));
         String query = given.get("query") instanceof String q && !q.isBlank() ? q : String.valueOf(properties.get("query"));

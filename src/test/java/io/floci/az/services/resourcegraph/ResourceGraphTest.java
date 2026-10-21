@@ -206,6 +206,20 @@ class ResourceGraphTest {
                 .then().statusCode(200).body("value", hasSize(1)).body("value[0].name", equalTo("all-storage"));
         given().contentType("application/json").body("{\"location\": \"global\", \"properties\": {}}")
                 .when().put(query.replace("all-storage", "empty")).then().statusCode(400);
+        // A malformed PATCH changes nothing.
+        String etag = given().when().get(query).then().statusCode(200).extract().path("etag");
+        given().contentType("application/json").body("{").when().patch(query).then().statusCode(400)
+                .body("error.code", equalTo("InvalidRequestContent"));
+        given().when().get(query).then().statusCode(200).body("etag", equalTo(etag));
+        // Names keep the caller's casing, and saved queries are in the resource index the resources table reads.
+        given().contentType("application/json")
+                .body("{\"location\": \"global\", \"properties\": {\"query\": \"resources | count\"}}")
+                .when().put(query.replace("all-storage", "MyQuery")).then().statusCode(201)
+                .body("name", equalTo("MyQuery"))
+                .body("id", containsString("/queries/MyQuery"));
+        query("resources | where type =~ 'microsoft.resourcegraph/queries' | project name | order by name asc")
+                .statusCode(200).body("data.name", equalTo(java.util.List.of("MyQuery", "all-storage")));
+        given().when().delete(query.replace("all-storage", "MyQuery")).then().statusCode(200);
         given().when().delete(query).then().statusCode(200);
         given().when().get(query).then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
     }

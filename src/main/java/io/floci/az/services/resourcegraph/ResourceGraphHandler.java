@@ -72,9 +72,10 @@ public class ResourceGraphHandler implements AzureServiceHandler {
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         int query = path.indexOf('?');
-        String resource = (query >= 0 ? path.substring(0, query) : path).toLowerCase(Locale.ROOT);
+        String original = query >= 0 ? path.substring(0, query) : path;
+        String resource = original.toLowerCase(Locale.ROOT);
         if (SharedQueries.matches(resource)) {
-            return sharedQueries.handle(req, resource);
+            return sharedQueries.handle(req, original);
         }
         if (!resource.endsWith("providers/microsoft.resourcegraph/resources")) {
             return ArmErrors.error(404, "InvalidResourceType",

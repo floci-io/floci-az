@@ -30,9 +30,10 @@ against it yet.
   `properties.x`) are case-sensitive and `/` on two integers is integer division, as in Kusto.
 - **Shared queries** (`Microsoft.ResourceGraph/queries`, the namespace's one resource type): create,
   read, update, delete and list in a resource group or subscription, in memory and `global`, as the
-  `GraphQuery` resource of the specification.
+  `GraphQuery` resource of the specification; they sit in the ARM resource index, so the `resources`
+  table lists them and a resource-group delete removes them.
 - **Operators**: `where`, `extend`, `project`, `project-away`, `summarize ... by`, `order by` /
-  `sort by`, `distinct`, `take` / `limit`, `union`, `join kind=inner|innerunique|leftouter|leftsemi|leftanti|fullouter ... on`
+  `sort by`, `distinct`, `take` / `limit`, `union [kind=outer|inner]`, `join kind=inner|innerunique|leftouter|leftsemi|leftanti|fullouter ... on`
   and `count`.
 - **Expressions**: string (`"..."`, `'...'`, verbatim `@"..."` with doubled quotes, `\\u` escapes),
   numeric, timespan (`7d`, `30m`), boolean, `null`, `dynamic(...)` and `datetime(...)` literals;
