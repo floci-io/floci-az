@@ -1722,6 +1722,17 @@
           "resourceType" : "workspaces"
         } ]
       }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.ResourceGraph",
+        "namespace" : "Microsoft.ResourceGraph",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2024-04-01", "2022-10-01", "2021-03-01", "2019-04-01", "2018-09-01-preview" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "global" ],
+          "resourceType" : "queries"
+        } ]
+      }, {
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Resources",
         "namespace" : "Microsoft.Resources",
         "registrationPolicy" : "RegistrationFree",
