@@ -10,14 +10,15 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
-import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aks.AksModels.AgentPoolProfile;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
@@ -77,7 +78,11 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private final EmulatorConfig config;
     private final AksClusterManager clusterManager;
-    private final StorageBackend<String, StoredObject> storage;
+    /**
+     * Every cluster, keyed by its canonical id. Before the store, clusters were kept under raw-case
+     * {@code sub/rg/name}; those entries are read as they are and move to their canonical key on their next write.
+     */
+    private final ArmResourceStore<ManagedCluster> store;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "aks-readiness-poller");
         t.setDaemon(true);
@@ -90,7 +95,8 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                       StorageFactory storageFactory) {
         this.config = config;
         this.clusterManager = clusterManager;
-        this.storage = storageFactory.create("aks");
+        this.store = ArmResourceStore.create(storageFactory, "aks", ManagedCluster.class, ManagedCluster::armId,
+                key -> true);
     }
 
     @PostConstruct
@@ -233,8 +239,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 pools.add(AgentPoolProfile.defaultPool());
             }
 
-            String storageKey = storageKey(sub, rg, clusterName);
-            Optional<ManagedCluster> existing = getCluster(storageKey);
+            Optional<ManagedCluster> existing = getCluster(clusterId(sub, rg, clusterName));
 
             boolean isNew = existing.isEmpty();
             ManagedCluster cluster;
@@ -272,7 +277,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 }
             }
 
-            putCluster(storageKey, cluster);
+            store.put(cluster);
 
             int status = isNew ? 201 : 200;
             return Response.status(status)
@@ -286,7 +291,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleGet(String sub, String rg, String clusterName) {
-        return getCluster(storageKey(sub, rg, clusterName))
+        return getCluster(clusterId(sub, rg, clusterName))
                 .map(c -> Response.ok(toArmResponse(c)).type("application/json").build())
                 .orElseGet(() -> notFound("Managed cluster '" + clusterName + "' not found."));
     }
@@ -298,8 +303,8 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
      * already reports Succeeded on the first poll.
      */
     private Response handleDelete(AzureRequest req, String sub, String rg, String clusterName) {
-        String key = storageKey(sub, rg, clusterName);
-        Optional<ManagedCluster> found = getCluster(key);
+        ArmResourceId id = clusterId(sub, rg, clusterName);
+        Optional<ManagedCluster> found = getCluster(id);
         if (found.isEmpty()) {
             return Response.noContent().build();
         }
@@ -312,7 +317,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 LOG.warnv("Error stopping k3s container for cluster {0}: {1}", clusterName, e.getMessage());
             }
         }
-        storage.delete(key);
+        store.delete(id);
         return acceptedDelete(req, sub, cluster.getLocation());
     }
 
@@ -347,8 +352,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleUpdateTags(String sub, String rg, String clusterName, AzureRequest req) {
-        String key = storageKey(sub, rg, clusterName);
-        Optional<ManagedCluster> found = getCluster(key);
+        Optional<ManagedCluster> found = getCluster(clusterId(sub, rg, clusterName));
         if (found.isEmpty()) {
             return notFound("Managed cluster '" + clusterName + "' not found.");
         }
@@ -356,7 +360,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode body = readBody(req.bodyStream());
             ManagedCluster cluster = found.get();
             cluster.setTags(parseTags(body.path("tags")));
-            putCluster(key, cluster);
+            store.put(cluster);
             return Response.ok(toArmResponse(cluster)).type("application/json").build();
         } catch (Exception e) {
             return badRequest("Invalid request: " + e.getMessage());
@@ -364,28 +368,21 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleListByResourceGroup(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String rg = extractResourceGroup(fullPath);
-        String prefix = sub + "/" + rg.toLowerCase() + "/";
-        List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(c -> c.storageKey().toLowerCase().startsWith(prefix))
-                .forEach(c -> items.add(toArmResponse(c)));
-        return Response.ok(Map.of("value", items)).type("application/json").build();
+        return list(new ArmScope(extractSubscriptionId(fullPath), extractResourceGroup(fullPath)));
     }
 
     private Response handleListSubscription(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String prefix = sub + "/";
+        return list(new ArmScope(extractSubscriptionId(fullPath), null));
+    }
+
+    private Response list(ArmScope scope) {
         List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(c -> c.storageKey().startsWith(prefix))
-                .forEach(c -> items.add(toArmResponse(c)));
+        store.list(scope).forEach(stored -> items.add(toArmResponse(stored.value())));
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
     private Response handleListCredentials(String sub, String rg, String clusterName) {
-        Optional<ManagedCluster> found = getCluster(storageKey(sub, rg, clusterName));
+        Optional<ManagedCluster> found = getCluster(clusterId(sub, rg, clusterName));
         if (found.isEmpty()) {
             return notFound("Managed cluster '" + clusterName + "' not found.");
         }
@@ -418,7 +415,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleListAgentPools(String sub, String rg, String clusterName) {
-        Optional<ManagedCluster> found = getCluster(storageKey(sub, rg, clusterName));
+        Optional<ManagedCluster> found = getCluster(clusterId(sub, rg, clusterName));
         if (found.isEmpty()) {
             return notFound("Managed cluster '" + clusterName + "' not found.");
         }
@@ -434,7 +431,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private Response handleAgentPool(String method, String sub, String rg,
                                       String clusterName, String poolName, AzureRequest req) {
-        Optional<ManagedCluster> found = getCluster(storageKey(sub, rg, clusterName));
+        Optional<ManagedCluster> found = getCluster(clusterId(sub, rg, clusterName));
         if (found.isEmpty()) {
             return notFound("Managed cluster '" + clusterName + "' not found.");
         }
@@ -476,7 +473,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 pool.setMode(props.path("mode").asText(
                         pool.getMode() != null ? pool.getMode() : "System"));
                 pool.setProvisioningState("Succeeded");
-                putCluster(storageKey(sub, rg, clusterName), cluster);
+                store.put(cluster);
                 return Response.ok(toAgentPoolArmResponse(sub, rg, clusterName, pool))
                         .type("application/json").build();
             } catch (Exception e) {
@@ -489,7 +486,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
             if (!removed) {
                 return notFound("Agent pool '" + poolName + "' not found.");
             }
-            putCluster(storageKey(sub, rg, clusterName), cluster);
+            store.put(cluster);
             return Response.status(202).build();
         }
 
@@ -507,7 +504,9 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                             LOG.infov("AKS cluster {0} is now ready", cluster.getName());
                             clusterManager.finalizeCluster(cluster);
                             cluster.setProvisioningState("Succeeded");
-                            putCluster(cluster.storageKey(), cluster);
+                            // Only over the same instance: a DELETE while the cluster started must not be undone.
+                            store.update(clusterId(cluster), current ->
+                                    cluster.getInstanceId().equals(current.getInstanceId()) ? cluster : current);
                         }
                     }
                 });
@@ -519,37 +518,22 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     // ── Storage helpers ────────────────────────────────────────────────────────
 
-    private Optional<ManagedCluster> getCluster(String key) {
-        return storage.get(key).map(so -> {
-            try {
-                return MAPPER.readValue(so.data(), ManagedCluster.class);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deserialize AKS cluster {0}: {1}", key, e.getMessage());
-                return null;
-            }
-        });
-    }
-
-    private void putCluster(String key, ManagedCluster cluster) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(cluster);
-            storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize AKS cluster: " + key, e);
-        }
+    private Optional<ManagedCluster> getCluster(ArmResourceId id) {
+        return store.get(id).map(ArmResourceStore.Stored::value);
     }
 
     private List<ManagedCluster> scanAll() {
-        List<ManagedCluster> result = new ArrayList<>();
-        storage.scan(k -> true).forEach(so -> {
-            try {
-                ManagedCluster c = MAPPER.readValue(so.data(), ManagedCluster.class);
-                if (c != null) { result.add(c); }
-            } catch (Exception e) {
-                LOG.debugv("Skipping unreadable AKS cluster entry: {0}", e.getMessage());
-            }
-        });
-        return result;
+        return store.all().stream().map(ArmResourceStore.Stored::value).toList();
+    }
+
+    private static ArmResourceId clusterId(String sub, String rg, String clusterName) {
+        return ArmResourceId.parse(String.format(
+                "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerService/managedClusters/%s",
+                sub, rg, clusterName)).orElseThrow();
+    }
+
+    private static ArmResourceId clusterId(ManagedCluster cluster) {
+        return ArmResourceId.parse(cluster.armId()).orElseThrow();
     }
 
     // ── ARM response builders ──────────────────────────────────────────────────
@@ -669,10 +653,6 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
         return index < parts.length ? parts[index] : "";
     }
 
-    private static String storageKey(String sub, String rg, String clusterName) {
-        return sub + "/" + rg + "/" + clusterName;
-    }
-
     private static Map<String, String> parseTags(JsonNode tagsNode) {
         Map<String, String> tags = new LinkedHashMap<>();
         if (tagsNode != null && tagsNode.isObject()) {
@@ -707,7 +687,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     /** Wipes all AKS data — used by {@code POST /_admin/reset}. */
     public void clear() {
-        storage.clear();
+        store.clear();
     }
 
     // ── ResourceIndexContributor ────────────────────────────────────────────────
@@ -719,17 +699,17 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries((sub + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, null));
     }
 
-    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
-        return scanAll().stream()
-                .filter(cluster -> cluster.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return store.list(scope).stream()
+                .map(ArmResourceStore.Stored::value)
                 .map(cluster -> ArmResources.indexEntry(cluster.armId(), cluster.getName(), TYPE,
                         cluster.getLocation(), cluster.getTags()))
                 .toList();

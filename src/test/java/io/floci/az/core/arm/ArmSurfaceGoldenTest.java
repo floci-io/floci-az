@@ -123,6 +123,8 @@ class ArmSurfaceGoldenTest {
     private static final String NAMED = """
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
+        Microsoft.ContainerService/managedClusters               1-63    null    0    null
+        Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
         """;
 
     @Inject
