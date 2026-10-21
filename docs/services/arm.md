@@ -115,6 +115,7 @@ floci-az:
   #   strict-resource-groups: true   # default: on from strict
   #   strict-providers: true         # default: on from strict
   #   location-normalize: true       # default: on from azure
+  #   strict-locations: true         # default: on from strict
   cloud:
     default: AzureCloud
   services:
@@ -221,7 +222,7 @@ can also be set alone to opt in piecemeal:
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
 | `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete`, `location-normalize` |
-| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers` |
+| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
 override set to a value its level would not give it. At the default level the line also names the
@@ -350,8 +351,15 @@ belongs to, as Azure stores it:
   services) is `global` whatever the client sends, and a PUT that names no location gets `global`
 - a type whose location defaults to its group's gets the group's location when a PUT names none
 
-Emulator choice, with no Azure source to settle it: which declared types count as global follows each
-service's declaration.
+With `strict-locations` (on from `parity: strict`) a PUT of a regional resource naming a location its
+subscription's cloud does not offer is refused before its handler runs with Azure's
+`400 NoRegisteredProviderFound`: "No registered resource provider found for location '<location>' and API
+version '<version>' for type '<type>'. The supported api-versions are '…'. The supported locations are
+'…'." `global` is always accepted. A PATCH, a child resource and a global type are never refused.
+
+Emulator choices, with no Azure source to settle them: which declared types count as global follows each
+service's declaration; the supported locations in the message are every location of the cloud, where Azure
+lists the ones the type is offered in.
 
 ## Resource names across subscriptions
 
@@ -403,7 +411,7 @@ servers is not publicly documented either; `409` is the likeliest.
   `<region>-az<n>`. `regionalDisplayName` repeats `displayName`, and `geography`, `geographyGroup`,
   `latitude`, `longitude`, `physicalLocation` and `pairedRegion` are omitted. There are no edge zones,
   so `includeExtendedLocations=true` returns the same list. Location values on resources are echoed as
-  sent and not validated unless `location-normalize` is on (see
+  sent and not validated unless `location-normalize` or `strict-locations` is on (see
   [Resource locations](#resource-locations)).
 - **ARM state is in-memory**: resource groups and the ARM shells do not persist across restarts; only
   the tenant and subscription directory follows `storage.mode`, and resource groups too under

@@ -1,9 +1,11 @@
 package io.floci.az.core.arm;
 
+import io.floci.az.core.AzureRequest;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.ScopeContext;
 import io.floci.az.core.cloud.ScopeSource;
 import io.floci.az.core.directory.ResourceGroups;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -14,8 +16,9 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("LocationRule: canonical locations")
+@DisplayName("LocationRule: canonical locations and strict refusals")
 class LocationRuleTest {
 
     private static final String SUB = "00000000-0000-0000-0000-0000000000d1";
@@ -40,7 +43,9 @@ class LocationRuleTest {
             id.resourceGroup(), null, ScopeSource.ARM_PATH);
         ArmRequestBody body = json == null ? null
             : ArmRequestBody.read(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
-        return new ArmCall(scope, id, TYPES.match(id).type(), method, null, body, null);
+        AzureRequest request = new AzureRequest(method, "arm", "arm", path, null, null,
+            Map.of("api-version", "2023-01-01"), Map.of(), null, false, null, null, path, null);
+        return new ArmCall(scope, id, TYPES.match(id).type(), method, null, body, request);
     }
 
     private static String text(ArmVerdict.Amend amend) {
@@ -48,7 +53,7 @@ class LocationRuleTest {
     }
 
     private static LocationRule normalizing(ResourceGroups groups) {
-        return new LocationRule(TYPES, groups, true);
+        return new LocationRule(TYPES, groups, true, false);
     }
 
     @Test
@@ -104,7 +109,7 @@ class LocationRuleTest {
 
     @Test
     void offByDefaultTheBodyIsNeitherReadNorRewritten() {
-        LocationRule rule = new LocationRule(TYPES, new ResourceGroups(null), false);
+        LocationRule rule = new LocationRule(TYPES, new ResourceGroups(null), false, false);
 
         assertEquals(false, rule.readsBody());
         assertEquals(ArmVerdict.proceed(), rule.enter(call("PUT", ACCOUNT, "AzureCloud", "{\"location\":\"East US\"}")));
@@ -117,5 +122,36 @@ class LocationRuleTest {
         assertEquals(ArmVerdict.proceed(), rule.enter(call("GET", ACCOUNT, "AzureCloud", null)));
         assertEquals(ArmVerdict.proceed(), rule.enter(call("PUT", ACCOUNT, "AzureCloud", "not json")));
         assertEquals(ArmVerdict.proceed(), rule.enter(call("PUT", ACCOUNT, "AzureCloud", "[1]")));
+    }
+
+    @Test
+    void strictRefusesALocationTheCloudDoesNotOfferWithAzuresBody() {
+        LocationRule rule = new LocationRule(TYPES, new ResourceGroups(null), false, true);
+
+        Response response = assertInstanceOf(ArmVerdict.Respond.class,
+            rule.enter(call("PUT", ACCOUNT, "AzureUSGovernment", "{\"location\":\"East US\"}"))).response();
+
+        assertEquals(400, response.getStatus());
+        Map<?, ?> error = (Map<?, ?>) ((Map<?, ?>) response.getEntity()).get("error");
+        assertEquals("NoRegisteredProviderFound", error.get("code"));
+        String message = (String) error.get("message");
+        assertTrue(message.startsWith("No registered resource provider found for location 'eastus' and API version "
+            + "'2023-01-01' for type 'storageAccounts'. The supported api-versions are '"), message);
+        assertTrue(message.endsWith("The supported locations are 'usgovvirginia, usgoviowa, usgovarizona, "
+            + "usgovtexas, usdodeast, usdodcentral'."), message);
+    }
+
+    @Test
+    void strictAcceptsTheCloudsLocationsGlobalAndGlobalTypes() {
+        LocationRule rule = new LocationRule(TYPES, new ResourceGroups(null), false, true);
+
+        assertEquals(ArmVerdict.proceed(),
+            rule.enter(call("PUT", ACCOUNT, "AzureCloud", "{\"location\":\"East US\"}")));
+        assertEquals(ArmVerdict.proceed(),
+            rule.enter(call("PUT", ACCOUNT, "AzureCloud", "{\"location\":\"global\"}")));
+        assertEquals(ArmVerdict.proceed(),
+            rule.enter(call("PUT", ZONE, "AzureUSGovernment", "{\"location\":\"anywhere\"}")));
+        assertEquals(ArmVerdict.proceed(),
+            rule.enter(call("PATCH", ACCOUNT, "AzureUSGovernment", "{\"location\":\"East US\"}")));
     }
 }

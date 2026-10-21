@@ -58,6 +58,19 @@ public final class ArmErrors {
     }
 
     /**
+     * {@code 400 NoRegisteredProviderFound} for a location (or api-version) a resource type does not offer, worded as
+     * Azure records it: the requested location and api-version, the type below its namespace, then the supported
+     * api-versions and locations, each list joined with {@code ", "}.
+     */
+    public static Response noRegisteredProviderFound(String location, String apiVersion, String typePath,
+                                                     List<String> apiVersions, List<String> locations) {
+        return error(400, "NoRegisteredProviderFound", "No registered resource provider found for location '"
+            + location + "' and API version '" + apiVersion + "' for type '" + typePath
+            + "'. The supported api-versions are '" + String.join(", ", apiVersions)
+            + "'. The supported locations are '" + String.join(", ", locations) + "'.");
+    }
+
+    /**
      * {@code 404 InvalidResourceNamespace} for a provider namespace floci-az does not serve. Azure documents the
      * code for an unknown namespace; no recording shows the Providers API answering one, so the status and the
      * message are an emulator choice.

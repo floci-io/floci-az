@@ -7,6 +7,7 @@ import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.util.Map;
 
@@ -22,6 +23,9 @@ import java.util.Map;
  *       echoed and built into names that way. A {@link LocationPolicy#GLOBAL} type gets {@code global}, and an
  *       {@link LocationPolicy#INHERITS_RG} PUT that names no location gets its resource group's.
  *       {@link ArmCall#normalizedLocation()} carries the result.</li>
+ *   <li>Under {@link EmulatorConfig#strictLocations()} a PUT of a regional top-level type naming a location
+ *       the cloud does not offer is refused with {@code 400 NoRegisteredProviderFound}, as Azure answers it.
+ *       {@code global} is always accepted, since some regional namespaces offer it.</li>
  * </ul>
  *
  * <p>The rule reads the body the gate buffers ({@link ArmCall#body()}) and rewrites it in place; a body that is
@@ -29,6 +33,8 @@ import java.util.Map;
  */
 @ApplicationScoped
 public class LocationRule implements ArmRequestRule {
+
+    private static final Logger LOG = Logger.getLogger(LocationRule.class);
 
     /** Position in the gate: after resource groups, so an inherited location reads a group that exists. */
     public static final int ORDER = 5;
@@ -38,16 +44,18 @@ public class LocationRule implements ArmRequestRule {
     private final ArmTypeRegistry types;
     private final ResourceGroups groups;
     private final boolean normalize;
+    private final boolean strict;
 
     @Inject
     public LocationRule(ArmTypeRegistry types, ResourceGroups groups, EmulatorConfig config) {
-        this(types, groups, config.locationNormalize());
+        this(types, groups, config.locationNormalize(), config.strictLocations());
     }
 
-    LocationRule(ArmTypeRegistry types, ResourceGroups groups, boolean normalize) {
+    LocationRule(ArmTypeRegistry types, ResourceGroups groups, boolean normalize, boolean strict) {
         this.types = types;
         this.groups = groups;
         this.normalize = normalize;
+        this.strict = strict;
     }
 
     @Override
@@ -57,12 +65,12 @@ public class LocationRule implements ArmRequestRule {
 
     @Override
     public boolean readsBody() {
-        return normalize;
+        return normalize || strict;
     }
 
     @Override
     public ArmVerdict enter(ArmCall call) {
-        if (!normalize || call.type() == null || call.body() == null) {
+        if (!readsBody() || call.type() == null || call.body() == null) {
             return ArmVerdict.proceed();
         }
         ArmResourceType type = types.type(call.type()).orElse(null);
@@ -73,7 +81,15 @@ public class LocationRule implements ArmRequestRule {
         CloudProfile cloud = cloud(call);
         String sent = body.get("location") instanceof String location ? location : null;
         String canonical = canonical(call, type, cloud, sent);
-        if (canonical == null) {
+        if (strict && refused(call, type, cloud, sent, canonical)) {
+            LOG.infov("Refused {0}: location {1} is not offered by {2} and "
+                    + "floci-az.parity-overrides.strict-locations is on (use one of the cloud''s locations, or "
+                    + "turn the override off)", call.method(), sent, cloud.name());
+            return ArmVerdict.respond(ArmErrors.noRegisteredProviderFound(canonical, apiVersion(call),
+                type.typePath(), types.apiVersions(type),
+                cloud.locations().stream().map(CloudProfile.Location::name).toList()));
+        }
+        if (!normalize || canonical == null) {
             return ArmVerdict.proceed();
         }
         if (!canonical.equals(sent)) {
@@ -100,6 +116,18 @@ public class LocationRule implements ArmRequestRule {
                 .orElse(null);
         }
         return null;
+    }
+
+    /** A PUT of a regional top-level type that names a location its cloud does not offer. */
+    private static boolean refused(ArmCall call, ArmResourceType type, CloudProfile cloud, String sent,
+                                   String canonical) {
+        return "PUT".equals(call.method()) && sent != null && type.location() != LocationPolicy.GLOBAL
+            && !type.isChild() && !GLOBAL.equals(canonical) && cloud.location(canonical).isEmpty();
+    }
+
+    private static String apiVersion(ArmCall call) {
+        return call.request() == null || call.request().queryParams() == null
+            ? null : call.request().queryParams().get("api-version");
     }
 
     private static CloudProfile cloud(ArmCall call) {
