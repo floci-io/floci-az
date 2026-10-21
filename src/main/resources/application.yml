@@ -106,6 +106,7 @@ floci-az:
     #                               # A request for a resource under a missing group is 404 ResourceGroupNotFound,
     #                               # and groups persist in the directory store
     # strict-providers: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_PROVIDERS; default on from strict.
+    # strict-names: true            # FLOCI_AZ_PARITY_OVERRIDES_STRICT_NAMES; default on from strict.
     #                               # Resource providers start NotRegistered in each subscription; a request for
     #                               # a type of an unregistered namespace is 409 MissingSubscriptionRegistration
     #                               # until it is registered, and registrations persist in the directory store

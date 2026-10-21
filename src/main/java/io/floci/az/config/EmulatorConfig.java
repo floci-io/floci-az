@@ -135,6 +135,14 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether a PUT whose resource name breaks its type's naming rule is refused with {@code 400} before its
+     * handler runs. On from {@code parity: strict}; {@code parity-overrides.strict-names} overrides it either way.
+     */
+    default boolean strictNames() {
+        return parityOverrides().strictNames().orElse(parity().includes(ParityLevel.STRICT));
+    }
+
+    /**
      * Whether ARM locations are canonical, as Azure stores them: a PUT or PATCH body's {@code location} is
      * normalized for the subscription's cloud ({@code "East US"} becomes {@code eastus}) before its handler runs,
      * so it is stored and echoed that way and every name built from it (ACI and AKS FQDNs, the AKS node resource
@@ -188,6 +196,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictProviders()}. */
         Optional<Boolean> strictProviders();
+
+        /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictNames()}. */
+        Optional<Boolean> strictNames();
 
         /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#locationNormalize()}. */
         Optional<Boolean> locationNormalize();

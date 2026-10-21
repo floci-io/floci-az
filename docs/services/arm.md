@@ -117,6 +117,7 @@ floci-az:
   #   location-normalize: true       # default: on from azure
   #   tenant-scoping: true           # default: on from azure
   #   strict-locations: true         # default: on from strict
+  #   strict-names: true             # default: on from strict
   cloud:
     default: AzureCloud
   services:
@@ -242,7 +243,7 @@ can also be set alone to opt in piecemeal:
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
 | `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete`, `location-normalize`, `tenant-scoping` |
-| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations` |
+| `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations`, `strict-names` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
 override set to a value its level would not give it. At the default level the line also names the
@@ -385,6 +386,15 @@ and refused under `strict-locations`.
 Emulator choices, with no Azure source to settle them: which declared types count as global follows each
 service's declaration; the supported locations in the message are every location of the cloud, where Azure
 lists the ones the type is offered in.
+
+## Name syntax
+
+With `strict-names` (on from `parity: strict`) a PUT whose resource name breaks its type's naming rule
+(`resource-name-rules.md`) is refused before its handler runs with `400 InvalidResourceName`. Without it every name
+passes, as floci-az has always accepted them. So far only Azure Cache for Redis declares its rule (1 to 63 letters,
+digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens); the other types declare
+theirs as they move to the shared resource store. The code is an emulator choice: no local source records Azure's
+answer for a bad cache name.
 
 ## Resource names across subscriptions
 

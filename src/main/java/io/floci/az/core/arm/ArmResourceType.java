@@ -7,13 +7,16 @@ import java.util.Locale;
  * location. Services declare these in an {@link ArmSurface}; the {@link ArmTypeRegistry} matches requests
  * against them, and the platform rules read them instead of each handler re-deriving the same facts.
  *
- * @param namespace the provider namespace, such as {@code Microsoft.Storage}
- * @param typePath  the type below the namespace, slash-separated for children, such as
- *                  {@code storageAccounts/blobServices/containers}; spelled as Azure spells it
- * @param scope     where the type lives in the id hierarchy
- * @param location  how a PUT treats the body's location
+ * @param namespace  the provider namespace, such as {@code Microsoft.Storage}
+ * @param typePath   the type below the namespace, slash-separated for children, such as
+ *                   {@code storageAccounts/blobServices/containers}; spelled as Azure spells it
+ * @param scope      where the type lives in the id hierarchy
+ * @param location   how a PUT treats the body's location
+ * @param name       the syntax its names follow, or {@link NameRule#NONE}
+ * @param globalName its global DNS name, or {@link GlobalName#NONE} for a name unique only within its scope
  */
-public record ArmResourceType(String namespace, String typePath, ArmScopeKind scope, LocationPolicy location) {
+public record ArmResourceType(String namespace, String typePath, ArmScopeKind scope, LocationPolicy location,
+                              NameRule name, GlobalName globalName) {
 
     public ArmResourceType {
         if (namespace == null || namespace.isBlank() || typePath == null || typePath.isBlank()) {
@@ -22,6 +25,23 @@ public record ArmResourceType(String namespace, String typePath, ArmScopeKind sc
         if (typePath.startsWith("/") || typePath.endsWith("/")) {
             throw new IllegalArgumentException("type path must not start or end with a slash: " + typePath);
         }
+        name = name == null ? NameRule.NONE : name;
+        globalName = globalName == null ? GlobalName.NONE : globalName;
+    }
+
+    /** A type with no name rule and no global name. */
+    public ArmResourceType(String namespace, String typePath, ArmScopeKind scope, LocationPolicy location) {
+        this(namespace, typePath, scope, location, NameRule.NONE, GlobalName.NONE);
+    }
+
+    /** This type with {@code rule} as its name syntax. */
+    public ArmResourceType withName(NameRule rule) {
+        return new ArmResourceType(namespace, typePath, scope, location, rule, globalName);
+    }
+
+    /** This type with a global DNS name. */
+    public ArmResourceType withGlobalName(GlobalName global) {
+        return new ArmResourceType(namespace, typePath, scope, location, name, global);
     }
 
     /** A resource-group scoped type. */

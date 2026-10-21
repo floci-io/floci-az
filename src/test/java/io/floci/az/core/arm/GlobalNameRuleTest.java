@@ -1,0 +1,117 @@
+package io.floci.az.core.arm;
+
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.core.cloud.ScopeContext;
+import io.floci.az.core.cloud.ScopeSource;
+import jakarta.ws.rs.core.Response;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@DisplayName("GlobalNameRule and ResourceNameRule: global names and name syntax in the gate")
+class GlobalNameRuleTest {
+
+    private static final GlobalName CACHE = new GlobalName(CloudSuffix.REDIS, 409, "NameNotAvailable",
+        "%s is taken.");
+    private static final GlobalName ACCOUNT = new GlobalName(CloudSuffix.BLOB, 409, "StorageAccountAlreadyTaken",
+        "The storage account named %s is already taken.", "StorageAccountInAnotherResourceGroup",
+        "The account %s is already in another resource group in this subscription.");
+
+    private static final ArmTypeRegistry TYPES = new ArmTypeRegistry(Map.of(
+        "microsoft.cache", new ArmSurface("Microsoft.Cache", ArmLane.FILTER, List.of(
+            ArmResourceType.resourceGroup("Microsoft.Cache", "redis", LocationPolicy.REQUIRED)
+                .withName(NameRule.REDIS).withGlobalName(CACHE))),
+        "microsoft.storage", new ArmSurface("Microsoft.Storage", ArmLane.ARM_HANDLER, List.of(
+            ArmResourceType.resourceGroup("Microsoft.Storage", "storageAccounts", LocationPolicy.REQUIRED)
+                .withGlobalName(ACCOUNT)))));
+
+    private final GlobalNameRegistry names = new GlobalNameRegistry(List::of,
+        subscription -> CloudCatalog.forNameOrPublic("AzureCloud"));
+    private final GlobalNameRule rule = new GlobalNameRule(TYPES, names);
+
+    private static ArmCall call(String method, String path) {
+        ArmResourceId id = ArmResourceId.parse(path).orElseThrow();
+        ScopeContext scope = new ScopeContext(CloudCatalog.forNameOrPublic("AzureCloud"), null, id.subscriptionId(),
+            id.resourceGroup(), null, ScopeSource.ARM_PATH);
+        return new ArmCall(scope, id, TYPES.match(id) == null ? null : TYPES.match(id).type(), method, null);
+    }
+
+    private static String cache(String sub, String rg, String name) {
+        return "subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Cache/Redis/" + name;
+    }
+
+    private void created(ArmCall call) {
+        assertEquals(ArmVerdict.proceed(), rule.enter(call));
+        rule.exit(call, Response.status(201).build());
+    }
+
+    @Test
+    void aNameAnotherResourceOwnsIsTheTypesConflict() {
+        created(call("PUT", cache("s1", "rg", "c1")));
+
+        Response response = assertInstanceOf(ArmVerdict.Respond.class,
+            rule.enter(call("PUT", cache("s2", "rg", "C1")))).response();
+        assertEquals(409, response.getStatus());
+        assertEquals("NameNotAvailable", ((Map<?, ?>) ((Map<?, ?>) response.getEntity()).get("error")).get("code"));
+        assertEquals(ArmVerdict.proceed(), rule.enter(call("PUT", cache("S1", "RG", "c1"))), "the owner updates");
+    }
+
+    @Test
+    void theSameSubscriptionVariantAnswersWhenTheTypeDeclaresOne() {
+        String account = "subscriptions/s1/resourceGroups/rg-a/providers/Microsoft.Storage/storageAccounts/acct1";
+        created(call("PUT", account));
+
+        Response sameSubscription = assertInstanceOf(ArmVerdict.Respond.class,
+            rule.enter(call("PUT", account.replace("rg-a", "rg-b")))).response();
+        assertEquals("StorageAccountInAnotherResourceGroup",
+            ((Map<?, ?>) ((Map<?, ?>) sameSubscription.getEntity()).get("error")).get("code"));
+        Response otherSubscription = assertInstanceOf(ArmVerdict.Respond.class,
+            rule.enter(call("PUT", account.replace("s1", "s2")))).response();
+        assertEquals("StorageAccountAlreadyTaken",
+            ((Map<?, ?>) ((Map<?, ?>) otherSubscription.getEntity()).get("error")).get("code"));
+    }
+
+    @Test
+    void aFailedCreateReleasesItsNameAndADeleteFreesIt() {
+        ArmCall failed = call("PUT", cache("s1", "rg", "c1"));
+        rule.enter(failed);
+        rule.exit(failed, Response.status(400).build());
+        created(call("PUT", cache("s2", "rg", "c1")));
+
+        ArmCall delete = call("DELETE", cache("s2", "rg", "c1"));
+        rule.enter(delete);
+        rule.exit(delete, Response.status(202).build());
+        created(call("PUT", cache("s3", "rg", "c1")));
+    }
+
+    @Test
+    void readsActionsAndPathsWithoutAGroupPass() {
+        created(call("PUT", cache("s1", "rg", "c1")));
+
+        assertEquals(ArmVerdict.proceed(), rule.enter(call("GET", cache("s2", "rg", "c1"))));
+        assertEquals(ArmVerdict.proceed(), rule.enter(call("POST", cache("s2", "rg", "c1") + "/listKeys")));
+        assertEquals(ArmVerdict.proceed(),
+            rule.enter(call("PUT", "subscriptions/s2/providers/Microsoft.Cache/Redis/c1")));
+    }
+
+    @Test
+    void underStrictNamesABadNameIsRefusedAndOtherwiseEveryNamePasses() {
+        ArmCall bad = call("PUT", cache("s1", "rg", "bad--name"));
+
+        Response refused = assertInstanceOf(ArmVerdict.Respond.class,
+            new ResourceNameRule(TYPES, true).enter(bad)).response();
+        assertEquals(400, refused.getStatus());
+        assertEquals("InvalidResourceName",
+            ((Map<?, ?>) ((Map<?, ?>) refused.getEntity()).get("error")).get("code"));
+        assertEquals(ArmVerdict.proceed(), new ResourceNameRule(TYPES, true).enter(call("PUT", cache("s1", "rg", "ok-1"))));
+        assertEquals(ArmVerdict.proceed(), new ResourceNameRule(TYPES, false).enter(bad));
+        assertTrue(NameRule.REDIS.accepts("a") && !NameRule.REDIS.accepts("-a") && !NameRule.REDIS.accepts("a-"));
+    }
+}

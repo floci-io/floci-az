@@ -20,20 +20,18 @@ class ArmRequestGateProductionTest {
     ArmRequestGate gate;
 
     @Test
-    void theSubscriptionProviderResourceGroupLocationPolicyAndAppendedLocationRulesRunInThatOrder() {
+    void theProductionRulesRunInTheirDeclaredOrder() {
+        List<Class<?>> expected = List.of(SubscriptionRule.class, ProviderRule.class, ResourceGroupRule.class,
+            LocationRule.class, ResourceNameRule.class, GlobalNameRule.class, PolicyEvaluationRule.class,
+            AppendedLocationRule.class);
+        List<Integer> orders = List.of(SubscriptionRule.ORDER, ProviderRule.ORDER, ResourceGroupRule.ORDER,
+            LocationRule.ORDER, ResourceNameRule.ORDER, GlobalNameRule.ORDER, PolicyEvaluationRule.ORDER,
+            AppendedLocationRule.ORDER);
         List<ArmRequestRule> rules = gate.rules();
-        assertEquals(6, rules.size(), "rules: " + rules);
-        assertInstanceOf(SubscriptionRule.class, rules.getFirst());
-        assertEquals(SubscriptionRule.ORDER, rules.getFirst().order());
-        assertInstanceOf(ProviderRule.class, rules.get(1));
-        assertEquals(ProviderRule.ORDER, rules.get(1).order());
-        assertInstanceOf(ResourceGroupRule.class, rules.get(2));
-        assertEquals(ResourceGroupRule.ORDER, rules.get(2).order());
-        assertInstanceOf(LocationRule.class, rules.get(3));
-        assertEquals(LocationRule.ORDER, rules.get(3).order());
-        assertInstanceOf(PolicyEvaluationRule.class, rules.get(4));
-        assertEquals(PolicyEvaluationRule.ORDER, rules.get(4).order());
-        assertInstanceOf(AppendedLocationRule.class, rules.get(5));
-        assertEquals(AppendedLocationRule.ORDER, rules.get(5).order());
+        assertEquals(expected.size(), rules.size(), "rules: " + rules);
+        for (int i = 0; i < expected.size(); i++) {
+            assertInstanceOf(expected.get(i), rules.get(i));
+            assertEquals(orders.get(i), rules.get(i).order());
+        }
     }
 }
