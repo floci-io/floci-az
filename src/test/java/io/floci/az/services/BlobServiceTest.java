@@ -3333,8 +3333,11 @@ public class BlobServiceTest {
             OffsetDateTime signedKeyStart,
             OffsetDateTime signedKeyExpiry
     ) {
-        OffsetDateTime start = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5).withNano(0);
-        OffsetDateTime expiry = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withNano(0);
+        // One clock read: a SAS that expires after its delegation key is refused, and a second boundary
+        // between two reads would put the SAS expiry one second past a key expiry read earlier.
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC).withNano(0);
+        OffsetDateTime start = now.minusMinutes(5);
+        OffsetDateTime expiry = now.plusHours(1).isAfter(signedKeyExpiry) ? signedKeyExpiry : now.plusHours(1);
         String st = start.toString();
         String se = expiry.toString();
         String skt = signedKeyStart.toString();
