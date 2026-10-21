@@ -15,6 +15,9 @@ applications use to acquire tokens without secrets.
 - **User-assigned identities**: CreateOrUpdate, Get, Update (tags), Delete, List (by resource
   group and by subscription); `principalId` / `clientId` / `tenantId` are server-generated GUIDs
   that stay stable across updates (msi spec `2024-11-30`)
+- **Identity references**: a `PUT` or `PATCH` of any resource whose
+  `identity.userAssignedIdentities` names an identity that doesn't exist answers
+  `400 FailedIdentityOperation` and stores nothing
 - **Federated identity credentials**: CreateOrUpdate, Get, Delete, List with
   `issuer` / `subject` / `audiences` (as used by `azurerm_federated_identity_credential`)
 - **System-assigned identity read**: `GET {scope}/providers/Microsoft.ManagedIdentity/identities/default`
