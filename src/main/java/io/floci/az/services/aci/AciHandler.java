@@ -10,12 +10,13 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
-import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aci.AciModels.ContainerGroup;
 import jakarta.annotation.PostConstruct;
@@ -102,7 +103,11 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private final EmulatorConfig config;
     private final AciContainerGroupManager containerManager;
-    private final StorageBackend<String, StoredObject> storage;
+    /**
+     * Every container group, keyed by its canonical id. Before the store, groups were kept under raw-case
+     * {@code sub/rg/name}; those entries are read as they are and move to their canonical key on their next write.
+     */
+    private final ArmResourceStore<ContainerGroup> store;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "aci-readiness-poller");
         t.setDaemon(true);
@@ -114,7 +119,8 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                       StorageFactory storageFactory) {
         this.config = config;
         this.containerManager = containerManager;
-        this.storage = storageFactory.create("aci");
+        this.store = ArmResourceStore.create(storageFactory, "aci", ContainerGroup.class, ContainerGroup::armId,
+                key -> true);
     }
 
     @PostConstruct
@@ -154,7 +160,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 LOG.errorf(e, "Could not relaunch container group %s after restart", group.getName());
                 group.setProvisioningState("Failed");
             }
-            putGroup(group.storageKey(), group);
+            store.put(group);
         }
     }
 
@@ -239,7 +245,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         // ── outboundNetworkDependenciesEndpoints — always an empty array per spec ──
         if (tail.matches("containerGroups/[^/]+/outboundNetworkDependenciesEndpoints(?:[?].*)?") && "GET".equals(method)) {
-            return getGroup(storageKey(sub, rg, segment(tail, 1)))
+            return getGroup(groupId(sub, rg, segment(tail, 1)))
                     .map(group -> Response.ok(List.of()).type("application/json").build())
                     .orElseGet(() -> groupNotFound(rg, segment(tail, 1)));
         }
@@ -277,8 +283,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             }
             normalizeProperties(properties);
 
-            String key = storageKey(sub, rg, name);
-            Optional<ContainerGroup> existing = getGroup(key);
+            Optional<ContainerGroup> existing = getGroup(groupId(sub, rg, name));
             boolean isNew = existing.isEmpty();
 
             ContainerGroup group = existing.orElseGet(ContainerGroup::new);
@@ -329,7 +334,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 }
             }
 
-            putGroup(key, group);
+            store.put(group);
             return Response.status(isNew ? 201 : 200)
                     .entity(toArmResponse(group, true))
                     .type("application/json")
@@ -341,14 +346,13 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleGet(String sub, String rg, String name) {
-        return getGroup(storageKey(sub, rg, name))
+        return getGroup(groupId(sub, rg, name))
                 .map(group -> Response.ok(toArmResponse(group, true)).type("application/json").build())
                 .orElseGet(() -> groupNotFound(rg, name));
     }
 
     private Response handleUpdateTags(String sub, String rg, String name, AzureRequest req) {
-        String key = storageKey(sub, rg, name);
-        Optional<ContainerGroup> found = getGroup(key);
+        Optional<ContainerGroup> found = getGroup(groupId(sub, rg, name));
         if (found.isEmpty()) {
             return groupNotFound(rg, name);
         }
@@ -357,7 +361,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             ContainerGroup group = found.get();
             Map<String, String> tags = parseTags(body.path("tags"));
             group.setTags(tags.isEmpty() ? null : tags);
-            putGroup(key, group);
+            store.put(group);
             return Response.ok(toArmResponse(group, true)).type("application/json").build();
         } catch (Exception e) {
             return ArmErrors.error(400, "InvalidRequestContent", "Invalid request: " + e.getMessage());
@@ -369,8 +373,8 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         // does not ("Resource does not exist"). Synchronous in both cases: azurerm's delete
         // poller GETs until 404, and a 202 with no operation endpoint would poll forever
         // (same rationale as VmHandler). Idempotent when absent.
-        String key = storageKey(sub, rg, name);
-        Optional<ContainerGroup> existing = getGroup(key);
+        ArmResourceId id = groupId(sub, rg, name);
+        Optional<ContainerGroup> existing = getGroup(id);
         if (existing.isEmpty()) {
             return Response.status(204).build();
         }
@@ -384,15 +388,14 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 LOG.warnv("Error removing containers for group {0}: {1}", name, e.getMessage());
             }
         }
-        storage.delete(key);
+        store.delete(id);
         return Response.ok(body).type("application/json").build();
     }
 
     private Response handleList(String sub, String rg) {
-        String prefix = rg == null ? (sub + "/").toLowerCase() : (sub + "/" + rg + "/").toLowerCase();
         List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(group -> group.storageKey().toLowerCase().startsWith(prefix))
+        store.list(new ArmScope(sub, rg)).stream()
+                .map(ArmResourceStore.Stored::value)
                 // List responses use the spec's ListResultContainerGroup shape: the full
                 // resource minus instanceView.
                 .forEach(group -> items.add(toArmResponse(group, false)));
@@ -400,7 +403,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleAction(AzureRequest req, String sub, String rg, String name, String action) {
-        Optional<ContainerGroup> found = getGroup(storageKey(sub, rg, name));
+        Optional<ContainerGroup> found = getGroup(groupId(sub, rg, name));
         if (found.isEmpty()) {
             return groupNotFound(rg, name);
         }
@@ -420,7 +423,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                         action, group.getName());
             }
             // start may have recreated the containers, giving the group new ids and host ports.
-            putGroup(group.storageKey(), group);
+            store.put(group);
         }
         return switch (action) {
             // The spec's only synchronous action: bare 204, no LRO headers.
@@ -433,7 +436,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     private Response handleLogs(String sub, String rg, String name, String containerName, AzureRequest req) {
-        Optional<ContainerGroup> found = getGroup(storageKey(sub, rg, name));
+        Optional<ContainerGroup> found = getGroup(groupId(sub, rg, name));
         if (found.isEmpty()) {
             return groupNotFound(rg, name);
         }
@@ -663,8 +666,15 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                     // for ever while ARM clients polled a state that could never change.
                     if ("Creating".equals(group.getProvisioningState())
                             && containerManager.allContainersStarted(group)) {
-                        group.setProvisioningState("Succeeded");
-                        putGroup(group.storageKey(), group);
+                        // Only over the containers this check saw: a DELETE, or a PUT that replaced them, since the
+                        // scan must not be undone.
+                        store.update(groupId(group), current -> {
+                            if ("Creating".equals(current.getProvisioningState())
+                                    && Objects.equals(current.getContainerIds(), group.getContainerIds())) {
+                                current.setProvisioningState("Succeeded");
+                            }
+                            return current;
+                        });
                         LOG.infov("Container group {0} has started; provisioningState=Succeeded", group.getName());
                     }
                 });
@@ -772,54 +782,39 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries((sub + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, null));
     }
 
-    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
-        return scanAll().stream()
-                .filter(group -> group.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return store.list(scope).stream()
+                .map(ArmResourceStore.Stored::value)
                 .map(ContainerGroup::indexEntry)
                 .toList();
     }
 
     // ── Storage helpers ────────────────────────────────────────────────────────
 
-    private Optional<ContainerGroup> getGroup(String key) {
-        return storage.get(key).map(so -> {
-            try {
-                return MAPPER.readValue(so.data(), ContainerGroup.class);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deserialize container group {0}: {1}", key, e.getMessage());
-                return null;
-            }
-        });
-    }
-
-    private void putGroup(String key, ContainerGroup group) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(group);
-            storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize container group: " + key, e);
-        }
+    private Optional<ContainerGroup> getGroup(ArmResourceId id) {
+        return store.get(id).map(ArmResourceStore.Stored::value);
     }
 
     private List<ContainerGroup> scanAll() {
-        List<ContainerGroup> result = new ArrayList<>();
-        storage.scan(k -> true).forEach(so -> {
-            try {
-                ContainerGroup group = MAPPER.readValue(so.data(), ContainerGroup.class);
-                if (group != null) { result.add(group); }
-            } catch (Exception e) {
-                LOG.debugv("Skipping unreadable container group entry: {0}", e.getMessage());
-            }
-        });
-        return result;
+        return store.all().stream().map(ArmResourceStore.Stored::value).toList();
+    }
+
+    private static ArmResourceId groupId(String sub, String rg, String name) {
+        return ArmResourceId.parse(String.format(
+                "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerInstance/containerGroups/%s",
+                sub, rg, name)).orElseThrow();
+    }
+
+    private static ArmResourceId groupId(ContainerGroup group) {
+        return ArmResourceId.parse(group.armId()).orElseThrow();
     }
 
     // ── Path / body parsing helpers ────────────────────────────────────────────
@@ -841,10 +836,6 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static String segment(String path, int index) {
         String[] parts = path.split("[/?]");
         return index < parts.length ? parts[index] : "";
-    }
-
-    private static String storageKey(String sub, String rg, String name) {
-        return sub + "/" + rg + "/" + name;
     }
 
     private static Map<String, String> parseTags(JsonNode tagsNode) {
@@ -906,6 +897,6 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 }
             });
         }
-        storage.clear();
+        store.clear();
     }
 }

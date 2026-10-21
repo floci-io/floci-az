@@ -396,6 +396,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | Type | Rule |
 |---|---|
 | `Microsoft.Cache/redis` | 1 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
+| `Microsoft.ContainerInstance/containerGroups` | 1 to 63 lowercase letters, digits and hyphens, no leading, trailing or consecutive hyphen |
 | `Microsoft.ContainerRegistry/registries` | 5 to 50 letters and digits |
 | `Microsoft.ContainerService/managedClusters` | 1 to 63 letters, digits, underscores and hyphens, starting and ending with a letter or digit |
 | `Microsoft.ContainerService/managedClusters/agentPools` | 1 to 12 lowercase letters and digits, starting with a letter; also checked for the pools in a cluster PUT body |

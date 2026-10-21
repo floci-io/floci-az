@@ -129,7 +129,7 @@ public class AciContainerGroupManager {
                 .withName(dockerName)
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels("aci", group.getName(),
                         group.getSubscriptionId(), group.getResourceGroup(), group.getLocation()))
-                .withLabel("floci_az_aci_group", group.storageKey())
+                .withLabel("floci_az_aci_group", group.containerKey())
                 .withLogRotation();
 
         // ACI's `command` replaces the image's entrypoint AND cmd (unlike docker run's trailing
@@ -471,7 +471,7 @@ public class AciContainerGroupManager {
         if (name.length() > 20) {
             name = name.substring(0, 20);
         }
-        return name + "-" + Integer.toHexString(group.storageKey().hashCode());
+        return name + "-" + Integer.toHexString(group.containerKey().hashCode());
     }
 
     private static String sanitize(String name) {

@@ -73,8 +73,11 @@ public class AciModels {
                     + "/providers/Microsoft.ContainerInstance/containerGroups/" + name;
         }
 
-        /** Storage key: subscriptionId/resourceGroup/name. */
-        public String storageKey() {
+        /**
+         * The group's identity for its Docker containers' names and labels: {@code subscriptionId/resourceGroup/name}
+         * as created. Containers that outlive a restart are found by it, so it must not change.
+         */
+        public String containerKey() {
             return subscriptionId + "/" + resourceGroup + "/" + name;
         }
 
