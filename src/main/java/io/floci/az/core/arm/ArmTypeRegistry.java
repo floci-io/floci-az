@@ -3,6 +3,7 @@ package io.floci.az.core.arm;
 import io.floci.az.core.arm.ProviderCatalog.ProviderEntry;
 import io.floci.az.core.arm.ProviderCatalog.ResourceTypeEntry;
 import io.quarkus.arc.All;
+import io.quarkus.runtime.Startup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -19,12 +20,15 @@ import java.util.Optional;
  * with Azure's api-versions from the {@link ProviderCatalog}.
  *
  * <p>Startup fails on a wiring or data defect: two surfaces claiming one namespace, a type declared twice, or a
- * declared type Azure does not know (a typo, or a stale {@code providers.json}).
+ * declared type Azure does not know (a typo, or a stale {@code providers.json}). The registry is built at startup
+ * ({@link Startup}), not on the first ARM request, so such a defect stops the emulator instead of failing requests
+ * while it reports ready.
  *
  * <p>{@link #match} answers which declared type an ARM path addresses. Resource groups and the built-in
  * {@code subscriptions/{sub}/resourcegroups} collection match {@code Microsoft.Resources/resourceGroups}; an
  * action on a resource ({@code storageAccounts/a/listKeys}) matches the resource's type.
  */
+@Startup
 @ApplicationScoped
 public class ArmTypeRegistry {
 
