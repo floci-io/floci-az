@@ -90,21 +90,22 @@ public class NetworkService {
 
     /** {@code UpdateTags}: a {@code tags} object replaces the resource's tags whole; every other field stays. */
     private Response updateTags(AzureRequest request, String tail, String key) {
-        Map<String, Object> existing = resources.get(key);
-        if (existing == null) {
+        if (!resources.containsKey(key)) {
             return notFound(tail);
         }
-        Map<String, Object> body = parseBody(request);
-        Map<String, Object> updated = new LinkedHashMap<>(existing);
-        if (body.get("tags") instanceof Map<?, ?> tags) {
-            if (tags.isEmpty()) {
-                updated.remove("tags");
-            } else {
-                updated.put("tags", tags);
+        Object tags = parseBody(request).get("tags");
+        Map<String, Object> updated = resources.computeIfPresent(key, (k, existing) -> {
+            Map<String, Object> copy = new LinkedHashMap<>(existing);
+            if (tags instanceof Map<?, ?> named) {
+                if (named.isEmpty()) {
+                    copy.remove("tags");
+                } else {
+                    copy.put("tags", named);
+                }
             }
-        }
-        resources.put(key, updated);
-        return Response.ok(stripInternal(updated)).build();
+            return copy;
+        });
+        return updated == null ? notFound(tail) : Response.ok(stripInternal(updated)).build();
     }
 
     public List<Map<String, Object>> listResources(String sub, String rg) {
