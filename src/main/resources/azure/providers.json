@@ -2922,6 +2922,15 @@
       ]
     },
     {
+      "namespace": "Microsoft.ResourceGraph",
+      "resourceTypes": [
+        {
+          "resourceType": "queries",
+          "apiVersions": ["2024-04-01", "2022-10-01", "2021-03-01", "2019-04-01", "2018-09-01-preview"]
+        }
+      ]
+    },
+    {
       "namespace": "Microsoft.Resources",
       "resourceTypes": [
         {

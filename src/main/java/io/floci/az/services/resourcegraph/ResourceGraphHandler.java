@@ -44,9 +44,11 @@ public class ResourceGraphHandler implements AzureServiceHandler {
 
     private final EmulatorConfig config;
     private final GraphTables tables;
+    private final SharedQueries sharedQueries;
 
     @Inject
-    public ResourceGraphHandler(EmulatorConfig config, GraphTables tables) {
+    public ResourceGraphHandler(EmulatorConfig config, GraphTables tables, SharedQueries sharedQueries) {
+        this.sharedQueries = sharedQueries;
         this.config = config;
         this.tables = tables;
     }
@@ -71,6 +73,9 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         String path = req.resourcePath();
         int query = path.indexOf('?');
         String resource = (query >= 0 ? path.substring(0, query) : path).toLowerCase(Locale.ROOT);
+        if (SharedQueries.matches(resource)) {
+            return sharedQueries.handle(req, resource);
+        }
         if (!resource.endsWith("providers/microsoft.resourcegraph/resources")) {
             return ArmErrors.error(404, "InvalidResourceType",
                 "The resource type '" + resource + "' could not be found in the namespace 'Microsoft.ResourceGraph'.");

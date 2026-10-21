@@ -28,6 +28,9 @@ against it yet.
   other dynamic columns are data and read as null when absent. Comparisons with a null operand are null,
   so `not(x < now())` keeps rows with no `x` out, as Kusto does. Dynamic property keys (`tags.env`,
   `properties.x`) are case-sensitive and `/` on two integers is integer division, as in Kusto.
+- **Shared queries** (`Microsoft.ResourceGraph/queries`, the namespace's one resource type): create,
+  read, update, delete and list in a resource group or subscription, in memory and `global`, as the
+  `GraphQuery` resource of the specification.
 - **Operators**: `where`, `extend`, `project`, `project-away`, `summarize ... by`, `order by` /
   `sort by`, `distinct`, `take` / `limit`, `union`, `join kind=inner|innerunique|leftouter|leftsemi|leftanti|fullouter ... on`
   and `count`.

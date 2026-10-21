@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.isOneOf;
 import static org.hamcrest.Matchers.notNullValue;
@@ -184,6 +185,29 @@ class ResourceGraphTest {
         given().contentType("application/json")
                 .body("{\"query\": \"policyresources | project id\", \"options\": {\"$skipToken\": \"c2tpcDotMQ\"}}")
                 .when().post(GRAPH).then().statusCode(400).body("error.code", equalTo("InvalidSkipToken"));
+    }
+
+    @Test
+    void sharedQueriesAreSavedPerResourceGroup() {
+        String query = "/subscriptions/" + SUB + "/resourceGroups/rg-graph/providers/Microsoft.ResourceGraph/queries/all-storage?api-version=2024-04-01";
+        given().contentType("application/json")
+                .body("{\"location\": \"global\", \"tags\": {\"team\": \"ops\"}, \"properties\": {\"description\": \"Storage accounts\", \"query\": \"resources | where type =~ 'microsoft.storage/storageaccounts'\"}}")
+                .when().put(query)
+                .then().statusCode(201)
+                .body("type", equalTo("Microsoft.ResourceGraph/queries"))
+                .body("location", equalTo("global"))
+                .body("properties.resultKind", equalTo("basic"))
+                .body("properties.query", containsString("storageaccounts"));
+        given().contentType("application/json").body("{\"properties\": {\"description\": \"All storage\"}}")
+                .when().patch(query).then().statusCode(200)
+                .body("properties.description", equalTo("All storage"))
+                .body("tags.team", equalTo("ops"));
+        given().when().get("/subscriptions/" + SUB + "/providers/Microsoft.ResourceGraph/queries?api-version=2024-04-01")
+                .then().statusCode(200).body("value", hasSize(1)).body("value[0].name", equalTo("all-storage"));
+        given().contentType("application/json").body("{\"location\": \"global\", \"properties\": {}}")
+                .when().put(query.replace("all-storage", "empty")).then().statusCode(400);
+        given().when().delete(query).then().statusCode(200);
+        given().when().get(query).then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
     }
 
     @Test
