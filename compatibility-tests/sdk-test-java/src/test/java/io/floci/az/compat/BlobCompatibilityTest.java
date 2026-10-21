@@ -3,11 +3,13 @@ package io.floci.az.compat;
 import com.azure.core.http.rest.PagedResponse;
 import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
+import com.azure.core.util.polling.SyncPoller;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobClientBuilder;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
+import com.azure.storage.blob.models.BlobCopyInfo;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.models.BlobItem;
@@ -17,6 +19,7 @@ import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobServiceProperties;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.BlockListType;
+import com.azure.storage.blob.models.CopyStatusType;
 import com.azure.storage.blob.models.CustomerProvidedKey;
 import com.azure.storage.blob.models.LeaseStateType;
 import com.azure.storage.blob.models.LeaseStatusType;
@@ -41,6 +44,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.Iterator;
@@ -1051,5 +1055,29 @@ class BlobCompatibilityTest {
         assertEquals(400, invalid.getStatusCode());
 
         client.deleteBlobContainer(name);
+    }
+
+    @Test
+    @DisplayName("copy blob: copyFromUrl and beginCopy copy the bytes and the source's metadata")
+    void copyBlob() {
+        BlobContainerClient container = client.createBlobContainer(containerName());
+        BlobClient source = container.getBlobClient("source.txt");
+        source.upload(BinaryData.fromString("copy me"));
+        source.setMetadata(Map.of("origin", "source"));
+
+        // Copy Blob From URL: the SDK accepts only 202.
+        BlobClient synced = container.getBlobClient("synced.txt");
+        assertNotNull(synced.copyFromUrl(source.getBlobUrl()));
+        assertEquals("copy me", synced.downloadContent().toString());
+
+        // Copy Blob: the poller completes on the start response's copy status.
+        BlobClient started = container.getBlobClient("started.txt");
+        SyncPoller<BlobCopyInfo, Void> poller = started.beginCopy(source.getBlobUrl(), Duration.ofMillis(100));
+        assertEquals(CopyStatusType.SUCCESS,
+            poller.waitForCompletion(Duration.ofSeconds(30)).getValue().getCopyStatus());
+        assertEquals("copy me", started.downloadContent().toString());
+        assertEquals("source", started.getProperties().getMetadata().get("origin"));
+
+        container.delete();
     }
 }
