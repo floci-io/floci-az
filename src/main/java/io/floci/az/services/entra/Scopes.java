@@ -1,5 +1,6 @@
 package io.floci.az.services.entra;
 
+import java.util.Arrays;
 import java.util.Set;
 
 /** Reads the audience and the {@code scp} claim out of a {@code scope} (or v1 {@code resource}) value. */
@@ -18,6 +19,15 @@ final class Scopes {
             return first.substring(0, first.length() - "/.default".length());
         }
         return first;
+    }
+
+    /** Delegated access tokens retain OIDC consent so UserInfo can enforce it. */
+    static String delegatedScopes(String scope) {
+        if (scope == null || scope.isBlank()) {
+            return null;
+        }
+        return String.join(" ", Arrays.stream(scope.trim().split("\\s+"))
+                .filter(value -> !"offline_access".equals(value)).toList());
     }
 
     /** The first requested scope, or the base URL when none was sent. */
