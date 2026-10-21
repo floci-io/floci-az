@@ -5,6 +5,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 /**
@@ -20,7 +25,7 @@ import static org.hamcrest.Matchers.startsWith;
  * TLS-only listener, and the apply never reaches a resource.
  */
 @QuarkusTest
-@DisplayName("AzureIdentityController — /metadata/endpoints scheme handling")
+@DisplayName("AzureIdentityController — /metadata/endpoints shapes and scheme handling")
 class AzureIdentityControllerTest {
 
     @Test
@@ -66,5 +71,50 @@ class AzureIdentityControllerTest {
                 .when().get("/metadata/endpoints")
                 .then().statusCode(200)
                 .body("resourceManager", startsWith("http://"));
+    }
+
+    @Test
+    @DisplayName("2022-09-01 and a request without an api-version answer the emulator's single object")
+    void theDefaultShapeIsTheSingleObject() {
+        for (String query : new String[] {"", "?api-version=2022-09-01"}) {
+            given()
+                    .when().get("/metadata/endpoints" + query)
+                    .then().statusCode(200)
+                    .body("name", equalTo("floci-az"))
+                    .body("suffixes.storage", equalTo("core.windows.net"))
+                    .body("cloudEndpoint", nullValue());
+        }
+    }
+
+    @Test
+    @DisplayName("2019-05-01 is a one-cloud list named after the default cloud, with the emulator's endpoints")
+    void theCloudListHasOneDefaultCloudAtTheEmulator() {
+        given()
+                .header("X-Forwarded-Proto", "https")
+                .when().get("/metadata/endpoints?api-version=2019-05-01")
+                .then().statusCode(200)
+                .body("$", hasSize(1))
+                .body("[0].name", equalTo("AzureCloud"))
+                .body("[0].resourceManager", startsWith("https://"))
+                .body("[0].resourceManager", not(equalTo("https://management.azure.com/")))
+                .body("[0].authentication.loginEndpoint", startsWith("https://"))
+                .body("[0].authentication.audiences", hasSize(1))
+                .body("[0].portal", startsWith("https://"))
+                .body("[0].suffixes.sqlServerHostname", equalTo("database.windows.net"))
+                .body("[0].suffixes.keyVaultDns", equalTo("vault.azure.net"));
+    }
+
+    @Test
+    @DisplayName("2018-01-01 keeps Azure's cloudEndpoint entries, so azurerm keeps its location fallback")
+    void theCloudEndpointDocumentKeepsAzuresEntries() {
+        given()
+                .when().get("/metadata/endpoints?api-version=2018-01-01")
+                .then().statusCode(200)
+                .body("cloudEndpoint.public.endpoint", equalTo("management.azure.com"))
+                .body("cloudEndpoint.public.locations", hasItem("eastus"))
+                .body("cloudEndpoint.usGovCloud.endpoint", equalTo("management.usgovcloudapi.net"))
+                .body("authentication.loginEndpoint", startsWith("http://"))
+                .body("portalEndpoint", startsWith("http://"))
+                .body("galleryEndpoint", startsWith("http://"));
     }
 }

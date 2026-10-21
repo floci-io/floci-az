@@ -24,6 +24,56 @@
     "status" : 200
   },
   "endpoints, 2019-05-01" : {
+    "body" : [ {
+      "activeDirectoryDataLake" : "https://datalake.azure.net/",
+      "appInsightsResourceId" : "https://api.applicationinsights.io",
+      "appInsightsTelemetryChannelResourceId" : "https://dc.applicationinsights.azure.com/v2/track",
+      "attestationResourceId" : "https://attest.azure.net",
+      "authentication" : {
+        "audiences" : [ "http://localhost:<port>/" ],
+        "identityProvider" : "AAD",
+        "loginEndpoint" : "http://localhost:<port>/",
+        "tenant" : "common"
+      },
+      "batch" : "https://batch.core.windows.net/",
+      "gallery" : "http://localhost:<port>/",
+      "graph" : "https://graph.windows.net/",
+      "graphAudience" : "https://graph.windows.net/",
+      "logAnalyticsResourceId" : "https://api.loganalytics.io",
+      "media" : "https://rest.media.azure.net",
+      "microsoftGraphResourceId" : "http://localhost:<port>/",
+      "name" : "AzureCloud",
+      "ossrDbmsResourceId" : "https://ossrdbms-aad.database.windows.net",
+      "ossrdbmsResourceId" : "https://ossrdbms-aad.database.windows.net",
+      "portal" : "http://localhost:<port>/",
+      "resourceManager" : "http://localhost:<port>",
+      "sqlManagement" : "https://management.core.windows.net:8443/",
+      "suffixes" : {
+        "acrLoginServer" : "azurecr.io",
+        "attestationEndpoint" : "attest.azure.net",
+        "azureDataLakeAnalyticsCatalogAndJob" : "azuredatalakeanalytics.net",
+        "azureDataLakeStoreFileSystem" : "azuredatalakestore.net",
+        "azureFrontDoorEndpointSuffix" : "azurefd.net",
+        "keyVaultDns" : "vault.azure.net",
+        "mariadbServerEndpoint" : "mariadb.database.azure.com",
+        "mhsmDns" : "managedhsm.azure.net",
+        "mysqlServerEndpoint" : "mysql.database.azure.com",
+        "postgresqlServerEndpoint" : "postgres.database.azure.com",
+        "sqlServerHostname" : "database.windows.net",
+        "storage" : "core.windows.net",
+        "storageSyncEndpointSuffix" : "afs.azure.net",
+        "synapseAnalytics" : "dev.azuresynapse.net"
+      },
+      "synapseAnalyticsResourceId" : "https://dev.azuresynapse.net",
+      "vmImageAliasDoc" : "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json"
+    } ],
+    "headers" : {
+      "Content-Type" : "application/json;charset=UTF-8"
+    },
+    "request" : "GET /metadata/endpoints?api-version=2019-05-01",
+    "status" : 200
+  },
+  "endpoints, 2018-01-01" : {
     "body" : {
       "authentication" : {
         "audiences" : [ "http://localhost:<port>/" ],
@@ -31,20 +81,29 @@
         "loginEndpoint" : "http://localhost:<port>/",
         "tenant" : "common"
       },
-      "gallery" : "http://localhost:<port>/",
-      "microsoftGraphResourceId" : "http://localhost:<port>/",
-      "name" : "floci-az",
-      "portal" : "http://localhost:<port>/",
-      "resourceManager" : "http://localhost:<port>",
-      "suffixes" : {
-        "keyVaultDns" : "vault.azure.net",
-        "storage" : "core.windows.net"
-      }
+      "cloudEndpoint" : {
+        "chinaCloud" : {
+          "endpoint" : "management.chinacloudapi.cn",
+          "locations" : [ "chinanorth", "chinaeast", "chinanorth2", "chinaeast2", "chinanorth3", "chinaeast3" ]
+        },
+        "public" : {
+          "endpoint" : "management.azure.com",
+          "locations" : [ "eastus", "eastus2", "southcentralus", "westus2", "centralus", "northcentralus", "westus", "westcentralus", "westus3", "canadacentral", "canadaeast", "brazilsouth", "brazilsoutheast", "mexicocentral", "northeurope", "uksouth", "westeurope", "francecentral", "germanywestcentral", "norwayeast", "switzerlandnorth", "swedencentral", "francesouth", "germanynorth", "norwaywest", "switzerlandwest", "ukwest", "italynorth", "spaincentral", "polandcentral", "australiaeast", "southeastasia", "centralindia", "eastasia", "japaneast", "koreacentral", "australiacentral", "australiacentral2", "australiasoutheast", "japanwest", "koreasouth", "southindia", "westindia", "indonesiacentral", "newzealandnorth", "uaenorth", "uaecentral", "israelcentral", "qatarcentral", "southafricanorth", "southafricawest" ]
+        },
+        "usGovCloud" : {
+          "endpoint" : "management.usgovcloudapi.net",
+          "locations" : [ "usgovvirginia", "usgoviowa", "usgovarizona", "usgovtexas", "usdodeast", "usdodcentral" ]
+        }
+      },
+      "galleryEndpoint" : "http://localhost:<port>/",
+      "graphAudience" : "https://graph.windows.net/",
+      "graphEndpoint" : "https://graph.windows.net/",
+      "portalEndpoint" : "http://localhost:<port>/"
     },
     "headers" : {
       "Content-Type" : "application/json;charset=UTF-8"
     },
-    "request" : "GET /metadata/endpoints?api-version=2019-05-01",
+    "request" : "GET /metadata/endpoints?api-version=2018-01-01",
     "status" : 200
   }
 }

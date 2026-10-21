@@ -194,9 +194,11 @@ public class ArmRouter {
     // ── Routing stages, in chain order ──────────────────────────────────────────
 
     /**
-     * ARM metadata endpoint, read by go-azure-sdk for environment discovery (the azurerm provider's
-     * {@code metadata_host}). Handed to JAX-RS, where {@code AzureIdentityController} answers it with
-     * the emulator's endpoints and suffixes, derived from the request base URL.
+     * ARM metadata endpoint ({@code /metadata/endpoints}), handed to JAX-RS, where
+     * {@code AzureIdentityController} answers it in the shape the api-version asks for, every endpoint at the
+     * request's base URL: the single object go-azure-sdk (azurerm's {@code metadata_host}) and
+     * {@code az cloud register} read, the cloud list of the az CLI's {@code ARM_CLOUD_METADATA_URL}
+     * (2019-05-01), and the {@code cloudEndpoint} document azurerm's location validation reads (2018-01-01).
      */
     RouteOutcome routeArmMetadataEndpoints(RoutingContext ctx) {
         return ctx.path().startsWith("metadata/endpoints") ? Fallthrough.TO_JAX_RS : Fallthrough.TO_NEXT_STAGE;

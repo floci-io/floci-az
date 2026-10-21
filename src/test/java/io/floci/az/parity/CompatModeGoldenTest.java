@@ -159,7 +159,11 @@ class CompatModeGoldenTest {
     void cloudMetadata() {
         Script script = new Script("metadata");
         script.step("endpoints, 2022-09-01", given(), "GET", "/metadata/endpoints?api-version=2022-09-01");
+        // Fix (metadata shapes, plan step 4): main answered the 2022-09-01 object to every api-version, which the
+        // az CLI cannot iterate as ARM_CLOUD_METADATA_URL's cloud list; 2019-05-01 is now a one-cloud list and
+        // 2018-01-01 the cloudEndpoint document, both from the default cloud's catalog payload.
         script.step("endpoints, 2019-05-01", given(), "GET", "/metadata/endpoints?api-version=2019-05-01");
+        script.step("endpoints, 2018-01-01", given(), "GET", "/metadata/endpoints?api-version=2018-01-01");
         script.finish();
     }
 

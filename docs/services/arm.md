@@ -45,6 +45,8 @@ Managed Identity, and the other `Microsoft.*` providers).
 ## Endpoints
 
 ```
+GET    /metadata/endpoints?api-version={2022-09-01|2019-05-01|2018-01-01}
+
 GET    /tenants
 GET    /subscriptions
 GET    /subscriptions/{sub}
@@ -141,6 +143,28 @@ The default tenant comes from the [Entra ID](entra.md) `default-tenant-id` setti
 and issued tokens always agree. The [Managed Identity](managed-identity.md) `system-assigned-scope`
 defaults to `subscriptions/${floci-az.services.arm.default-subscription-id}`, so it follows the
 subscription when you change it.
+
+## Cloud metadata
+
+`GET /metadata/endpoints` describes the cloud with every endpoint a client calls at the emulator's own base
+URL (the request's scheme and host, or the `X-Forwarded-Proto` scheme behind a TLS proxy), in the shape the
+`api-version` asks for:
+
+| api-version | Shape | Read by |
+|---|---|---|
+| `2022-09-01`, or any other, or none | one object, named `floci-az` | azurerm's `metadata_host`, `az cloud register --endpoint-resource-manager` |
+| `2019-05-01` | a list holding one cloud, named after the default cloud (`AzureCloud`) | the az CLI's `ARM_CLOUD_METADATA_URL` |
+| `2018-01-01` | Azure's `cloudEndpoint` document | azurerm's location validation |
+
+The `2019-05-01` and `2018-01-01` answers start from Azure's own payload for the default cloud
+(`floci-az.cloud.default`), so audiences and suffixes of services no client reaches through this document stay
+Azure's. Because the `2019-05-01` cloud keeps the name `AzureCloud`, setting `ARM_CLOUD_METADATA_URL` to
+`<base-url>/metadata/endpoints?api-version=2019-05-01` is enough: the az CLI's default active cloud then resolves
+to the emulator without `az cloud set`.
+
+The `2018-01-01` `cloudEndpoint` lists Azure's ARM hosts verbatim and none of the emulator's. azurerm validates a
+resource's `location` only against the entry whose `endpoint` is its own ARM host, so it keeps accepting any
+non-empty location against floci-az, as before.
 
 ## Tenants and subscriptions
 
