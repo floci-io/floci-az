@@ -42,7 +42,7 @@
       "logAnalyticsResourceId" : "https://api.loganalytics.io",
       "media" : "https://rest.media.azure.net",
       "microsoftGraphResourceId" : "http://localhost:<port>/",
-      "name" : "AzureCloud",
+      "name" : "floci-az",
       "ossrDbmsResourceId" : "https://ossrdbms-aad.database.windows.net",
       "ossrdbmsResourceId" : "https://ossrdbms-aad.database.windows.net",
       "portal" : "http://localhost:<port>/",

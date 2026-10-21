@@ -94,7 +94,7 @@ class AzureIdentityControllerTest {
                 .when().get("/metadata/endpoints?api-version=2019-05-01")
                 .then().statusCode(200)
                 .body("$", hasSize(1))
-                .body("[0].name", equalTo("AzureCloud"))
+                .body("[0].name", equalTo("floci-az"))
                 .body("[0].resourceManager", startsWith("https://"))
                 .body("[0].resourceManager", not(equalTo("https://management.azure.com/")))
                 .body("[0].authentication.loginEndpoint", startsWith("https://"))

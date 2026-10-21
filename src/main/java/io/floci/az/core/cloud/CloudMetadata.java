@@ -12,8 +12,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  *
  * <ul>
  *   <li>{@value #CLOUD_LIST_VERSION}: a list of clouds, which the az CLI reads from {@code ARM_CLOUD_METADATA_URL}
- *       and registers by {@code name}. The one entry keeps the catalog's name ({@code AzureCloud} for the public
- *       cloud), so az's default active cloud resolves to the emulator with no {@code az cloud set}.</li>
+ *       and registers by {@code name}; with one cloud listed, az makes it the active one with no
+ *       {@code az cloud set}. The entry is named {@value #EMULATOR_CLOUD_NAME}, as the 2022-09-01 answer is, and
+ *       never {@code AzureCloud}: az replaces the login endpoint of a cloud by that name with
+ *       {@code https://login.microsoftonline.com}, which would send {@code az login} away from the emulator.</li>
  *   <li>{@value #CLOUD_ENDPOINT_VERSION}: one object whose {@code cloudEndpoint} lists each Azure ARM host's
  *       locations, verbatim. azurerm validates a resource's location only against the entry whose
  *       {@code endpoint} is its own ARM host, so naming no emulator host keeps its "any non-empty location"
@@ -26,6 +28,8 @@ public final class CloudMetadata {
 
     public static final String CLOUD_LIST_VERSION = "2019-05-01";
     public static final String CLOUD_ENDPOINT_VERSION = "2018-01-01";
+    /** The name every {@code /metadata/endpoints} answer gives the emulator's cloud. */
+    public static final String EMULATOR_CLOUD_NAME = "floci-az";
 
     private CloudMetadata() {
     }
@@ -33,6 +37,7 @@ public final class CloudMetadata {
     /** The {@value #CLOUD_LIST_VERSION} answer: a one-cloud list for {@code cloud}, served at {@code baseUrl}. */
     public static ArrayNode cloudList(CloudProfile cloud, String baseUrl) {
         ObjectNode entry = payload(cloud, CLOUD_LIST_VERSION);
+        entry.put("name", EMULATOR_CLOUD_NAME);
         // No trailing slash, as in the 2022-09-01 answer: SDKs append leading-slash paths to it.
         entry.put("resourceManager", baseUrl);
         entry.put("microsoftGraphResourceId", baseUrl + "/");

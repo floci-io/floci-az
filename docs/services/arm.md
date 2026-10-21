@@ -153,14 +153,16 @@ URL (the request's scheme and host, or the `X-Forwarded-Proto` scheme behind a T
 | api-version | Shape | Read by |
 |---|---|---|
 | `2022-09-01`, or any other, or none | one object, named `floci-az` | azurerm's `metadata_host`, `az cloud register --endpoint-resource-manager` |
-| `2019-05-01` | a list holding one cloud, named after the default cloud (`AzureCloud`) | the az CLI's `ARM_CLOUD_METADATA_URL` |
+| `2019-05-01` | a list holding one cloud, named `floci-az` | the az CLI's `ARM_CLOUD_METADATA_URL` |
 | `2018-01-01` | Azure's `cloudEndpoint` document | azurerm's location validation |
 
 The `2019-05-01` and `2018-01-01` answers start from Azure's own payload for the default cloud
 (`floci-az.cloud.default`), so audiences and suffixes of services no client reaches through this document stay
-Azure's. Because the `2019-05-01` cloud keeps the name `AzureCloud`, setting `ARM_CLOUD_METADATA_URL` to
-`<base-url>/metadata/endpoints?api-version=2019-05-01` is enough: the az CLI's default active cloud then resolves
-to the emulator without `az cloud set`.
+Azure's. Setting `ARM_CLOUD_METADATA_URL` to `<base-url>/metadata/endpoints?api-version=2019-05-01` is enough
+for the az CLI: the one cloud listed becomes its active cloud without `az cloud register` or `az cloud set`, and
+`az login` signs in against the emulator. The cloud is named `floci-az` rather than `AzureCloud` because az
+replaces the login endpoint of a cloud named `AzureCloud` with Microsoft's. Use the `https` base URL: MSAL
+refuses a plain-HTTP authority.
 
 The `2018-01-01` `cloudEndpoint` lists Azure's ARM hosts verbatim and none of the emulator's. azurerm validates a
 resource's `location` only against the entry whose `endpoint` is its own ARM host, so it keeps accepting any

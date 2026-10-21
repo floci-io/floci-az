@@ -62,7 +62,7 @@ public class AzureIdentityController {
         // env.Storage/env.KeyVault with a resource identifier; the actual data-plane URLs come from ARM
         // primaryEndpoints/vaultUri.
         return Response.ok(Map.of(
-            "name",                     "floci-az",
+            "name",                     CloudMetadata.EMULATOR_CLOUD_NAME,
             // No trailing slash: in Azure Stack mode the go-azure-sdk concatenates this
             // endpoint with leading-slash resource paths, so a trailing slash yields
             // "//subscriptions/..." — a network-path reference that breaks the SDK's LRO
