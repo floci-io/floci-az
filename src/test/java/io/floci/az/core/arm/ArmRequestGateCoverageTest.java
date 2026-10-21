@@ -132,6 +132,7 @@ class ArmRequestGateCoverageTest {
         assertEquals("/subscriptions/sub-gate", call.id().id());
         assertEquals(ScopeSource.ARM_PATH, call.scope().source());
         assertEquals("sub-gate", call.scope().subscriptionId());
+        assertNull(call.type(), "a subscription is not a declared resource type");
     }
 
     @Test
@@ -154,6 +155,7 @@ class ArmRequestGateCoverageTest {
         assertEquals("PUT", call.method());
         assertEquals("rg-gate", call.id().resourceGroup());
         assertEquals("rg-gate", call.scope().resourceGroup());
+        assertEquals("Microsoft.Resources/resourceGroups", call.type());
     }
 
     @Test
@@ -163,7 +165,9 @@ class ArmRequestGateCoverageTest {
                 + "?api-version=2023-05-01")
             .then().extract().statusCode();
 
-        assertEquals("Microsoft.Storage/storageAccounts", assertGatedOnce(status).id().typePath());
+        ArmCall call = assertGatedOnce(status);
+        assertEquals("Microsoft.Storage/storageAccounts", call.id().typePath());
+        assertEquals("Microsoft.Storage/storageAccounts", call.type());
     }
 
     // ── ArmHandler's provider lane (ArmProviderService) ─────────────────────────
@@ -174,7 +178,9 @@ class ArmRequestGateCoverageTest {
             .get("/subscriptions/sub-gate/resourceGroups/rg-gate/providers/Microsoft.EventGrid/topics?api-version=2022-06-15")
             .then().extract().statusCode();
 
-        assertEquals("Microsoft.EventGrid/topics", assertGatedOnce(status).id().typePath());
+        ArmCall call = assertGatedOnce(status);
+        assertEquals("Microsoft.EventGrid/topics", call.id().typePath());
+        assertEquals("Microsoft.EventGrid/topics", call.type());
     }
 
     @Test
@@ -183,7 +189,9 @@ class ArmRequestGateCoverageTest {
             .get("/subscriptions/sub-gate/providers/Microsoft.Network/virtualNetworks?api-version=2023-09-01")
             .then().extract().statusCode();
 
-        assertEquals("Microsoft.Network/virtualNetworks", assertGatedOnce(status).id().typePath());
+        ArmCall call = assertGatedOnce(status);
+        assertEquals("Microsoft.Network/virtualNetworks", call.id().typePath());
+        assertEquals("Microsoft.Network/virtualNetworks", call.type());
     }
 
     @Test
@@ -206,7 +214,9 @@ class ArmRequestGateCoverageTest {
             .get("/subscriptions/sub-gate/resourceGroups/rg-gate/providers/Microsoft.Cache/redis?api-version=2023-08-01")
             .then().extract().statusCode();
 
-        assertEquals("Microsoft.Cache/redis", assertGatedOnce(status).id().typePath());
+        ArmCall call = assertGatedOnce(status);
+        assertEquals("Microsoft.Cache/redis", call.id().typePath());
+        assertEquals("Microsoft.Cache/redis", call.type());
     }
 
     @Test
@@ -218,6 +228,7 @@ class ArmRequestGateCoverageTest {
         assertEquals(200, status);
         assertNull(call.id().subscriptionId());
         assertEquals(ScopeSource.DEFAULT, call.scope().source());
+        assertEquals("Microsoft.Authorization/policyDefinitions", call.type());
     }
 
     // ── Monitor stage ───────────────────────────────────────────────────────────
@@ -232,6 +243,7 @@ class ArmRequestGateCoverageTest {
         ArmCall call = assertGatedOnce(status);
         assertTrue(call.id().isExtension());
         assertEquals("microsoft.insights/diagnosticSettings", call.id().typePath());
+        assertEquals("Microsoft.Insights/diagnosticSettings", call.type(), "the declared spelling, not the client's");
     }
 
     @Test

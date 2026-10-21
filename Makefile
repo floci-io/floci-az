@@ -8,7 +8,7 @@
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
         test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean \
         smoke-native-crypto \
-        az-data-sync az-data-check az-data-test \
+        az-data-sync az-data-check az-data-test arm-data-sync arm-data-check arm-data-test \
         cloud-literals-check cloud-literals-audit cloud-literals-baseline
 
 MVN            = ./mvnw
@@ -542,6 +542,24 @@ az-data-check:
 
 az-data-test:
 	$(PYTHON) -m pytest tools/cloud -q
+
+# src/main/resources/azure/providers.json (the api-versions of every resource type in the served ARM
+# namespaces) is generated from local/azure/bicep-types-az (see tools/arm/gen_providers.py). Without
+# local/ (CI), arm-data-check verifies its shape only.
+
+arm-data-sync:
+	$(PYTHON) tools/arm/gen_providers.py
+
+arm-data-check:
+	@$(PYTHON) tools/arm/gen_providers.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/azure/providers.json is out of date or malformed."; \
+		echo "       Run 'make arm-data-sync' with local/azure checked out and commit the result."; \
+		exit 1; \
+	}
+
+arm-data-test:
+	$(PYTHON) -m pytest tools/arm -q
 
 # Ratchet on hardcoded cloud hosts, the "eastus" default, ARM scope re-parsing in services and the
 # per-service global-name guards (see tools/cloud/README.md). az-data-test runs its unit tests.

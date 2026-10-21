@@ -33,12 +33,19 @@ public class ArmRequestGate {
 
     private final List<ArmRequestRule> rules;
     private final boolean buffersBody;
+    private final ArmTypeRegistry types;
 
     @Inject
-    public ArmRequestGate(@All List<ArmRequestRule> rules) {
+    public ArmRequestGate(@All List<ArmRequestRule> rules, ArmTypeRegistry types) {
         this.rules = ordered(rules);
         this.buffersBody = this.rules.stream().anyMatch(ArmRequestRule::readsBody);
+        this.types = types;
         LOG.debugv("ARM request gate: {0} rules", this.rules.size());
+    }
+
+    /** A gate whose calls never carry a type, for tests that exercise the rules alone. */
+    ArmRequestGate(List<ArmRequestRule> rules) {
+        this(rules, ArmTypeRegistry.empty());
     }
 
     /** The rules in the order they run. */
@@ -88,8 +95,9 @@ public class ArmRequestGate {
         ArmRequestBody body = buffersBody && ("PUT".equals(method) || "PATCH".equals(method))
             ? ArmRequestBody.read(request.bodyStream())
             : null;
-        return new ArmCall(request.scope(), ArmResourceId.parse(request.resourcePath()).orElse(null),
-            null, method, null, body, request);
+        ArmResourceId id = ArmResourceId.parse(request.resourcePath()).orElse(null);
+        ArmResourceType type = types.match(id);
+        return new ArmCall(request.scope(), id, type == null ? null : type.type(), method, null, body, request);
     }
 
     /** Runs the exit hook of the first {@code entered} rules; {@code response} is null when something threw. */

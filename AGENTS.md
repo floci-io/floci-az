@@ -390,15 +390,20 @@ When adding a new HTTP-based service:
    a method added to the `stages` list in `AzureRoutingFilter` and ordered against its neighbours,
    plus its service type in `LITERAL_ROUTE_SERVICE_TYPES`. That set is a declaration for the
    routing-drift test, not a dispatch mechanism: adding to it alone routes nothing
-4. Implement `enabled(String serviceType)` on the handler, reading
+4. A service that serves ARM resource types declares them in a `*ArmSurface` bean next to its handler
+   (`ArmSurfaceProvider`: namespace, lane, and each type's scope and location policy), adds the namespace to
+   `NAMESPACES` in `tools/arm/gen_providers.py`, runs `make arm-data-sync`, and adds its rows to
+   `ArmSurfaceGoldenTest`. `ArmSurfaceInventoryTest` fails for a routed namespace with no surface, and the
+   `ArmTypeRegistry` refuses a type that is not in `providers.json`
+5. Implement `enabled(String serviceType)` on the handler, reading
    `config.services().<svc>().enabled()`; `AzureServiceRegistry.isEnabled()` delegates to it, so there
    is no central switch to edit
-5. Add config interface to `EmulatorConfig.ServicesConfig`
-6. Add YAML block to `application.yml`
-7. Add storage wiring if needed
-8. Update `BannerLogger`
-9. Add compatibility tests
-10. Update docs (`docs/services/<svc>.md`, `docs/services/index.md`, `mkdocs.yml`, `README.md`)
+6. Add config interface to `EmulatorConfig.ServicesConfig`
+7. Add YAML block to `application.yml`
+8. Add storage wiring if needed
+9. Update `BannerLogger`
+10. Add compatibility tests
+11. Update docs (`docs/services/<svc>.md`, `docs/services/index.md`, `mkdocs.yml`, `README.md`)
 
 When adding a sidecar-based service, additionally:
 
