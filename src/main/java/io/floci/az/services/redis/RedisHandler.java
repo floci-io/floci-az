@@ -9,13 +9,18 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
-import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import jakarta.annotation.PostConstruct;
@@ -38,6 +43,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -65,12 +71,9 @@ import java.util.function.Consumer;
  * standard Redis clients can connect to the sidecar.</p>
  */
 @ApplicationScoped
-public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(RedisHandler.class);
-
-    /** Guards the check-and-claim of a global resource name across concurrent creates. */
-    private final Object nameClaims = new Object();
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -83,7 +86,12 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     private final EmulatorConfig config;
     private final RedisCacheManager cacheManager;
-    private final StorageBackend<String, StoredObject> storage;
+    private final GlobalNameRegistry names;
+    /**
+     * Every cache, keyed by its canonical id. Before the store, caches were kept under raw-case
+     * {@code sub/rg/name}; those entries are read as they are and move to their canonical key on their next write.
+     */
+    private final ArmResourceStore<RedisCache> store;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "redis-readiness-poller");
         t.setDaemon(true);
@@ -93,10 +101,13 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
     @Inject
     public RedisHandler(EmulatorConfig config,
                         RedisCacheManager cacheManager,
-                        StorageFactory storageFactory) {
+                        StorageFactory storageFactory,
+                        GlobalNameRegistry names) {
         this.config = config;
         this.cacheManager = cacheManager;
-        this.storage = storageFactory.create("redis");
+        this.names = names;
+        this.store = ArmResourceStore.create(storageFactory, "redis", RedisCache.class, RedisCache::armId,
+                key -> true);
     }
 
     @PostConstruct
@@ -143,6 +154,11 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         LOG.debugf("RedisHandler: %s %s", method, fullPath);
 
         String tail = extractRedisPath(fullPath);
+
+        // ── Name availability (Redis_CheckNameAvailability) ──────────────────
+        if (tail.equalsIgnoreCase("checkNameAvailability") && "POST".equals(method)) {
+            return handleCheckNameAvailability(req);
+        }
 
         // ── LIST all caches in subscription ────────────────────────────────
         if (tail.equalsIgnoreCase("redis") && !fullPath.contains("/resourceGroups/")) {
@@ -191,57 +207,47 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             JsonNode props = body.path("properties");
             JsonNode sku = props.path("sku");
 
-            String storageKey = storageKey(sub, rg, cacheName);
+            // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before this runs, so a
+            // name another subscription owns never reaches here.
+            ArmResourceId id = cacheId(sub, rg, cacheName);
             RedisCache cache;
-            boolean isNew;
-            // The ownership check and the write that claims the name happen under one lock, so two
-            // subscriptions creating the same name at once cannot both pass the check. The container
-            // start stays outside it.
-            synchronized (nameClaims) {
-                if (ownedElsewhere(sub, rg, cacheName)) {
-                    return ArmErrors.error(409, "NameNotAvailable", "An error occured when trying to reserve the DNS name "
-                            + "for the cache instance. This may be a temporary issue if a cache instance of this name was "
-                            + "recently deleted. Please choose a different name or try again later.");
-                }
-                Optional<RedisCache> existing = getCache(storageKey);
-                isNew = existing.isEmpty();
-
-                if (isNew) {
-                    cache = new RedisCache();
-                    cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                    cache.setSubscriptionId(sub);
-                    cache.setResourceGroup(rg);
-                    cache.setName(cacheName);
-                    cache.setCreatedAt(Instant.now());
-                    cache.setPrimaryKey(generateAccessKey());
-                    cache.setSecondaryKey(generateAccessKey());
-                    cache.setSslPort(SSL_PORT);
-                } else {
-                    cache = existing.get();
-                }
-
-                cache.setLocation(location);
-                cache.setSkuName(sku.path("name").asText("Basic"));
-                cache.setSkuFamily(sku.path("family").asText("C"));
-                cache.setSkuCapacity(sku.path("capacity").asInt(0));
-                cache.setRedisVersion("7.0");
-                // With TLS served, absent means false, the spec default; without it, true, because
-                // the plain port is then the only one served. The plain port is served either way.
-                cache.setEnableNonSslPort(props.path("enableNonSslPort")
-                        .asBoolean(!config.services().redis().tlsEnabled()));
-                cache.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
-                cache.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
-                cache.setTags(parseStringMap(body.path("tags")));
-
-                if (config.services().redis().mocked()) {
-                    cache.setProvisioningState("Succeeded");
-                    cache.setHostName("localhost");
-                    cache.setPort(6379);
-                } else if (isNew) {
-                    cache.setProvisioningState("Creating");
-                }
-                putCache(storageKey, cache);
+            Optional<RedisCache> existing = getCache(id);
+            boolean isNew = existing.isEmpty();
+            if (isNew) {
+                cache = new RedisCache();
+                cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                cache.setSubscriptionId(sub);
+                cache.setResourceGroup(rg);
+                cache.setName(cacheName);
+                cache.setCreatedAt(Instant.now());
+                cache.setPrimaryKey(generateAccessKey());
+                cache.setSecondaryKey(generateAccessKey());
+                cache.setSslPort(SSL_PORT);
+            } else {
+                cache = existing.get();
             }
+
+            cache.setLocation(location);
+            cache.setSkuName(sku.path("name").asText("Basic"));
+            cache.setSkuFamily(sku.path("family").asText("C"));
+            cache.setSkuCapacity(sku.path("capacity").asInt(0));
+            cache.setRedisVersion("7.0");
+            // With TLS served, absent means false, the spec default; without it, true, because
+            // the plain port is then the only one served. The plain port is served either way.
+            cache.setEnableNonSslPort(props.path("enableNonSslPort")
+                    .asBoolean(!config.services().redis().tlsEnabled()));
+            cache.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
+            cache.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
+            cache.setTags(parseStringMap(body.path("tags")));
+
+            if (config.services().redis().mocked()) {
+                cache.setProvisioningState("Succeeded");
+                cache.setHostName("localhost");
+                cache.setPort(6379);
+            } else if (isNew) {
+                cache.setProvisioningState("Creating");
+            }
+            store.put(cache);
 
             if (!config.services().redis().mocked() && isNew) {
                 try {
@@ -250,7 +256,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
                     LOG.errorf(e, "Failed to start Redis container for cache %s", cacheName);
                     cache.setProvisioningState("Failed");
                 }
-                // A DELETE may have removed the claim while the container started; writing the record
+                // A DELETE may have removed the cache while the container started; writing the record
                 // back would resurrect a name another subscription may have claimed since.
                 RedisCache started = cache;
                 Optional<RedisCache> stored = updateIfSameInstance(started, current -> {
@@ -282,14 +288,13 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     private Response handleGet(String sub, String rg, String cacheName) {
-        return getCache(storageKey(sub, rg, cacheName))
+        return getCache(cacheId(sub, rg, cacheName))
                 .map(c -> Response.ok(toArmResponse(c)).type("application/json").build())
                 .orElseGet(() -> notFound("Redis cache '" + cacheName + "' not found."));
     }
 
     private Response handlePatch(String sub, String rg, String cacheName, AzureRequest req) {
-        String key = storageKey(sub, rg, cacheName);
-        Optional<RedisCache> found = getCache(key);
+        Optional<RedisCache> found = getCache(cacheId(sub, rg, cacheName));
         if (found.isEmpty()) {
             return notFound("Redis cache '" + cacheName + "' not found.");
         }
@@ -309,7 +314,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             if (props.has("enableNonSslPort")) {
                 cache.setEnableNonSslPort(props.path("enableNonSslPort").asBoolean());
             }
-            putCache(key, cache);
+            store.put(cache);
             return Response.ok(toArmResponse(cache)).type("application/json").build();
         } catch (Exception e) {
             return badRequest("Invalid request: " + e.getMessage());
@@ -317,50 +322,53 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     private Response handleDelete(String sub, String rg, String cacheName) {
-        String key = storageKey(sub, rg, cacheName);
-        Optional<RedisCache> found = getCache(key);
+        ArmResourceId id = cacheId(sub, rg, cacheName);
+        Optional<RedisCache> found = getCache(id);
         if (found.isEmpty()) {
             return notFound("Redis cache '" + cacheName + "' not found.");
         }
         if (!config.services().redis().mocked()) {
             stopQuietly(found.get());
         }
-        synchronized (nameClaims) {
-            storage.delete(key);
-        }
+        store.delete(id);
         return Response.status(202).build();
     }
 
+    /**
+     * {@code Redis_CheckNameAvailability}: {@code 200} with no body when the name is free in the caller's cloud. A
+     * taken name is answered with the create conflict, an emulator choice: Azure's answer for it is not recorded.
+     */
+    private Response handleCheckNameAvailability(AzureRequest req) {
+        String name = readBody(req.bodyStream()).path("name").asText("");
+        if (names.owner(cloud(req), CloudSuffix.REDIS, name).isEmpty()) {
+            return Response.ok().build();
+        }
+        return ArmErrors.error(RedisArmSurface.CACHE_NAME.conflictStatus(),
+                RedisArmSurface.CACHE_NAME.conflictCode(), RedisArmSurface.CACHE_NAME.conflictMessage());
+    }
+
     private Response handleListByResourceGroup(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String rg = extractResourceGroup(fullPath);
-        String prefix = sub + "/" + rg.toLowerCase() + "/";
-        List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(c -> c.storageKey().toLowerCase().startsWith(prefix))
-                .forEach(c -> items.add(toArmResponse(c)));
-        return Response.ok(Map.of("value", items)).type("application/json").build();
+        return list(new ArmScope(extractSubscriptionId(fullPath), extractResourceGroup(fullPath)));
     }
 
     private Response handleListSubscription(String fullPath) {
-        String sub = extractSubscriptionId(fullPath);
-        String prefix = sub + "/";
+        return list(new ArmScope(extractSubscriptionId(fullPath), null));
+    }
+
+    private Response list(ArmScope scope) {
         List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(c -> c.storageKey().startsWith(prefix))
-                .forEach(c -> items.add(toArmResponse(c)));
+        store.list(scope).forEach(stored -> items.add(toArmResponse(stored.value())));
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
     private Response handleListKeys(String sub, String rg, String cacheName) {
-        return getCache(storageKey(sub, rg, cacheName))
+        return getCache(cacheId(sub, rg, cacheName))
                 .map(c -> Response.ok(accessKeys(c)).type("application/json").build())
                 .orElseGet(() -> notFound("Redis cache '" + cacheName + "' not found."));
     }
 
     private Response handleRegenerateKey(String sub, String rg, String cacheName, AzureRequest req) {
-        String key = storageKey(sub, rg, cacheName);
-        Optional<RedisCache> found = getCache(key);
+        Optional<RedisCache> found = getCache(cacheId(sub, rg, cacheName));
         if (found.isEmpty()) {
             return notFound("Redis cache '" + cacheName + "' not found.");
         }
@@ -377,7 +385,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         if (!config.services().redis().mocked()) {
             cacheManager.applyAccessKeys(cache, authKey);
         }
-        putCache(key, cache);
+        store.put(cache);
         return Response.ok(accessKeys(cache)).type("application/json").build();
     }
 
@@ -401,28 +409,12 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     // ── Storage helpers ──────────────────────────────────────────────────────────
 
-    private Optional<RedisCache> getCache(String key) {
-        return storage.get(key).map(so -> {
-            try {
-                return MAPPER.readValue(so.data(), RedisCache.class);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deserialize Redis cache {0}: {1}", key, e.getMessage());
-                return null;
-            }
-        });
+    private Optional<RedisCache> getCache(ArmResourceId id) {
+        return store.get(id).map(ArmResourceStore.Stored::value);
     }
 
-    private void putCache(String key, RedisCache cache) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(cache);
-            storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize Redis cache: " + key, e);
-        }
-    }
-
-    private static boolean isSameCache(Optional<RedisCache> stored, RedisCache cache) {
-        return stored.isPresent() && cache.getInstanceId().equals(stored.get().getInstanceId());
+    private static boolean isSameCache(RedisCache stored, RedisCache cache) {
+        return cache.getInstanceId().equals(stored.getInstanceId());
     }
 
     /**
@@ -431,15 +423,15 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
      * update made since {@code cache} was read. Empty once the cache was deleted, or deleted and created again.
      */
     private Optional<RedisCache> updateIfSameInstance(RedisCache cache, Consumer<RedisCache> change) {
-        synchronized (nameClaims) {
-            Optional<RedisCache> stored = getCache(cache.storageKey());
-            if (!isSameCache(stored, cache)) {
-                return Optional.empty();
+        AtomicBoolean same = new AtomicBoolean();
+        Optional<ArmResourceStore.Stored<RedisCache>> stored = store.update(cacheId(cache), current -> {
+            if (isSameCache(current, cache)) {
+                same.set(true);
+                change.accept(current);
             }
-            change.accept(stored.get());
-            putCache(cache.storageKey(), stored.get());
-            return stored;
-        }
+            return current;
+        });
+        return same.get() ? stored.map(ArmResourceStore.Stored::value) : Optional.empty();
     }
 
     private void stopQuietly(RedisCache cache) {
@@ -450,24 +442,21 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         }
     }
 
-    /** Whether a cache of this name exists under a subscription or resource group other than this one. */
-    private boolean ownedElsewhere(String sub, String rg, String cacheName) {
-        ArmScope scope = new ArmScope(sub, rg);
-        return scanAll().stream().anyMatch(c -> cacheName.equalsIgnoreCase(c.getName())
-                && !scope.owns(c.getSubscriptionId(), c.getResourceGroup()));
+    private List<RedisCache> scanAll() {
+        return store.all().stream().map(ArmResourceStore.Stored::value).toList();
     }
 
-    private List<RedisCache> scanAll() {
-        List<RedisCache> result = new ArrayList<>();
-        storage.scan(k -> true).forEach(so -> {
-            try {
-                RedisCache c = MAPPER.readValue(so.data(), RedisCache.class);
-                if (c != null) { result.add(c); }
-            } catch (Exception e) {
-                LOG.debugv("Skipping unreadable Redis cache entry: {0}", e.getMessage());
-            }
-        });
-        return result;
+    private static ArmResourceId cacheId(String sub, String rg, String cacheName) {
+        return ArmResourceId.parse(String.format("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Cache/Redis/%s",
+                sub, rg, cacheName)).orElseThrow();
+    }
+
+    private static ArmResourceId cacheId(RedisCache cache) {
+        return ArmResourceId.parse(cache.armId()).orElseThrow();
+    }
+
+    private static CloudProfile cloud(AzureRequest req) {
+        return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
     }
 
     // ── ARM response builders ──────────────────────────────────────────────────────
@@ -542,10 +531,6 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         return index < parts.length ? parts[index] : "";
     }
 
-    private static String storageKey(String sub, String rg, String cacheName) {
-        return sub + "/" + rg + "/" + cacheName;
-    }
-
     private static Map<String, String> parseStringMap(JsonNode node) {
         Map<String, String> map = new LinkedHashMap<>();
         if (node != null && node.isObject()) {
@@ -580,7 +565,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     /** Wipes all Redis data — used by {@code POST /_admin/reset}. */
     public void clear() {
-        storage.clear();
+        store.clear();
     }
 
     // ── ResourceIndexContributor ────────────────────────────────────────────────
@@ -592,19 +577,28 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries((sub + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, null));
     }
 
-    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
-        return scanAll().stream()
-                .filter(cache -> cache.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return store.list(scope).stream()
+                .map(ArmResourceStore.Stored::value)
                 .map(cache -> ArmResources.indexEntry(cache.armId(), cache.getName(), TYPE,
                         cache.getLocation(), cache.getTags()))
+                .toList();
+    }
+
+    // ── GlobalNameSource ───────────────────────────────────────────────────────
+
+    @Override
+    public List<Claim> globalNames() {
+        return store.all().stream()
+                .map(stored -> new Claim(CloudSuffix.REDIS, stored.value().getName(), stored.id()))
                 .toList();
     }
 }

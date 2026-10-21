@@ -50,7 +50,6 @@ src/main/java/io/floci/az/services/postgres/PostgresHandler.java	name-guard	1
 src/main/java/io/floci/az/services/postgres/PostgresHandler.java	scope-parse	4
 src/main/java/io/floci/az/services/queue/QueueServiceHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/redis/RedisHandler.java	location-literal	1
-src/main/java/io/floci/az/services/redis/RedisHandler.java	name-guard	2
 src/main/java/io/floci/az/services/redis/RedisHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/servicebus/ServiceBusHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/signalr/SignalRHandler.java	cloud-literal	1

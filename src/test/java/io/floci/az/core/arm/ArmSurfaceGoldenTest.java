@@ -118,6 +118,11 @@ class ArmSurfaceGoldenTest {
         Microsoft.Web/sites/config                                                     RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         """;
 
+    /** The types that declare a name rule or a global DNS name: their bounds, suffix and conflict answer. */
+    private static final String NAMED = """
+        Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
+        """;
+
     @Inject
     ArmTypeRegistry registry;
 
@@ -128,6 +133,21 @@ class ArmSurfaceGoldenTest {
         List<String> actual = registry.surfaces().stream()
             .flatMap(surface -> surface.types().stream()
                 .map(type -> type.type() + " " + type.scope() + " " + type.location() + " " + surface.lane()))
+            .sorted(Comparator.comparing(String::toLowerCase))
+            .collect(Collectors.toList());
+        assertEquals(String.join("\n", golden), String.join("\n", actual));
+    }
+
+    @Test
+    void theNamedTypesMatchTheGoldenTable() {
+        List<String> golden = NAMED.lines().map(String::strip).filter(line -> !line.isEmpty())
+            .map(line -> line.replaceAll("\\s+", " ")).toList();
+        List<String> actual = registry.surfaces().stream()
+            .flatMap(surface -> surface.types().stream())
+            .filter(type -> type.name() != NameRule.NONE || type.globalName().declared())
+            .map(type -> type.type() + " " + type.name().minLength() + "-" + type.name().maxLength() + " "
+                + type.globalName().suffix() + " " + type.globalName().conflictStatus() + " "
+                + type.globalName().conflictCode())
             .sorted(Comparator.comparing(String::toLowerCase))
             .collect(Collectors.toList());
         assertEquals(String.join("\n", golden), String.join("\n", actual));

@@ -40,7 +40,13 @@ POST   .../redis/{name}/listKeys
 POST   .../redis/{name}/regenerateKey      # body: {"keyType":"Primary"|"Secondary"}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Cache/redis
 GET    /subscriptions/{sub}/providers/Microsoft.Cache/redis
+POST   /subscriptions/{sub}/providers/Microsoft.Cache/checkNameAvailability   # body: {"name", "type"}
 ```
+
+A cache name is a global DNS name: the first subscription to create it owns it in its cloud, and another
+subscription's create is `409 NameNotAvailable` until the owner deletes it. `checkNameAvailability` answers `200`
+with no body for a free name and the same `409 NameNotAvailable` for a taken one; Azure's answer for a taken name
+is not recorded, so that one is an emulator choice.
 
 ---
 
