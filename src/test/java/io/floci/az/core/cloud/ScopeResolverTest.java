@@ -3,6 +3,9 @@ package io.floci.az.core.cloud;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -179,5 +182,30 @@ class ScopeResolverTest {
         assertTrue(ScopeResolver.isEntraPath("t/oauth2/token"));
         assertFalse(ScopeResolver.isEntraPath("subscriptions/s"));
         assertFalse(ScopeResolver.isEntraPath("t/oauth2/v2.0/logout"));
+    }
+
+    private static String bearerWithTid(String tid) {
+        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+        return "Bearer " + encoder.encodeToString("{\"alg\":\"RS256\"}".getBytes(StandardCharsets.UTF_8)) + "."
+            + encoder.encodeToString(("{\"tid\":\"" + tid + "\"}").getBytes(StandardCharsets.UTF_8)) + ".sig";
+    }
+
+    @Test
+    void underTenantScopingTheTokensTidIsRecordedOnEverySignal() {
+        ScopeResolver scoping = new ScopeResolver(subscription -> DEFAULT_TENANT, tenant -> PUBLIC, PUBLIC, true);
+        String authorization = bearerWithTid("11111111-0000-0000-0000-0000000000a6");
+
+        assertEquals("11111111-0000-0000-0000-0000000000a6",
+            scoping.resolve("subscriptions/sub-1/resourceGroups", "localhost", authorization).tokenTenantId());
+        assertEquals("11111111-0000-0000-0000-0000000000a6",
+            scoping.resolve("subscriptions", "localhost", authorization).tokenTenantId());
+        assertNull(scoping.resolve("subscriptions", "localhost", "Bearer opaque").tokenTenantId());
+        assertNull(scoping.resolve("subscriptions", "localhost").tokenTenantId());
+    }
+
+    @Test
+    void withoutTenantScopingTheTokenIsNeverRead() {
+        assertNull(resolver.resolve("subscriptions", "localhost",
+            bearerWithTid("11111111-0000-0000-0000-0000000000a6")).tokenTenantId());
     }
 }

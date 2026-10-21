@@ -178,7 +178,7 @@ public class ArmRouter {
             .collect(Collectors.joining("&"));
         RoutingContext ctx = new RoutingContext(method.toUpperCase(Locale.ROOT), relative, relative, rawQuery,
             headers, headers.map(), queryParameters, InputStream.nullInputStream(), origin.host(), origin.secure(),
-            origin.remoteAddress(), authority, scopeResolver.resolve(relative, origin.host()));
+            origin.remoteAddress(), authority, scopeResolver.resolve(relative, origin.host(), authorization(origin)));
         LOG.debugv("Internal ARM request: {0} {1}", ctx.method(), relative);
         for (Function<RoutingContext, RouteOutcome> stage : internalStages) {
             RouteOutcome outcome = stage.apply(ctx);
@@ -190,6 +190,11 @@ public class ArmRouter {
             }
         }
         return ArmErrors.notFound("Resource not found: " + relative);
+    }
+
+    /** The caller's {@code Authorization} header, so an internal request is scoped to the same caller. */
+    private static String authorization(AzureRequest origin) {
+        return origin.headers() == null ? null : origin.headers().getHeaderString(HttpHeaders.AUTHORIZATION);
     }
 
     // ── Routing stages, in chain order ──────────────────────────────────────────

@@ -35,7 +35,8 @@ class ParityConfigTest {
         "strict-resource-groups", ParityLevel.STRICT,
         "strict-providers", ParityLevel.STRICT,
         "location-normalize", ParityLevel.AZURE,
-        "strict-locations", ParityLevel.STRICT);
+        "strict-locations", ParityLevel.STRICT,
+        "tenant-scoping", ParityLevel.AZURE);
 
     private record Override(String name, Predicate<EmulatorConfig> resolver) {
     }
@@ -48,7 +49,8 @@ class ParityConfigTest {
         new Override("strict-resource-groups", EmulatorConfig::strictResourceGroups),
         new Override("strict-providers", EmulatorConfig::strictProviders),
         new Override("location-normalize", EmulatorConfig::locationNormalize),
-        new Override("strict-locations", EmulatorConfig::strictLocations));
+        new Override("strict-locations", EmulatorConfig::strictLocations),
+        new Override("tenant-scoping", EmulatorConfig::tenantScoping));
 
     private static EmulatorConfig config(ParityLevel level, Map<String, Boolean> explicit, String authMode) {
         EmulatorConfig config = mock(EmulatorConfig.class, CALLS_REAL_METHODS);
@@ -68,6 +70,7 @@ class ParityConfigTest {
         when(overrides.strictProviders()).thenReturn(Optional.ofNullable(explicit.get("strict-providers")));
         when(overrides.locationNormalize()).thenReturn(Optional.ofNullable(explicit.get("location-normalize")));
         when(overrides.strictLocations()).thenReturn(Optional.ofNullable(explicit.get("strict-locations")));
+        when(overrides.tenantScoping()).thenReturn(Optional.ofNullable(explicit.get("tenant-scoping")));
         return config;
     }
 

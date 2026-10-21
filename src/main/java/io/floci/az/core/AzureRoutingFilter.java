@@ -285,7 +285,7 @@ public class AzureRoutingFilter {
         LOGGER.infof("Incoming request: %s %s", requestContext.getMethod(), path);
 
         String host = hostWithoutPort(capturedHost);
-        ScopeContext scope = scopeResolver.resolve(path, host);
+        ScopeContext scope = scopeResolver.resolve(path, host, headers.getHeaderString(HttpHeaders.AUTHORIZATION));
         RoutingContext ctx = RoutingContext.of(requestContext, path, encodedPath, rawQuery, headers, host,
             remoteAddress, authority, scope);
 

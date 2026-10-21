@@ -222,6 +222,7 @@ public class BannerLogger {
         overrides.put("strict-providers", config.strictProviders());
         overrides.put("location-normalize", config.locationNormalize());
         overrides.put("strict-locations", config.strictLocations());
+        overrides.put("tenant-scoping", config.tenantScoping());
         Map<String, Boolean> levelDefaults = Map.of(
                 "subscription-listing", level.includes(ParityLevel.AZURE),
                 "strict-subscriptions", level.includes(ParityLevel.STRICT),
@@ -230,7 +231,8 @@ public class BannerLogger {
                 "strict-resource-groups", level.includes(ParityLevel.STRICT),
                 "strict-providers", level.includes(ParityLevel.STRICT),
                 "location-normalize", level.includes(ParityLevel.AZURE),
-                "strict-locations", level.includes(ParityLevel.STRICT));
+                "strict-locations", level.includes(ParityLevel.STRICT),
+                "tenant-scoping", level.includes(ParityLevel.AZURE));
         StringBuilder line = new StringBuilder("parity: ").append(level.name().toLowerCase(Locale.ROOT));
         overrides.forEach((name, value) -> {
             if (!value.equals(levelDefaults.get(name))) {

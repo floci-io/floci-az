@@ -115,6 +115,7 @@ floci-az:
   #   strict-resource-groups: true   # default: on from strict
   #   strict-providers: true         # default: on from strict
   #   location-normalize: true       # default: on from azure
+  #   tenant-scoping: true           # default: on from azure
   #   strict-locations: true         # default: on from strict
   cloud:
     default: AzureCloud
@@ -198,8 +199,9 @@ or a configured one, and an unknown cloud or state fails startup with the proper
 
 - **Cloud**: a tenant lives in exactly one cloud, and a subscription's cloud is its tenant's. A request
   under `/subscriptions/{sub}` resolves to that cloud.
-- **Listing**: `GET /subscriptions` lists the caller's tenant's subscriptions. Until tokens are read for
-  their tenant, the caller's tenant is always the default tenant. The default subscription comes first,
+- **Listing**: `GET /subscriptions` lists the caller's tenant's subscriptions. By default the caller's tenant
+  is always the default tenant; under `tenant-scoping` it is the `tid` of the request's Bearer token, when the
+  directory holds that tenant (see [Tenant scoping](#tenant-scoping)). The default subscription comes first,
   then configured ones in config order, so `az login` (which selects the first `Enabled` subscription)
   keeps selecting the default. Subscriptions registered on first use are listed after them only under
   `subscription-listing`. `GET /tenants` lists every tenant, each reported as the caller's `Home` tenant.
@@ -212,6 +214,24 @@ or a configured one, and an unknown cloud or state fails startup with the proper
   in the directory after a restart (the default tenant id changed, or a configured tenant was removed) moves to
   the default tenant.
 
+### Tenant scoping
+
+With `tenant-scoping` (on from `parity: azure`) the `tid` claim of a request's Bearer token is read as the
+caller's tenant. The token is decoded, never verified: the claim only picks which tenant's view the request
+gets, and verifying tokens is strict auth's job.
+
+- `GET /subscriptions` lists that tenant's subscriptions, as Azure lists the subscriptions of the tenant a
+  token was issued for. A tenant the directory does not hold, or a request without a readable token, is the
+  default tenant. A tenant that owns no subscription sees the default subscription, so a client logged in to
+  it (`az login --tenant`) still finds one to use.
+- A subscription used for the first time is registered under the caller's tenant when the directory holds it.
+- `GET /tenants` still lists every tenant, each as `Home`. Azure lists every tenant the identity can reach,
+  and every tenant is reachable in the emulator, so `az login` without `--tenant` walks every tenant and,
+  with a token per tenant, finds each one's subscriptions.
+
+Emulator choices, with no Azure source to settle them: the default-subscription fallback, and `Home` for every
+tenant (no local source says which category a tenant reached as a guest gets).
+
 ### Parity levels
 
 `floci-az.parity` decides how closely floci-az follows Azure where Azure differs from what floci-az has
@@ -221,7 +241,7 @@ can also be set alone to opt in piecemeal:
 | Level | What changes |
 |---|---|
 | `compat` (default) | Nothing a client could rely on: unknown subscriptions are registered internally on first use but not listed, ids are echoed as sent, and resource groups answer as they always have (every PUT `201`, `DELETE` `200` without cascade) |
-| `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete`, `location-normalize` |
+| `azure` | Azure's answers for the requests Azure accepts. Every parity override on: `subscription-listing`, `resource-group-semantics`, `resource-group-delete`, `location-normalize`, `tenant-scoping` |
 | `strict` | `azure` plus Azure's refusals, every `strict-*` override: `strict-subscriptions`, `strict-resource-groups`, `strict-providers`, `strict-locations` |
 
 `auth.mode` plays no part in any of this. The startup banner prints `parity: <level>` followed by every
@@ -408,8 +428,8 @@ servers is not publicly documented either; `409` is the likeliest.
 - **Unknown subscriptions exist on first use**: unless `strict-subscriptions` is on, any subscription
   id a request names is registered and served (and listed under `subscription-listing`), so a client
   configured with its own subscription id keeps working. ARM state is kept per subscription.
-- **The caller's tenant is the default tenant**: `GET /subscriptions` and `GET /tenants` are not yet
-  scoped by the token's tenant.
+- **The caller's tenant is the default tenant** unless `tenant-scoping` is on, and even then the token
+  is read for its `tid` only, never verified.
 - **Locations are a static catalog per cloud**: a subscription lists the regions of the cloud its tenant
   belongs to (the public cloud's 51, US Gov's 6 or China's 6), with names and display names from the
   Azure SDK's region list; every entry is a physical region with zones 1 to 3 mapped to

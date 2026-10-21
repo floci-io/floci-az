@@ -1,6 +1,8 @@
 package io.floci.az.core.cloud;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.auth.TokenTenantHint;
 import io.floci.az.core.directory.AzureDirectory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -35,8 +37,11 @@ import java.util.function.Supplier;
  *
  * <p>{@link #tenantOfSubscription} and {@link #cloudOfTenant} ask the tenant and subscription directory
  * ({@link AzureDirectory}); a subscription it does not hold yet resolves to the default tenant, which is where
- * first use registers it. Signal 4 waits for the global-name registry, and the token's {@code tid} is left
- * null until the bearer verifier exposes parsed claims.
+ * first use registers it. Signal 4 waits for the global-name registry.
+ *
+ * <p>The token's {@code tid} ({@link ScopeContext#tokenTenantId()}) is read only under
+ * {@link EmulatorConfig#tenantScoping()}, unverified, as a hint of the caller's tenant ({@link TokenTenantHint});
+ * otherwise it stays null and every caller is the default tenant, as floci-az has always answered.
  */
 @ApplicationScoped
 public class ScopeResolver {
@@ -53,23 +58,31 @@ public class ScopeResolver {
     private final Function<String, CloudProfile> cloudOfTenant;
     private final CloudProfile defaultCloud;
     private final Map<String, CloudProfile> cloudHosts;
+    private final boolean readTokenTenant;
 
     @Inject
-    public ScopeResolver(AzureDirectory directory) {
-        this(directory::tenantOfSubscription, directory::cloudOfTenant, directory.defaultCloud());
+    public ScopeResolver(AzureDirectory directory, EmulatorConfig config) {
+        this(directory::tenantOfSubscription, directory::cloudOfTenant, directory.defaultCloud(),
+            config.tenantScoping());
     }
 
     /** One tenant in one cloud: every subscription is {@code defaultTenantId}'s, every tenant is in {@code defaultCloud}. */
     ScopeResolver(Supplier<String> defaultTenantId, CloudProfile defaultCloud) {
-        this(subscription -> defaultTenantId.get(), tenant -> defaultCloud, defaultCloud);
+        this(subscription -> defaultTenantId.get(), tenant -> defaultCloud, defaultCloud, false);
     }
 
     ScopeResolver(Function<String, String> tenantOfSubscription, Function<String, CloudProfile> cloudOfTenant,
                   CloudProfile defaultCloud) {
+        this(tenantOfSubscription, cloudOfTenant, defaultCloud, false);
+    }
+
+    ScopeResolver(Function<String, String> tenantOfSubscription, Function<String, CloudProfile> cloudOfTenant,
+                  CloudProfile defaultCloud, boolean readTokenTenant) {
         this.tenantOfSubscription = tenantOfSubscription;
         this.cloudOfTenant = cloudOfTenant;
         this.defaultCloud = defaultCloud;
         this.cloudHosts = cloudHosts(CloudCatalog.all());
+        this.readTokenTenant = readTokenTenant;
     }
 
     /**
@@ -99,14 +112,25 @@ public class ScopeResolver {
     }
 
     /**
-     * Resolves the scope of one request.
+     * Resolves the scope of one request that carries no token, or whose token is not read.
      *
      * @param path the decoded request path without its leading slash
      * @param host the request host, lowercase and without a port; may be null
      */
     public ScopeContext resolve(String path, String host) {
+        return resolve(path, host, null);
+    }
+
+    /**
+     * Resolves the scope of one request.
+     *
+     * @param path          the decoded request path without its leading slash
+     * @param host          the request host, lowercase and without a port; may be null
+     * @param authorization the request's {@code Authorization} header value; may be null
+     */
+    public ScopeContext resolve(String path, String host, String authorization) {
         String safePath = path == null ? "" : path;
-        String tokenTenantId = null;
+        String tokenTenantId = readTokenTenant ? TokenTenantHint.of(authorization).orElse(null) : null;
 
         Optional<ArmResourceId> armId = ArmResourceId.parse(safePath);
         if (armId.isPresent() && armId.get().subscriptionId() != null) {

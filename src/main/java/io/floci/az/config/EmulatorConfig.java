@@ -156,6 +156,17 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether ARM answers as the caller's tenant: the {@code tid} of a Bearer token is read, unverified, as a hint
+     * of who is calling; {@code GET /subscriptions} lists that tenant's subscriptions (the default subscription when
+     * it owns none), and a subscription seen for the first time is registered under it. {@code GET /tenants} keeps
+     * listing every tenant, since every tenant is reachable from any identity in the emulator. On from {@code parity: azure}; {@code parity-overrides.tenant-scoping}
+     * overrides it either way.
+     */
+    default boolean tenantScoping() {
+        return parityOverrides().tenantScoping().orElse(parity().includes(ParityLevel.AZURE));
+    }
+
+    /**
      * {@code floci-az.parity-overrides}: each switch is unset by default and then follows {@link #parity()}.
      * Later phases add their own switches here.
      */
@@ -183,6 +194,9 @@ public interface EmulatorConfig {
 
         /** Default: on from {@code parity: strict}. Read through {@link EmulatorConfig#strictLocations()}. */
         Optional<Boolean> strictLocations();
+
+        /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#tenantScoping()}. */
+        Optional<Boolean> tenantScoping();
     }
 
     /** The cloud a tenant lives in when nothing else names one. */

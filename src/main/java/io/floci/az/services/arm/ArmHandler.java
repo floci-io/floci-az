@@ -209,9 +209,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // ── Subscription list ─────────────────────────────────────────────────
         // GET /subscriptions — the az CLI enumerates subscriptions during `az login`.
         if (path.matches("subscriptions([?].*)?")) {
-            boolean listFirstUse = config.subscriptionListing();
-            return Response.ok(Map.of("value", directory.subscriptionsOfTenant(callerTenantId(req)).stream()
-                    .filter(subscription -> listFirstUse || subscription.origin() != DirectoryOrigin.FIRST_USE)
+            return Response.ok(Map.of("value", callerSubscriptions(req).stream()
                     .map(subscription -> subscriptionBody(subscription, subscription.id())).toList())).build();
         }
 
@@ -1005,7 +1003,10 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         );
     }
 
-    /** Every tenant reports {@code Home} until the tenant listing is scoped to the caller. */
+    /**
+     * Every tenant reports {@code Home}: Azure lists every tenant the identity can reach, every tenant is reachable
+     * in the emulator, and no local source says which category a guest tenant gets.
+     */
     private static Map<String, Object> tenantBody(Tenant tenant) {
         return Map.of(
                 "id",                "/tenants/" + tenant.id(),
@@ -1020,6 +1021,23 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     private String tenantId() {
         return directory.defaultTenantId();
+    }
+
+    /**
+     * The subscriptions {@code GET /subscriptions} lists: the caller's tenant's, first-use ones only under
+     * subscription-listing. Under tenant-scoping a caller whose tenant owns none sees the default subscription, so a
+     * client logged in to that tenant ({@code az login --tenant}) still finds one to use; without tenant-scoping the
+     * caller is always the default tenant, which owns it.
+     */
+    private List<Subscription> callerSubscriptions(AzureRequest req) {
+        boolean listFirstUse = config.subscriptionListing();
+        List<Subscription> owned = directory.subscriptionsOfTenant(callerTenantId(req)).stream()
+                .filter(subscription -> listFirstUse || subscription.origin() != DirectoryOrigin.FIRST_USE)
+                .toList();
+        if (!owned.isEmpty() || !config.tenantScoping()) {
+            return owned;
+        }
+        return directory.subscription(directory.defaultSubscriptionId()).stream().toList();
     }
 
     /** The caller's tenant: its token's, when the request carries one the directory holds, else the default. */

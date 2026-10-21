@@ -113,6 +113,10 @@ floci-az:
     #                               # A PUT or PATCH body's location is made canonical for the subscription's cloud
     #                               # ("East US" -> eastus) before its handler runs; INHERITS_RG and global types
     #                               # get their group's location and "global"
+    # tenant-scoping: true          # FLOCI_AZ_PARITY_OVERRIDES_TENANT_SCOPING; default on from azure.
+    #                               # A Bearer token's tid is read (unverified) as the caller's tenant: /subscriptions
+    #                               # lists that tenant's (the default one when it owns none), and first-use
+    #                               # subscriptions are registered under it
     # strict-locations: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_LOCATIONS; default on from strict.
     #                               # A resource PUT naming a location the cloud does not offer is
     #                               # 400 NoRegisteredProviderFound
