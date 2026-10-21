@@ -22,7 +22,6 @@ src/main/java/io/floci/az/services/arm/ArmHandler.java	cloud-literal	6
 src/main/java/io/floci/az/services/arm/ArmHandler.java	location-literal	5
 src/main/java/io/floci/az/services/arm/ArmHandler.java	name-guard	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	scope-parse	2
-src/main/java/io/floci/az/services/arm/AzureLocations.java	location-literal	1
 src/main/java/io/floci/az/services/blob/BlobServiceHandler.java	cloud-literal	3
 src/main/java/io/floci/az/services/containerapps/ContainerAppsHandler.java	location-literal	4
 src/main/java/io/floci/az/services/containerapps/ContainerAppsHandler.java	scope-parse	2
