@@ -9,12 +9,13 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
-import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
-import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.PowerState;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
@@ -79,10 +80,15 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
-    private final StorageBackend<String, StoredObject> storage;
+    /**
+     * Every VM, keyed by its canonical id. Before the store, VMs were kept under raw-case {@code sub/rg/name}; those
+     * entries are read as they are and move to their canonical key on their next write.
+     */
+    private final ArmResourceStore<VirtualMachine> store;
     // A create, a retry or a power action reads the VM record, may replace the backing container, and
     // writes the record back. Two of those overlapping on one VM would let the slower one save the id
-    // of a container the other already removed. A VM always maps to the same lock; the set is fixed
+    // of a container the other already removed. A VM always maps to the same lock, whatever casing the
+    // request used, because the lock follows the canonical id; the set is fixed
     // in size so it does not grow with the VM names ever seen.
     private final Object[] vmLocks = Stream.generate(Object::new).limit(LOCK_STRIPES).toArray();
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -97,7 +103,8 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
                      StorageFactory storageFactory) {
         this.config = config;
         this.containerManager = containerManager;
-        this.storage = storageFactory.create("vm");
+        this.store = ArmResourceStore.create(storageFactory, "vm", VirtualMachine.class, VirtualMachine::armId,
+                key -> true);
     }
 
     @PostConstruct
@@ -198,9 +205,9 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             Map<String, String> tags = parseTags(body.path("tags"));
             Map<String, Object> properties = objectToMap(body.path("properties"));
 
-            String key = storageKey(sub, rg, vmName);
-            synchronized (lockFor(key)) {
-                Optional<VirtualMachine> existing = getVm(key);
+            ArmResourceId id = vmId(sub, rg, vmName);
+            synchronized (lockFor(id)) {
+                Optional<VirtualMachine> existing = getVm(id);
                 boolean isNew = existing.isEmpty();
 
                 VirtualMachine vm = existing.orElseGet(VirtualMachine::new);
@@ -230,7 +237,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
                     vm.setProvisioningState("Succeeded");
                 }
 
-                putVm(key, vm);
+                store.put(vm);
                 return Response.status(isNew ? 201 : 200)
                         .entity(toArmResponse(vm, false))
                         .type("application/json")
@@ -261,37 +268,37 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     private Response handleGet(String sub, String rg, String vmName, boolean expandInstanceView) {
-        return getVm(storageKey(sub, rg, vmName))
+        return getVm(vmId(sub, rg, vmName))
                 .map(vm -> Response.ok(toArmResponse(vm, expandInstanceView)).type("application/json").build())
                 .orElseGet(() -> armNotFound("The Resource 'Microsoft.Compute/virtualMachines/" + vmName
                         + "' under resource group '" + rg + "' was not found."));
     }
 
     private Response handleUpdateTags(String sub, String rg, String vmName, AzureRequest req) {
-        String key = storageKey(sub, rg, vmName);
+        ArmResourceId id = vmId(sub, rg, vmName);
         Map<String, String> tags;
         try {
             tags = parseTags(readBody(req.bodyStream()).path("tags"));
         } catch (Exception e) {
             return badRequest("Invalid request: " + e.getMessage());
         }
-        synchronized (lockFor(key)) {
-            Optional<VirtualMachine> found = getVm(key);
+        synchronized (lockFor(id)) {
+            Optional<VirtualMachine> found = getVm(id);
             if (found.isEmpty()) {
                 return armNotFound("Virtual machine '" + vmName + "' not found.");
             }
             VirtualMachine vm = found.get();
             vm.setTags(tags.isEmpty() ? null : tags);
-            putVm(key, vm);
+            store.put(vm);
             return Response.ok(toArmResponse(vm, false)).type("application/json").build();
         }
     }
 
     private Response handleDelete(String sub, String rg, String vmName) {
-        String key = storageKey(sub, rg, vmName);
-        synchronized (lockFor(key)) {
+        ArmResourceId id = vmId(sub, rg, vmName);
+        synchronized (lockFor(id)) {
             if (!config.services().vm().mocked()) {
-                getVm(key).ifPresent(vm -> {
+                getVm(id).ifPresent(vm -> {
                     try {
                         containerManager.removeVm(vm);
                     } catch (Exception e) {
@@ -299,7 +306,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
                     }
                 });
             }
-            storage.delete(key);
+            store.delete(id);
         }
         // Delete synchronously with 204 No Content. The azurerm provider's virtualmachines
         // DeleteThenPoll treats a 202/200 as a long-running operation and polls the collection
@@ -309,40 +316,36 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     private Response handleListSubscription(String sub, boolean expandInstanceView) {
-        String prefix = sub + "/";
-        List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(vm -> vm.storageKey().startsWith(prefix))
-                .forEach(vm -> items.add(toArmResponse(vm, expandInstanceView)));
-        return Response.ok(Map.of("value", items)).type("application/json").build();
+        return list(new ArmScope(sub, null), expandInstanceView);
     }
 
     private Response handleListByResourceGroup(String sub, String rg, boolean expandInstanceView) {
-        String prefix = (sub + "/" + rg + "/").toLowerCase();
+        return list(new ArmScope(sub, rg), expandInstanceView);
+    }
+
+    private Response list(ArmScope scope, boolean expandInstanceView) {
         List<Map<String, Object>> items = new ArrayList<>();
-        scanAll().stream()
-                .filter(vm -> vm.storageKey().toLowerCase().startsWith(prefix))
-                .forEach(vm -> items.add(toArmResponse(vm, expandInstanceView)));
+        store.list(scope).forEach(stored -> items.add(toArmResponse(stored.value(), expandInstanceView)));
         return Response.ok(Map.of("value", items)).type("application/json").build();
     }
 
     private Response handleInstanceView(String sub, String rg, String vmName) {
         // The instanceView endpoint returns the bare VirtualMachineInstanceView object
         // (no id/name/type wrapper) — see Compute spec VirtualMachine_Get_InstanceView.
-        return getVm(storageKey(sub, rg, vmName))
+        return getVm(vmId(sub, rg, vmName))
                 .map(vm -> Response.ok(instanceViewBody(vm)).type("application/json").build())
                 .orElseGet(() -> armNotFound("Virtual machine '" + vmName + "' not found."));
     }
 
     private Response handlePowerAction(String sub, String rg, String vmName, String action) {
-        String key = storageKey(sub, rg, vmName);
-        synchronized (lockFor(key)) {
-            return applyPowerAction(key, sub, vmName, action);
+        ArmResourceId id = vmId(sub, rg, vmName);
+        synchronized (lockFor(id)) {
+            return applyPowerAction(id, sub, vmName, action);
         }
     }
 
-    private Response applyPowerAction(String key, String sub, String vmName, String action) {
-        Optional<VirtualMachine> found = getVm(key);
+    private Response applyPowerAction(ArmResourceId id, String sub, String vmName, String action) {
+        Optional<VirtualMachine> found = getVm(id);
         if (found.isEmpty()) {
             return armNotFound("Virtual machine '" + vmName + "' not found.");
         }
@@ -354,7 +357,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         };
 
         if (!config.services().vm().mocked() && lacksContainer(vm)) {
-            return handlePowerActionWithoutContainer(key, vm, target);
+            return handlePowerActionWithoutContainer(vm, target);
         }
 
         if (!config.services().vm().mocked()) {
@@ -373,7 +376,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
         vm.setPowerState(target.code());
         vm.setProvisioningState("Succeeded");
-        putVm(key, vm);
+        store.put(vm);
         return acceptedWithAsync(sub, vm.getLocation());
     }
 
@@ -387,10 +390,10 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
      * running VM that has no container and hide the failure from the next PUT. An action that
      * powers the VM on retries provisioning instead; one that powers it off leaves it as it is.
      */
-    private Response handlePowerActionWithoutContainer(String key, VirtualMachine vm, PowerState target) {
+    private Response handlePowerActionWithoutContainer(VirtualMachine vm, PowerState target) {
         if (target == PowerState.RUNNING) {
             provisionContainer(vm);
-            putVm(key, vm);
+            store.put(vm);
         }
         return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation());
     }
@@ -483,7 +486,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             try {
                 scanAll().stream()
                         .filter(vm -> "Creating".equals(vm.getProvisioningState()))
-                        .forEach(vm -> markSucceededOnceRunning(vm.storageKey()));
+                        .forEach(vm -> markSucceededOnceRunning(vmId(vm)));
             } catch (Exception e) {
                 LOG.error("Error in VM readiness poller", e);
             }
@@ -491,9 +494,9 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     /** Re-reads the VM under its lock, so a request that changed it since the scan is not overwritten. */
-    private void markSucceededOnceRunning(String key) {
-        synchronized (lockFor(key)) {
-            Optional<VirtualMachine> found = getVm(key);
+    private void markSucceededOnceRunning(ArmResourceId id) {
+        synchronized (lockFor(id)) {
+            Optional<VirtualMachine> found = getVm(id);
             if (found.isEmpty()) {
                 return;
             }
@@ -501,7 +504,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             if ("Creating".equals(vm.getProvisioningState()) && containerManager.isRunning(vm)) {
                 vm.setProvisioningState("Succeeded");
                 vm.setPowerState(PowerState.RUNNING.code());
-                putVm(key, vm);
+                store.put(vm);
                 LOG.infov("VM {0} container is running; provisioningState=Succeeded", vm.getName());
             }
         }
@@ -509,41 +512,26 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     // ── Storage helpers ────────────────────────────────────────────────────────
 
-    private Object lockFor(String key) {
-        return vmLocks[Math.floorMod(key.hashCode(), LOCK_STRIPES)];
+    private Object lockFor(ArmResourceId id) {
+        return vmLocks[Math.floorMod(id.canonicalKey().hashCode(), LOCK_STRIPES)];
     }
 
-    private Optional<VirtualMachine> getVm(String key) {
-        return storage.get(key).map(so -> {
-            try {
-                return MAPPER.readValue(so.data(), VirtualMachine.class);
-            } catch (Exception e) {
-                LOG.warnv("Failed to deserialize VM {0}: {1}", key, e.getMessage());
-                return null;
-            }
-        });
-    }
-
-    private void putVm(String key, VirtualMachine vm) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(vm);
-            storage.put(key, new StoredObject(key, data, Map.of(), Instant.now(), key));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize VM: " + key, e);
-        }
+    private Optional<VirtualMachine> getVm(ArmResourceId id) {
+        return store.get(id).map(ArmResourceStore.Stored::value);
     }
 
     private List<VirtualMachine> scanAll() {
-        List<VirtualMachine> result = new ArrayList<>();
-        storage.scan(k -> true).forEach(so -> {
-            try {
-                VirtualMachine vm = MAPPER.readValue(so.data(), VirtualMachine.class);
-                if (vm != null) { result.add(vm); }
-            } catch (Exception e) {
-                LOG.debugv("Skipping unreadable VM entry: {0}", e.getMessage());
-            }
-        });
-        return result;
+        return store.all().stream().map(ArmResourceStore.Stored::value).toList();
+    }
+
+    private static ArmResourceId vmId(String sub, String rg, String vmName) {
+        return ArmResourceId.parse(String.format(
+                "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/virtualMachines/%s",
+                sub, rg, vmName)).orElseThrow();
+    }
+
+    private static ArmResourceId vmId(VirtualMachine vm) {
+        return ArmResourceId.parse(vm.armId()).orElseThrow();
     }
 
     // ── Path / body parsing helpers ──────────────────────────────────────────────
@@ -578,10 +566,6 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     private static String lower(String s) {
         return s == null ? "" : s.toLowerCase();
-    }
-
-    private static String storageKey(String sub, String rg, String vmName) {
-        return sub + "/" + rg + "/" + vmName;
     }
 
     private static Map<String, String> parseTags(JsonNode tagsNode) {
@@ -625,7 +609,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     /** Wipes all VM data — used by {@code POST /_admin/reset}. */
     public void clear() {
-        storage.clear();
+        store.clear();
     }
 
     // ── ResourceIndexContributor ────────────────────────────────────────────────
@@ -637,17 +621,17 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries((sub + "/" + rg + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries((sub + "/").toLowerCase());
+        return indexEntries(new ArmScope(sub, null));
     }
 
-    private List<Map<String, Object>> indexEntries(String storageKeyPrefix) {
-        return scanAll().stream()
-                .filter(vm -> vm.storageKey().toLowerCase().startsWith(storageKeyPrefix))
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return store.list(scope).stream()
+                .map(ArmResourceStore.Stored::value)
                 .map(vm -> ArmResources.indexEntry(vm.armId(), vm.getName(), TYPE,
                         vm.getLocation(), vm.getTags()))
                 .toList();

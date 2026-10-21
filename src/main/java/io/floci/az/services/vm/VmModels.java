@@ -72,11 +72,6 @@ public class VmModels {
             return "/subscriptions/" + subscriptionId + "/resourceGroups/" + resourceGroup
                     + "/providers/Microsoft.Compute/virtualMachines/" + name;
         }
-
-        /** Storage key: subscriptionId/resourceGroup/name. */
-        public String storageKey() {
-            return subscriptionId + "/" + resourceGroup + "/" + name;
-        }
     }
 
     /**
