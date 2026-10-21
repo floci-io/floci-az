@@ -20,16 +20,18 @@ class ArmRequestGateProductionTest {
     ArmRequestGate gate;
 
     @Test
-    void theSubscriptionProviderResourceGroupAndPolicyRulesRunInThatOrder() {
+    void theSubscriptionProviderResourceGroupLocationAndPolicyRulesRunInThatOrder() {
         List<ArmRequestRule> rules = gate.rules();
-        assertEquals(4, rules.size(), "rules: " + rules);
+        assertEquals(5, rules.size(), "rules: " + rules);
         assertInstanceOf(SubscriptionRule.class, rules.getFirst());
         assertEquals(SubscriptionRule.ORDER, rules.getFirst().order());
         assertInstanceOf(ProviderRule.class, rules.get(1));
         assertEquals(ProviderRule.ORDER, rules.get(1).order());
         assertInstanceOf(ResourceGroupRule.class, rules.get(2));
         assertEquals(ResourceGroupRule.ORDER, rules.get(2).order());
-        assertInstanceOf(PolicyEvaluationRule.class, rules.get(3));
-        assertEquals(PolicyEvaluationRule.ORDER, rules.get(3).order());
+        assertInstanceOf(LocationRule.class, rules.get(3));
+        assertEquals(LocationRule.ORDER, rules.get(3).order());
+        assertInstanceOf(PolicyEvaluationRule.class, rules.get(4));
+        assertEquals(PolicyEvaluationRule.ORDER, rules.get(4).order());
     }
 }

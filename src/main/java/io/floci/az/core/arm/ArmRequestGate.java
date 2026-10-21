@@ -57,7 +57,9 @@ public class ArmRequestGate {
      * Runs {@code handler} inside the gate: each rule's entry check before it and each entered rule's exit hook
      * after it, even when it throws. A rule that answers the request on entry ({@link ArmVerdict.Respond}) stands
      * in for the handler: no later rule is entered, the handler does not run, and the entered rules' exit hooks
-     * see that response. A request already inside the gate is handed to {@code handler} unchanged.
+     * see that response. A rule that amends it ({@link ArmVerdict.Amend}) hands the later rules and the handler a
+     * new call; each rule's exit hook still gets the call it was entered with. A request already inside the gate is
+     * handed to {@code handler} unchanged.
      */
     public Response serve(AzureRequest request, Function<AzureRequest, Response> handler) {
         if (request.armCall() != null) {
@@ -67,14 +69,18 @@ public class ArmRequestGate {
         if (rules.isEmpty()) {
             return handler.apply(request.withArm(call));
         }
-        int entered = 0;
+        List<ArmCall> entered = new ArrayList<>();
         Response response = null;
         try {
             for (ArmRequestRule rule : rules) {
-                entered++;
-                if (rule.enter(call) instanceof ArmVerdict.Respond respond) {
+                entered.add(call);
+                ArmVerdict verdict = rule.enter(call);
+                if (verdict instanceof ArmVerdict.Respond respond) {
                     response = respond.response();
                     return response;
+                }
+                if (verdict instanceof ArmVerdict.Amend amend) {
+                    call = amend.call();
                 }
             }
             response = handler.apply(call.body() == null
@@ -82,7 +88,7 @@ public class ArmRequestGate {
                 : request.withArm(call, call.body().stream()));
             return response;
         } finally {
-            exit(call, response, entered);
+            exit(entered, response);
         }
     }
 
@@ -100,12 +106,16 @@ public class ArmRequestGate {
         return new ArmCall(request.scope(), id, type == null ? null : type.type(), method, null, body, request);
     }
 
-    /** Runs the exit hook of the first {@code entered} rules; {@code response} is null when something threw. */
-    private void exit(ArmCall call, Response response, int entered) {
-        for (int i = 0; i < entered; i++) {
-            rules.get(i).exit(call, response);
+    /**
+     * Runs the exit hook of each entered rule with the call it was entered with; {@code response} is null when
+     * something threw.
+     */
+    private void exit(List<ArmCall> entered, Response response) {
+        for (int i = 0; i < entered.size(); i++) {
+            rules.get(i).exit(entered.get(i), response);
         }
     }
+
 
     /** Sorts rules by {@link ArmRequestRule#order()}, failing on two rules that claim the same position. */
     static List<ArmRequestRule> ordered(List<ArmRequestRule> rules) {

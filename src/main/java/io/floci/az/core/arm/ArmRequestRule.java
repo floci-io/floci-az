@@ -22,7 +22,8 @@ public interface ArmRequestRule {
 
     /**
      * Runs before the handler. A {@link ArmVerdict.Respond} answers the request in the handler's place: the
-     * rules after this one are not entered and the handler does not run.
+     * rules after this one are not entered and the handler does not run A {@link ArmVerdict.Amend} replaces the
+     * call for the rules after this one and the handler; a rule rewrites the body through {@link ArmCall#body()}.
      */
     default ArmVerdict enter(ArmCall call) {
         return ArmVerdict.proceed();

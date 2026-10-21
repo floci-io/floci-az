@@ -8,11 +8,16 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -189,5 +194,109 @@ class ArmRequestGateTest {
             () -> new ArmRequestGate(List.of(new LoggingRule(5, log), new LoggingRule(5, log))));
 
         assertTrue(failure.getMessage().contains("order 5"), failure.getMessage());
+    }
+
+    private static AzureRequest requestWithBody(String method, String path, String body) {
+        return new AzureRequest(method, "arm", "arm", path, null,
+            new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), Map.of("api-version", "2023-01-01"),
+            Map.of(), null, false, null, null, path, null).withScope(SCOPE);
+    }
+
+    private static String read(AzureRequest request) {
+        try {
+            return new String(request.bodyStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Reads the body and api-version, and amends the call's location and the body. */
+    private record AmendingRule(int order, List<String> log) implements ArmRequestRule {
+        @Override
+        public boolean readsBody() {
+            return true;
+        }
+
+        @Override
+        public ArmVerdict enter(ArmCall call) {
+            log.add("saw " + new String(call.body().bytes(), StandardCharsets.UTF_8) + " at "
+                + call.request().queryParams().get("api-version"));
+            call.body().replace(Map.of("location", "eastus"));
+            return ArmVerdict.amend(new ArmCall(call.scope(), call.id(), call.type(), call.method(), "eastus",
+                call.body(), call.request()));
+        }
+
+        @Override
+        public void exit(ArmCall call, Response response) {
+            log.add("exit" + order + " " + call.normalizedLocation());
+        }
+    }
+
+    @Test
+    void anAmendingRuleRewritesTheBodyAndCallForLaterRulesAndTheHandler() {
+        List<String> log = new ArrayList<>();
+        AtomicReference<AzureRequest> seen = new AtomicReference<>();
+        ArmRequestGate gate = new ArmRequestGate(List.of(new LoggingRule(1, log), new AmendingRule(5, log),
+            new LoggingRule(9, log)));
+
+        gate.serve(requestWithBody("PUT", "subscriptions/s/resourceGroups/rg", "{\"location\":\"East US\"}"),
+            req -> {
+                seen.set(req);
+                return Response.ok().build();
+            });
+
+        assertEquals("eastus", seen.get().armCall().normalizedLocation());
+        assertEquals("{\"location\":\"eastus\"}", read(seen.get()));
+        assertEquals(List.of("enter1 PUT /subscriptions/s/resourceGroups/rg",
+            "saw {\"location\":\"East US\"} at 2023-01-01",
+            "enter9 PUT /subscriptions/s/resourceGroups/rg",
+            "exit1 200", "exit5 null", "exit9 200"), log, "each rule exits with the call it was entered with");
+    }
+
+    @Test
+    void aBufferedBodyThatNoRuleRewritesReachesTheHandlerIntact() {
+        List<String> log = new ArrayList<>();
+        AtomicReference<String> seen = new AtomicReference<>();
+        ArmRequestRule reader = new ArmRequestRule() {
+            @Override
+            public int order() {
+                return 3;
+            }
+
+            @Override
+            public boolean readsBody() {
+                return true;
+            }
+
+            @Override
+            public ArmVerdict enter(ArmCall call) {
+                log.add(new String(call.body().bytes(), StandardCharsets.UTF_8));
+                return ArmVerdict.proceed();
+            }
+        };
+        ArmRequestGate gate = new ArmRequestGate(List.of(reader));
+
+        gate.serve(requestWithBody("PUT", "subscriptions/s/resourceGroups/rg", "{\"tags\":{}}"), req -> {
+            seen.set(read(req));
+            return Response.ok().build();
+        });
+
+        assertEquals(List.of("{\"tags\":{}}"), log);
+        assertEquals("{\"tags\":{}}", seen.get());
+    }
+
+    @Test
+    void withoutABodyReadingRuleTheBodyStreamIsNotTouched() {
+        AtomicReference<AzureRequest> seen = new AtomicReference<>();
+        AzureRequest original = requestWithBody("PUT", "subscriptions/s/resourceGroups/rg", "{}");
+        ArmRequestGate gate = new ArmRequestGate(List.of(new LoggingRule(1, new ArrayList<>())));
+
+        gate.serve(original, req -> {
+            seen.set(req);
+            return Response.ok().build();
+        });
+
+        assertSame(original.bodyStream(), seen.get().bodyStream());
+        assertArrayEquals("{}".getBytes(StandardCharsets.UTF_8), read(seen.get()).getBytes(StandardCharsets.UTF_8));
     }
 }

@@ -109,6 +109,10 @@ floci-az:
     #                               # Resource providers start NotRegistered in each subscription; a request for
     #                               # a type of an unregistered namespace is 409 MissingSubscriptionRegistration
     #                               # until it is registered, and registrations persist in the directory store
+    # location-normalize: true      # FLOCI_AZ_PARITY_OVERRIDES_LOCATION_NORMALIZE; default on from azure.
+    #                               # A PUT or PATCH body's location is made canonical for the subscription's cloud
+    #                               # ("East US" -> eastus) before its handler runs; INHERITS_RG and global types
+    #                               # get their group's location and "global"
 
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:
