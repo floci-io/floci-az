@@ -314,6 +314,7 @@ floci-az:
       validate-tokens: false        # true = BearerTokenVerifier validates signature/claims (default off: permissive dev auth)
       validate-client-credentials: false   # FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS: true = unknown client_id and wrong secrets are rejected (AADSTS700016, AADSTS7000215)
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
+      # seed-file:                  # FLOCI_AZ_SERVICES_ENTRA_SEED_FILE: optional startup directory JSON
     graph:
       enabled: true                 # Microsoft Graph slice at /v1.0/...: servicePrincipals discovery + group membership
     # docker-network:  # optional: shared Docker network for sidecar containers
