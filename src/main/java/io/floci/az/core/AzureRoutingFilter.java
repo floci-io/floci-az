@@ -566,7 +566,7 @@ public class AzureRoutingFilter {
         if (ctx.headers().getHeaderString("x-ms-blob-type") != null) {
             return "blob";
         }
-        if (resourcePath.contains("/messages") || resourcePath.endsWith("/messages")) {
+        if (hasPathSegment(resourcePath, "messages")) {
             return "queue";
         }
         List<String> restype = ctx.queryParameters().get("restype");
@@ -577,6 +577,15 @@ public class AzureRoutingFilter {
             return "queue";
         }
         return "blob";
+    }
+
+    private static boolean hasPathSegment(String path, String segment) {
+        for (String pathSegment : path.split("/")) {
+            if (segment.equals(pathSegment)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Avoid reinterpreting unrelated pathless storage requests based only on their Shared Key identity. */
