@@ -19,9 +19,9 @@ public class PolicyArmSurface implements ArmSurfaceProvider {
     private static final List<ArmSurface> SURFACES = List.of(
         new ArmSurface(NAMESPACE, ArmLane.FILTER, List.of(
             new ArmResourceType(NAMESPACE, "policyAssignments", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL),
-            new ArmResourceType(NAMESPACE, "policyDefinitions", ArmScopeKind.SUBSCRIPTION, LocationPolicy.OPTIONAL),
+            new ArmResourceType(NAMESPACE, "policyDefinitions", ArmScopeKind.SUBSCRIPTION, LocationPolicy.NONE),
             new ArmResourceType(NAMESPACE, "policyExemptions", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL),
-            new ArmResourceType(NAMESPACE, "policySetDefinitions", ArmScopeKind.SUBSCRIPTION, LocationPolicy.OPTIONAL))));
+            new ArmResourceType(NAMESPACE, "policySetDefinitions", ArmScopeKind.SUBSCRIPTION, LocationPolicy.NONE))));
 
     @Override
     public List<ArmSurface> armSurfaces() {

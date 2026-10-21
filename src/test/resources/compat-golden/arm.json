@@ -1287,8 +1287,8 @@
           "resourceType" : "policyAssignments"
         }, {
           "apiVersions" : [ "2026-07-01", "2026-06-01", "2026-01-01-preview", "2025-12-01-preview", "2025-11-01", "2025-03-01", "2025-01-01", "2024-05-01", "2023-04-01", "2021-06-01", "2020-09-01", "2020-03-01", "2019-09-01", "2019-06-01", "2019-01-01", "2018-05-01", "2018-03-01", "2016-12-01", "2016-04-01", "2015-11-01", "2015-10-01-preview" ],
-          "capabilities" : "SupportsTags, SupportsLocation",
-          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "capabilities" : "None",
+          "locations" : [ ],
           "resourceType" : "policyDefinitions"
         }, {
           "apiVersions" : [ "2026-01-01-preview", "2025-12-01-preview", "2024-12-01-preview", "2022-07-01-preview", "2020-07-01-preview" ],
@@ -1297,8 +1297,8 @@
           "resourceType" : "policyExemptions"
         }, {
           "apiVersions" : [ "2026-07-01", "2026-06-01", "2026-01-01-preview", "2025-12-01-preview", "2025-11-01", "2025-03-01", "2025-01-01", "2024-05-01", "2023-04-01", "2021-06-01", "2020-09-01", "2020-03-01", "2019-09-01", "2019-06-01", "2019-01-01", "2018-05-01", "2018-03-01", "2017-06-01-preview" ],
-          "capabilities" : "SupportsTags, SupportsLocation",
-          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "capabilities" : "None",
+          "locations" : [ ],
           "resourceType" : "policySetDefinitions"
         } ]
       }, {

@@ -35,9 +35,9 @@ class ArmSurfaceGoldenTest {
         Microsoft.App/managedEnvironments                                              RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.App/managedEnvironments/storages                                     RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Authorization/policyAssignments                                      EXTENSION       OPTIONAL  FILTER
-        Microsoft.Authorization/policyDefinitions                                      SUBSCRIPTION    OPTIONAL  FILTER
+        Microsoft.Authorization/policyDefinitions                                      SUBSCRIPTION    NONE      FILTER
         Microsoft.Authorization/policyExemptions                                       EXTENSION       OPTIONAL  FILTER
-        Microsoft.Authorization/policySetDefinitions                                   SUBSCRIPTION    OPTIONAL  FILTER
+        Microsoft.Authorization/policySetDefinitions                                   SUBSCRIPTION    NONE      FILTER
         Microsoft.Cache/redis                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Communication/communicationServices                                  RESOURCE_GROUP  GLOBAL    FILTER
         Microsoft.Communication/emailServices                                          RESOURCE_GROUP  GLOBAL    FILTER

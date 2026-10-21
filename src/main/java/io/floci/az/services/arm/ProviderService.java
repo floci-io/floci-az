@@ -102,7 +102,7 @@ public class ProviderService {
 
     private static List<String> locations(ArmResourceType type) {
         boolean ownLocation = !type.isChild() && type.scope() != ArmScopeKind.EXTENSION
-            && type.scope() != ArmScopeKind.TENANT;
+            && type.scope() != ArmScopeKind.TENANT && type.location() != LocationPolicy.NONE;
         if (!ownLocation) {
             return List.of();
         }

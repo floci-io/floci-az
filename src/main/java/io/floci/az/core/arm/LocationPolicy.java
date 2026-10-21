@@ -9,5 +9,10 @@ public enum LocationPolicy {
     /** The location may be omitted and then comes from the resource group. */
     INHERITS_RG,
     /** A location may be sent and is kept as is; child and proxy resources, which carry none, also fall here. */
-    OPTIONAL
+    OPTIONAL,
+    /**
+     * The type has no {@code location} property of its own (bicep-types-az declares none): a top-level type such as
+     * a policy definition, which the Providers API lists with no locations.
+     */
+    NONE
 }
