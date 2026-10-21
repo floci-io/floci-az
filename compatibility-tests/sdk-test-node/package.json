@@ -7,26 +7,26 @@
   },
   "comment_app-configuration": "Pinned to exactly 1.11.0: 1.12.0's connection-string credential sets an invalid request header named 'Connection String' ('Header name must be a valid HTTP token'), breaking this suite. The exact pin keeps a lockfile refresh from moving to it; a Dependabot bump past it fails this suite until the regression is fixed. Revisit when the SDK regression is fixed.",
   "dependencies": {
-    "@azure/app-configuration": "1.11.0",
+    "@azure/app-configuration": "1.13.0",
     "@azure/cosmos": "^4.1.0",
     "@azure/data-tables": "^13.3.0",
-    "@azure/identity": "^4.5.0",
+    "@azure/identity": "^4.14.0",
     "@azure/keyvault-secrets": "^4.8.0",
     "@azure/keyvault-keys": "^4.9.0",
-    "@azure/msal-node": "^5.4.2",
-    "@azure/service-bus": "7.9.5",
+    "@azure/msal-node": "^7.1.0",
+    "@azure/service-bus": "7.10.0",
     "@azure/storage-blob": "^12.23.0",
     "@azure/storage-queue": "^12.22.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
-    "rhea-promise": "^3.0.0"
+    "rhea-promise": "^3.1.0"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
-    "@types/node": "^20.0.0",
-    "jest": "^29.5.0",
-    "jest-junit": "^16.0.0",
-    "ts-jest": "^29.1.0",
-    "typescript": "^5.0.0"
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.5",
+    "jest": "^30.5.2",
+    "jest-junit": "^17.0.0",
+    "ts-jest": "^29.4.15",
+    "typescript": "^6.0.3"
   },
   "jest-junit": {
     "outputDirectory": "./results",
