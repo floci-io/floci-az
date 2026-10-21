@@ -192,7 +192,7 @@ class ScopeResolverTest {
 
     @Test
     void underTenantScopingTheTokensTidIsRecordedOnEverySignal() {
-        ScopeResolver scoping = new ScopeResolver(subscription -> DEFAULT_TENANT, tenant -> PUBLIC, PUBLIC, true);
+        ScopeResolver scoping = new ScopeResolver((subscription, caller) -> DEFAULT_TENANT, tenant -> PUBLIC, PUBLIC, true);
         String authorization = bearerWithTid("11111111-0000-0000-0000-0000000000a6");
 
         assertEquals("11111111-0000-0000-0000-0000000000a6",

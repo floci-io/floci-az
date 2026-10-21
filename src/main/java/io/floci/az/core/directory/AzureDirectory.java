@@ -141,6 +141,16 @@ public class AzureDirectory implements Resettable {
     }
 
     /**
+     * The tenant a subscription belongs to, or, for one the directory does not hold yet, the tenant its first use
+     * registers it under ({@link #registerOnFirstUse}): {@code callerTenantId} when the directory holds that
+     * tenant, the default tenant otherwise. So the first request for a new subscription already resolves the cloud
+     * the subscription will be registered in.
+     */
+    public String tenantOfSubscription(String subscriptionId, String callerTenantId) {
+        return subscription(subscriptionId).map(Subscription::tenantId).orElseGet(() -> firstUseOwner(callerTenantId));
+    }
+
+    /**
      * Registers a subscription the directory does not hold yet, {@code Enabled}, under {@code tenantId} when the
      * directory holds that tenant and under the default tenant otherwise. A subscription already held is
      * returned unchanged, so concurrent first uses register it once.
@@ -151,7 +161,7 @@ public class AzureDirectory implements Resettable {
         if (existing != null) {
             return existing;
         }
-        String owner = tenant(tenantId).map(Tenant::id).orElse(defaultTenantId());
+        String owner = firstUseOwner(tenantId);
         Subscription registered = new Subscription(subscriptionId, owner, DirectorySeed.DEFAULT_DISPLAY_NAME,
             SubscriptionState.ENABLED, DirectoryOrigin.FIRST_USE);
         subscriptions.put(key, registered);
@@ -165,6 +175,11 @@ public class AzureDirectory implements Resettable {
             LOG.infov("Registered subscription {0} on first use, under tenant {1}", subscriptionId, owner);
         }
         return registered;
+    }
+
+    /** The tenant a first-use subscription is registered under: {@code tenantId} when held, else the default. */
+    private String firstUseOwner(String tenantId) {
+        return tenant(tenantId).map(Tenant::id).orElse(defaultTenantId());
     }
 
     // ── Reset and load ───────────────────────────────────────────────────────

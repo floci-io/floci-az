@@ -15,6 +15,8 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 
 /**
  * {@code parity-overrides.tenant-scoping} alone: the {@code tid} of the caller's token decides whose subscriptions
@@ -31,6 +33,7 @@ class TenantScopingTest {
     private static final String TEAM_TENANT = "aaaaaaaa-0000-0000-0000-0000000000a6";
     private static final String EMPTY_TENANT = "bbbbbbbb-0000-0000-0000-0000000000a6";
     private static final String TEAM_SUB = "aaaaaaaa-1111-0000-0000-0000000000a6";
+    private static final String GOV_TENANT = "eeeeeeee-0000-0000-0000-0000000000a6";
     private static final String API = "?api-version=2022-12-01";
 
     public static class TenantScopingOnly implements QuarkusTestProfile {
@@ -44,6 +47,10 @@ class TenantScopingTest {
                 Map.entry("floci-az.tenants[1].id", EMPTY_TENANT),
                 Map.entry("floci-az.tenants[1].display-name", "Empty tenant"),
                 Map.entry("floci-az.tenants[1].default-domain", "empty.example"),
+                Map.entry("floci-az.tenants[2].id", GOV_TENANT),
+                Map.entry("floci-az.tenants[2].display-name", "Gov tenant"),
+                Map.entry("floci-az.tenants[2].default-domain", "gov.example"),
+                Map.entry("floci-az.tenants[2].cloud", "AzureUSGovernment"),
                 Map.entry("floci-az.subscriptions[0].id", TEAM_SUB),
                 Map.entry("floci-az.subscriptions[0].tenant-id", TEAM_TENANT));
         }
@@ -92,10 +99,19 @@ class TenantScopingTest {
     }
 
     @Test
+    void aFirstUseSubscriptionAnswersInItsCallersCloudFromTheFirstRequest() {
+        String sub = "ffffffff-1111-0000-0000-0000000000a6";
+        given().header("Authorization", bearer(GOV_TENANT))
+            .when().get("/subscriptions/" + sub + "/locations" + API).then().statusCode(200)
+            .body("value.name", hasItem("usgovvirginia"))
+            .body("value.name", not(hasItem("eastus")));
+    }
+
+    @Test
     void everyTenantIsStillListedAsHome() {
         given().header("Authorization", bearer(TEAM_TENANT))
             .when().get("/tenants" + API).then().statusCode(200)
-            .body("value.tenantId", containsInAnyOrder(DEFAULT_TENANT, TEAM_TENANT, EMPTY_TENANT))
+            .body("value.tenantId", containsInAnyOrder(DEFAULT_TENANT, TEAM_TENANT, EMPTY_TENANT, GOV_TENANT))
             .body("value.tenantCategory", everyItem(equalTo("Home")));
     }
 }
