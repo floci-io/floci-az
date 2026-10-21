@@ -12,7 +12,6 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
-import static org.hamcrest.Matchers.not;
 
 /**
  * {@code parity-overrides.strict-providers} alone: namespaces start {@code NotRegistered}, and a request for a
@@ -67,6 +66,8 @@ class ProviderStrictTest {
             .body("registrationState", equalTo("Registered"));
 
         given().contentType("application/json").body(STORAGE_BODY).when().put(ACCOUNT + STORAGE_API)
-            .then().statusCode(not(equalTo(409)));
+            .then().statusCode(200);
+        given().when().get(ACCOUNT + STORAGE_API).then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Succeeded"));
     }
 }
