@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,6 +35,73 @@ final class KqlFunctions {
 
     static boolean isKnown(String name) {
         return NAMES.contains(name);
+    }
+
+    /**
+     * A Kusto replacement string as Java's {@code replaceAll} reads it: {@code \\1} names a group ({@code $1} in
+     * Java), a dollar sign is literal, and a doubled backslash is one backslash.
+     */
+    static String javaReplacement(String kusto) {
+        StringBuilder out = new StringBuilder(kusto.length() + 8);
+        for (int i = 0; i < kusto.length(); i++) {
+            char c = kusto.charAt(i);
+            if (c == '\\' && i + 1 < kusto.length()) {
+                char next = kusto.charAt(i + 1);
+                if (Character.isDigit(next)) {
+                    out.append('$').append(next);
+                    i++;
+                    continue;
+                }
+                if (next == '\\') {
+                    out.append("\\\\");
+                    i++;
+                    continue;
+                }
+            }
+            if (c == '$' || c == '\\') {
+                out.append('\\');
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    /**
+     * Kusto's {@code format_datetime} tokens as a Java formatter: {@code y}, {@code M}, {@code d}, {@code H},
+     * {@code h}, {@code m}, {@code s}, {@code f} (fraction) and {@code tt} runs; anything else is literal.
+     */
+    static DateTimeFormatter dateTimeFormatter(String format) {
+        StringBuilder pattern = new StringBuilder();
+        int i = 0;
+        while (i < format.length()) {
+            char c = format.charAt(i);
+            int j = i;
+            while (j < format.length() && format.charAt(j) == c) {
+                j++;
+            }
+            int run = j - i;
+            switch (c) {
+                case 'y' -> pattern.append(run >= 3 ? "uuuu" : "uu");
+                case 'M', 'd', 'H', 'h', 'm', 's' -> pattern.append(String.valueOf(c).repeat(Math.min(run, 2)));
+                case 'f', 'F' -> pattern.append("S".repeat(Math.min(run, 7)));
+                case 't' -> pattern.append("a");
+                default -> {
+                    if (Character.isLetter(c)) {
+                        pattern.append('\'').append(String.valueOf(c).repeat(run)).append('\'');
+                    } else if (c == '\'') {
+                        pattern.append("''");
+                    } else {
+                        pattern.append(String.valueOf(c).repeat(run));
+                    }
+                }
+            }
+            i = j;
+        }
+        try {
+            return DateTimeFormatter.ofPattern(pattern.toString(), Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            throw KqlException.semantic("Invalid datetime format '" + format + "'");
+        }
     }
 
     static Object call(String name, List<Expr> args, Map<String, Object> row) {
@@ -144,7 +213,9 @@ final class KqlFunctions {
             }
             case "substring" -> {
                 String s = KqlValues.toString(a.get(0));
-                int start = (int) Math.max(0, Math.min(s.length(), lng(a, 1)));
+                long requested = lng(a, 1);
+                // A negative start counts from the end, as in Kusto.
+                int start = (int) Math.max(0, Math.min(s.length(), requested < 0 ? s.length() + requested : requested));
                 int length = a.size() > 2 ? (int) Math.max(0, Math.min(s.length() - start, lng(a, 2))) : s.length() - start;
                 return s.substring(start, start + length);
             }
@@ -187,7 +258,8 @@ final class KqlFunctions {
             }
             case "replace_regex" -> {
                 try {
-                    return KqlValues.toString(a.get(0)).replaceAll(KqlValues.toString(a.get(1)), KqlValues.toString(a.get(2)));
+                    return KqlValues.toString(a.get(0)).replaceAll(KqlValues.toString(a.get(1)),
+                        javaReplacement(KqlValues.toString(a.get(2))));
                 } catch (PatternSyntaxException e) {
                     throw KqlException.semantic("Invalid regular expression: " + e.getDescription());
                 }
@@ -276,7 +348,13 @@ final class KqlFunctions {
             }
             case "format_datetime" -> {
                 Instant instant = KqlValues.toDateTime(a.get(0));
-                return instant == null ? null : instant.toString();
+                if (instant == null) {
+                    return null;
+                }
+                if (a.size() < 2 || a.get(1) == null) {
+                    return instant.toString();
+                }
+                return dateTimeFormatter(KqlValues.toString(a.get(1))).format(instant.atOffset(ZoneOffset.UTC));
             }
             default -> throw KqlException.semantic("Unknown function '" + name + "'");
         }

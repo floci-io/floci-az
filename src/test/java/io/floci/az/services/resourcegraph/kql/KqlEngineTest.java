@@ -460,6 +460,21 @@ class KqlEngineTest {
         assertEquals(java.time.Duration.ofMinutes(90), row.get("span"));
         Map<String, Object> spans = run("resources | take 1 | project neg = -90m, micro = 7microseconds, ticks = 7ticks, one = 1tick").getFirst();
         assertEquals(java.time.Duration.ofMinutes(-90), spans.get("neg"));
+        Map<String, Object> fn = run("""
+                resources | take 1
+                | project suffix = substring('abcdef', -2), middle = substring('abcdef', 1, 3),
+                          grp = replace_regex('abc123', @'([0-9]+)', @'\\1x'), dollar = replace_regex('a', 'a', '$'),
+                          day = format_datetime(datetime(2026-01-02T03:04:05Z), 'yyyy-MM-dd'),
+                          stamp = format_datetime(datetime(2026-01-02T03:04:05.678Z), 'HH:mm:ss.fff'),
+                          raw = format_datetime(datetime(2026-01-02T03:04:05Z))
+                """).getFirst();
+        assertEquals("ef", fn.get("suffix"));
+        assertEquals("bcd", fn.get("middle"));
+        assertEquals("abc123x", fn.get("grp"));
+        assertEquals("$", fn.get("dollar"));
+        assertEquals("2026-01-02", fn.get("day"));
+        assertEquals("03:04:05.678", fn.get("stamp"));
+        assertEquals("2026-01-02T03:04:05Z", fn.get("raw"));
         assertEquals(java.time.Duration.ofNanos(7_000), spans.get("micro"));
         assertEquals(java.time.Duration.ofNanos(700), spans.get("ticks"));
         assertEquals(java.time.Duration.ofNanos(100), spans.get("one"));
