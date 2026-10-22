@@ -126,9 +126,31 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @PostConstruct
     public void init() {
+        dropShadowedGroups();
         if (!mocked()) {
             reconcilePersistedGroups();
             startReadinessPoller();
+        }
+    }
+
+    /**
+     * Old raw-case keys could hold one group under several casings, each with Docker containers of its own (the
+     * {@link ContainerGroup#containerKey() container key} keeps the casing). The store serves one of them; the others
+     * are removed here, with their containers, before anything could drop them and leave the containers running.
+     */
+    void dropShadowedGroups() {
+        for (ArmResourceStore.Stored<ContainerGroup> shadowed : store.removeShadowedLegacy()) {
+            ContainerGroup group = shadowed.value();
+            LOG.infov("Container group {0}: dropping the duplicate stored under {1}", group.getName(),
+                    group.containerKey());
+            if (!mocked()) {
+                try {
+                    containerManager.removeGroup(group);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing containers for duplicate group {0}: {1}", group.containerKey(),
+                            e.getMessage());
+                }
+            }
         }
     }
 

@@ -169,6 +169,27 @@ class ArmResourceStoreTest {
         assertEquals("moved", indexed.get(id(ID)).orElseThrow().value().label());
     }
 
+    @Test
+    void shadowedLegacyEntriesAreRemovedAndReturned() throws Exception {
+        String other = ID.replace("/a", "/b");
+        backend.put("Sub-1/RG-One/a", new StoredObject("Sub-1/RG-One/a",
+            new ObjectMapper().writeValueAsBytes(new Thing(ID, "old casing")), Map.of(), Instant.now().minusSeconds(60),
+            "etag"));
+        backend.put("sub-1/rg-one/a", new StoredObject("sub-1/rg-one/a",
+            new ObjectMapper().writeValueAsBytes(new Thing(ID.toLowerCase(), "newest casing")), Map.of(), Instant.now(),
+            "etag"));
+        putLegacy("Sub-1/RG-One/b", new Thing(other, "legacy b"));
+        putLegacy(other.toLowerCase(), new Thing(other, "canonical b"));
+
+        List<String> removed = store.removeShadowedLegacy().stream().map(stored -> stored.value().label()).sorted()
+            .toList();
+
+        assertEquals(List.of("legacy b", "old casing"), removed);
+        assertEquals("newest casing", store.get(id(ID)).orElseThrow().value().label());
+        assertEquals("canonical b", store.get(id(other)).orElseThrow().value().label());
+        assertTrue(store.removeShadowedLegacy().isEmpty(), "a second pass finds nothing");
+    }
+
     /** Counts how often the store walks the backend's keys. */
     static final class CountingStorage extends InMemoryStorage<String, StoredObject> {
         int keyScans;

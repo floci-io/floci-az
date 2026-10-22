@@ -187,6 +187,37 @@ public final class ArmResourceStore<T> {
         legacyIndex = null;
     }
 
+    /**
+     * Removes the legacy entries no read can reach, and returns them: those of a resource that also has a canonical
+     * entry, and every legacy entry of a resource but its newest. The old raw-case keys could hold one resource under
+     * several casings, each a resource of its own to the service that wrote them, so a service whose values own
+     * outside state (containers, volumes, ports) releases what these returned values own; nothing else would find it
+     * once they are gone.
+     */
+    public synchronized List<Stored<T>> removeShadowedLegacy() {
+        List<Stored<T>> removed = new ArrayList<>();
+        for (Map.Entry<String, List<String>> resource : legacyIndex().entrySet()) {
+            boolean canonical = backend.get(resource.getKey()).isPresent();
+            List<Map.Entry<String, Stored<T>>> entries = new ArrayList<>();
+            for (String key : resource.getValue()) {
+                backend.get(key).flatMap(this::decode).ifPresent(stored -> entries.add(Map.entry(key, stored)));
+            }
+            Optional<Stored<T>> kept = canonical ? Optional.empty() : newest(entries);
+            List<String> remaining = new ArrayList<>();
+            for (Map.Entry<String, Stored<T>> entry : entries) {
+                if (kept.isPresent() && kept.get() == entry.getValue()) {
+                    remaining.add(entry.getKey());
+                } else {
+                    backend.delete(entry.getKey());
+                    removed.add(entry.getValue());
+                }
+            }
+            resource.setValue(remaining);
+        }
+        legacyIndex().values().removeIf(List::isEmpty);
+        return removed;
+    }
+
     /** The legacy entries for {@code id}: every non-canonical key whose value belongs to it. */
     private List<Map.Entry<String, Stored<T>>> legacy(ArmResourceId id) {
         List<Map.Entry<String, Stored<T>>> found = new ArrayList<>();

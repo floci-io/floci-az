@@ -17,9 +17,13 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("ACI readiness poller: a DELETE or a replacing PUT during the check is not undone")
@@ -95,5 +99,25 @@ class AciReadinessPollerTest {
         ContainerGroup replaced = stored();
         assertEquals("Creating", replaced.getProvisioningState());
         assertEquals(Map.of("web", "new-container"), replaced.getContainerIds());
+    }
+
+    @Test
+    void aDuplicateUnderAnOldCasingIsDroppedWithItsContainers() throws Exception {
+        ContainerGroup older = group("Succeeded", "older-container");
+        older.setResourceGroup("RG");
+        ContainerGroup newer = group("Succeeded", "newer-container");
+        newer.setResourceGroup("rg");
+        backend.delete(KEY);
+        backend.put("sub-poll/RG/web", new StoredObject("sub-poll/RG/web", MAPPER.writeValueAsBytes(older), Map.of(),
+            Instant.now().minusSeconds(60), "etag"));
+        backend.put("sub-poll/rg/web", new StoredObject("sub-poll/rg/web", MAPPER.writeValueAsBytes(newer), Map.of(),
+            Instant.now(), "etag"));
+
+        handler.dropShadowedGroups();
+
+        verify(containers).removeGroup(argThat(group -> "sub-poll/RG/web".equals(group.containerKey())));
+        verify(containers, never()).removeGroup(argThat(group -> "sub-poll/rg/web".equals(group.containerKey())));
+        assertFalse(backend.get("sub-poll/RG/web").isPresent(), "the shadowed duplicate is dropped");
+        assertTrue(backend.get("sub-poll/rg/web").isPresent(), "the served copy stays");
     }
 }
