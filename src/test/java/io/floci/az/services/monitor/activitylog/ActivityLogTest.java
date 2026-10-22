@@ -14,6 +14,7 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.isOneOf;
 import static org.hamcrest.Matchers.notNullValue;
@@ -173,13 +174,19 @@ class ActivityLogTest {
                 .body("value", hasSize(3))
                 .body("nextLink", nullValue());
 
+        // The CLI's window: unquoted timestamps, no offset.
+        given().when().get(LOGS + "&$filter=eventTimestamp ge " + since.substring(0, since.length() - 1)
+                        + " and eventTimestamp le " + Instant.now().plusSeconds(60).toString().replace("Z", ""))
+                .then().statusCode(200)
+                .body("value.size()", greaterThan(0));
         given().when().get(LOGS)
                 .then().statusCode(400)
-                .body("error.code", equalTo("BadRequest"))
-                .body("error.message", containsString("eventTimestamp ge"));
+                .body("code", equalTo("BadRequest"))
+                .body("message", containsString("eventTimestamp ge"))
+                .body("error", nullValue());
         given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "' and colour eq 'blue'")
                 .then().statusCode(400)
-                .body("error.code", equalTo("BadRequest"));
+                .body("code", equalTo("BadRequest"));
         given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "'&$skiptoken=garbage")
                 .then().statusCode(400);
         given().when().get(LOGS + "&$filter=eventTimestamp ge '" + since + "'&$skiptoken=" + ActivityLogEndpoint.encode(-1))

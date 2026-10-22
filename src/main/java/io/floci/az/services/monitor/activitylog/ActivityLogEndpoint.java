@@ -1,9 +1,9 @@
 package io.floci.az.services.monitor.activitylog;
 
 import io.floci.az.core.AzureRequest;
-import io.floci.az.core.arm.ArmErrors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.nio.charset.StandardCharsets;
@@ -21,7 +21,8 @@ import java.util.function.Predicate;
  * {@code GET /subscriptions/{sub}/providers/Microsoft.Insights/eventtypes/management/values}: the Activity
  * Logs list operation, with its {@code $filter} grammar, {@code $select} projection and {@code nextLink}
  * paging through an opaque {@code $skiptoken} that names the entry the previous page ended on, so a
- * page stays stable while writes keep adding entries.
+ * page stays stable while writes keep adding entries. Errors use this API's own flat {@code ErrorResponse}
+ * ({@code {"code": ..., "message": ...}}), not ARM's {@code error} wrapper.
  */
 @ApplicationScoped
 public class ActivityLogEndpoint {
@@ -41,6 +42,13 @@ public class ActivityLogEndpoint {
         this.pageSize = Math.max(1, pageSize);
     }
 
+    static Response error(int status, String code, String message) {
+        return Response.status(status)
+                .entity(Map.of("code", code, "message", message))
+                .type(MediaType.APPLICATION_JSON)
+                .build();
+    }
+
     public static boolean matches(String path) {
         int query = path.indexOf('?');
         String resource = (query >= 0 ? path.substring(0, query) : path).toLowerCase(Locale.ROOT);
@@ -49,14 +57,14 @@ public class ActivityLogEndpoint {
 
     public Response list(AzureRequest req, String subscriptionId) {
         if (!"GET".equalsIgnoreCase(req.method())) {
-            return ArmErrors.error(405, "MethodNotAllowed",
+            return error(405, "MethodNotAllowed",
                 "The requested resource does not support http method '" + req.method() + "'.");
         }
         Predicate<ActivityLogEvent> filter;
         try {
             filter = ActivityLogFilter.parse(req.queryParams().get("$filter"));
         } catch (ActivityLogFilter.InvalidFilterException e) {
-            return ArmErrors.error(400, "BadRequest", e.getMessage());
+            return error(400, "BadRequest", e.getMessage());
         }
         Set<String> select = select(req.queryParams().get("$select"));
 
@@ -65,7 +73,7 @@ public class ActivityLogEndpoint {
         if (token != null && !token.isBlank()) {
             Long cursor = decode(token);
             if (cursor == null) {
-                return ArmErrors.error(400, "BadRequest", "The provided $skiptoken is invalid.");
+                return error(400, "BadRequest", "The provided $skiptoken is invalid.");
             }
             before = cursor;
         }

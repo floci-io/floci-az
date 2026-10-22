@@ -1,7 +1,10 @@
 package io.floci.az.services.monitor.activitylog;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,18 +21,20 @@ import java.util.regex.Pattern;
  * {@code resourceId}, {@code resourceProvider}, {@code correlationId}) the preview grammar's
  * {@code eventChannels}, {@code levels}, {@code operations}, {@code status}, {@code subStatus},
  * {@code caller}, {@code category} and {@code searchText} are accepted, each with a comma-separated
- * list of values where the service allows one.
+ * list of values where the service allows one. A value is quoted or a bare token: {@code az monitor
+ * activity-log list} sends its timestamps unquoted, and without an offset when it computes the window
+ * itself, so an offset-less date-time is read as UTC.
  */
 public final class ActivityLogFilter {
 
-    /** A filter the grammar does not allow, answered as ARM's {@code BadRequest}. */
+    /** A filter the grammar does not allow, answered as the Activity Log API's flat {@code BadRequest}. */
     public static final class InvalidFilterException extends RuntimeException {
         InvalidFilterException(String message) {
             super(message);
         }
     }
 
-    private static final Pattern CLAUSE = Pattern.compile("(?i)^\\s*(\\w+)\\s+(ge|gt|le|lt|eq)\\s+'((?:[^']|'')*)'\\s*$");
+    private static final Pattern CLAUSE = Pattern.compile("(?i)^\\s*(\\w+)\\s+(ge|gt|le|lt|eq)\\s+(?:'((?:[^']|'')*)'|([^'\\s]+))\\s*$");
     private static final Set<String> LIST_FIELDS = Set.of("eventchannels", "levels", "operations", "status", "substatus", "category");
 
     private ActivityLogFilter() {
@@ -48,7 +53,7 @@ public final class ActivityLogFilter {
             }
             String field = m.group(1).toLowerCase(Locale.ROOT);
             String op = m.group(2).toLowerCase(Locale.ROOT);
-            String value = m.group(3).replace("''", "'");
+            String value = m.group(3) != null ? m.group(3).replace("''", "'") : m.group(4);
             if (field.equals("eventtimestamp")) {
                 Instant instant = instant(value);
                 switch (op) {
@@ -137,14 +142,19 @@ public final class ActivityLogFilter {
         return clauses;
     }
 
+    /** ISO 8601 with an offset, or without one (a date-time or a date), which is taken as UTC. */
     static Instant instant(String text) {
         try {
             return OffsetDateTime.parse(text).toInstant();
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException offset) {
             try {
-                return Instant.parse(text);
-            } catch (DateTimeParseException ignored) {
-                throw new InvalidFilterException("'" + text + "' is not an ISO 8601 date-time.");
+                return LocalDateTime.parse(text).toInstant(ZoneOffset.UTC);
+            } catch (DateTimeParseException local) {
+                try {
+                    return LocalDate.parse(text).atStartOfDay().toInstant(ZoneOffset.UTC);
+                } catch (DateTimeParseException date) {
+                    throw new InvalidFilterException("'" + text + "' is not an ISO 8601 date-time.");
+                }
             }
         }
     }

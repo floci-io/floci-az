@@ -54,6 +54,19 @@ class ActivityLogFilterTest {
     }
 
     @Test
+    void acceptsTheUnquotedOffsetLessTimestampsTheCliSends() {
+        ActivityLogEvent write = event("Microsoft.Storage/storageAccounts/write", "Informational", "Succeeded", "rg1");
+        // az monitor activity-log list: `eventTimestamp ge {start} and eventTimestamp le {end}` from
+        // datetime.utcnow().isoformat(), no quotes and no offset.
+        assertTrue(ActivityLogFilter.parse("eventTimestamp ge 2026-10-12T09:00:00.123456 and eventTimestamp le 2026-10-12T11:00:00").test(write));
+        assertFalse(ActivityLogFilter.parse("eventTimestamp ge 2026-10-12T10:00:01").test(write));
+        assertTrue(ActivityLogFilter.parse("eventTimestamp ge 2026-10-12 and resourceGroupName eq 'rg1'").test(write));
+        assertTrue(ActivityLogFilter.parse("eventTimestamp ge 2026-10-12T11:00:00+02:00").test(write));
+        assertEquals(Instant.parse("2026-10-12T09:00:00Z"), ActivityLogFilter.instant("2026-10-12T09:00:00"));
+        assertThrows(ActivityLogFilter.InvalidFilterException.class, () -> ActivityLogFilter.parse("eventTimestamp ge 2026-10-12T09:00:00 and resourceGroupName eq rg 1"));
+    }
+
+    @Test
     void quotesAreEscapedByDoubling() {
         ActivityLogEvent write = event("Microsoft.Storage/storageAccounts/write", "Informational", "Succeeded", "it's");
         assertTrue(ActivityLogFilter.parse("eventTimestamp ge '2026-10-12T09:00:00Z' and resourceGroupName eq 'it''s'").test(write));

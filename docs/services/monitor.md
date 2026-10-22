@@ -144,8 +144,11 @@ curl -s "http://localhost:4577/subscriptions/00000000-0000-0000-0000-00000000000
 - **`$filter`** (required) takes `eventTimestamp ge '...'` plus `eventTimestamp le`, `resourceGroupName eq`,
   `resourceUri eq` / `resourceId eq`, `resourceProvider eq`, `correlationId eq`, `eventChannels eq`,
   `levels eq`, `operations eq`, `status eq`, `subStatus eq`, `caller eq`, `category eq` and
-  `searchText eq`, joined with `and`; the list-valued fields take comma-separated values. Anything else
-  answers `400 BadRequest`, as does a filter without a start time.
+  `searchText eq`, joined with `and`; the list-valued fields take comma-separated values. Values are
+  quoted or bare tokens, and a date-time without an offset is read as UTC, which is how
+  `az monitor activity-log list` sends the window it computes. Anything else answers `400 BadRequest`,
+  as does a filter without a start time; errors use this API's flat `{"code": ..., "message": ...}`
+  shape rather than ARM's `error` wrapper.
 - **`$select`** narrows each entry to the named properties.
 - **Paging**: `activity-log.page-size` entries per page (default 1000), the rest behind `nextLink`
   with an opaque `$skiptoken`. Entries are newest first.
