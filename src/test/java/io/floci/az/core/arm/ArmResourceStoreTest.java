@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -148,5 +149,34 @@ class ArmResourceStoreTest {
         assertEquals(1, store.all().size());
         store.clear();
         assertEquals(List.of("other:x"), List.copyOf(backend.keys()));
+    }
+
+    @Test
+    void writesFindLegacyEntriesWithoutWalkingEveryKey() throws Exception {
+        CountingStorage counting = new CountingStorage();
+        ArmResourceStore<Thing> indexed = ArmResourceStore.over(counting, "things", Thing.class, Thing::id, key -> true);
+        counting.put("Sub-1/RG-One/a", new StoredObject("Sub-1/RG-One/a",
+            new ObjectMapper().writeValueAsBytes(new Thing(ID, "legacy")), Map.of(), Instant.now(), "etag"));
+
+        for (int i = 0; i < 20; i++) {
+            indexed.put(new Thing(ID.replace("/a", "/n" + i), "new"));
+        }
+        indexed.put(new Thing(ID, "moved"));
+        indexed.delete(id(ID.replace("/a", "/n0")));
+
+        assertEquals(1, counting.keyScans, "the legacy keys are indexed once, not walked on every write");
+        assertFalse(counting.get("Sub-1/RG-One/a").isPresent(), "the write still moved the legacy entry");
+        assertEquals("moved", indexed.get(id(ID)).orElseThrow().value().label());
+    }
+
+    /** Counts how often the store walks the backend's keys. */
+    static final class CountingStorage extends InMemoryStorage<String, StoredObject> {
+        int keyScans;
+
+        @Override
+        public Set<String> keys() {
+            keyScans++;
+            return super.keys();
+        }
     }
 }

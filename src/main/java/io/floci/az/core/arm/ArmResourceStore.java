@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,10 @@ import java.util.function.UnaryOperator;
  * moves it to its canonical key (move-on-write), so an entry never exists twice. A service that keyed by the raw
  * request path can hold one resource under several legacy keys that differ only in case; a write or a delete
  * removes all of them, and a read takes the most recently written one.
+ *
+ * <p>Legacy entries only come from data a service wrote before it used this class, so their number only shrinks.
+ * The store indexes them by canonical key on first use, and a write or a delete looks its resource up in that index
+ * instead of walking every key; {@link #clear()} drops the index with the entries.
  *
  * @param <T> the stored model, Jackson-serializable and reflection-registered for the native image
  */
@@ -65,6 +70,8 @@ public final class ArmResourceStore<T> {
     private final Class<T> type;
     private final Function<T, String> idOf;
     private final Predicate<String> legacyKey;
+    /** Legacy backend keys by the canonical key of the resource they hold; null until first needed. */
+    private Map<String, List<String>> legacyIndex;
 
     private ArmResourceStore(String name, StorageBackend<String, StoredObject> backend, Class<T> type,
                              Function<T, String> idOf, Predicate<String> legacyKey) {
@@ -101,7 +108,7 @@ public final class ArmResourceStore<T> {
     /** Writes {@code value} under its canonical key, removing a legacy entry for the same resource. */
     public synchronized Stored<T> put(T value) {
         ArmResourceId id = idFor(value);
-        legacy(id).forEach(entry -> backend.delete(entry.getKey()));
+        forgetLegacy(id);
         Instant now = Instant.now();
         backend.put(id.canonicalKey(), new StoredObject(id.canonicalKey(), encode(value), Map.of(), now,
             UUID.randomUUID().toString()));
@@ -137,7 +144,7 @@ public final class ArmResourceStore<T> {
     public synchronized Optional<Stored<T>> delete(ArmResourceId id) {
         Optional<Stored<T>> found = get(id);
         backend.delete(id.canonicalKey());
-        legacy(id).forEach(entry -> backend.delete(entry.getKey()));
+        forgetLegacy(id);
         return found;
     }
 
@@ -177,21 +184,37 @@ public final class ArmResourceStore<T> {
                 backend.delete(key);
             }
         }
+        legacyIndex = null;
     }
 
     /** The legacy entries for {@code id}: every non-canonical key whose value belongs to it. */
     private List<Map.Entry<String, Stored<T>>> legacy(ArmResourceId id) {
         List<Map.Entry<String, Stored<T>>> found = new ArrayList<>();
-        for (String key : backend.keys()) {
-            if (isCanonical(key) || !legacyKey.test(key)) {
-                continue;
-            }
-            Optional<Stored<T>> stored = backend.get(key).flatMap(this::decode);
-            if (stored.isPresent() && stored.get().id().canonicalKey().equals(id.canonicalKey())) {
-                found.add(Map.entry(key, stored.get()));
-            }
+        for (String key : legacyIndex().getOrDefault(id.canonicalKey(), List.of())) {
+            backend.get(key).flatMap(this::decode).ifPresent(stored -> found.add(Map.entry(key, stored)));
         }
         return found;
+    }
+
+    /** Deletes every legacy entry of {@code id} and drops it from the index. */
+    private void forgetLegacy(ArmResourceId id) {
+        List<String> keys = legacyIndex().remove(id.canonicalKey());
+        if (keys != null) {
+            keys.forEach(backend::delete);
+        }
+    }
+
+    private Map<String, List<String>> legacyIndex() {
+        if (legacyIndex == null) {
+            legacyIndex = new HashMap<>();
+            for (String key : backend.keys()) {
+                if (!isCanonical(key) && legacyKey.test(key)) {
+                    backend.get(key).flatMap(this::decode).ifPresent(stored -> legacyIndex
+                        .computeIfAbsent(stored.id().canonicalKey(), ignored -> new ArrayList<>()).add(key));
+                }
+            }
+        }
+        return legacyIndex;
     }
 
     /** The most recently written of {@code entries}, so a read does not depend on the backend's key order. */
