@@ -17,9 +17,11 @@ teardown() {
     rm -rf "$PROFILE_DIR"
 }
 
-# az in the fresh profile, discovering its clouds from floci-az.
+# az in the fresh profile, discovering its clouds from floci-az. Telemetry is off because az forks a detached
+# uploader that writes into the profile after the command returns, which races the teardown's rm.
 discovered_az() {
     AZURE_CONFIG_DIR="$PROFILE_DIR" \
+        AZURE_CORE_COLLECT_TELEMETRY=false \
         ARM_CLOUD_METADATA_URL="${HTTPS_BASE}/metadata/endpoints?api-version=2019-05-01" \
         az "$@" 2>/dev/null
 }
