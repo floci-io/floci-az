@@ -44,6 +44,7 @@ class DiscoveryGoldenTest {
         doc.put("issuer", tenantBase + "/v2.0");
         doc.put("authorization_endpoint", tenantBase + "/oauth2/v2.0/authorize");
         doc.put("token_endpoint", tenantBase + "/oauth2/v2.0/token");
+        doc.put("userinfo_endpoint", baseUrl() + "/oidc/userinfo");
         doc.put("end_session_endpoint", tenantBase + "/oauth2/v2.0/logout");
         doc.put("jwks_uri", tenantBase + "/discovery/v2.0/keys");
         doc.put("response_types_supported", List.of("code"));
@@ -130,6 +131,6 @@ class DiscoveryGoldenTest {
             .body("grant_types_supported", not(hasItem("refresh_token")))
             .body("scopes_supported", not(hasItem("offline_access")))
             .body("$", not(hasKey("device_authorization_endpoint")))
-            .body("$", not(hasKey("userinfo_endpoint")));
+            .body("userinfo_endpoint", is(baseUrl() + "/oidc/userinfo"));
     }
 }
