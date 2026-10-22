@@ -208,48 +208,37 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             JsonNode sku = props.path("sku");
 
             // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before this runs, so a
-            // name another subscription owns never reaches here.
+            // name another subscription owns never reaches here. The read and the first write are one store
+            // operation, so two concurrent creates of one cache keep the first one's instance and keys.
             ArmResourceId id = cacheId(sub, rg, cacheName);
-            RedisCache cache;
-            Optional<RedisCache> existing = getCache(id);
-            boolean isNew = existing.isEmpty();
-            if (isNew) {
-                cache = new RedisCache();
-                cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                cache.setSubscriptionId(sub);
-                cache.setResourceGroup(rg);
-                cache.setName(cacheName);
-                cache.setCreatedAt(Instant.now());
-                cache.setPrimaryKey(generateAccessKey());
-                cache.setSecondaryKey(generateAccessKey());
-                cache.setSslPort(SSL_PORT);
-            } else {
-                cache = existing.get();
-            }
+            boolean mocked = config.services().redis().mocked();
+            ArmResourceStore.Written<RedisCache> written = store.createOrUpdate(id, existing -> {
+                RedisCache current = existing.orElseGet(() -> newCache(sub, rg, cacheName));
+                current.setLocation(location);
+                current.setSkuName(sku.path("name").asText("Basic"));
+                current.setSkuFamily(sku.path("family").asText("C"));
+                current.setSkuCapacity(sku.path("capacity").asInt(0));
+                current.setRedisVersion("7.0");
+                // With TLS served, absent means false, the spec default; without it, true, because
+                // the plain port is then the only one served. The plain port is served either way.
+                current.setEnableNonSslPort(props.path("enableNonSslPort")
+                        .asBoolean(!config.services().redis().tlsEnabled()));
+                current.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
+                current.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
+                current.setTags(parseStringMap(body.path("tags")));
+                if (mocked) {
+                    current.setProvisioningState("Succeeded");
+                    current.setHostName("localhost");
+                    current.setPort(6379);
+                } else if (existing.isEmpty()) {
+                    current.setProvisioningState("Creating");
+                }
+                return current;
+            });
+            boolean isNew = written.created();
+            RedisCache cache = written.stored().value();
 
-            cache.setLocation(location);
-            cache.setSkuName(sku.path("name").asText("Basic"));
-            cache.setSkuFamily(sku.path("family").asText("C"));
-            cache.setSkuCapacity(sku.path("capacity").asInt(0));
-            cache.setRedisVersion("7.0");
-            // With TLS served, absent means false, the spec default; without it, true, because
-            // the plain port is then the only one served. The plain port is served either way.
-            cache.setEnableNonSslPort(props.path("enableNonSslPort")
-                    .asBoolean(!config.services().redis().tlsEnabled()));
-            cache.setMinimumTlsVersion(props.path("minimumTlsVersion").asText("1.2"));
-            cache.setRedisConfiguration(parseStringMap(props.path("redisConfiguration")));
-            cache.setTags(parseStringMap(body.path("tags")));
-
-            if (config.services().redis().mocked()) {
-                cache.setProvisioningState("Succeeded");
-                cache.setHostName("localhost");
-                cache.setPort(6379);
-            } else if (isNew) {
-                cache.setProvisioningState("Creating");
-            }
-            store.put(cache);
-
-            if (!config.services().redis().mocked() && isNew) {
+            if (!mocked && isNew) {
                 try {
                     cacheManager.startCache(cache);
                 } catch (Exception e) {
@@ -408,6 +397,19 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     // ── Storage helpers ──────────────────────────────────────────────────────────
+
+    private static RedisCache newCache(String sub, String rg, String cacheName) {
+        RedisCache cache = new RedisCache();
+        cache.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+        cache.setSubscriptionId(sub);
+        cache.setResourceGroup(rg);
+        cache.setName(cacheName);
+        cache.setCreatedAt(Instant.now());
+        cache.setPrimaryKey(generateAccessKey());
+        cache.setSecondaryKey(generateAccessKey());
+        cache.setSslPort(SSL_PORT);
+        return cache;
+    }
 
     private Optional<RedisCache> getCache(ArmResourceId id) {
         return store.get(id).map(ArmResourceStore.Stored::value);

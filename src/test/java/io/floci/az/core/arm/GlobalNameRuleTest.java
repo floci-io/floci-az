@@ -92,6 +92,23 @@ class GlobalNameRuleTest {
     }
 
     @Test
+    void aConcurrentPutToTheSameCacheFailingKeepsTheNameTheFirstPutIsCreating() {
+        ArmCall first = call("PUT", cache("s1", "rg", "c1"));
+        ArmCall second = call("PUT", cache("s1", "rg", "c1"));
+        assertEquals(ArmVerdict.proceed(), rule.enter(first));
+        assertEquals(ArmVerdict.proceed(), rule.enter(second));
+
+        rule.exit(second, Response.status(400).build());
+
+        assertInstanceOf(ArmVerdict.Respond.class, rule.enter(call("PUT", cache("s2", "rg", "c1"))),
+            "the first PUT still holds the name");
+        rule.exit(first, Response.status(201).build());
+        assertEquals(first.id().canonicalKey(),
+            names.owner(CloudCatalog.forNameOrPublic("AzureCloud"), CloudSuffix.REDIS, "c1").orElseThrow()
+                .canonicalKey());
+    }
+
+    @Test
     void readsActionsAndPathsWithoutAGroupPass() {
         created(call("PUT", cache("s1", "rg", "c1")));
 

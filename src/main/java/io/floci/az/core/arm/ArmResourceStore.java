@@ -12,6 +12,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,9 @@ import java.util.function.UnaryOperator;
  * (raw-case {@code sub/rg/name}, placeholders). Every key in the store that is not canonical and that
  * {@code legacyKey} accepts is a legacy entry, and its id is read from its value. Reads find legacy entries too;
  * nothing is rewritten at startup. The first {@link #put}, {@link #update} or {@link #delete} of such a resource
- * moves it to its canonical key (move-on-write), so an entry never exists twice.
+ * moves it to its canonical key (move-on-write), so an entry never exists twice. A service that keyed by the raw
+ * request path can hold one resource under several legacy keys that differ only in case; a write or a delete
+ * removes all of them, and a read takes the most recently written one.
  *
  * @param <T> the stored model, Jackson-serializable and reflection-registered for the native image
  */
@@ -45,8 +48,16 @@ public final class ArmResourceStore<T> {
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
+    /** Older first; an entry written without a timestamp counts as the oldest. */
+    private static final Comparator<Stored<?>> BY_LAST_MODIFIED =
+        Comparator.comparing(Stored::lastModified, Comparator.nullsFirst(Comparator.naturalOrder()));
+
     /** One resource and its id. */
     public record Stored<T>(ArmResourceId id, T value, Instant lastModified) {
+    }
+
+    /** What {@link #createOrUpdate} wrote, and whether the resource was new. */
+    public record Written<T>(Stored<T> stored, boolean created) {
     }
 
     private final String name;
@@ -84,13 +95,13 @@ public final class ArmResourceStore<T> {
     /** The resource {@code id} names, in canonical or legacy form. */
     public synchronized Optional<Stored<T>> get(ArmResourceId id) {
         Optional<Stored<T>> canonical = backend.get(id.canonicalKey()).flatMap(this::decode);
-        return canonical.isPresent() ? canonical : legacy(id).map(Map.Entry::getValue);
+        return canonical.isPresent() ? canonical : newest(legacy(id));
     }
 
     /** Writes {@code value} under its canonical key, removing a legacy entry for the same resource. */
     public synchronized Stored<T> put(T value) {
         ArmResourceId id = idFor(value);
-        legacy(id).ifPresent(entry -> backend.delete(entry.getKey()));
+        legacy(id).forEach(entry -> backend.delete(entry.getKey()));
         Instant now = Instant.now();
         backend.put(id.canonicalKey(), new StoredObject(id.canonicalKey(), encode(value), Map.of(), now,
             UUID.randomUUID().toString()));
@@ -105,11 +116,28 @@ public final class ArmResourceStore<T> {
         return get(id).map(stored -> put(change.apply(stored.value())));
     }
 
-    /** Removes the resource, canonical and legacy entry alike; empty when there was none. */
+    /**
+     * Writes {@code change} applied to the stored resource, or to empty when there is none, atomically with respect
+     * to every other write to this store, so two concurrent creates of one resource leave the first one's value
+     * for the second to change rather than each writing a new one. {@code change} returns a value whose id is
+     * {@code id}.
+     */
+    public synchronized Written<T> createOrUpdate(ArmResourceId id, Function<Optional<T>, T> change) {
+        Optional<T> existing = get(id).map(Stored::value);
+        T value = change.apply(existing);
+        ArmResourceId written = idFor(value);
+        if (!written.canonicalKey().equals(id.canonicalKey())) {
+            throw new IllegalArgumentException("store " + name + ": a write to " + id.id() + " returned "
+                + written.id());
+        }
+        return new Written<>(put(value), existing.isEmpty());
+    }
+
+    /** Removes the resource, canonical and legacy entries alike; empty when there was none. */
     public synchronized Optional<Stored<T>> delete(ArmResourceId id) {
         Optional<Stored<T>> found = get(id);
         backend.delete(id.canonicalKey());
-        legacy(id).ifPresent(entry -> backend.delete(entry.getKey()));
+        legacy(id).forEach(entry -> backend.delete(entry.getKey()));
         return found;
     }
 
@@ -129,17 +157,16 @@ public final class ArmResourceStore<T> {
     /** Every resource in the store, canonical entries first and each resource once. */
     public synchronized List<Stored<T>> all() {
         Map<String, Stored<T>> byKey = new LinkedHashMap<>();
-        List<Stored<T>> legacyEntries = new ArrayList<>();
+        Map<String, Stored<T>> newestLegacy = new LinkedHashMap<>();
         for (String key : backend.keys()) {
             if (isCanonical(key)) {
                 backend.get(key).flatMap(this::decode).ifPresent(stored -> byKey.put(key, stored));
             } else if (legacyKey.test(key)) {
-                backend.get(key).flatMap(this::decode).ifPresent(legacyEntries::add);
+                backend.get(key).flatMap(this::decode).ifPresent(stored ->
+                    newestLegacy.merge(stored.id().canonicalKey(), stored, ArmResourceStore::newer));
             }
         }
-        for (Stored<T> stored : legacyEntries) {
-            byKey.putIfAbsent(stored.id().canonicalKey(), stored);
-        }
+        newestLegacy.forEach(byKey::putIfAbsent);
         return List.copyOf(byKey.values());
     }
 
@@ -152,18 +179,28 @@ public final class ArmResourceStore<T> {
         }
     }
 
-    /** The legacy entry for {@code id}: a non-canonical key whose value belongs to it. */
-    private Optional<Map.Entry<String, Stored<T>>> legacy(ArmResourceId id) {
+    /** The legacy entries for {@code id}: every non-canonical key whose value belongs to it. */
+    private List<Map.Entry<String, Stored<T>>> legacy(ArmResourceId id) {
+        List<Map.Entry<String, Stored<T>>> found = new ArrayList<>();
         for (String key : backend.keys()) {
             if (isCanonical(key) || !legacyKey.test(key)) {
                 continue;
             }
             Optional<Stored<T>> stored = backend.get(key).flatMap(this::decode);
             if (stored.isPresent() && stored.get().id().canonicalKey().equals(id.canonicalKey())) {
-                return Optional.of(Map.entry(key, stored.get()));
+                found.add(Map.entry(key, stored.get()));
             }
         }
-        return Optional.empty();
+        return found;
+    }
+
+    /** The most recently written of {@code entries}, so a read does not depend on the backend's key order. */
+    private static <T> Optional<Stored<T>> newest(List<Map.Entry<String, Stored<T>>> entries) {
+        return entries.stream().map(Map.Entry::getValue).max(BY_LAST_MODIFIED);
+    }
+
+    private static <T> Stored<T> newer(Stored<T> a, Stored<T> b) {
+        return BY_LAST_MODIFIED.compare(b, a) > 0 ? b : a;
     }
 
     private static boolean isCanonical(String key) {

@@ -32,7 +32,11 @@ class ArmResourceStoreTest {
     }
 
     private void putLegacy(String key, Thing thing) throws Exception {
-        backend.put(key, new StoredObject(key, new ObjectMapper().writeValueAsBytes(thing), Map.of(), Instant.now(),
+        putLegacy(key, thing, Instant.now());
+    }
+
+    private void putLegacy(String key, Thing thing, Instant lastModified) throws Exception {
+        backend.put(key, new StoredObject(key, new ObjectMapper().writeValueAsBytes(thing), Map.of(), lastModified,
             "etag"));
     }
 
@@ -82,6 +86,49 @@ class ArmResourceStoreTest {
         assertTrue(store.delete(id(ID)).isPresent());
         assertTrue(backend.keys().isEmpty());
         assertFalse(store.delete(id(ID)).isPresent());
+    }
+
+    @Test
+    void aDeleteRemovesEveryLegacyEntryThatDiffersOnlyInCase() throws Exception {
+        putLegacy("Sub-1/RG-One/a", new Thing(ID, "upper"));
+        putLegacy("sub-1/rg-one/a", new Thing(ID.replace("RG-One", "rg-one"), "lower"));
+
+        assertEquals(1, store.all().size());
+        assertTrue(store.delete(id(ID)).isPresent());
+        assertTrue(backend.keys().isEmpty());
+        assertTrue(store.get(id(ID)).isEmpty());
+    }
+
+    @Test
+    void aWriteMovesEveryLegacyCasingToTheOneCanonicalKey() throws Exception {
+        putLegacy("Sub-1/RG-One/a", new Thing(ID, "upper"));
+        putLegacy("sub-1/rg-one/a", new Thing(ID.replace("RG-One", "rg-one"), "lower"));
+
+        store.put(new Thing(ID, "written"));
+
+        assertEquals(List.of(ID.toLowerCase()), List.copyOf(backend.keys()));
+    }
+
+    @Test
+    void aReadOfSeveralLegacyCasingsTakesTheMostRecentlyWritten() throws Exception {
+        putLegacy("Sub-1/RG-One/a", new Thing(ID, "older"), Instant.parse("2026-01-01T00:00:00Z"));
+        putLegacy("sub-1/rg-one/a", new Thing(ID, "newer"), Instant.parse("2026-02-01T00:00:00Z"));
+
+        assertEquals("newer", store.get(id(ID)).orElseThrow().value().label());
+        assertEquals("newer", store.all().getFirst().value().label());
+    }
+
+    @Test
+    void createOrUpdateCreatesOnceAndHandsTheSecondWriteTheFirstsValue() {
+        ArmResourceStore.Written<Thing> created =
+            store.createOrUpdate(id(ID), existing -> existing.orElse(new Thing(ID, "first")));
+        ArmResourceStore.Written<Thing> updated =
+            store.createOrUpdate(id(ID.toLowerCase()), existing -> existing.orElse(new Thing(ID, "second")));
+
+        assertTrue(created.created());
+        assertFalse(updated.created());
+        assertEquals("first", updated.stored().value().label());
+        assertEquals(1, store.all().size());
     }
 
     @Test

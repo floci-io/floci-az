@@ -173,5 +173,9 @@ class ParityConfigTest {
             BannerLogger.parityLine(config(ParityLevel.AZURE, Map.of("resource-group-semantics", false), "dev")));
         assertEquals("parity: azure  strict-resource-groups:true",
             BannerLogger.parityLine(config(ParityLevel.AZURE, Map.of("strict-resource-groups", true), "dev")));
+        assertEquals("parity: compat  strict-names:true",
+            BannerLogger.parityLine(config(ParityLevel.COMPAT, Map.of("strict-names", true), "dev")));
+        assertEquals("parity: strict  strict-names:false",
+            BannerLogger.parityLine(config(ParityLevel.STRICT, Map.of("strict-names", false), "dev")));
     }
 }

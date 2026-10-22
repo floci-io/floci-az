@@ -6,6 +6,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -14,6 +17,9 @@ import java.util.Optional;
  * another resource owns it. The reservation is committed when the handler answers 2xx and released otherwise; a
  * 2xx DELETE releases the name. Every other request passes: a read or delete through another resource's scope
  * misses that resource's key and is the handler's 404, as before.
+ *
+ * <p>Only the request that made a reservation releases it on failure: the gate hands each exit hook the call
+ * its entry saw, so the reservation's token is kept per call between the two.
  *
  * <p>A path that names no resource group is never a create of a resource-group type, so it passes too, and its
  * handler answers it.
@@ -26,6 +32,8 @@ public class GlobalNameRule implements ArmRequestRule {
 
     private final ArmTypeRegistry types;
     private final GlobalNameRegistry names;
+    /** The token of each call in flight that reserved a name, by identity: two calls can be equal records. */
+    private final Map<ArmCall, Long> reservations = Collections.synchronizedMap(new IdentityHashMap<>());
 
     @Inject
     public GlobalNameRule(ArmTypeRegistry types, GlobalNameRegistry names) {
@@ -46,6 +54,9 @@ public class GlobalNameRule implements ArmRequestRule {
         }
         GlobalNameRegistry.Reservation reservation =
             names.reserve(cloud(call), global.get().suffix(), call.id().name(), call.id());
+        if (reservation.outcome() == GlobalNameRegistry.Outcome.RESERVED) {
+            reservations.put(call, reservation.token());
+        }
         if (reservation.outcome() != GlobalNameRegistry.Outcome.TAKEN) {
             return ArmVerdict.proceed();
         }
@@ -55,11 +66,12 @@ public class GlobalNameRule implements ArmRequestRule {
     @Override
     public void exit(ArmCall call, Response response) {
         boolean succeeded = response != null && response.getStatus() / 100 == 2;
+        Long token = reservations.remove(call);
         globalName(call, "PUT").ifPresent(global -> {
             if (succeeded) {
                 names.commit(cloud(call), global.suffix(), call.id().name(), call.id());
-            } else {
-                names.releasePending(cloud(call), global.suffix(), call.id().name(), call.id());
+            } else if (token != null) {
+                names.releasePending(cloud(call), global.suffix(), call.id().name(), token);
             }
         });
         if (succeeded) {

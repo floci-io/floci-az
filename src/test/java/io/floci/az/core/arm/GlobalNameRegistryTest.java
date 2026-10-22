@@ -44,19 +44,52 @@ class GlobalNameRegistryTest {
     @Test
     void aFailedCreateFreesTheNameAndASucceededOneKeepsIt() {
         ArmResourceId owner = cache("s1", "rg", "c1");
-        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
-        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        long failed = registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner).token();
+        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", failed);
         assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isEmpty());
 
-        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        long succeeded = registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner).token();
         registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
-        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", succeeded);
         assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow());
 
         registry.release(PUBLIC, CloudSuffix.REDIS, "c1", cache("s2", "rg", "c1"));
         assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isPresent(), "only the owner releases");
         registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
         assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isEmpty());
+    }
+
+    @Test
+    void aConcurrentPutToTheSameResourceCannotFreeTheNameTheFirstIsCreating() {
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        GlobalNameRegistry.Reservation first = registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        GlobalNameRegistry.Reservation second = registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(GlobalNameRegistry.Outcome.OWNED, second.outcome());
+
+        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", second.token());
+
+        assertEquals(GlobalNameRegistry.Outcome.TAKEN,
+            registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", cache("s2", "rg", "c1")).outcome(),
+            "the second PUT failing leaves the first one's reservation");
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow());
+        registry.releasePending(PUBLIC, CloudSuffix.REDIS, "c1", first.token());
+        assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isPresent(), "a committed name stays held");
+    }
+
+    @Test
+    void aCreateThatSucceedsAfterADeleteReleasedItsNameHoldsItOnlyIfTheResourceIsStored() {
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isEmpty(), "the delete won: nothing is stored");
+
+        stored.add(new GlobalNameSource.Claim(CloudSuffix.REDIS, "c1", owner));
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow(),
+            "the PUT stored the resource after the delete, so it holds the name again");
     }
 
     @Test
