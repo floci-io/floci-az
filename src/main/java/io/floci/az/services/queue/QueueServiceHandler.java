@@ -209,15 +209,37 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response deleteQueue(AzureRequest request, String queueName) {
-        synchronized (queueRecordLock) {
-            store.delete(nsKey(request.accountName(), queueName));
+        removeQueue(request.accountName(), queueName);
+        return Response.status(Response.Status.NO_CONTENT).build();
+    }
+
+    /** Whether {@code queueName} exists in {@code accountName}, for the ARM queue resource. */
+    public boolean queueExists(String accountName, String queueName) {
+        return store.get(nsKey(accountName, queueName)).isPresent();
+    }
+
+    /**
+     * Deletes a queue and its messages, as Delete Queue does, for the ARM queue resource.
+     *
+     * @return {@code false} when there was no such queue
+     */
+    public boolean deleteQueue(String accountName, String queueName) {
+        if (!queueExists(accountName, queueName)) {
+            return false;
         }
-        String msgPrefix = request.accountName() + "/" + queueName + "/";
+        removeQueue(accountName, queueName);
+        return true;
+    }
+
+    private void removeQueue(String accountName, String queueName) {
+        synchronized (queueRecordLock) {
+            store.delete(nsKey(accountName, queueName));
+        }
+        String msgPrefix = accountName + "/" + queueName + "/";
         store.keys().stream()
                 .filter(k -> k.startsWith(msgPrefix))
                 .toList()
                 .forEach(store::delete);
-        return Response.status(Response.Status.NO_CONTENT).build();
     }
 
     private Response listQueues(AzureRequest request) {

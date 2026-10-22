@@ -527,11 +527,34 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
+        removeContainer(request.accountName(), containerName);
+        return Response.status(Response.Status.ACCEPTED).build();
+    }
+
+    /** Whether {@code containerName} exists in {@code accountName}, for the ARM container resource. */
+    public boolean containerExists(String accountName, String containerName) {
+        return store.get(nsKey(accountName, containerName)).isPresent();
+    }
+
+    /**
+     * Deletes a container and everything in it, as Delete Container does, for the ARM container resource.
+     *
+     * @return {@code false} when there was no such container
+     */
+    public boolean deleteContainer(String accountName, String containerName) {
+        if (!containerExists(accountName, containerName)) {
+            return false;
+        }
+        removeContainer(accountName, containerName);
+        return true;
+    }
+
+    private void removeContainer(String accountName, String containerName) {
         // The sweep runs under the lease monitor so no lease op or guarded
         // write can interleave and resurrect blob or lease state mid-deletion.
-        return leaseService.exclusively(() -> {
-            store.delete(nsKey(request.accountName(), containerName));
-            String objPrefix = request.accountName() + "/" + containerName + "/";
+        leaseService.exclusively(() -> {
+            store.delete(nsKey(accountName, containerName));
+            String objPrefix = accountName + "/" + containerName + "/";
             String blkPrefix = BLK_PREFIX + objPrefix;
             String snapshotPrefix = SNAPSHOT_PREFIX + objPrefix;
             String appendPrefix = DATALAKE_APPEND_PREFIX + objPrefix;
@@ -541,7 +564,6 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .toList()
                     .forEach(store::delete);
             leaseService.onContainerDeleted(objPrefix);
-            return Response.status(Response.Status.ACCEPTED).build();
         });
     }
 

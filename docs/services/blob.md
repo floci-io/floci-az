@@ -70,6 +70,12 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   A SAS on the source URL is checked as a read of the source, as Azurite checks it, and a failed check
   is `CannotVerifyCopySource` with the status the read got. Both answer `202` with
   `x-ms-copy-status: success`
+- **ARM containers and queues**: `.../blobServices/default/containers/{name}` and
+  `.../queueServices/default/queues/{name}` answer from the data plane's own containers and queues, so a
+  container or queue made on either plane is read on the other, and an ARM delete removes it with its blobs or
+  messages. A missing one is `404` (`ContainerNotFound` / `QueueNotFound`, the Storage service's codes; Azure's
+  ARM spec records no code for it). Statuses follow the spec: a container delete is `200`, or `204` when there
+  was none; a queue create is `200` and a queue delete `204`
 - **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 

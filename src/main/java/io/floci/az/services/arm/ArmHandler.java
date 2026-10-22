@@ -762,13 +762,16 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                         "properties", props
                 )).build();
             }
-            case "GET" -> Response.ok(Map.of(
-                    "id",         path,
-                    "name",       container,
-                    "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
-                    "properties", Map.of("publicAccess", "None")
-            )).build();
-            case "DELETE" -> Response.ok().build();
+            case "GET" -> blobHandler.containerExists(account, container)
+                    ? Response.ok(Map.of(
+                            "id",         path,
+                            "name",       container,
+                            "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
+                            "properties", Map.of("publicAccess", "None")
+                    )).build()
+                    : ArmErrors.error(404, "ContainerNotFound", "The specified container does not exist.");
+            // BlobContainers_Delete: 200 when it deleted the container, 204 when there was none.
+            case "DELETE" -> Response.status(blobHandler.deleteContainer(account, container) ? 200 : 204).build();
             default -> Response.status(405).build();
         };
     }
@@ -782,20 +785,27 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         return switch (method) {
             case "PUT" -> {
                 queueHandler.ensureQueue(account, queue);
-                yield Response.status(201).entity(Map.of(
+                // Queue_Create declares 200 only, for a new queue and an existing one alike.
+                yield Response.ok(Map.of(
                         "id",         path,
                         "name",       queue,
                         "type",       "Microsoft.Storage/storageAccounts/queueServices/queues",
                         "properties", Map.of()
                 )).build();
             }
-            case "GET" -> Response.ok(Map.of(
-                    "id",         path,
-                    "name",       queue,
-                    "type",       "Microsoft.Storage/storageAccounts/queueServices/queues",
-                    "properties", Map.of()
-            )).build();
-            case "DELETE" -> Response.ok().build();
+            case "GET" -> queueHandler.queueExists(account, queue)
+                    ? Response.ok(Map.of(
+                            "id",         path,
+                            "name",       queue,
+                            "type",       "Microsoft.Storage/storageAccounts/queueServices/queues",
+                            "properties", Map.of()
+                    )).build()
+                    : ArmErrors.error(404, "QueueNotFound", "The specified queue does not exist.");
+            // Queue_Delete declares 204 only, whether or not the queue existed.
+            case "DELETE" -> {
+                queueHandler.deleteQueue(account, queue);
+                yield Response.noContent().build();
+            }
             default -> Response.status(405).build();
         };
     }
