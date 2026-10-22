@@ -18,11 +18,14 @@ public class RedisArmSurface implements ArmSurfaceProvider {
 
     private static final String NAMESPACE = "Microsoft.Cache";
 
-    /** A cache name is a global DNS label under {@code redis.cache.windows.net}; the conflict is Azure's own text. */
+    /**
+     * A cache name is a global DNS label under {@code redis.cache.windows.net}; the conflict is Azure's own text. Each
+     * cache runs in a container keyed by its instance, not its name, so the name is owned per cloud as in Azure.
+     */
     static final GlobalName CACHE_NAME = new GlobalName(CloudSuffix.REDIS, 409, "NameNotAvailable",
         "An error occured when trying to reserve the DNS name for the cache instance. This may be a temporary issue "
             + "if a cache instance of this name was recently deleted. Please choose a different name or try again "
-            + "later.");
+            + "later.").ownedPerCloud();
 
     private static final List<ArmSurface> SURFACES = List.of(
         new ArmSurface(NAMESPACE, ArmLane.FILTER, List.of(

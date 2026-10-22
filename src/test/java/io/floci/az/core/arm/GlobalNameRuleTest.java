@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,7 +34,7 @@ class GlobalNameRuleTest {
                 .withGlobalName(ACCOUNT)))));
 
     private final GlobalNameRegistry names = new GlobalNameRegistry(List::of,
-        subscription -> CloudCatalog.forNameOrPublic("AzureCloud"));
+        subscription -> CloudCatalog.forNameOrPublic("AzureCloud"), () -> Set.of(CloudSuffix.REDIS));
     private final GlobalNameRule rule = new GlobalNameRule(TYPES, names);
 
     private static ArmCall call(String method, String path) {

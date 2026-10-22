@@ -13,18 +13,18 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
- * One owner per global DNS name in each cloud: the first resource to create a name owns it until it is deleted.
- * Names are unique per cloud and suffix, because each cloud has its own DNS zones ({@code x.redis.cache.windows.net}
- * and {@code x.redis.cache.usgovcloudapi.net} are different names), so the key is {@code cloud/suffix/name}.
- *
- * <p>The exception is a {@link CloudSuffix#hostRouted() host-routed} suffix. floci-az serves those data planes on one
- * host suffix per service and keys their data by name alone (an ACR repository prefix, a storage account), with no
- * cloud in either, so two clouds holding the same name would share one data plane. Until the data planes are
- * cloud-aware, a host-routed name is unique across every cloud, and its key leaves the cloud out.
+ * One owner per global DNS name: the first resource to create a name owns it until it is deleted. A name is unique
+ * across every cloud, keyed {@code suffix/name}, because floci-az keys most data planes by name alone; a type that
+ * declares {@link GlobalName#perCloud()} is unique per cloud instead, as in Azure, where each cloud has its own DNS
+ * zones ({@code x.redis.cache.windows.net} and {@code x.redis.cache.usgovcloudapi.net} are different names), keyed
+ * {@code cloud/suffix/name}. Each suffix belongs to one type's global name, so the registry reads the per-cloud
+ * suffixes from the declared types.
  *
  * <p>A PUT {@link #reserve reserves} a name, then {@link #commit commits} it on a 2xx answer or
  * {@link #releasePending releases} it otherwise ({@link GlobalNameRule}). A reservation in flight reads as taken to
@@ -41,7 +41,7 @@ public class GlobalNameRegistry implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(GlobalNameRegistry.class);
 
-    /** The namespace of a host-routed suffix's names: every cloud at once, since its data plane has no cloud. */
+    /** The namespace of a name unique across clouds. */
     private static final String ALL_CLOUDS = "*";
 
     /** What a reservation found. */
@@ -60,18 +60,32 @@ public class GlobalNameRegistry implements Resettable {
 
     private final Supplier<Iterable<GlobalNameSource>> sources;
     private final Function<String, CloudProfile> cloudOfSubscription;
+    private final Supplier<Set<CloudSuffix>> perCloudSuffixes;
+    private Set<CloudSuffix> perCloud;
     private final Map<String, Entry> names = new HashMap<>();
     private boolean built;
     private long lastToken;
 
     @Inject
-    public GlobalNameRegistry(Instance<GlobalNameSource> sources, AzureDirectory directory) {
-        this(() -> sources, subscription -> directory.cloudOfTenant(directory.tenantOfSubscription(subscription)));
+    public GlobalNameRegistry(Instance<GlobalNameSource> sources, AzureDirectory directory, ArmTypeRegistry types) {
+        this(() -> sources, subscription -> directory.cloudOfTenant(directory.tenantOfSubscription(subscription)),
+            () -> perCloudSuffixes(types));
     }
 
-    GlobalNameRegistry(Supplier<Iterable<GlobalNameSource>> sources, Function<String, CloudProfile> cloudOfSubscription) {
+    GlobalNameRegistry(Supplier<Iterable<GlobalNameSource>> sources, Function<String, CloudProfile> cloudOfSubscription,
+                       Supplier<Set<CloudSuffix>> perCloudSuffixes) {
         this.sources = sources;
         this.cloudOfSubscription = cloudOfSubscription;
+        this.perCloudSuffixes = perCloudSuffixes;
+    }
+
+    private static Set<CloudSuffix> perCloudSuffixes(ArmTypeRegistry types) {
+        return types.surfaces().stream()
+            .flatMap(surface -> surface.types().stream())
+            .map(ArmResourceType::globalName)
+            .filter(global -> global.declared() && global.perCloud())
+            .map(GlobalName::suffix)
+            .collect(Collectors.toUnmodifiableSet());
     }
 
     /** Reserves {@code name} for {@code owner}, unless another resource owns or is creating it. */
@@ -172,8 +186,11 @@ public class GlobalNameRegistry implements Resettable {
         return a.canonicalKey().equals(b.canonicalKey());
     }
 
-    private static String key(CloudProfile cloud, CloudSuffix suffix, String name) {
-        String namespace = suffix.hostRouted() ? ALL_CLOUDS : cloud.name().toLowerCase(Locale.ROOT);
+    private String key(CloudProfile cloud, CloudSuffix suffix, String name) {
+        if (perCloud == null) {
+            perCloud = perCloudSuffixes.get();
+        }
+        String namespace = perCloud.contains(suffix) ? cloud.name().toLowerCase(Locale.ROOT) : ALL_CLOUDS;
         return namespace + "/" + suffix.name() + "/" + name.toLowerCase(Locale.ROOT);
     }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,7 +21,7 @@ class GlobalNameRegistryTest {
 
     private final List<GlobalNameSource.Claim> stored = new ArrayList<>();
     private final GlobalNameRegistry registry = new GlobalNameRegistry(() -> List.of(() -> List.copyOf(stored)),
-        subscription -> subscription.startsWith("gov") ? GOV : PUBLIC);
+        subscription -> subscription.startsWith("gov") ? GOV : PUBLIC, () -> Set.of(CloudSuffix.REDIS));
 
     private static ArmResourceId cache(String sub, String rg, String name) {
         return ArmResourceId.parse("/subscriptions/" + sub + "/resourceGroups/" + rg
@@ -100,6 +101,19 @@ class GlobalNameRegistryTest {
             registry.reserve(GOV, CloudSuffix.REDIS, "c1", cache("gov1", "rg", "c1")).outcome());
         assertEquals(GlobalNameRegistry.Outcome.RESERVED,
             registry.reserve(PUBLIC, CloudSuffix.ACR, "c1", cache("s2", "rg", "c1")).outcome());
+    }
+
+    @Test
+    void aNameIsOneNameAcrossCloudsUnlessItsTypeIsPerCloud() {
+        registry.reserve(PUBLIC, CloudSuffix.POSTGRES, "db1", cache("s1", "rg", "db1"));
+
+        assertEquals(GlobalNameRegistry.Outcome.TAKEN,
+            registry.reserve(GOV, CloudSuffix.POSTGRES, "db1", cache("gov1", "rg", "db1")).outcome(),
+            "a database container is keyed by the server name, so the name is one across clouds");
+        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c9", cache("s1", "rg", "c9"));
+        assertEquals(GlobalNameRegistry.Outcome.RESERVED,
+            registry.reserve(GOV, CloudSuffix.REDIS, "c9", cache("gov1", "rg", "c9")).outcome(),
+            "Redis declares its name per cloud");
     }
 
     @Test
