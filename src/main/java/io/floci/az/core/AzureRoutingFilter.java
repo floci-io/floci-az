@@ -4,7 +4,6 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.RouteOutcome.Fallthrough;
 import io.floci.az.core.RouteOutcome.Handled;
 import io.floci.az.core.ServiceRoutes.SuffixRoute;
-import io.floci.az.core.auth.SharedKeyAuthVerifier;
 import io.floci.az.core.cloud.ScopeContext;
 import io.floci.az.core.cloud.ScopeResolver;
 import io.smallrye.mutiny.Uni;
@@ -508,27 +507,14 @@ public class AzureRoutingFilter {
     // ── Terminal: account-name routing ──────────────────────────────────────────
 
     /**
-     * Terminal stage: {@code /{account}[-suffix]/{resourcePath}}, or a recognizable pathless Blob write whose
-     * Shared Key header supplies the account name. Unlike the stages above, an unknown or disabled service
-     * produces an Azure error response here rather than declining — this is the last chance to answer, so
-     * silence would surface as a bare 404.
+     * Terminal stage: {@code /{account}[-suffix]/{resourcePath}}. Unlike the stages above, an unknown
+     * or disabled service produces an Azure error response here rather than declining — this is the
+     * last chance to answer, so silence would surface as a bare 404.
      */
     private Response dispatchByAccountSuffix(RoutingContext ctx) {
         String accountName = ctx.firstSegment();
         String resourcePath = ctx.resourcePath();
-        Optional<String> sharedKeyAccount = SharedKeyAuthVerifier.accountName(
-                ctx.headers().getHeaderString(HttpHeaders.AUTHORIZATION))
-            .filter(account -> !account.isBlank());
         SuffixRoute route = matchSuffix(accountSuffixRoutes, accountName);
-        boolean useSharedKeyAccount = sharedKeyAccount.isPresent() && isPathlessBlobWrite(ctx)
-            && (accountName.isEmpty()
-                || (!sharedKeyAccount.get().equals(accountName) && route == null));
-
-        if (useSharedKeyAccount) {
-            accountName = sharedKeyAccount.get();
-            resourcePath = ctx.path();
-            route = null;
-        }
         if (accountName.isEmpty()) {
             return null;
         }
@@ -539,7 +525,7 @@ public class AzureRoutingFilter {
             accountName = stripSuffix(accountName, route);
             ctx.mutableHeaders().putSingle("x-floci-account-suffix", route.suffix());
         } else {
-            serviceType = useSharedKeyAccount ? "blob" : resolveStorageServiceType(ctx, resourcePath);
+            serviceType = resolveStorageServiceType(ctx, resourcePath);
         }
 
         LOGGER.infof("Resolved accountName: %s, serviceType: %s, resourcePath: %s",
@@ -566,7 +552,7 @@ public class AzureRoutingFilter {
         if (ctx.headers().getHeaderString("x-ms-blob-type") != null) {
             return "blob";
         }
-        if (hasPathSegment(resourcePath, "messages")) {
+        if (isQueueMessagePath(resourcePath)) {
             return "queue";
         }
         List<String> restype = ctx.queryParameters().get("restype");
@@ -579,26 +565,18 @@ public class AzureRoutingFilter {
         return "blob";
     }
 
-    private static boolean hasPathSegment(String path, String segment) {
-        for (String pathSegment : path.split("/")) {
-            if (segment.equals(pathSegment)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Avoid reinterpreting unrelated pathless storage requests based only on their Shared Key identity. */
-    private static boolean isPathlessBlobWrite(RoutingContext ctx) {
-        if (!"PUT".equalsIgnoreCase(ctx.method())) {
+    /** Queue message operations use exactly {@code {queue}/messages[/{messageId}]}. */
+    private static boolean isQueueMessagePath(String resourcePath) {
+        int queueSeparator = resourcePath.indexOf('/');
+        if (queueSeparator < 0) {
             return false;
         }
-        if (ctx.headers().getHeaderString("x-ms-blob-type") != null) {
-            return true;
-        }
-        String restype = ctx.queryParameters().getFirst("restype");
-        String comp = ctx.queryParameters().getFirst("comp");
-        return "container".equals(restype) || "block".equals(comp) || "blocklist".equals(comp);
+        int messageStart = queueSeparator + 1;
+        int messageEnd = resourcePath.indexOf('/', messageStart);
+        String messageSegment = messageEnd < 0
+            ? resourcePath.substring(messageStart)
+            : resourcePath.substring(messageStart, messageEnd);
+        return "messages".equals(messageSegment);
     }
 
     // ── Dispatch helpers ────────────────────────────────────────────────────────

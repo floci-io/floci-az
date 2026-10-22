@@ -125,7 +125,7 @@ public class BlobServiceTest {
     }
 
     @Test
-    void rootEndpointUsesSharedKeyAccountForContainerAndBlobOperations() {
+    void pathStyleSharedKeyUploadsUseTheUrlAccountForContainerAndBlobOperations() {
         String account = "issue191account";
         String container = "issue191-container";
         String blob = "small-upload.txt";
@@ -134,7 +134,7 @@ public class BlobServiceTest {
         given()
             .header("Authorization", authorization)
             .queryParam("restype", "container")
-            .when().put("/{container}", container)
+            .when().put("/{account}/{container}", account, container)
             .then().statusCode(201);
 
         given()
@@ -142,7 +142,7 @@ public class BlobServiceTest {
             .header("x-ms-blob-type", "BlockBlob")
             .contentType("application/octet-stream")
             .body(BLOB_CONTENT.getBytes(StandardCharsets.UTF_8))
-            .when().put("/{container}/{blob}", container, blob)
+            .when().put("/{account}/{container}/{blob}", account, container, blob)
             .then().statusCode(201);
 
         given()
@@ -170,7 +170,7 @@ public class BlobServiceTest {
     }
 
     @Test
-    void rootEndpointRoutesBlockUploadToBlobWhenBlobPathContainsMessages() {
+    void pathStyleBlockUploadUsesBlobRoutingWhenBlobNameContainsMessages() {
         String account = "issue191blockaccount";
         String container = "issue191-blocks";
         String blob = "messages.txt";
@@ -181,23 +181,73 @@ public class BlobServiceTest {
         given()
             .header("Authorization", authorization)
             .queryParam("restype", "container")
-            .when().put("/{container}", container)
+            .when().put("/{account}/{container}", account, container)
             .then().statusCode(201);
 
         given()
             .header("Authorization", authorization)
             .body(BLOB_CONTENT)
-            .when().put("/{container}/{blob}?comp=block&blockid={id}", container, blob, blockId)
+            .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                account, container, blob, blockId)
             .then().statusCode(201);
 
         given()
             .header("Authorization", authorization)
             .body(blockList)
-            .when().put("/{container}/{blob}?comp=blocklist", container, blob)
+            .when().put("/{account}/{container}/{blob}?comp=blocklist", account, container, blob)
             .then().statusCode(201);
 
         given()
             .when().get("/{account}/{container}/{blob}", account, container, blob)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void requestUrlSelectsBlobAccountWhenSharedKeyNamesAnotherAccount() {
+        String accountA = "issue191keyaccount";
+        String accountB = "issue191urlaccount";
+        String container = "url-selected-container";
+        String blob = "url-selected.txt";
+
+        given()
+            .queryParam("restype", "container")
+            .when().put("/{account}/{container}", accountB, container)
+            .then().statusCode(201);
+
+        given()
+            .header("Authorization", "SharedKey " + accountA + ":signature")
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/{blob}", accountB, container, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{container}/{blob}", accountB, container, blob)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+
+        given()
+            .when().get("/{account}/{container}/{blob}", accountA, container, blob)
+            .then().statusCode(404);
+    }
+
+    @Test
+    void blobContainerNamedMessagesSupportsContainerBlobUploadAndDownload() {
+        String account = "messageroutingaccount";
+        String blob = "file.txt";
+
+        given()
+            .queryParam("restype", "container")
+            .when().put("/{account}/messages", account)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/messages/{blob}", account, blob)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/messages/{blob}", account, blob)
             .then().statusCode(200).body(equalTo(BLOB_CONTENT));
     }
 

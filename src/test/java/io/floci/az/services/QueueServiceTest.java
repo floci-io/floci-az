@@ -97,6 +97,34 @@ public class QueueServiceTest {
     }
 
     @Test
+    void pathStyleQueueMessageAndMessageIdRoutesReachQueue() {
+        String account = "pathstylequeueaccount";
+        String queue = "pathstyle-orders";
+
+        given()
+            .queryParam("restype", "queue")
+            .when().put("/{account}/{queue}", account, queue)
+            .then().statusCode(201);
+
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>path-style-message</MessageText></QueueMessage>")
+            .when().post("/{account}/{queue}/messages", account, queue)
+            .then().statusCode(201);
+
+        Response messages = given()
+            .when().get("/{account}/{queue}/messages", account, queue);
+        messages.then().statusCode(200).body(containsString("path-style-message"));
+        String messageId = messages.xmlPath().getString("QueueMessagesList.QueueMessage.MessageId");
+        String popReceipt = messages.xmlPath().getString("QueueMessagesList.QueueMessage.PopReceipt");
+
+        given()
+            .when().delete("/{account}/{queue}/messages/{id}?popreceipt={receipt}",
+                account, queue, messageId, popReceipt)
+            .then().statusCode(204);
+    }
+
+    @Test
     void getFromEmptyQueueReturnsEmptyList() {
         given().put("/{account}/{queue}", ACCOUNT, QUEUE);
 
