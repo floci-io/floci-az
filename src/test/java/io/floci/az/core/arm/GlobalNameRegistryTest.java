@@ -103,6 +103,17 @@ class GlobalNameRegistryTest {
     }
 
     @Test
+    void aHostRoutedNameIsOneNameAcrossClouds() {
+        ArmResourceId publicOwner = cache("s1", "rg", "shared");
+        registry.reserve(PUBLIC, CloudSuffix.ACR, "shared", publicOwner);
+
+        GlobalNameRegistry.Reservation gov = registry.reserve(GOV, CloudSuffix.ACR, "shared", cache("gov1", "rg", "shared"));
+        assertEquals(GlobalNameRegistry.Outcome.TAKEN, gov.outcome());
+        assertEquals(publicOwner, gov.owner());
+        assertEquals(publicOwner, registry.owner(GOV, CloudSuffix.ACR, "shared").orElseThrow());
+    }
+
+    @Test
     void theRegistryRebuildsFromTheStoresOnFirstUseAndAfterAReset() {
         stored.add(new GlobalNameSource.Claim(CloudSuffix.REDIS, "kept", cache("s1", "rg", "kept")));
         stored.add(new GlobalNameSource.Claim(CloudSuffix.REDIS, "govname", cache("gov1", "rg", "govname")));

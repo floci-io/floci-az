@@ -32,9 +32,11 @@ GET                   .../registries/{name}/listUsages
 POST                  /subscriptions/{s}/providers/Microsoft.ContainerRegistry/checkNameAvailability
 ```
 
-A registry name is a global DNS name: the first subscription to create it owns it in its cloud, and another
-subscription's create is `409 AlreadyInUse` until the owner deletes it. `checkNameAvailability` answers from the
-same ownership, so it reports a name taken in any subscription of the caller's cloud. Paths that differ only in case
+A registry name is a global DNS name: the first subscription to create it owns it, and another subscription's
+create is `409 AlreadyInUse` until the owner deletes it. In Azure each cloud has its own zone (`azurecr.us`,
+`azurecr.cn`), but floci-az serves every registry on `{name}.azurecr.io` from one shared backing registry, so a name
+is unique across every configured cloud, not per cloud. `checkNameAvailability` answers from the same ownership.
+Paths that differ only in case
 address the same registry. With `parity-overrides.strict-names` a name outside 5 to 50 letters and digits is refused
 with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 

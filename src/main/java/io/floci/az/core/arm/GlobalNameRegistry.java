@@ -21,6 +21,11 @@ import java.util.function.Supplier;
  * Names are unique per cloud and suffix, because each cloud has its own DNS zones ({@code x.redis.cache.windows.net}
  * and {@code x.redis.cache.usgovcloudapi.net} are different names), so the key is {@code cloud/suffix/name}.
  *
+ * <p>The exception is a {@link CloudSuffix#hostRouted() host-routed} suffix. floci-az serves those data planes on one
+ * host suffix per service and keys their data by name alone (an ACR repository prefix, a storage account), with no
+ * cloud in either, so two clouds holding the same name would share one data plane. Until the data planes are
+ * cloud-aware, a host-routed name is unique across every cloud, and its key leaves the cloud out.
+ *
  * <p>A PUT {@link #reserve reserves} a name, then {@link #commit commits} it on a 2xx answer or
  * {@link #releasePending releases} it otherwise ({@link GlobalNameRule}). A reservation in flight reads as taken to
  * a concurrent PUT from another resource, so concurrent creates leave one owner. Only the request that made a
@@ -35,6 +40,9 @@ import java.util.function.Supplier;
 public class GlobalNameRegistry implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(GlobalNameRegistry.class);
+
+    /** The namespace of a host-routed suffix's names: every cloud at once, since its data plane has no cloud. */
+    private static final String ALL_CLOUDS = "*";
 
     /** What a reservation found. */
     public enum Outcome { RESERVED, OWNED, TAKEN }
@@ -165,6 +173,7 @@ public class GlobalNameRegistry implements Resettable {
     }
 
     private static String key(CloudProfile cloud, CloudSuffix suffix, String name) {
-        return cloud.name().toLowerCase(Locale.ROOT) + "/" + suffix.name() + "/" + name.toLowerCase(Locale.ROOT);
+        String namespace = suffix.hostRouted() ? ALL_CLOUDS : cloud.name().toLowerCase(Locale.ROOT);
+        return namespace + "/" + suffix.name() + "/" + name.toLowerCase(Locale.ROOT);
     }
 }
