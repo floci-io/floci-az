@@ -82,6 +82,19 @@ setup() {
     assert_output --partial "blob"
 }
 
+@test "OpenTofu: storage account tags read back, so a second plan leaves them unchanged" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}"
+    assert_success
+    assert_output --partial '"env":"floci-test"'
+
+    # The account still plans other drift (the queue and table encryption key type), so only tags are checked here.
+    cd "$TF_DIR"
+    run tofu plan -input=false -no-color -target=azurerm_storage_account.sa
+    assert_success
+    refute_output --partial "~ tags"
+    refute_output --partial "+ tags"
+}
+
 @test "OpenTofu: storage container listed in blob API" {
     run curl -sf "${FLOCI_AZ_ENDPOINT}/${SA_NAME}?comp=list&restype=container"
     assert_success

@@ -27,6 +27,10 @@ resource "azurerm_storage_account" "sa" {
   location                 = azurerm_resource_group.rg.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
+
+  tags = {
+    env = "floci-test"
+  }
 }
 
 resource "azurerm_storage_container" "sc" {

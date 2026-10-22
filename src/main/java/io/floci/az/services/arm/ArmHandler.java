@@ -633,6 +633,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             String account = extractResourceName(path, "storageAccounts");
             return switch (method) {
                 case "PUT"    -> createOrUpdateStorageAccount(req, sub, rg, account);
+                case "PATCH"  -> updateStorageAccount(req, sub, rg, account);
                 case "GET"    -> getStorageAccount(sub, rg, account);
                 case "DELETE" -> {
                     synchronized (this) {
@@ -692,6 +693,10 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         resource.put("name", account);
         resource.put("type", "Microsoft.Storage/storageAccounts");
         resource.put("location", location);
+        Map<String, Object> tags = tags(body.get("tags"));
+        if (tags != null) {
+            resource.put("tags", tags);
+        }
         resource.put("sku", Map.of("name", "Standard_LRS", "tier", "Standard"));
         resource.put("kind", "StorageV2");
         resource.put("properties", Map.of(
@@ -719,6 +724,42 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         blobHandler.setHierarchicalNamespaceEnabled(account, hnsEnabled);
         LOG.infof("ARM: created storage account %s", account);
         return Response.ok(stripInternal(resource)).build();
+    }
+
+    /**
+     * {@code StorageAccounts_Update}: the {@code tags} the body names replace the account's, as azurerm updates them;
+     * nothing else in the body is applied yet.
+     */
+    private synchronized Response updateStorageAccount(AzureRequest req, String sub, String rg, String account) {
+        Map<String, Object> resource = storageAccounts.get(saKey(sub, rg, account));
+        if (resource == null) {
+            return armNotFound("storageAccounts/" + account);
+        }
+        Map<String, Object> tags = tags(parseBody(req).get("tags"));
+        if (tags != null) {
+            Map<String, Object> updated = new LinkedHashMap<>();
+            resource.forEach((key, value) -> {
+                if (!key.equals("tags")) {
+                    updated.put(key, value);
+                }
+                if (key.equals("location")) {
+                    updated.put("tags", tags);
+                }
+            });
+            storageAccounts.put(saKey(sub, rg, account), updated);
+            resource = updated;
+        }
+        return Response.ok(stripInternal(resource)).build();
+    }
+
+    /** A {@code tags} object as sent, or null when the body names none, so an account without tags omits them. */
+    private static Map<String, Object> tags(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Map<String, Object> tags = new LinkedHashMap<>();
+        map.forEach((key, value) -> tags.put(String.valueOf(key), value));
+        return tags;
     }
 
     private Response getStorageAccount(String sub, String rg, String account) {

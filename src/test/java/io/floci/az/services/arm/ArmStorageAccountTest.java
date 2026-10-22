@@ -11,6 +11,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.isEmptyOrNullString;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
 @DisplayName("ARM storage accounts")
@@ -369,5 +370,36 @@ class ArmStorageAccountTest {
             .when().post("/subscriptions/sub-case-check/providers/" + operation + "?api-version=2023-01-01")
             .then()
             .statusCode(200);
+    }
+
+    @Test
+    void tagsSentOnPutAreStoredAndAPatchReplacesThem() {
+        String account = "/subscriptions/sub-tags/resourceGroups/rg-tags/providers/Microsoft.Storage/storageAccounts/"
+            + "taggedacct?api-version=2023-01-01";
+        given().contentType("application/json").body("{\"location\":\"eastus\",\"tags\":{\"env\":\"test\"}}")
+            .when().put(account).then().statusCode(200).body("tags.env", equalTo("test"));
+        given().when().get(account).then().statusCode(200).body("tags.env", equalTo("test"));
+        given().when().get("/subscriptions/sub-tags/resourceGroups/rg-tags/providers/Microsoft.Storage/storageAccounts"
+                + "?api-version=2023-01-01")
+            .then().statusCode(200).body("value[0].tags.env", equalTo("test"));
+
+        given().contentType("application/json").body("{\"tags\":{\"team\":\"data\"}}")
+            .when().patch(account).then().statusCode(200)
+            .body("tags.team", equalTo("data"))
+            .body("tags.env", nullValue())
+            .body("properties.provisioningState", equalTo("Succeeded"));
+        given().when().get(account).then().statusCode(200).body("tags.team", equalTo("data"));
+
+        given().contentType("application/json").body("{\"properties\":{}}")
+            .when().patch(account).then().statusCode(200).body("tags.team", equalTo("data"));
+    }
+
+    @Test
+    void anAccountCreatedWithoutTagsHasNoneAndAPatchOfAMissingAccountIs404() {
+        String base = "/subscriptions/sub-tags/resourceGroups/rg-tags/providers/Microsoft.Storage/storageAccounts/";
+        given().contentType("application/json").body("{\"location\":\"eastus\"}")
+            .when().put(base + "untaggedacct?api-version=2023-01-01").then().statusCode(200).body("tags", nullValue());
+        given().contentType("application/json").body("{\"tags\":{}}")
+            .when().patch(base + "missingacct?api-version=2023-01-01").then().statusCode(404);
     }
 }
