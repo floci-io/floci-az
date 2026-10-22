@@ -371,36 +371,26 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode props = body.path("properties");
 
             // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before this runs, so a
-            // name another subscription owns never reaches here.
-            Optional<Registry> existing = getRegistry(registryId(sub, rg, registryName));
-            boolean isNew = existing.isEmpty();
-            Registry registry;
-            if (isNew) {
-                registry = new Registry();
-                registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
-                registry.setSubscriptionId(sub);
-                registry.setResourceGroup(rg);
-                registry.setName(registryName);
-                registry.setCreatedAt(Instant.now());
-                registry.setUsername(registryName);
-                registry.setPassword(generatePassword());
-                registry.setPassword2(generatePassword());
-            } else {
-                registry = existing.get();
-            }
-
-            registry.setLocation(location);
-            registry.setSkuName(sku.path("name").asText("Basic"));
-            registry.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
-            registry.setTags(parseStringMap(body.path("tags")));
-
-            registry.setLoginServer(loginServer(registryName));
-            if (config.services().acr().mocked()) {
-                registry.setProvisioningState("Succeeded");
-            } else if (isNew) {
-                registry.setProvisioningState("Creating");
-            }
-            store.put(registry);
+            // name another subscription owns never reaches here. The read and the first write are one store
+            // operation, so two concurrent creates of one registry keep the first one's instance and passwords.
+            boolean mocked = config.services().acr().mocked();
+            ArmResourceStore.Written<Registry> written = store.createOrUpdate(registryId(sub, rg, registryName),
+                    existing -> {
+                        Registry current = existing.orElseGet(() -> newRegistry(sub, rg, registryName));
+                        current.setLocation(location);
+                        current.setSkuName(sku.path("name").asText("Basic"));
+                        current.setAdminUserEnabled(props.path("adminUserEnabled").asBoolean(false));
+                        current.setTags(parseStringMap(body.path("tags")));
+                        current.setLoginServer(loginServer(registryName));
+                        if (mocked) {
+                            current.setProvisioningState("Succeeded");
+                        } else if (existing.isEmpty()) {
+                            current.setProvisioningState("Creating");
+                        }
+                        return current;
+                    });
+            boolean isNew = written.created();
+            Registry registry = written.stored().value();
 
             if (!config.services().acr().mocked() && isNew) {
                 String provisioningState;
@@ -563,6 +553,19 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     // ── Storage helpers ──────────────────────────────────────────────────────────
+
+    private static Registry newRegistry(String sub, String rg, String registryName) {
+        Registry registry = new Registry();
+        registry.setInstanceId(UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+        registry.setSubscriptionId(sub);
+        registry.setResourceGroup(rg);
+        registry.setName(registryName);
+        registry.setCreatedAt(Instant.now());
+        registry.setUsername(registryName);
+        registry.setPassword(generatePassword());
+        registry.setPassword2(generatePassword());
+        return registry;
+    }
 
     private Optional<Registry> getRegistry(ArmResourceId id) {
         return store.get(id).map(ArmResourceStore.Stored::value);

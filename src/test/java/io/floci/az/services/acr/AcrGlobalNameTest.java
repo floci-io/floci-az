@@ -15,11 +15,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,5 +113,31 @@ class AcrGlobalNameTest {
         assertFalse(backend.get(oldKey).isPresent(), "the write moved the entry off its old key");
         assertTrue(backend.keys().stream()
             .anyMatch(key -> key.equals(registry("sub-legacy", "rg-legacy", "legacyreg").toLowerCase())));
+    }
+
+    @Test
+    void concurrentCreatesOfOneRegistryCreateItOnce() throws Exception {
+        String path = registry("sub-race", "rg", "racereg") + API;
+        int callers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> statuses = new ArrayList<>();
+            for (int i = 0; i < callers; i++) {
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    return given().contentType("application/json").body(BODY).when().put(path).statusCode();
+                }));
+            }
+            start.countDown();
+            List<Integer> codes = new ArrayList<>();
+            for (Future<Integer> status : statuses) {
+                codes.add(status.get(30, TimeUnit.SECONDS));
+            }
+            assertEquals(1, codes.stream().filter(code -> code == 201).count(), "codes " + codes);
+            assertEquals(callers - 1, codes.stream().filter(code -> code == 200).count(), "codes " + codes);
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }
