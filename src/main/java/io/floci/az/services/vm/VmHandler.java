@@ -109,8 +109,29 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     @PostConstruct
     public void init() {
+        dropShadowedVms();
         if (!config.services().vm().mocked()) {
             startReadinessPoller();
+        }
+    }
+
+    /**
+     * Old raw-case keys could hold one VM under several casings, each with a backing container of its own (named
+     * from the record's {@code vmId}). The store serves one of them; the others are removed here, with their
+     * containers, before anything could drop them and leave the containers running.
+     */
+    void dropShadowedVms() {
+        for (ArmResourceStore.Stored<VirtualMachine> shadowed : store.removeShadowedLegacy()) {
+            VirtualMachine vm = shadowed.value();
+            LOG.infov("VM {0}: dropping the duplicate stored under {1}/{2}", vm.getName(), vm.getSubscriptionId(),
+                    vm.getResourceGroup());
+            if (!config.services().vm().mocked()) {
+                try {
+                    containerManager.removeVm(vm);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing the container of duplicate VM {0}: {1}", vm.getName(), e.getMessage());
+                }
+            }
         }
     }
 
