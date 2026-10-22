@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("ArmResourceStore: canonical keys, legacy reads and move-on-write")
@@ -206,6 +207,21 @@ class ArmResourceStoreTest {
         assertEquals("newest casing", store.get(id(ID)).orElseThrow().value().label());
         assertEquals("canonical b", store.get(id(other)).orElseThrow().value().label());
         assertTrue(store.removeShadowedLegacy().isEmpty(), "a second pass finds nothing");
+    }
+
+    @Test
+    void aTypedStoreNeitherReadsWritesNorDeletesAnotherTypesId() {
+        String other = "/subscriptions/Sub-1/resourceGroups/RG-One/providers/Microsoft.Test/others/a";
+        ArmResourceStore<Thing> things = ArmResourceStore.over(backend, "shared", "Microsoft.Test/things",
+            Thing.class, Thing::id, key -> false);
+        ArmResourceStore<Thing> others = ArmResourceStore.over(backend, "shared", "Microsoft.Test/others",
+            Thing.class, Thing::id, key -> false);
+        others.put(new Thing(other, "other"));
+
+        assertTrue(things.get(id(other)).isEmpty(), "another type's id does not resolve");
+        assertTrue(things.delete(id(other)).isEmpty());
+        assertEquals("other", others.get(id(other)).orElseThrow().value().label(), "and is not deleted");
+        assertThrows(IllegalArgumentException.class, () -> things.put(new Thing(other, "wrong store")));
     }
 
     /** Counts how often the store walks the backend's keys. */

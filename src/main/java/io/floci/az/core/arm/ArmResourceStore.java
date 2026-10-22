@@ -124,6 +124,9 @@ public final class ArmResourceStore<T> {
 
     /** The resource {@code id} names, in canonical or legacy form. */
     public synchronized Optional<Stored<T>> get(ArmResourceId id) {
+        if (!owns(id)) {
+            return Optional.empty();
+        }
         Optional<Stored<T>> canonical = backend.get(id.canonicalKey()).flatMap(this::decode);
         return canonical.isPresent() ? canonical : newest(legacy(id));
     }
@@ -131,6 +134,9 @@ public final class ArmResourceStore<T> {
     /** Writes {@code value} under its canonical key, removing a legacy entry for the same resource. */
     public synchronized Stored<T> put(T value) {
         ArmResourceId id = idFor(value);
+        if (!owns(id)) {
+            throw new IllegalArgumentException("store " + name + " holds " + resourceType + ", not " + id.id());
+        }
         forgetLegacy(id);
         Instant now = Instant.now();
         backend.put(id.canonicalKey(), new StoredObject(id.canonicalKey(), encode(value), Map.of(), now,
@@ -165,6 +171,9 @@ public final class ArmResourceStore<T> {
 
     /** Removes the resource, canonical and legacy entries alike; empty when there was none. */
     public synchronized Optional<Stored<T>> delete(ArmResourceId id) {
+        if (!owns(id)) {
+            return Optional.empty();
+        }
         Optional<Stored<T>> found = get(id);
         backend.delete(id.canonicalKey());
         forgetLegacy(id);
@@ -281,6 +290,14 @@ public final class ArmResourceStore<T> {
     }
 
     /** A canonical key this store owns: any id, or one of {@link #resourceType} when the backend is shared. */
+    /**
+     * Whether {@code id} is of this store's type: every id for an untyped store. A typed store shares its backend with
+     * other types' stores, so a read, write or delete of another type's id must not reach their entries.
+     */
+    private boolean owns(ArmResourceId id) {
+        return resourceType == null || resourceType.equalsIgnoreCase(id.typePath());
+    }
+
     private boolean isCanonical(String key) {
         if (!key.startsWith("/")) {
             return false;
