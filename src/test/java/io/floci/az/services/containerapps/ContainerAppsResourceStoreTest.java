@@ -8,6 +8,7 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
 import io.floci.az.services.containerapps.ContainerAppsModels.ManagedEnvironmentState;
+import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -64,8 +66,21 @@ class ContainerAppsResourceStoreTest {
         appDocument.putObject("properties")
             .put("managedEnvironmentId", PROVIDER + "/managedEnvironments/legacy-env")
             .put("environmentId", PROVIDER + "/managedEnvironments/legacy-env");
+        ObjectNode template = MAPPER.createObjectNode();
+        template.putArray("containers").addObject().put("name", "web").put("image", "nginx:1.27");
+        ((ObjectNode) appDocument.get("properties")).set("template", template);
         app.setDocument(appDocument);
         app.setCreatedAt(Instant.now());
+        RevisionState revision = new RevisionState();
+        revision.setName("legacy-app--r1");
+        revision.setTemplate(template);
+        revision.setActive(true);
+        revision.setReplicas(1);
+        revision.setProvisioningState("Provisioned");
+        revision.setRunningState("Running");
+        revision.setHealthState("Healthy");
+        revision.setCreatedTime(Instant.now());
+        app.setRevisions(List.of(revision));
         StorageBackend<String, StoredObject> backend = storageFactory.create("containerapps");
         putLegacy(backend, "environment/sub-legacy/rg-legacy/legacy-env", environment);
         putLegacy(backend, "app/sub-legacy/rg-legacy/legacy-app", app);
@@ -88,5 +103,14 @@ class ContainerAppsResourceStoreTest {
         given().when().get(PROVIDER + "/containerApps" + API).then().statusCode(200).body("value", hasSize(1));
         given().when().get(PROVIDER + "/managedEnvironments" + API).then().statusCode(200)
             .body("value", hasSize(1));
+
+        given().contentType("application/json").body("{\"tags\":{\"env\":\"t\"}}")
+            .when().patch(PROVIDER + "/containerApps/legacy-app" + API).then().statusCode(200);
+        assertFalse(backend.get("app/sub-legacy/rg-legacy/legacy-app").isPresent(),
+            "the write moved the app off its old key");
+        assertTrue(backend.keys().contains((PROVIDER + "/containerApps/legacy-app").toLowerCase()));
+        given().when().get(PROVIDER + "/containerApps/legacy-app/revisions" + API).then().statusCode(200)
+            .body("value", hasSize(1)).body("value[0].name", equalTo("legacy-app--r1"));
+        given().when().get(PROVIDER + "/containerApps" + API).then().statusCode(200).body("value", hasSize(1));
     }
 }
