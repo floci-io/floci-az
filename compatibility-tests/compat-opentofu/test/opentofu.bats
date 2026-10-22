@@ -88,11 +88,30 @@ setup() {
     assert_output --partial '"env":"floci-test"'
 
     # The account still plans other drift (the queue and table encryption key type), so only tags are checked here.
-    cd "$TF_DIR"
+    cd "$TOFU_DIR"
     run tofu plan -input=false -no-color -target=azurerm_storage_account.sa
     assert_success
     refute_output --partial "~ tags"
     refute_output --partial "+ tags"
+}
+
+@test "OpenTofu: a tag-only change is applied through the account update and leaves no tag drift" {
+    cd "$TOFU_DIR"
+    local changed='storage_tags={env="floci-test",stage="updated"}'
+    run tofu apply -input=false -auto-approve -no-color -target=azurerm_storage_account.sa -var "$changed"
+    assert_success
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}"
+    assert_success
+    assert_output --partial '"stage":"updated"'
+    run tofu plan -input=false -no-color -target=azurerm_storage_account.sa -var "$changed"
+    assert_success
+    refute_output --partial "~ tags"
+
+    # Back to the configured tags, so the tests after this one see the account as applied.
+    run tofu apply -input=false -auto-approve -no-color -target=azurerm_storage_account.sa
+    assert_success
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}"
+    refute_output --partial '"stage"'
 }
 
 @test "OpenTofu: storage container listed in blob API" {
