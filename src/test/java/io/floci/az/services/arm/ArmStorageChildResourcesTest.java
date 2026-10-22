@@ -6,7 +6,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
 @DisplayName("ARM storage child resources: blob containers and queues answer from the data plane's state")
@@ -65,5 +67,25 @@ class ArmStorageChildResourcesTest {
         given().when().get(queue + "jobs" + API).then().statusCode(404);
         given().when().get("/childacct-queue/jobs?comp=metadata").then().statusCode(404);
         given().when().delete(queue + "jobs" + API).then().statusCode(204);
+    }
+
+    @Test
+    void anArmDeleteTakesTheContainersBlobsAndTheQueuesMessagesWithIt() {
+        String container = ACCOUNT + "/blobServices/default/containers/withblobs";
+        given().contentType("application/json").body("{}").when().put(container + API).then().statusCode(201);
+        given().header("x-ms-blob-type", "BlockBlob").body("kept?")
+            .when().put("/childacct/withblobs/old.txt").then().statusCode(201);
+        given().when().delete(container + API).then().statusCode(200);
+        given().contentType("application/json").body("{}").when().put(container + API).then().statusCode(201);
+        given().when().get("/childacct/withblobs/old.txt").then().statusCode(404);
+
+        String queue = ACCOUNT + "/queueServices/default/queues/withmessages";
+        given().contentType("application/json").body("{}").when().put(queue + API).then().statusCode(200);
+        given().body("<QueueMessage><MessageText>kept?</MessageText></QueueMessage>")
+            .when().post("/childacct-queue/withmessages/messages").then().statusCode(201);
+        given().when().delete(queue + API).then().statusCode(204);
+        given().contentType("application/json").body("{}").when().put(queue + API).then().statusCode(200);
+        given().when().get("/childacct-queue/withmessages/messages?peekonly=true").then().statusCode(200)
+            .body(not(containsString("kept?")));
     }
 }

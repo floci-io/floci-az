@@ -542,11 +542,16 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
      * @return {@code false} when there was no such container
      */
     public boolean deleteContainer(String accountName, String containerName) {
-        if (!containerExists(accountName, containerName)) {
-            return false;
-        }
-        removeContainer(accountName, containerName);
-        return true;
+        // The check and the delete are one step under the lease monitor (re-entrant), so of two overlapping
+        // deletes only one finds the container and answers that it removed it.
+        AtomicBoolean removed = new AtomicBoolean();
+        leaseService.exclusively(() -> {
+            if (containerExists(accountName, containerName)) {
+                removeContainer(accountName, containerName);
+                removed.set(true);
+            }
+        });
+        return removed.get();
     }
 
     private void removeContainer(String accountName, String containerName) {

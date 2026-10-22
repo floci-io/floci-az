@@ -224,11 +224,15 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
      * @return {@code false} when there was no such queue
      */
     public boolean deleteQueue(String accountName, String queueName) {
-        if (!queueExists(accountName, queueName)) {
-            return false;
+        // The check and the delete are one step under the queue record lock (re-entrant), so of two overlapping
+        // deletes only one finds the queue and answers that it removed it.
+        synchronized (queueRecordLock) {
+            if (!queueExists(accountName, queueName)) {
+                return false;
+            }
+            removeQueue(accountName, queueName);
+            return true;
         }
-        removeQueue(accountName, queueName);
-        return true;
     }
 
     private void removeQueue(String accountName, String queueName) {
