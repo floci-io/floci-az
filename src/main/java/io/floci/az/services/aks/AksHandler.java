@@ -235,6 +235,15 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                     pools.add(pool);
                 }
             }
+            // The gate checks an agentPools/{name} URL; pools embedded in the cluster body get the same rule here.
+            if (config.strictNames()) {
+                for (AgentPoolProfile pool : pools) {
+                    if (!AksArmSurface.AGENT_POOL_NAME.accepts(pool.getName())) {
+                        return ArmErrors.error(400, AksArmSurface.AGENT_POOL_NAME.code(),
+                                AksArmSurface.AGENT_POOL_NAME.message(pool.getName()));
+                    }
+                }
+            }
             if (pools.isEmpty()) {
                 pools.add(AgentPoolProfile.defaultPool());
             }

@@ -47,4 +47,15 @@ class AksStrictNamesTest {
         given().contentType("application/json").body(POOL).when().put(BASE + "poolhost/agentPools/pool2" + API)
             .then().statusCode(200);
     }
+
+    @Test
+    void aPoolNameInTheClusterBodyFollowsTheSameRule() {
+        String bad = "{\"location\":\"eastus\",\"properties\":{\"dnsPrefix\":\"dns\","
+            + "\"agentPoolProfiles\":[{\"name\":\"1pool\",\"count\":1}]}}";
+        given().contentType("application/json").body(bad).when().put(BASE + "embedded" + API)
+            .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
+        given().when().get(BASE + "embedded" + API).then().statusCode(404);
+        given().contentType("application/json").body(bad.replace("1pool", "pool1")).when().put(BASE + "embedded" + API)
+            .then().statusCode(201);
+    }
 }
