@@ -596,9 +596,11 @@ class PolicyTest {
                 .body("systemData.lastModifiedBy", equalTo(appId))
                 .body("properties.metadata.createdBy", equalTo(appOid));
 
-        // A user token updating it: createdBy stays, lastModifiedBy and updatedBy move to the user's principal name.
+        // A user token updating it: createdBy stays, lastModifiedBy moves to the user's principal name and
+        // metadata.updatedBy to the user's object id, as Azure writes them.
         String userToken = token("password", "eval-app");
         String userName = claim(userToken, "preferred_username");
+        String userOid = claim(userToken, "oid");
         org.junit.jupiter.api.Assertions.assertEquals("user@floci.local", userName);
         given().header("Authorization", "Bearer " + userToken).contentType("application/json").body(DEFINITION_BODY)
                 .when().put(DEFINITIONS + "/by-app" + API)
@@ -608,7 +610,7 @@ class PolicyTest {
                 .body("systemData.lastModifiedBy", equalTo(userName))
                 .body("systemData.lastModifiedByType", equalTo("User"))
                 .body("properties.metadata.createdBy", equalTo(appOid))
-                .body("properties.metadata.updatedBy", equalTo(userName));
+                .body("properties.metadata.updatedBy", equalTo(userOid));
 
         // Assignments carry the same stamps.
         given().header("Authorization", "Bearer " + appToken).contentType("application/json")
@@ -638,7 +640,7 @@ class PolicyTest {
                 .body("systemData.createdBy", equalTo(appId))
                 .body("systemData.lastModifiedBy", equalTo(userName))
                 .body("properties.metadata.createdBy", equalTo(appOid))
-                .body("properties.metadata.updatedBy", equalTo(userName));
+                .body("properties.metadata.updatedBy", equalTo(userOid));
     }
 
     private static String token(String grant, String clientId) {

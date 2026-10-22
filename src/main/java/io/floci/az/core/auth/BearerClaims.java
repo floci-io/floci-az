@@ -20,14 +20,12 @@ import java.util.Map;
  *                or null for an application
  * @param idtyp   {@code app}, {@code user} or null when the token does not say and no claim implies it
  * @param managedIdentity true when the token names a managed identity resource ({@code xms_mirid} or {@code xms_az_rid})
- * @param appDisplayName  the calling application's display name ({@code app_displayname}), or null
  */
-public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity,
-                           String appDisplayName) {
+public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity) {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false, null);
+    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false);
 
     /** The claims of the request's bearer token, or {@link #NONE} when it carries none that can be read. */
     public static BearerClaims of(AzureRequest request) {
@@ -69,7 +67,7 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
                 // A delegated token carries the user's scopes (scp); an app-only token carries roles instead.
                 idtyp = upn != null || string(claims, "scp") != null ? "user" : "app";
             }
-            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity, string(claims, "app_displayname"));
+            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity);
         } catch (IOException | IllegalArgumentException e) {
             return NONE;
         }
@@ -101,20 +99,12 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
         return managedIdentity ? "ManagedIdentity" : "Application";
     }
 
-    /** The principal's object id, as Azure Policy writes {@code metadata.createdBy}; the ARM principal when the token has none. */
+    /**
+     * The principal's object id, as Azure Policy writes {@code metadata.createdBy} and {@code updatedBy}; the ARM
+     * principal when the token has none.
+     */
     public String objectId() {
         return oid != null ? oid : principal();
-    }
-
-    /**
-     * The principal's friendly name, as Azure Policy writes {@code metadata.updatedBy}: a user's principal
-     * name, else the application's display name, else its client id.
-     */
-    public String friendlyName() {
-        if (isUser() && upn != null) {
-            return upn;
-        }
-        return appDisplayName != null ? appDisplayName : principal();
     }
 
     private boolean isUser() {

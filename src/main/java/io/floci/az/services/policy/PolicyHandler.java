@@ -758,7 +758,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         } else {
             metadata.put("createdBy", previous.get("createdBy"));
             metadata.put("createdOn", previous.get("createdOn"));
-            metadata.put("updatedBy", caller.friendlyName());
+            metadata.put("updatedBy", caller.objectId());
             metadata.put("updatedOn", now);
         }
         return metadata;
@@ -777,20 +777,18 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         return systemData;
     }
 
-    /** Who the audit fields name: the request's bearer token principal, else the fixed emulator author. */
     /**
      * Who made a request, in the forms Azure writes it: {@code principal} and {@code principalType} for
-     * {@code systemData}, {@code objectId} for {@code metadata.createdBy}, {@code friendlyName} for
-     * {@code metadata.updatedBy}.
+     * {@code systemData}, {@code objectId} for {@code metadata.createdBy} and {@code updatedBy}.
      */
-    private record Caller(String principal, String principalType, String objectId, String friendlyName) {
+    private record Caller(String principal, String principalType, String objectId) {
     }
 
     private static Caller caller(AzureRequest req) {
         BearerClaims claims = BearerClaims.of(req);
         return claims.present()
-                ? new Caller(claims.principal(), claims.principalType(), claims.objectId(), claims.friendlyName())
-                : new Caller(AUTHOR, "Application", AUTHOR, AUTHOR);
+                ? new Caller(claims.principal(), claims.principalType(), claims.objectId())
+                : new Caller(AUTHOR, "Application", AUTHOR);
     }
 
     /** Azure hands out numeric reference ids for policy definition references that were created without one. */

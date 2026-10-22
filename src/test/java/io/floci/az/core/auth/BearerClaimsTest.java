@@ -31,15 +31,12 @@ class BearerClaimsTest {
 
     @Test
     void namesThePrincipalForPolicyMetadata() {
-        BearerClaims app = BearerClaims.parse(token("{\"oid\":\"app-oid\",\"appid\":\"app-1\",\"app_displayname\":\"Deployer\",\"idtyp\":\"app\"}"));
+        BearerClaims app = BearerClaims.parse(token("{\"oid\":\"app-oid\",\"appid\":\"app-1\",\"idtyp\":\"app\"}"));
         assertEquals("app-oid", app.objectId());
-        assertEquals("Deployer", app.friendlyName());
         BearerClaims user = BearerClaims.parse(token("{\"oid\":\"u-oid\",\"upn\":\"me@contoso.com\",\"idtyp\":\"user\"}"));
         assertEquals("u-oid", user.objectId());
-        assertEquals("me@contoso.com", user.friendlyName());
         BearerClaims bare = BearerClaims.parse(token("{\"appid\":\"only-app\"}"));
-        assertEquals("only-app", bare.objectId());
-        assertEquals("only-app", bare.friendlyName());
+        assertEquals("only-app", bare.objectId()); // no object id: the ARM principal stands in
     }
 
     @Test

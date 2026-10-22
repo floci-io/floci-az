@@ -291,10 +291,8 @@ floci-az:
   application or managed identity by client id (`appid` / `azp`), with `createdByType` /
   `lastModifiedByType` of `User`, `Application` or `ManagedIdentity` (a token carrying `xms_mirid`).
   The object id is used only when a token lacks those claims, and `Key` is never reported since
-  policy requests carry no shared key. The policy `metadata` fields follow the policy documentation
-  instead: `createdBy` is the principal's object id and `updatedBy` its friendly name (a user's
-  principal name, else the application's `app_displayname`, else its client id). The token is read,
-  not verified. A request without
+  policy requests carry no shared key. The policy `metadata` fields carry the principal's object id in
+  both `createdBy` and `updatedBy`, as Azure writes them. The token is read, not verified. A request without
   a readable token is stamped with a fixed emulator identity. `metadata.updatedBy` / `updatedOn` appear
   only after the first update instead of being present as `null` from creation.
 - **Listings are unpaginated** (`nextLink` is never returned) and `$top` is ignored.
