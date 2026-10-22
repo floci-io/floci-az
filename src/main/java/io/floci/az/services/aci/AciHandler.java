@@ -41,6 +41,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * HTTP handler for Azure Container Instances (Microsoft.ContainerInstance/containerGroups)
@@ -659,29 +660,39 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private void startReadinessPoller() {
         poller.scheduleAtFixedRate(() -> {
             try {
-                scanAll().forEach(group -> {
-                    // Every container has started, whether or not they are all running right now:
-                    // the deployment is what provisioningState describes. Requiring simultaneous
-                    // running left short-lived commands, and Never/OnFailure policies, in Creating
-                    // for ever while ARM clients polled a state that could never change.
-                    if ("Creating".equals(group.getProvisioningState())
-                            && containerManager.allContainersStarted(group)) {
-                        // Only over the containers this check saw: a DELETE, or a PUT that replaced them, since the
-                        // scan must not be undone.
-                        store.update(groupId(group), current -> {
-                            if ("Creating".equals(current.getProvisioningState())
-                                    && Objects.equals(current.getContainerIds(), group.getContainerIds())) {
-                                current.setProvisioningState("Succeeded");
-                            }
-                            return current;
-                        });
-                        LOG.infov("Container group {0} has started; provisioningState=Succeeded", group.getName());
-                    }
-                });
+                markStartedGroups();
             } catch (Exception e) {
                 LOG.error("Error in ACI readiness poller", e);
             }
         }, 2, 3, TimeUnit.SECONDS);
+    }
+
+    /**
+     * One pass of the readiness poller: a {@code Creating} group whose containers have all started becomes
+     * {@code Succeeded}. Every container has started, whether or not they are all running right now: the deployment
+     * is what provisioningState describes. Requiring simultaneous running left short-lived commands, and
+     * Never/OnFailure policies, in Creating for ever while ARM clients polled a state that could never change.
+     */
+    void markStartedGroups() {
+        scanAll().forEach(group -> {
+            if (!"Creating".equals(group.getProvisioningState()) || !containerManager.allContainersStarted(group)) {
+                return;
+            }
+            // Only over the containers this check saw: a DELETE, or a PUT that replaced them, since the scan
+            // must not be undone.
+            AtomicBoolean marked = new AtomicBoolean();
+            store.update(groupId(group), current -> {
+                if ("Creating".equals(current.getProvisioningState())
+                        && Objects.equals(current.getContainerIds(), group.getContainerIds())) {
+                    current.setProvisioningState("Succeeded");
+                    marked.set(true);
+                }
+                return current;
+            });
+            if (marked.get()) {
+                LOG.infov("Container group {0} has started; provisioningState=Succeeded", group.getName());
+            }
+        });
     }
 
     /**
