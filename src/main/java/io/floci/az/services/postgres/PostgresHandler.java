@@ -10,9 +10,16 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalName;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -74,21 +81,31 @@ import java.util.concurrent.ConcurrentHashMap;
  * returning 204, which both majors already accept.</p>
  */
 @ApplicationScoped
-public class PostgresHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class PostgresHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(PostgresHandler.class);
     private static final String TYPE = "Microsoft.DBforPostgreSQL/flexibleServers";
 
     private static final String NS = "/providers/Microsoft.DBforPostgreSQL/";
 
-    @Inject EmulatorConfig config;
-    @Inject PostgresState  state;
-    @Inject PostgresServerManager serverManager;
+    private final EmulatorConfig config;
+    private final PostgresState state;
+    private final PostgresServerManager serverManager;
+    private final GlobalNameRegistry names;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** Guards concurrent server-start operations (per server name). */
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
+
+    @Inject
+    public PostgresHandler(EmulatorConfig config, PostgresState state, PostgresServerManager serverManager,
+                           GlobalNameRegistry names) {
+        this.config = config;
+        this.state = state;
+        this.serverManager = serverManager;
+        this.names = names;
+    }
 
     @Override public String getServiceType()           { return "postgres"; }
 
@@ -118,14 +135,9 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleCheckNameAvailability(request);
         }
 
-        Optional<Response> foreign = foreignServer(request, tail);
-        if (foreign.isPresent()) {
-            return foreign.get();
-        }
-
         // ── Convenience /connect ───────────────────────────────────────────
         if (tail.matches("flexibleServers/[^/]+/connect")) {
-            return handleServerConnect(segment(tail, 1));
+            return handleServerConnect(request, segment(tail, 1));
         }
 
         // ── Configurations ─────────────────────────────────────────────────
@@ -133,7 +145,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleConfiguration(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("flexibleServers/[^/]+/configurations")) {
-            return handleConfigurationList(segment(tail, 1));
+            return handleConfigurationList(request, segment(tail, 1));
         }
 
         // ── Firewall rules ─────────────────────────────────────────────────
@@ -141,7 +153,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleFirewallRule(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("flexibleServers/[^/]+/firewallRules")) {
-            return handleFirewallRuleList(method, segment(tail, 1));
+            return handleFirewallRuleList(method, request, segment(tail, 1));
         }
 
         // ── Databases ──────────────────────────────────────────────────────
@@ -149,7 +161,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleDatabase(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("flexibleServers/[^/]+/databases")) {
-            return handleDatabaseList(segment(tail, 1));
+            return handleDatabaseList(request, segment(tail, 1));
         }
 
         // ── Servers ────────────────────────────────────────────────────────
@@ -193,13 +205,24 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             .build();
     }
 
+    /**
+     * A create answered 2xx: the name is kept in the {@link GlobalNameRegistry}. The gate's {@code GlobalNameRule}
+     * commits it too for an ARM create; this also covers the creates outside the gate (the account path, and a
+     * path with no resource group), so the registry knows every stored server.
+     */
+    private Response created(AzureRequest request, PostgresState.ServerEntry entry) {
+        names.commit(cloud(request), CloudSuffix.POSTGRES, entry.serverName(), PostgresState.serverId(entry));
+        return accepted(request, entry.armId(), serverResponse(entry));
+    }
+
     // ── checkNameAvailability ─────────────────────────────────────────────────
 
+    /** Whether the name is owned, answered from the {@link GlobalNameRegistry} in the shape it always had. */
     private Response handleCheckNameAvailability(AzureRequest request) {
         try {
             JsonNode body = readBody(request.bodyStream());
             String name = body.path("name").asText();
-            boolean available = !state.serverExists(name);
+            boolean available = names.owner(cloud(request), CloudSuffix.POSTGRES, name).isEmpty();
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("nameAvailable", available);
             resp.put("name", name);
@@ -217,8 +240,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         return switch (method) {
             case "PUT"    -> createOrUpdateServer(request, serverName, false);
             case "PATCH"  -> createOrUpdateServer(request, serverName, true);
-            case "GET"    -> getServer(serverName);
-            case "DELETE" -> deleteServer(serverName);
+            case "GET"    -> getServer(request, serverName);
+            case "DELETE" -> deleteServer(request, serverName);
             default       -> methodNotAllowed();
         };
     }
@@ -234,16 +257,9 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
-            boolean isNew = !state.serverExists(serverName);
-            if (!isNew) {
-                // The guard in handle() runs unlocked, so a create that raced another scope's claim
-                // arrives here as an update. An existing server's owner never changes, so checking
-                // it now is enough to refuse the update.
-                Optional<Response> foreign = foreignServer(request, "flexibleServers/" + serverName);
-                if (foreign.isPresent()) {
-                    return foreign.get();
-                }
-            }
+            // A name another resource owns never reaches here through an ARM path: the gate's GlobalNameRule
+            // answers the conflict before this runs.
+            boolean isNew = server(request, serverName).isEmpty();
 
             if (isPatch && isNew) {
                 return notFound("Server '" + serverName + "' not found");
@@ -270,14 +286,15 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 if (state.claimServer(entry)) {
                     if (config.services().postgres().mocked()) {
                         // Control-plane only: no container, data plane unavailable. Reports Ready.
-                        return accepted(request, entry.armId(), serverResponse(entry));
+                        return created(request, entry);
                     }
 
                     PostgresState.ServerEntry claimed = entry;
                     try {
                         Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
                         synchronized (lock) {
-                            Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
+                            Optional<PostgresState.ServerEntry> current =
+                                state.getServer(PostgresState.serverId(claimed));
                             if (current.isPresent() && current.get().containerId() != null) {
                                 entry = current.get();
                             } else {
@@ -299,13 +316,12 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                             .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
                             .build();
                     }
-                    return accepted(request, entry.armId(), serverResponse(entry));
+                    return created(request, entry);
                 }
-                // A concurrent create claimed the name between the existence check and this write.
-                // Another scope's claim is a conflict; this scope's claim takes this request as an update.
-                Optional<Response> foreign = foreignServer(request, "flexibleServers/" + serverName);
-                if (foreign.isPresent()) {
-                    return foreign.get();
+                // The name was claimed between the lookup and this write. A concurrent create of this server
+                // takes this request as an update; a server of this name elsewhere is a conflict.
+                if (server(request, serverName).isEmpty()) {
+                    return nameTaken(request, serverName);
                 }
             }
 
@@ -321,18 +337,14 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             PostgresState.ServerEntry updated;
             Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
             synchronized (lock) {
-                Optional<PostgresState.ServerEntry> current = state.getServer(serverName);
+                // Everything below reads the entry as it is now. The wait for the lock can outlast
+                // a delete and another scope's claim of the name, which this scope no longer reaches,
+                // and an earlier queued update may have changed the fields this request leaves out.
+                Optional<PostgresState.ServerEntry> current = server(request, serverName);
                 if (current.isEmpty()) {
                     return notFound("Server '" + serverName + "' not found");
                 }
-                // Everything below reads the entry as it is now. The wait for the lock can outlast
-                // a delete and another scope's claim of the name, and an earlier queued update may
-                // have changed the fields this request leaves out.
                 PostgresState.ServerEntry live = current.get();
-                Optional<Response> foreign = foreignEntry(request, live);
-                if (foreign.isPresent()) {
-                    return foreign.get();
-                }
                 String version  = props.path("version").asText(live.version());
                 int storageGB   = props.path("storage").path("storageSizeGB").asInt(live.storageSizeGB());
                 String skuName  = sku.path("name").asText(live.skuName());
@@ -345,7 +357,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     serverManager.rotateAdminPassword(live, password);
                 }
                 updated = new PostgresState.ServerEntry(
-                    serverName, live.subscriptionId(), live.resourceGroupName(),
+                    live.serverName(), live.subscriptionId(), live.resourceGroupName(),
                     live.location(), version, live.administratorLogin(),
                     password.isBlank() ? live.administratorLoginPassword() : password,
                     skuName, skuTier, storageGB,
@@ -366,16 +378,18 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         }
     }
 
-    private Response getServer(String serverName) {
-        return state.getServer(serverName)
+    private Response getServer(AzureRequest request, String serverName) {
+        return server(request, serverName)
             .map(s -> Response.ok(serverResponse(s)).build())
             .orElse(notFound("Server '" + serverName + "' not found"));
     }
 
-    private Response deleteServer(String serverName) {
-        Optional<PostgresState.ServerEntry> entry = state.getServer(serverName);
+    private Response deleteServer(AzureRequest request, String serverName) {
+        Optional<PostgresState.ServerEntry> entry = server(request, serverName);
         if (entry.isEmpty()) return notFound("Server '" + serverName + "' not found");
-        state.removeServer(serverName);
+        ArmResourceId id = PostgresState.serverId(entry.get());
+        state.removeServer(id);
+        names.release(cloud(request), CloudSuffix.POSTGRES, entry.get().serverName(), id);
         try { serverManager.stopServer(entry.get()); } catch (Exception e) {
             LOG.warnf(e, "Error stopping PostgreSQL container for server %s", serverName);
         }
@@ -399,14 +413,14 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                                     String serverName, String dbName) {
         return switch (method) {
             case "PUT"    -> createOrUpdateDatabase(request, serverName, dbName);
-            case "GET"    -> getDatabase(serverName, dbName);
-            case "DELETE" -> deleteDatabase(serverName, dbName);
+            case "GET"    -> getDatabase(request, serverName, dbName);
+            case "DELETE" -> deleteDatabase(request, serverName, dbName);
             default       -> methodNotAllowed();
         };
     }
 
     private Response createOrUpdateDatabase(AzureRequest request, String serverName, String dbName) {
-        Optional<PostgresState.ServerEntry> serverOpt = state.getServer(serverName);
+        Optional<PostgresState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
 
         try {
@@ -429,16 +443,16 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         }
     }
 
-    private Response getDatabase(String serverName, String dbName) {
-        Optional<PostgresState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response getDatabase(AzureRequest request, String serverName, String dbName) {
+        Optional<PostgresState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         return state.getDatabase(serverName, dbName)
             .map(db -> Response.ok(databaseResponse(db, serverOpt.get())).build())
             .orElse(notFound("Database '" + dbName + "' not found on server '" + serverName + "'"));
     }
 
-    private Response deleteDatabase(String serverName, String dbName) {
-        Optional<PostgresState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response deleteDatabase(AzureRequest request, String serverName, String dbName) {
+        Optional<PostgresState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         if (!state.databaseExists(serverName, dbName))
             return notFound("Database '" + dbName + "' not found");
@@ -446,8 +460,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         return Response.status(204).build();
     }
 
-    private Response handleDatabaseList(String serverName) {
-        Optional<PostgresState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response handleDatabaseList(AzureRequest request, String serverName) {
+        Optional<PostgresState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         List<Map<String, Object>> value = state.listDatabases(serverName).stream()
             .map(db -> databaseResponse(db, serverOpt.get()))
@@ -459,7 +473,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     private Response handleFirewallRule(String method, AzureRequest request,
                                         String serverName, String ruleName) {
-        if (!state.serverExists(serverName))
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         return switch (method) {
             case "PUT"    -> createFirewallRule(request, serverName, ruleName);
@@ -493,8 +507,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         }
     }
 
-    private Response handleFirewallRuleList(String method, String serverName) {
-        if (!state.serverExists(serverName))
+    private Response handleFirewallRuleList(String method, AzureRequest request, String serverName) {
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         if ("GET".equals(method)) {
             List<Map<String, Object>> value = state.listFirewallRules(serverName).stream()
@@ -509,7 +523,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     private Response handleConfiguration(String method, AzureRequest request,
                                          String serverName, String cfgName) {
-        if (!state.serverExists(serverName))
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         return switch (method) {
             case "PUT", "PATCH" -> {
@@ -531,8 +545,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         };
     }
 
-    private Response handleConfigurationList(String serverName) {
-        if (!state.serverExists(serverName))
+    private Response handleConfigurationList(AzureRequest request, String serverName) {
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         List<Map<String, Object>> value = state.listConfigurations(serverName).entrySet().stream()
             .map(e -> configurationResponse(serverName, e.getKey(), e.getValue()))
@@ -542,8 +556,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     // ── Convenience /connect ──────────────────────────────────────────────────
 
-    private Response handleServerConnect(String serverName) {
-        return state.getServer(serverName)
+    private Response handleServerConnect(AzureRequest request, String serverName) {
+        return server(request, serverName)
             .map(s -> {
                 PostgresConnectionInfo info = PostgresConnectionInfo.of(
                     s.fullyQualifiedDomainName(), s.hostPort(),
@@ -685,38 +699,44 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     }
 
     /**
-     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
-     * subscription or resource group is not the owner's must never reach that entry: creating the
-     * server there is a name conflict, and any other call is a 404.
+     * The server a path addresses. An ARM path reaches the server stored under its own id, so a server of that name
+     * in another subscription or resource group is not found; a subscription-level path names no resource group and
+     * owns nothing ({@link ArmScope}). The account path ({@code /{account}-postgres/...}) has no scope and finds the
+     * server by its name alone, which is unique.
      */
-    private Optional<Response> foreignServer(AzureRequest request, String tail) {
-        if (!tail.matches("flexibleServers/[^/]+(/.*)?")) {
-            return Optional.empty();
-        }
-        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+    private Optional<PostgresState.ServerEntry> server(AzureRequest request, String serverName) {
+        Optional<ArmScope> scope = scope(request);
         if (scope.isEmpty()) {
+            return state.getServer(serverName);
+        }
+        if (scope.get().resourceGroup() == null) {
             return Optional.empty();
         }
-        String serverName = segment(tail, 1);
-        boolean createsServer = "PUT".equals(request.method()) && tail.matches("flexibleServers/[^/]+")
-            && scope.get().resourceGroup() != null;
-        return state.getServer(serverName)
-            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
-            .map(s -> createsServer
-                ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
-                : notFound("Server '" + serverName + "' not found"));
+        return state.getServer(PostgresState.serverId(scope.get().subscription(), scope.get().resourceGroup(),
+            serverName));
     }
 
-    /** The owner check of {@link #foreignServer}, for a server update against an entry already read. */
-    private Optional<Response> foreignEntry(AzureRequest request, PostgresState.ServerEntry entry) {
-        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
-        if (scope.isEmpty() || scope.get().owns(entry.subscriptionId(), entry.resourceGroupName())) {
-            return Optional.empty();
+    /**
+     * A create that found the name held by a server this path cannot reach: the type's own conflict for a create in
+     * a resource group, and a 404 for a path that names none, which creates nothing of its own.
+     */
+    private static Response nameTaken(AzureRequest request, String serverName) {
+        if (scope(request).filter(armScope -> armScope.resourceGroup() == null).isPresent()) {
+            return notFound("Server '" + serverName + "' not found");
         }
-        boolean createsServer = "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
-        return Optional.of(createsServer
-            ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
-            : notFound("Server '" + entry.serverName() + "' not found"));
+        GlobalName global = PostgresArmSurface.SERVER_DNS_NAME;
+        return ArmErrors.error(global.conflictStatus(), global.conflictCode(),
+            String.format(global.conflictMessage(), serverName));
+    }
+
+    /** The subscription and resource group of an ARM path; empty for the account path. */
+    private static Optional<ArmScope> scope(AzureRequest request) {
+        return ArmScope.of(request.resourcePath());
+    }
+
+    private static CloudProfile cloud(AzureRequest request) {
+        return request.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            : request.scope().cloud();
     }
 
     private static Response notFound(String message) {
@@ -772,6 +792,15 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         return servers.stream()
                 .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
                         server.location(), server.tags()))
+                .toList();
+    }
+
+    // ── GlobalNameSource ────────────────────────────────────────────────────────
+
+    @Override
+    public List<Claim> globalNames() {
+        return state.listServers().stream()
+                .map(server -> new Claim(CloudSuffix.POSTGRES, server.serverName(), PostgresState.serverId(server)))
                 .toList();
     }
 }

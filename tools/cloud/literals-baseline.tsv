@@ -46,8 +46,7 @@ src/main/java/io/floci/az/services/mysql/MySqlHandler.java	name-guard	1
 src/main/java/io/floci/az/services/mysql/MySqlHandler.java	scope-parse	1
 src/main/java/io/floci/az/services/network/NetworkService.java	scope-parse	1
 src/main/java/io/floci/az/services/postgres/PostgresHandler.java	location-literal	1
-src/main/java/io/floci/az/services/postgres/PostgresHandler.java	name-guard	1
-src/main/java/io/floci/az/services/postgres/PostgresHandler.java	scope-parse	4
+src/main/java/io/floci/az/services/postgres/PostgresHandler.java	scope-parse	3
 src/main/java/io/floci/az/services/queue/QueueServiceHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/redis/RedisHandler.java	location-literal	1
 src/main/java/io/floci/az/services/redis/RedisHandler.java	scope-parse	2

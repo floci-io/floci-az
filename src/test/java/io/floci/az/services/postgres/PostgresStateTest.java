@@ -2,6 +2,8 @@ package io.floci.az.services.postgres;
 
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link PostgresState} — pure in-memory CRUD, no Quarkus, no Docker.
- * Uses the package-private constructor to inject an {@link InMemoryStorage} backend directly.
+ * Builds the state over an {@link InMemoryStorage} backend directly.
  */
 @DisplayName("PostgresState — in-memory state")
 class PostgresStateTest {
@@ -25,10 +27,20 @@ class PostgresStateTest {
 
     @BeforeEach
     void setup() {
-        state = new PostgresState(new InMemoryStorage<>());
+        state = new PostgresState(over(new InMemoryStorage<>()));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** A factory whose every store is {@code backend}. */
+    static StorageFactory over(StorageBackend<String, StoredObject> backend) {
+        return new StorageFactory(null) {
+            @Override
+            public synchronized StorageBackend<String, StoredObject> create(String serviceName) {
+                return backend;
+            }
+        };
+    }
 
     private PostgresState.ServerEntry server(String name) {
         return server(name, "sub-001", "rg-test");
@@ -207,7 +219,7 @@ class PostgresStateTest {
     @DisplayName("state survives backend reload — ARM metadata restored, runtime fields cleared")
     void persistenceReload() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
-        PostgresState original = new PostgresState(sharedBackend);
+        PostgresState original = new PostgresState(over(sharedBackend));
 
         original.putServer(server("persist-srv"));   // containerId="container-abc", hostPort=54320
         original.putDatabase("persist-srv",
@@ -217,7 +229,7 @@ class PostgresStateTest {
         original.putConfiguration("persist-srv", "max_connections", "200");
 
         // Simulate emulator restart
-        PostgresState reloaded = new PostgresState(sharedBackend);
+        PostgresState reloaded = new PostgresState(over(sharedBackend));
 
         assertTrue(reloaded.serverExists("persist-srv"), "server should survive reload");
         Optional<PostgresState.ServerEntry> entry = reloaded.getServer("persist-srv");
@@ -241,7 +253,7 @@ class PostgresStateTest {
     @DisplayName("clear removes entries from both in-memory cache and backend")
     void clearPurgesBackend() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
-        PostgresState s = new PostgresState(sharedBackend);
+        PostgresState s = new PostgresState(over(sharedBackend));
 
         s.putServer(server("s1"));
         s.putServer(server("s2"));
@@ -250,7 +262,7 @@ class PostgresStateTest {
         s.clear();
         assertEquals(0, s.listServers().size(), "in-memory cache cleared");
 
-        PostgresState reloaded = new PostgresState(sharedBackend);
+        PostgresState reloaded = new PostgresState(over(sharedBackend));
         assertEquals(0, reloaded.listServers().size(), "backend cleared — reload produces no entries");
     }
 }
