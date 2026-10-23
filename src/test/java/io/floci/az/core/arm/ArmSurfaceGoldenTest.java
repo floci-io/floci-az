@@ -139,6 +139,11 @@ class ArmSurfaceGoldenTest {
         Microsoft.EventGrid/topics    3-50    null    0    null
         Microsoft.ManagedIdentity/userAssignedIdentities    3-128    null    0    null
         Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials    3-120    null    0    null
+        Microsoft.Network/networkInterfaces        1-80    null    0    null
+        Microsoft.Network/networkSecurityGroups    1-80    null    0    null
+        Microsoft.Network/publicIPAddresses        1-80    null    0    null
+        Microsoft.Network/virtualNetworks          2-64    null    0    null
+        Microsoft.Network/virtualNetworks/subnets  1-80    null    0    null
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null

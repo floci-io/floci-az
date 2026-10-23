@@ -4,7 +4,13 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmResourceStore.Stored;
+import io.floci.az.core.arm.ArmResourceStore.Written;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -13,91 +19,121 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
+/**
+ * Microsoft.Network's ARM resources.
+ *
+ * <p>Every resource, top level or child (subnets, DNS record sets, virtual network links, private DNS zone groups,
+ * the NIC a private endpoint synthesizes), is one JSON document in one {@link ArmResourceStore} over the
+ * {@value #STORE} backend, keyed by its canonical id, so a path that differs only in case addresses the one resource
+ * and the casing of its first PUT is what responses echo. One store of documents rather than a model per type: the
+ * service keeps dozens of types as the documents ARM returns, and a document round-trips them byte for byte. Load
+ * balancer pools and NSG rules stay arrays on their parent document, as Azure models them. The store follows the
+ * global storage mode; Network was kept in memory before, so there are no older entries to read.
+ */
 @ApplicationScoped
 public class NetworkService {
 
-    private static final String VNET_TYPE = "Microsoft.Network/virtualNetworks";
+    /** The {@link StorageFactory} backend the documents live in. */
+    static final String STORE = "network";
+
+    private static final String PROVIDER = "/providers/Microsoft.Network/";
     private static final String SUBNET_TYPE = "Microsoft.Network/virtualNetworks/subnets";
 
-    private final Map<String, Map<String, Object>> resources;
+    private final ArmResourceStore<Map<String, Object>> store;
+
+    /**
+     * Held by every VNet and subnet PUT and by every DELETE: a VNet's inline {@code subnets} and its child subnet
+     * documents are written as several store calls, so a subnet written or deleted on its own must not interleave
+     * with a VNet PUT that rewrites the set.
+     */
     private final Object subnetLock = new Object();
 
     @Inject
-    public NetworkService(NetworkStore store) {
-        this.resources = store.resources;
+    public NetworkService(StorageFactory storageFactory) {
+        this.store = ArmResourceStore.create(storageFactory, STORE, documentType(),
+                document -> String.valueOf(document.get("id")), key -> false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Class<Map<String, Object>> documentType() {
+        return (Class<Map<String, Object>>) (Class<?>) Map.class;
     }
 
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
-        String rg = extractRg(path);
-        String tail = extractAfter(path, "/providers/Microsoft.Network/");
+        String rg = ArmPaths.resourceGroup(path).orElse(null);
+        String tail = extractAfter(path, PROVIDER);
 
-        if (tail.startsWith("dnsZones") || tail.startsWith("dnszones")) {
+        // Every Network resource lives in a resource group: a path that names none only lists.
+        if (rg == null && !tail.matches("[^/]+")) {
+            return notFound(tail);
+        }
+
+        String type = typeOf(tail);
+        if (isType(type, "dnsZones")) {
             return handleDnsZones(request, path, method, sub, rg, tail);
         }
 
-        if (tail.startsWith("privateDnsZones")) {
+        if (isType(type, "privateDnsZones")) {
             return handlePrivateDnsZones(request, path, method, sub, rg, tail);
         }
 
-        if (tail.startsWith("privateEndpoints")) {
+        if (isType(type, "privateEndpoints")) {
             return handlePrivateEndpoints(request, path, method, sub, rg, tail);
         }
 
         if (tail.matches("[^/]+")) {
             return Response.ok(Map.of("value", listResources(sub, rg, "Microsoft.Network/" + tail))).build();
         }
-        if (tail.matches("virtualNetworks/[^/]+/subnets")) {
-            String vnetName = tail.split("/")[1];
-            return Response.ok(Map.of("value", listSubnets(sub, rg, vnetName))).build();
+        if (tail.split("/").length == 3 && isChildPath(tail, "virtualNetworks", "subnets")) {
+            return Response.ok(Map.of("value", children(sub, rg, resourceId(sub, rg, tail)))).build();
         }
 
         // Child resources whose canonical home is an array on the parent. Azure models LB
         // backend pools and NSG security rules this way, and azurerm manages them through
-        // these dedicated child endpoints — routing them into the generic CRUD would store
+        // these dedicated child endpoints: routing them into the generic CRUD would store
         // a mis-typed sibling the parent read-back never sees.
-        if (tail.matches("loadBalancers/[^/?]+/backendAddressPools([/?].*)?")) {
+        if (isChildPath(tail, "loadBalancers", "backendAddressPools")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "loadBalancers", "backendAddressPools", false);
         }
-        if (tail.matches("networkSecurityGroups/[^/?]+/securityRules([/?].*)?")) {
+        if (isChildPath(tail, "networkSecurityGroups", "securityRules")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "networkSecurityGroups", "securityRules", false);
         }
-        if (tail.matches("networkSecurityGroups/[^/?]+/defaultSecurityRules([/?].*)?")) {
+        if (isChildPath(tail, "networkSecurityGroups", "defaultSecurityRules")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "networkSecurityGroups", "defaultSecurityRules", true);
         }
 
-        String resourceType = resourceType(tail);
-        String name = resourceName(tail);
-        String key = key(sub, rg, tail);
+        String id = resourceId(sub, rg, tail);
+        ArmResourceId rid = parseId(id);
 
         return switch (method) {
             case "PUT" -> {
-                if (VNET_TYPE.equals(resourceType) || SUBNET_TYPE.equals(resourceType)) {
+                if (isVnetPath(tail) || isSubnetPath(tail)) {
                     synchronized (subnetLock) {
-                        yield createOrUpdateResource(request, sub, rg, tail, resourceType, name, key);
+                        yield createOrUpdateResource(request, rid, tail);
                     }
                 }
-                yield createOrUpdateResource(request, sub, rg, tail, resourceType, name, key);
+                yield createOrUpdateResource(request, rid, tail);
             }
-            case "GET" -> {
-                Map<String, Object> resource = resources.get(key);
-                yield resource == null ? notFound(tail) : Response.ok(stripInternal(resource)).build();
-            }
-            case "PATCH" -> updateTags(request, tail, key);
+            case "GET" -> find(rid).map(NetworkService::ok).orElseGet(() -> notFound(tail));
+            case "PATCH" -> updateTags(request, tail, rid);
             case "DELETE" -> {
                 synchronized (subnetLock) {
-                    resources.remove(key);
-                    deleteChildren(sub, rg, tail);
-                    if (SUBNET_TYPE.equals(resourceType)) {
-                        refreshParentSubnets(sub, rg, tail);
+                    store.delete(rid);
+                    deleteChildren(sub, rg, tail, id);
+                    if (isSubnetPath(tail)) {
+                        refreshParentSubnets(vnetIdOf(rid));
                     }
                 }
                 yield Response.ok().build();
@@ -107,12 +143,12 @@ public class NetworkService {
     }
 
     /** {@code UpdateTags}: a {@code tags} object replaces the resource's tags whole; every other field stays. */
-    private Response updateTags(AzureRequest request, String tail, String key) {
-        if (!resources.containsKey(key)) {
+    private Response updateTags(AzureRequest request, String tail, ArmResourceId rid) {
+        if (find(rid).isEmpty()) {
             return notFound(tail);
         }
         Object tags = parseBody(request).get("tags");
-        Map<String, Object> updated = resources.computeIfPresent(key, (k, existing) -> {
+        return store.update(rid, existing -> {
             Map<String, Object> copy = new LinkedHashMap<>(existing);
             if (tags instanceof Map<?, ?> named) {
                 if (named.isEmpty()) {
@@ -122,138 +158,156 @@ public class NetworkService {
                 }
             }
             return copy;
-        });
-        return updated == null ? notFound(tail) : Response.ok(stripInternal(updated)).build();
+        }).map(stored -> ok(stored.value())).orElseGet(() -> notFound(tail));
     }
 
     public List<Map<String, Object>> listResources(String sub, String rg) {
-        return resources.values().stream()
-                .filter(r -> sub.equals(r.get("_sub")) && rg.equals(r.get("_rg")))
+        return store.list(new ArmScope(sub, rg)).stream()
+                .map(Stored::value)
                 .map(NetworkService::stripInternal)
                 .toList();
     }
 
     public List<Map<String, Object>> listResources(String sub) {
-        return resources.values().stream()
-                .filter(r -> sub.equals(r.get("_sub")))
-                .map(NetworkService::stripInternal)
-                .toList();
+        return listResources(sub, null);
     }
 
+    /** The resources of {@code type} in the resource group, or in the whole subscription when {@code rg} is null. */
     public List<Map<String, Object>> listResources(String sub, String rg, String type) {
-        return resources.values().stream()
-                .filter(r -> sub.equals(r.get("_sub")) && rg.equals(r.get("_rg")) && type.equals(r.get("type")))
-                .map(NetworkService::stripInternal)
-                .toList();
-    }
-
-    public List<Map<String, Object>> listSubnets(String sub, String rg, String vnetName) {
-        String prefix = key(sub, rg, "virtualNetworks/" + vnetName + "/subnets/");
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
+        return store.list(new ArmScope(sub, rg)).stream()
+                .map(Stored::value)
+                .filter(r -> type.equalsIgnoreCase(String.valueOf(r.get("type"))))
                 .map(NetworkService::stripInternal)
                 .toList();
     }
 
     public void clear() {
-        resources.clear();
+        store.clear();
     }
 
-    private Response createOrUpdateResource(AzureRequest request, String sub, String rg, String tail,
-                                            String resourceType, String name, String key) {
+    private Response createOrUpdateResource(AzureRequest request, ArmResourceId rid, String tail) {
         Map<String, Object> body = parseBody(request);
-        String id = "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + "/providers/Microsoft.Network/" + tail;
-        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
-        synthesizeProperties(resourceType, name, id, properties);
-        properties.put("provisioningState", "Succeeded");
+        Written<Map<String, Object>> written = store.createOrUpdate(rid, existing -> {
+            String id = firstCasing(existing, "id", rid.id());
+            String name = firstCasing(existing, "name", resourceName(tail));
+            String resourceType = firstCasing(existing, "type", resourceType(tail));
+            Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+            synthesizeProperties(resourceType, name, id, properties);
+            properties.put("provisioningState", "Succeeded");
 
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("_sub", sub);
-        resource.put("_rg", rg);
-        resource.put("id", id);
-        resource.put("name", name);
-        resource.put("type", resourceType);
-        String location = bodyString(body, "location", null);
-        if (location != null) {
-            resource.put("location", location);
-        }
-        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            resource.put("tags", tags);
-        }
-        // ARM envelope fields that live beside properties and must round-trip verbatim —
-        // azurerm reads them from the response model, not from its own state (e.g.
-        // azurerm_lb sets sku/sku_tier from model.Sku and diffs forever if it vanishes).
-        for (String envelope : List.of("sku", "zones", "identity")) {
-            Object value = body.get(envelope);
-            if (value != null) {
-                resource.put(envelope, value);
+            Map<String, Object> resource = new LinkedHashMap<>();
+            resource.put("id", id);
+            resource.put("name", name);
+            resource.put("type", resourceType);
+            String location = bodyString(body, "location", null);
+            if (location != null) {
+                resource.put("location", location);
             }
+            if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+                resource.put("tags", tags);
+            }
+            // ARM envelope fields that live beside properties and must round-trip verbatim:
+            // azurerm reads them from the response model, not from its own state (e.g.
+            // azurerm_lb sets sku/sku_tier from model.Sku and diffs forever if it vanishes).
+            for (String envelope : List.of("sku", "zones", "identity")) {
+                Object value = body.get(envelope);
+                if (value != null) {
+                    resource.put(envelope, value);
+                }
+            }
+            resource.put("properties", properties);
+            if (isVnetPath(tail)) {
+                syncInlineSubnets(id, properties, existing);
+            }
+            return resource;
+        });
+        if (isSubnetPath(tail)) {
+            refreshParentSubnets(vnetIdOf(rid));
         }
-        resource.put("properties", properties);
-        if (VNET_TYPE.equals(resourceType) && tail.split("\\?")[0].split("/").length == 2) {
-            syncInlineSubnets(sub, rg, tail, id, properties, resources.get(key));
-        }
-        resources.put(key, resource);
-        if (SUBNET_TYPE.equals(resourceType)) {
-            refreshParentSubnets(sub, rg, tail);
-        }
-        return Response.ok(stripInternal(resource)).build();
+        return ok(written.stored().value());
     }
 
     /**
      * A VNet PUT that names {@code subnets} makes that list the VNet's subnets, as ARM does: each entry is stored as
      * a {@code virtualNetworks/subnets} child, and a child the list leaves out is removed. A PUT without the key
-     * keeps the children and lists them, in the previous VNet's order.
+     * keeps the children and lists them, in the previous VNet's order. Runs inside the VNet's
+     * {@link ArmResourceStore#createOrUpdate}, so the child writes and the VNet write share one store transaction.
      */
-    private void syncInlineSubnets(String sub, String rg, String tail, String id, Map<String, Object> properties,
-                                   Map<String, Object> previous) {
-        String vnet = tail.split("[/?]")[1];
+    private void syncInlineSubnets(String vnetId, Map<String, Object> properties,
+                                   Optional<Map<String, Object>> previous) {
+        ArmResourceId subnets = parseId(vnetId + "/subnets");
         if (!(properties.get("subnets") instanceof List<?>)) {
-            properties.put("subnets", childSubnets(sub, rg, vnet, previous == null ? List.of() : parentSubnets(previous)));
+            properties.put("subnets", childSubnets(subnets, previous.map(NetworkService::parentSubnets).orElse(List.of())));
             return;
         }
-        stampChildArray(properties, "subnets", id, entryProps -> { });
-        List<?> subnets = (List<?>) properties.get("subnets");
+        stampChildArray(properties, "subnets", vnetId, entryProps -> { });
+        List<Object> entries = new ArrayList<>();
         Set<String> kept = new HashSet<>();
-        for (Object item : subnets) {
-            Map<String, Object> entry = cast(item);
+        for (Object item : (List<?>) properties.get("subnets")) {
+            Map<String, Object> entry = new LinkedHashMap<>(cast(item));
             String name = bodyString(entry, "name", null);
-            String childKey = key(sub, rg, "virtualNetworks/" + vnet + "/subnets/" + name);
-            kept.add(childKey);
+            ArmResourceId childId = parseId(subnetId(vnetId, name, entry.get("id")));
+            Map<String, Object> existingChild = find(childId).orElse(null);
+            String childIdText = existingChild == null ? childId.id() : String.valueOf(existingChild.get("id"));
+            String childName = existingChild == null ? name : String.valueOf(existingChild.get("name"));
+            entry.put("id", childIdText);
+            entry.put("name", childName);
+            kept.add(childId.canonicalKey());
             Map<String, Object> child = new LinkedHashMap<>();
-            child.put("_sub", sub);
-            child.put("_rg", rg);
-            child.put("id", entry.get("id"));
-            child.put("name", name);
+            child.put("id", childIdText);
+            child.put("name", childName);
             child.put("type", SUBNET_TYPE);
             child.put("properties", entry.get("properties"));
-            resources.put(childKey, child);
+            store.put(child);
+            entries.add(entry);
         }
-        String prefix = key(sub, rg, "virtualNetworks/" + vnet + "/subnets/");
-        resources.keySet().removeIf(k -> k.startsWith(prefix) && !kept.contains(k));
+        properties.put("subnets", entries);
+        for (Stored<Map<String, Object>> child : store.under(subnets)) {
+            if (!kept.contains(child.id().canonicalKey())) {
+                store.delete(child.id());
+            }
+        }
+    }
+
+    /**
+     * The id a VNet PUT's inline subnet entry is stored under: the id the entry sends when that names this subnet of
+     * this VNet (azurerm echoes the ids it read), else {@code {vnetId}/subnets/{name}}.
+     */
+    private static String subnetId(String vnetId, String name, Object sent) {
+        String expected = vnetId + "/subnets/" + name;
+        String expectedKey = parseId(expected).canonicalKey();
+        if (sent instanceof String text) {
+            Optional<ArmResourceId> parsed = ArmResourceId.parse(text);
+            if (parsed.isPresent() && parsed.get().canonicalKey().equals(expectedKey)) {
+                return text;
+            }
+        }
+        return expected;
     }
 
     /** A subnet written or deleted on its own also updates its VNet's {@code subnets}, so a later VNet PUT that echoes them keeps it. */
-    private void refreshParentSubnets(String sub, String rg, String tail) {
-        String vnet = tail.split("[/?]")[1];
-        resources.computeIfPresent(key(sub, rg, "virtualNetworks/" + vnet), (k, existing) -> {
+    private void refreshParentSubnets(ArmResourceId vnetId) {
+        ArmResourceId subnets = parseId(vnetId.id() + "/subnets");
+        store.update(vnetId, existing -> {
             Map<String, Object> properties = new LinkedHashMap<>(cast(existing.get("properties")));
-            properties.put("subnets", childSubnets(sub, rg, vnet, parentSubnets(existing)));
+            properties.put("subnets", childSubnets(subnets, parentSubnets(existing)));
             Map<String, Object> copy = new LinkedHashMap<>(existing);
             copy.put("properties", properties);
             return copy;
         });
     }
 
-    /** The VNet's child subnets as {@code properties.subnets} entries: those named in {@code order} first, then the rest by name. */
-    private List<Object> childSubnets(String sub, String rg, String vnet, List<?> order) {
-        Map<String, Map<String, Object>> byName = new TreeMap<>();
-        for (Map<String, Object> child : listSubnets(sub, rg, vnet)) {
-            Map<String, Object> entry = new LinkedHashMap<>(child);
+    /**
+     * The VNet's child subnets (the documents under {@code subnets}, its subnets collection id) as
+     * {@code properties.subnets} entries: those named in {@code order} first, then the rest by name. Names compare
+     * ignoring case, as the store's keys do.
+     */
+    private List<Object> childSubnets(ArmResourceId subnets, List<?> order) {
+        Map<String, Map<String, Object>> byName = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (Stored<Map<String, Object>> child : store.under(subnets)) {
+            Map<String, Object> entry = new LinkedHashMap<>(stripInternal(child.value()));
             entry.remove("location");
-            byName.put(String.valueOf(child.get("name")), entry);
+            byName.put(String.valueOf(entry.get("name")), entry);
         }
         List<Object> entries = new ArrayList<>();
         for (Object item : order) {
@@ -270,11 +324,29 @@ public class NetworkService {
         return cast(vnet.get("properties")).get("subnets") instanceof List<?> list ? list : List.of();
     }
 
-    private void deleteChildren(String sub, String rg, String tail) {
+    /** Whether {@code tail} addresses one virtual network: {@code virtualNetworks/{name}}, in any casing. */
+    private static boolean isVnetPath(String tail) {
+        String[] parts = tail.split("\\?")[0].split("/");
+        return parts.length == 2 && isType(parts[0], "virtualNetworks");
+    }
+
+    /** Whether {@code tail} addresses one subnet: {@code virtualNetworks/{name}/subnets/{name}}, in any casing. */
+    private static boolean isSubnetPath(String tail) {
+        String clean = tail.split("\\?")[0];
+        return clean.split("/").length == 4 && isChildPath(clean, "virtualNetworks", "subnets");
+    }
+
+    /** The VNet a subnet id sits in. */
+    private static ArmResourceId vnetIdOf(ArmResourceId subnetId) {
+        String id = subnetId.id();
+        int subnets = id.toLowerCase(Locale.ROOT).lastIndexOf("/subnets/");
+        return parseId(id.substring(0, subnets));
+    }
+
+    private void deleteChildren(String sub, String rg, String tail, String id) {
         String[] parts = tail.split("/");
-        if (parts.length == 2 && "virtualNetworks".equals(parts[0])) {
-            String prefix = key(sub, rg, "virtualNetworks/" + parts[1] + "/subnets/");
-            resources.keySet().removeIf(k -> k.startsWith(prefix));
+        if (parts.length == 2 && isType(parts[0], "virtualNetworks")) {
+            deleteUnder(sub, rg, id + "/subnets");
         }
     }
 
@@ -293,14 +365,12 @@ public class NetworkService {
         String parentName = parts[1];
         String childName = parts.length > 3 && !parts[3].isEmpty() ? parts[3] : null;
 
-        Map<String, Object> parent = resources.get(key(sub, rg, parentSegment + "/" + parentName));
+        ArmResourceId parentId = parseId(resourceId(sub, rg, parentSegment + "/" + parentName));
+        Map<String, Object> parent = find(parentId).orElse(null);
         if (parent == null) {
             return notFound(parentSegment + "/" + parentName);
         }
-        Map<String, Object> parentProps = cast(parent.get("properties"));
-        List<Object> entries = parentProps.get(childSegment) instanceof List<?> l
-                ? new ArrayList<>((List<Object>) l)
-                : new ArrayList<>();
+        List<Object> entries = childEntries(parent, childSegment);
 
         if (childName == null) {
             return "GET".equals(method)
@@ -329,23 +399,46 @@ public class NetworkService {
                 entry.put("name", childName);
                 entry.put("id", parent.get("id") + "/" + childSegment + "/" + childName);
                 entry.put("properties", entryProps);
-                entries.removeIf(item -> childName.equals(cast(item).get("name")));
-                entries.add(entry);
-                parentProps.put(childSegment, entries);
-                return Response.ok(entry).build();
+                Optional<Stored<Map<String, Object>>> updated = store.update(parentId,
+                        current -> withChildEntries(current, childSegment, list -> {
+                            list.removeIf(item -> childName.equals(cast(item).get("name")));
+                            list.add(entry);
+                            return list;
+                        }));
+                return updated.isPresent() ? Response.ok(entry).build() : notFound(parentSegment + "/" + parentName);
             }
             case "DELETE" -> {
                 if (readOnly) {
                     return Response.status(405).build();
                 }
-                entries.removeIf(item -> childName.equals(cast(item).get("name")));
-                parentProps.put(childSegment, entries);
+                store.update(parentId, current -> withChildEntries(current, childSegment, list -> {
+                    list.removeIf(item -> childName.equals(cast(item).get("name")));
+                    return list;
+                }));
                 return Response.ok().build();
             }
             default -> {
                 return Response.status(405).build();
             }
         }
+    }
+
+    /** A copy of the parent's {@code segment} array, empty when it has none. */
+    @SuppressWarnings("unchecked")
+    private static List<Object> childEntries(Map<String, Object> parent, String segment) {
+        return cast(parent.get("properties")).get(segment) instanceof List<?> l
+                ? new ArrayList<>((List<Object>) l)
+                : new ArrayList<>();
+    }
+
+    /** A copy of {@code parent} whose {@code segment} array is {@code change} applied to its current entries. */
+    private static Map<String, Object> withChildEntries(Map<String, Object> parent, String segment,
+                                                        UnaryOperator<List<Object>> change) {
+        Map<String, Object> properties = new LinkedHashMap<>(cast(parent.get("properties")));
+        properties.put(segment, change.apply(childEntries(parent, segment)));
+        Map<String, Object> copy = new LinkedHashMap<>(parent);
+        copy.put("properties", properties);
+        return copy;
     }
 
     @SuppressWarnings("unchecked")
@@ -356,7 +449,7 @@ public class NetworkService {
                 // azurerm's flatteners scan every frontend for id + private IP fields, and
                 // lb_rule/probe/nat_rule child resources read-modify-write these arrays on
                 // the parent, so entries must echo with well-formed ARM ids. Every collection
-                // must EXIST even when empty — real Azure always returns them, and azurerm v3
+                // must EXIST even when empty: real Azure always returns them, and azurerm v3
                 // child resources deref the collection unguarded (probe_resource panics on a
                 // missing probes array).
                 stampChildArray(properties, "frontendIPConfigurations", id, entryProps -> {
@@ -377,7 +470,7 @@ public class NetworkService {
             }
             case "Microsoft.Network/applicationGateways" -> {
                 // azurerm builds child sub-resource ids itself and sends them in the PUT, so
-                // echo is usually enough — but its flatteners parse every id and fail the
+                // echo is usually enough, but its flatteners parse every id and fail the
                 // apply on a malformed one, so ids synthesized here must use the exact
                 // {agwId}/{segment}/{name} form.
                 for (String segment : List.of("gatewayIPConfigurations", "frontendIPConfigurations",
@@ -426,7 +519,7 @@ public class NetworkService {
     /**
      * Stamps each entry of an inline child array with its ARM id
      * ({@code {parentId}/{segment}/{name}}), a Succeeded provisioningState, and
-     * segment-specific property defaults. Existing ids are kept — azurerm sends
+     * segment-specific property defaults. Existing ids are kept: azurerm sends
      * self-built ids for Application Gateway children and they must echo untouched.
      */
     @SuppressWarnings("unchecked")
@@ -495,9 +588,28 @@ public class NetworkService {
         return result;
     }
 
+    /** The first segment of {@code tail}: the top-level resource type it addresses. */
+    private static String typeOf(String tail) {
+        return tail.split("/", 2)[0];
+    }
+
+    /**
+     * Whether {@code segment} names the resource type (or record type) {@code type}. ARM type names are
+     * case-insensitive, like the store's keys, so every type segment this service routes on is compared here.
+     */
+    private static boolean isType(String segment, String type) {
+        return type.equalsIgnoreCase(segment);
+    }
+
+    /** Whether {@code tail} is {@code parent/{name}/child}, or something below it. */
+    private static boolean isChildPath(String tail, String parent, String child) {
+        String[] parts = tail.split("/");
+        return parts.length >= 3 && isType(parts[0], parent) && isType(parts[2], child);
+    }
+
     private static String resourceType(String tail) {
         String[] parts = tail.split("/");
-        if (parts.length >= 4 && "subnets".equals(parts[2])) {
+        if (parts.length >= 4 && isType(parts[2], "subnets")) {
             return "Microsoft.Network/virtualNetworks/subnets";
         }
         return "Microsoft.Network/" + parts[0];
@@ -508,14 +620,53 @@ public class NetworkService {
         return parts.length > 0 ? parts[parts.length - 1] : tail;
     }
 
-    private static String key(String sub, String rg, String tail) {
+    /** The ARM id of {@code tail} (the path after {@code /providers/Microsoft.Network/}) in the resource group. */
+    private static String resourceId(String sub, String rg, String tail) {
         int q = tail.indexOf('?');
         String clean = q >= 0 ? tail.substring(0, q) : tail;
-        return sub + "/" + rg + "/net/" + clean;
+        return "/subscriptions/" + sub + "/resourceGroups/" + rg + PROVIDER + clean;
     }
 
-    private static String extractRg(String path) {
-        return ArmPaths.resourceGroup(path, "unknown");
+    private static ArmResourceId parseId(String id) {
+        return ArmResourceId.parse(id).orElseThrow(() -> new IllegalArgumentException("not an ARM id: " + id));
+    }
+
+    private Optional<Map<String, Object>> find(ArmResourceId id) {
+        return store.get(id).map(Stored::value);
+    }
+
+    private Optional<Map<String, Object>> find(String id) {
+        return find(parseId(id));
+    }
+
+    /** The resources under {@code parentId} (a resource or one of its collections), at any depth. */
+    private List<Map<String, Object>> descendants(String sub, String rg, String parentId) {
+        String prefix = parseId(parentId).canonicalKey() + "/";
+        return store.list(new ArmScope(sub, rg)).stream()
+                .filter(stored -> stored.id().canonicalKey().startsWith(prefix))
+                .map(Stored::value)
+                .toList();
+    }
+
+    /** {@link #descendants}, as responses. */
+    private List<Map<String, Object>> children(String sub, String rg, String parentId) {
+        return descendants(sub, rg, parentId).stream().map(NetworkService::stripInternal).toList();
+    }
+
+    private void deleteUnder(String sub, String rg, String parentId) {
+        for (Map<String, Object> child : descendants(sub, rg, parentId)) {
+            store.delete(parseId(String.valueOf(child.get("id"))));
+        }
+    }
+
+    /** The stored resource's {@code field}, so an update through other casing keeps the casing of the first PUT. */
+    private static String firstCasing(Optional<Map<String, Object>> existing, String field, String requested) {
+        return existing.map(e -> e.get(field)).filter(String.class::isInstance).map(String.class::cast)
+                .orElse(requested);
+    }
+
+    private static Response ok(Map<String, Object> resource) {
+        return Response.ok(stripInternal(resource)).build();
     }
 
     private static String extractAfter(String path, String marker) {
@@ -549,7 +700,7 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listDnsZones(sub, request.resourceGroup().orElse(null)))).build();
+            return Response.ok(Map.of("value", listDnsZones(sub, rg))).build();
         }
 
         // 2. Zone CRUD
@@ -606,68 +757,60 @@ public class NetworkService {
 
     /** The subscription's DNS zones, or one resource group's when {@code rg} is non-null. */
     private List<Map<String, Object>> listDnsZones(String sub, String rg) {
-        return resources.values().stream()
-                .filter(r -> sub.equals(r.get("_sub"))
-                        && (rg == null || rg.equals(r.get("_rg")))
-                        && "Microsoft.Network/dnsZones".equals(r.get("type")))
-                .map(NetworkService::stripInternal)
-                .toList();
+        return listResources(sub, rg, "Microsoft.Network/dnsZones");
+    }
+
+    private static String dnsZoneId(String sub, String rg, String zoneName) {
+        return resourceId(sub, rg, "dnsZones/" + zoneName);
     }
 
     private Response getDnsZone(String sub, String rg, String zoneName) {
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName;
-        Map<String, Object> zone = resources.get(key);
-        if (zone == null) {
-            return notFound("dnsZones/" + zoneName);
-        }
-        return Response.ok(stripInternal(zone)).build();
+        return find(dnsZoneId(sub, rg, zoneName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("dnsZones/" + zoneName));
     }
 
     private Response createOrUpdateDnsZone(AzureRequest request, String sub, String rg, String zoneName) {
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName;
         Map<String, Object> body = parseBody(request);
-        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+        Written<Map<String, Object>> written = store.createOrUpdate(parseId(dnsZoneId(sub, rg, zoneName)), existing -> {
+            Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+            Map<String, Object> existingZone = existing.orElse(null);
+            String etag = existingZone != null ? (String) existingZone.get("etag") : "\"" + UUID.randomUUID() + "\"";
+            int numberOfRecordSets = existingZone != null ? ((Number) cast(existingZone.get("properties")).getOrDefault("numberOfRecordSets", 2)).intValue() : 2;
 
-        Map<String, Object> existingZone = resources.get(key);
-        String etag = existingZone != null ? (String) existingZone.get("etag") : "\"" + UUID.randomUUID() + "\"";
-        int numberOfRecordSets = existingZone != null ? ((Number) cast(existingZone.get("properties")).getOrDefault("numberOfRecordSets", 2)).intValue() : 2;
+            properties.putIfAbsent("maxNumberOfRecordSets", 10000);
+            properties.putIfAbsent("numberOfRecordSets", numberOfRecordSets);
+            properties.putIfAbsent("zoneType", "Public");
+            properties.putIfAbsent("nameServers", List.of(
+                    "ns1-01.azure-dns.com.",
+                    "ns2-01.azure-dns.net.",
+                    "ns3-01.azure-dns.org.",
+                    "ns4-01.azure-dns.info."
+            ));
 
-        properties.putIfAbsent("maxNumberOfRecordSets", 10000);
-        properties.putIfAbsent("numberOfRecordSets", numberOfRecordSets);
-        properties.putIfAbsent("zoneType", "Public");
-        properties.putIfAbsent("nameServers", List.of(
-                "ns1-01.azure-dns.com.",
-                "ns2-01.azure-dns.net.",
-                "ns3-01.azure-dns.org.",
-                "ns4-01.azure-dns.info."
-        ));
+            Map<String, Object> zone = new LinkedHashMap<>();
+            zone.put("id", firstCasing(existing, "id", dnsZoneId(sub, rg, zoneName)));
+            zone.put("name", firstCasing(existing, "name", zoneName));
+            zone.put("type", "Microsoft.Network/dnsZones");
+            zone.put("location", bodyString(body, "location", "global"));
+            if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+                zone.put("tags", tags);
+            } else if (existingZone != null && existingZone.containsKey("tags")) {
+                zone.put("tags", existingZone.get("tags"));
+            }
+            zone.put("etag", etag);
+            zone.put("properties", properties);
+            return zone;
+        });
 
-        Map<String, Object> zone = new LinkedHashMap<>();
-        zone.put("_sub", sub);
-        zone.put("_rg", rg);
-        zone.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName);
-        zone.put("name", zoneName);
-        zone.put("type", "Microsoft.Network/dnsZones");
-        zone.put("location", bodyString(body, "location", "global"));
-        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            zone.put("tags", tags);
-        } else if (existingZone != null && existingZone.containsKey("tags")) {
-            zone.put("tags", existingZone.get("tags"));
+        Map<String, Object> zone = written.stored().value();
+        if (written.created()) {
+            createDefaultRecordSets(String.valueOf(zone.get("id")), String.valueOf(zone.get("name")));
         }
-        zone.put("etag", etag);
-        zone.put("properties", properties);
 
-        resources.put(key, zone);
-
-        if (existingZone == null) {
-            createDefaultRecordSets(sub, rg, zoneName);
-        }
-
-        return Response.status(existingZone == null ? 201 : 200).entity(stripInternal(zone)).build();
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(zone)).build();
     }
 
-    private void createDefaultRecordSets(String sub, String rg, String zoneName) {
-        String soaKey = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/SOA/@";
+    private void createDefaultRecordSets(String zoneId, String zoneName) {
         Map<String, Object> soaProperties = new LinkedHashMap<>();
         soaProperties.put("fqdn", zoneName + ".");
         soaProperties.put("TTL", 3600);
@@ -681,16 +824,13 @@ public class NetworkService {
                 "minimumTTL", 300L
         ));
         Map<String, Object> soa = new LinkedHashMap<>();
-        soa.put("_sub", sub);
-        soa.put("_rg", rg);
-        soa.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName + "/SOA/@");
+        soa.put("id", zoneId + "/SOA/@");
         soa.put("name", "@");
         soa.put("type", "Microsoft.Network/dnsZones/SOA");
         soa.put("etag", "\"" + UUID.randomUUID() + "\"");
         soa.put("properties", soaProperties);
-        resources.put(soaKey, soa);
+        store.put(soa);
 
-        String nsKey = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/NS/@";
         Map<String, Object> nsProperties = new LinkedHashMap<>();
         nsProperties.put("fqdn", zoneName + ".");
         nsProperties.put("TTL", 172800);
@@ -701,115 +841,97 @@ public class NetworkService {
                 Map.of("nsdname", "ns4-01.azure-dns.info.")
         ));
         Map<String, Object> ns = new LinkedHashMap<>();
-        ns.put("_sub", sub);
-        ns.put("_rg", rg);
-        ns.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName + "/NS/@");
+        ns.put("id", zoneId + "/NS/@");
         ns.put("name", "@");
         ns.put("type", "Microsoft.Network/dnsZones/NS");
         ns.put("etag", "\"" + UUID.randomUUID() + "\"");
         ns.put("properties", nsProperties);
-        resources.put(nsKey, ns);
+        store.put(ns);
     }
 
     private Response deleteDnsZone(String sub, String rg, String zoneName) {
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName;
-        Map<String, Object> zone = resources.remove(key);
-        if (zone == null) {
+        String zoneId = dnsZoneId(sub, rg, zoneName);
+        if (store.delete(parseId(zoneId)).isEmpty()) {
             return notFound("dnsZones/" + zoneName);
         }
-        String prefix = key + "/";
-        resources.keySet().removeIf(k -> k.startsWith(prefix));
+        deleteUnder(sub, rg, zoneId);
         return Response.ok().build();
     }
 
     private List<Map<String, Object>> listAllRecordSets(String sub, String rg, String zoneName) {
-        String prefix = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .map(NetworkService::stripInternal)
-                .toList();
+        return children(sub, rg, dnsZoneId(sub, rg, zoneName));
     }
 
     private List<Map<String, Object>> listRecordSetsByType(String sub, String rg, String zoneName, String recordType) {
-        String prefix = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/" + recordType + "/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .map(NetworkService::stripInternal)
-                .toList();
+        return children(sub, rg, dnsZoneId(sub, rg, zoneName) + "/" + recordType);
+    }
+
+    private static String recordSetId(String sub, String rg, String zoneName, String recordType,
+                                      String relativeRecordSetName) {
+        return dnsZoneId(sub, rg, zoneName) + "/" + recordType + "/" + relativeRecordSetName;
     }
 
     private Response getRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName;
-        Map<String, Object> recordSet = resources.get(key);
-        if (recordSet == null) {
-            return notFound("dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
-        }
-        return Response.ok(stripInternal(recordSet)).build();
+        return find(recordSetId(sub, rg, zoneName, recordType, relativeRecordSetName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName));
     }
 
     private Response deleteRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        if ("@".equals(relativeRecordSetName) && ("SOA".equals(recordType) || "NS".equals(recordType))) {
+        if ("@".equals(relativeRecordSetName) && (isType(recordType, "SOA") || isType(recordType, "NS"))) {
             return Response.status(400).entity(Map.of("error", Map.of(
                     "code", "BadRequest",
                     "message", "Default SOA and NS record sets at the zone root cannot be deleted."
             ))).build();
         }
 
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName;
-        Map<String, Object> recordSet = resources.remove(key);
-        if (recordSet == null) {
+        String id = recordSetId(sub, rg, zoneName, recordType, relativeRecordSetName);
+        if (store.delete(parseId(id)).isEmpty()) {
             return notFound("dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
         }
 
-        decrementZoneRecordSetCount(sub, rg, zoneName);
+        adjustZoneCount(dnsZoneId(sub, rg, zoneName), "numberOfRecordSets", -1, 2, 2);
 
         return Response.ok().build();
     }
 
     private Response createOrUpdateRecordSet(AzureRequest request, String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        String key = sub + "/" + rg + "/net/dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName;
-
-        String zoneKey = sub + "/" + rg + "/net/dnsZones/" + zoneName;
-        Map<String, Object> parentZone = resources.get(zoneKey);
-        if (parentZone == null) {
+        if (find(dnsZoneId(sub, rg, zoneName)).isEmpty()) {
             return Response.status(404).entity(Map.of("error", Map.of(
                     "code", "ParentResourceNotFound",
                     "message", "DNS Zone " + zoneName + " was not found."
             ))).build();
         }
 
-        Map<String, Object> existingRecordSet = resources.get(key);
+        ArmResourceId id = parseId(recordSetId(sub, rg, zoneName, recordType, relativeRecordSetName));
+        Map<String, Object> existingRecordSet = find(id).orElse(null);
 
-        String ifMatch = request.headers().getHeaderString("If-Match");
-        String ifNoneMatch = request.headers().getHeaderString("If-None-Match");
-
-        if (ifMatch != null) {
-            if ("*".equals(ifMatch)) {
-                if (existingRecordSet == null) {
-                    return preconditionFailed();
-                }
-            } else {
-                if (existingRecordSet == null || !ifMatch.equals(existingRecordSet.get("etag"))) {
-                    return preconditionFailed();
-                }
-            }
+        Response precondition = checkPreconditions(request, existingRecordSet);
+        if (precondition != null) {
+            return precondition;
         }
 
-        if (ifNoneMatch != null) {
-            if ("*".equals(ifNoneMatch)) {
-                if (existingRecordSet != null) {
-                    return preconditionFailed();
-                }
-            } else {
-                if (existingRecordSet != null && ifNoneMatch.equals(existingRecordSet.get("etag"))) {
-                    return preconditionFailed();
-                }
-            }
+        Map<String, Object> properties = recordSetProperties(parseBody(request), zoneName, recordType,
+                relativeRecordSetName);
+        Written<Map<String, Object>> written = store.createOrUpdate(id, existing -> {
+            Map<String, Object> recordSet = new LinkedHashMap<>();
+            recordSet.put("id", firstCasing(existing, "id", id.id()));
+            recordSet.put("name", firstCasing(existing, "name", relativeRecordSetName));
+            recordSet.put("type", firstCasing(existing, "type", "Microsoft.Network/dnsZones/" + recordType));
+            recordSet.put("etag", "\"" + UUID.randomUUID() + "\"");
+            recordSet.put("properties", properties);
+            return recordSet;
+        });
+
+        if (written.created()) {
+            adjustZoneCount(dnsZoneId(sub, rg, zoneName), "numberOfRecordSets", 1, 2, 2);
         }
 
-        Map<String, Object> body = parseBody(request);
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(written.stored().value())).build();
+    }
+
+    /** A record set's {@code properties} from a PUT body: its fqdn, TTL, metadata and the records of its type. */
+    private static Map<String, Object> recordSetProperties(Map<String, Object> body, String zoneName,
+                                                           String recordType, String relativeRecordSetName) {
         Map<String, Object> bodyProps = body.containsKey("properties") ? cast(body.get("properties")) : body;
 
         Object ttlVal = bodyProps.containsKey("TTL") ? bodyProps.get("TTL") : bodyProps.get("ttl");
@@ -826,25 +948,7 @@ public class NetworkService {
         }
 
         copyRecordProperties(recordType, bodyProps, properties);
-
-        String newEtag = "\"" + UUID.randomUUID() + "\"";
-
-        Map<String, Object> recordSet = new LinkedHashMap<>();
-        recordSet.put("_sub", sub);
-        recordSet.put("_rg", rg);
-        recordSet.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/dnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
-        recordSet.put("name", relativeRecordSetName);
-        recordSet.put("type", "Microsoft.Network/dnsZones/" + recordType);
-        recordSet.put("etag", newEtag);
-        recordSet.put("properties", properties);
-
-        resources.put(key, recordSet);
-
-        if (existingRecordSet == null) {
-            incrementZoneRecordSetCount(sub, rg, zoneName);
-        }
-
-        return Response.status(existingRecordSet == null ? 201 : 200).entity(stripInternal(recordSet)).build();
+        return properties;
     }
 
     private static void copyRecordProperties(String recordType, Map<String, Object> bodyProps, Map<String, Object> properties) {
@@ -873,26 +977,19 @@ public class NetworkService {
         }
     }
 
-    private void incrementZoneRecordSetCount(String sub, String rg, String zoneName) {
-        String zoneKey = sub + "/" + rg + "/net/dnsZones/" + zoneName;
-        Map<String, Object> zone = resources.get(zoneKey);
-        if (zone != null) {
+    /**
+     * Adds {@code delta} to a zone's {@code field} count, never below {@code floor}; a zone without the field counts
+     * from {@code missing}. A zone that is gone is left alone.
+     */
+    private void adjustZoneCount(String zoneId, String field, int delta, int floor, int missing) {
+        store.update(parseId(zoneId), zone -> {
             Map<String, Object> props = new LinkedHashMap<>(cast(zone.get("properties")));
-            int count = ((Number) props.getOrDefault("numberOfRecordSets", 2)).intValue();
-            props.put("numberOfRecordSets", count + 1);
-            zone.put("properties", props);
-        }
-    }
-
-    private void decrementZoneRecordSetCount(String sub, String rg, String zoneName) {
-        String zoneKey = sub + "/" + rg + "/net/dnsZones/" + zoneName;
-        Map<String, Object> zone = resources.get(zoneKey);
-        if (zone != null) {
-            Map<String, Object> props = new LinkedHashMap<>(cast(zone.get("properties")));
-            int count = ((Number) props.getOrDefault("numberOfRecordSets", 2)).intValue();
-            props.put("numberOfRecordSets", Math.max(2, count - 1));
-            zone.put("properties", props);
-        }
+            int count = ((Number) props.getOrDefault(field, missing)).intValue();
+            props.put(field, Math.max(floor, count + delta));
+            Map<String, Object> copy = new LinkedHashMap<>(zone);
+            copy.put("properties", props);
+            return copy;
+        });
     }
 
     private Response preconditionFailed() {
@@ -909,7 +1006,7 @@ public class NetworkService {
 
         // 1. List zones
         if (parts.length == 1) {
-            return Response.ok(Map.of("value", listPrivateDnsZones(sub, request.resourceGroup().orElse(null))))
+            return Response.ok(Map.of("value", listPrivateDnsZones(sub, rg)))
                     .build();
         }
 
@@ -925,12 +1022,12 @@ public class NetworkService {
         }
 
         // 3. List virtual network links
-        if (parts.length == 3 && "virtualNetworkLinks".equals(parts[2])) {
+        if (parts.length == 3 && isType(parts[2], "virtualNetworkLinks")) {
             return Response.ok(Map.of("value", listVirtualNetworkLinks(sub, rg, parts[1]))).build();
         }
 
         // 4. Virtual network link CRUD
-        if (parts.length == 4 && "virtualNetworkLinks".equals(parts[2])) {
+        if (parts.length == 4 && isType(parts[2], "virtualNetworkLinks")) {
             String zoneName = parts[1];
             String linkName = parts[3];
             return switch (method) {
@@ -979,75 +1076,65 @@ public class NetworkService {
                "SOA".equals(u) || "SRV".equals(u);
     }
 
-    private static String privateZoneKey(String sub, String rg, String zoneName) {
-        return sub + "/" + rg + "/net/privateDnsZones/" + zoneName;
+    private static String privateZoneId(String sub, String rg, String zoneName) {
+        return resourceId(sub, rg, "privateDnsZones/" + zoneName);
     }
 
     /** The subscription's private DNS zones, or one resource group's when {@code rg} is non-null. */
     private List<Map<String, Object>> listPrivateDnsZones(String sub, String rg) {
-        return resources.values().stream()
-                .filter(r -> sub.equals(r.get("_sub"))
-                        && (rg == null || rg.equals(r.get("_rg")))
-                        && "Microsoft.Network/privateDnsZones".equals(r.get("type")))
-                .map(NetworkService::stripInternal)
-                .toList();
+        return listResources(sub, rg, "Microsoft.Network/privateDnsZones");
     }
 
     private Response getPrivateDnsZone(String sub, String rg, String zoneName) {
-        Map<String, Object> zone = resources.get(privateZoneKey(sub, rg, zoneName));
-        if (zone == null) {
-            return notFound("privateDnsZones/" + zoneName);
-        }
-        return Response.ok(stripInternal(zone)).build();
+        return find(privateZoneId(sub, rg, zoneName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("privateDnsZones/" + zoneName));
     }
 
     private Response createOrUpdatePrivateDnsZone(AzureRequest request, String sub, String rg, String zoneName) {
-        String key = privateZoneKey(sub, rg, zoneName);
+        String zoneId = privateZoneId(sub, rg, zoneName);
         Map<String, Object> body = parseBody(request);
-        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+        Written<Map<String, Object>> written = store.createOrUpdate(parseId(zoneId), existing -> {
+            Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
+            Map<String, Object> existingZone = existing.orElse(null);
+            // Azure rotates the ETag on every mutation (as record sets and VNet links do here).
+            String etag = "\"" + UUID.randomUUID() + "\"";
+            Map<String, Object> existingProps = existingZone != null ? cast(existingZone.get("properties")) : Map.of();
 
-        Map<String, Object> existingZone = resources.get(key);
-        // Azure rotates the ETag on every mutation (as record sets and VNet links do here).
-        String etag = "\"" + UUID.randomUUID() + "\"";
-        Map<String, Object> existingProps = existingZone != null ? cast(existingZone.get("properties")) : Map.of();
+            properties.putIfAbsent("maxNumberOfRecordSets", 25000);
+            properties.putIfAbsent("maxNumberOfVirtualNetworkLinks", 1000);
+            properties.putIfAbsent("maxNumberOfVirtualNetworkLinksWithRegistration", 100);
+            properties.putIfAbsent("numberOfRecordSets",
+                    ((Number) existingProps.getOrDefault("numberOfRecordSets", 1)).intValue());
+            properties.putIfAbsent("numberOfVirtualNetworkLinks",
+                    ((Number) existingProps.getOrDefault("numberOfVirtualNetworkLinks", 0)).intValue());
+            properties.putIfAbsent("numberOfVirtualNetworkLinksWithRegistration",
+                    ((Number) existingProps.getOrDefault("numberOfVirtualNetworkLinksWithRegistration", 0)).intValue());
+            properties.put("provisioningState", "Succeeded");
 
-        properties.putIfAbsent("maxNumberOfRecordSets", 25000);
-        properties.putIfAbsent("maxNumberOfVirtualNetworkLinks", 1000);
-        properties.putIfAbsent("maxNumberOfVirtualNetworkLinksWithRegistration", 100);
-        properties.putIfAbsent("numberOfRecordSets",
-                ((Number) existingProps.getOrDefault("numberOfRecordSets", 1)).intValue());
-        properties.putIfAbsent("numberOfVirtualNetworkLinks",
-                ((Number) existingProps.getOrDefault("numberOfVirtualNetworkLinks", 0)).intValue());
-        properties.putIfAbsent("numberOfVirtualNetworkLinksWithRegistration",
-                ((Number) existingProps.getOrDefault("numberOfVirtualNetworkLinksWithRegistration", 0)).intValue());
-        properties.put("provisioningState", "Succeeded");
+            Map<String, Object> zone = new LinkedHashMap<>();
+            zone.put("id", firstCasing(existing, "id", zoneId));
+            zone.put("name", firstCasing(existing, "name", zoneName));
+            zone.put("type", "Microsoft.Network/privateDnsZones");
+            zone.put("location", bodyString(body, "location", "global"));
+            if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+                zone.put("tags", tags);
+            } else if (existingZone != null && existingZone.containsKey("tags")) {
+                zone.put("tags", existingZone.get("tags"));
+            }
+            zone.put("etag", etag);
+            zone.put("properties", properties);
+            return zone;
+        });
 
-        Map<String, Object> zone = new LinkedHashMap<>();
-        zone.put("_sub", sub);
-        zone.put("_rg", rg);
-        zone.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName);
-        zone.put("name", zoneName);
-        zone.put("type", "Microsoft.Network/privateDnsZones");
-        zone.put("location", bodyString(body, "location", "global"));
-        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            zone.put("tags", tags);
-        } else if (existingZone != null && existingZone.containsKey("tags")) {
-            zone.put("tags", existingZone.get("tags"));
+        Map<String, Object> zone = written.stored().value();
+        if (written.created()) {
+            createDefaultPrivateSoaRecordSet(String.valueOf(zone.get("id")), String.valueOf(zone.get("name")));
         }
-        zone.put("etag", etag);
-        zone.put("properties", properties);
 
-        resources.put(key, zone);
-
-        if (existingZone == null) {
-            createDefaultPrivateSoaRecordSet(sub, rg, zoneName);
-        }
-
-        return Response.status(existingZone == null ? 201 : 200).entity(stripInternal(zone)).build();
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(zone)).build();
     }
 
-    private void createDefaultPrivateSoaRecordSet(String sub, String rg, String zoneName) {
-        String soaKey = privateZoneKey(sub, rg, zoneName) + "/SOA/@";
+    private void createDefaultPrivateSoaRecordSet(String zoneId, String zoneName) {
         Map<String, Object> soaProperties = new LinkedHashMap<>();
         soaProperties.put("fqdn", zoneName + ".");
         soaProperties.put("TTL", 3600);
@@ -1061,157 +1148,121 @@ public class NetworkService {
                 "minimumTTL", 10L
         ));
         Map<String, Object> soa = new LinkedHashMap<>();
-        soa.put("_sub", sub);
-        soa.put("_rg", rg);
-        soa.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName + "/SOA/@");
+        soa.put("id", zoneId + "/SOA/@");
         soa.put("name", "@");
         soa.put("type", "Microsoft.Network/privateDnsZones/SOA");
         soa.put("etag", "\"" + UUID.randomUUID() + "\"");
         soa.put("properties", soaProperties);
-        resources.put(soaKey, soa);
+        store.put(soa);
     }
 
     private Response deletePrivateDnsZone(String sub, String rg, String zoneName) {
-        String key = privateZoneKey(sub, rg, zoneName);
-        Map<String, Object> zone = resources.remove(key);
-        if (zone == null) {
+        String zoneId = privateZoneId(sub, rg, zoneName);
+        if (store.delete(parseId(zoneId)).isEmpty()) {
             return notFound("privateDnsZones/" + zoneName);
         }
-        String prefix = key + "/";
-        resources.keySet().removeIf(k -> k.startsWith(prefix));
+        deleteUnder(sub, rg, zoneId);
         return Response.ok().build();
     }
 
     private List<Map<String, Object>> listAllPrivateRecordSets(String sub, String rg, String zoneName) {
-        String prefix = privateZoneKey(sub, rg, zoneName) + "/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix) && !e.getKey().contains("/virtualNetworkLinks/"))
-                .map(Map.Entry::getValue)
+        String zoneId = privateZoneId(sub, rg, zoneName);
+        String links = parseId(zoneId + "/virtualNetworkLinks").canonicalKey() + "/";
+        return descendants(sub, rg, zoneId).stream()
+                .filter(r -> !String.valueOf(r.get("id")).toLowerCase(Locale.ROOT).startsWith(links))
                 .map(NetworkService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listPrivateRecordSetsByType(String sub, String rg, String zoneName, String recordType) {
-        String prefix = privateZoneKey(sub, rg, zoneName) + "/" + recordType + "/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .map(NetworkService::stripInternal)
-                .toList();
+        return children(sub, rg, privateZoneId(sub, rg, zoneName) + "/" + recordType);
+    }
+
+    private static String privateRecordSetId(String sub, String rg, String zoneName, String recordType,
+                                             String relativeRecordSetName) {
+        return privateZoneId(sub, rg, zoneName) + "/" + recordType + "/" + relativeRecordSetName;
     }
 
     private Response getPrivateRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        String key = privateZoneKey(sub, rg, zoneName) + "/" + recordType + "/" + relativeRecordSetName;
-        Map<String, Object> recordSet = resources.get(key);
-        if (recordSet == null) {
-            return notFound("privateDnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
-        }
-        return Response.ok(stripInternal(recordSet)).build();
+        return find(privateRecordSetId(sub, rg, zoneName, recordType, relativeRecordSetName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("privateDnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName));
     }
 
     private Response deletePrivateRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        if ("@".equals(relativeRecordSetName) && "SOA".equals(recordType)) {
+        if ("@".equals(relativeRecordSetName) && isType(recordType, "SOA")) {
             return Response.status(400).entity(Map.of("error", Map.of(
                     "code", "BadRequest",
                     "message", "The default SOA record set at the zone root cannot be deleted."
             ))).build();
         }
 
-        String key = privateZoneKey(sub, rg, zoneName) + "/" + recordType + "/" + relativeRecordSetName;
-        Map<String, Object> recordSet = resources.remove(key);
-        if (recordSet == null) {
+        String id = privateRecordSetId(sub, rg, zoneName, recordType, relativeRecordSetName);
+        if (store.delete(parseId(id)).isEmpty()) {
             return notFound("privateDnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
         }
 
-        adjustPrivateZoneCount(sub, rg, zoneName, "numberOfRecordSets", -1, 1);
+        adjustZoneCount(privateZoneId(sub, rg, zoneName), "numberOfRecordSets", -1, 1, 1);
 
         return Response.ok().build();
     }
 
     private Response createOrUpdatePrivateRecordSet(AzureRequest request, String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        String key = privateZoneKey(sub, rg, zoneName) + "/" + recordType + "/" + relativeRecordSetName;
-
-        Map<String, Object> parentZone = resources.get(privateZoneKey(sub, rg, zoneName));
-        if (parentZone == null) {
+        if (find(privateZoneId(sub, rg, zoneName)).isEmpty()) {
             return Response.status(404).entity(Map.of("error", Map.of(
                     "code", "ParentResourceNotFound",
                     "message", "Private DNS Zone " + zoneName + " was not found."
             ))).build();
         }
 
-        Map<String, Object> existingRecordSet = resources.get(key);
+        ArmResourceId id = parseId(privateRecordSetId(sub, rg, zoneName, recordType, relativeRecordSetName));
+        Map<String, Object> existingRecordSet = find(id).orElse(null);
 
         Response precondition = checkPreconditions(request, existingRecordSet);
         if (precondition != null) {
             return precondition;
         }
 
-        Map<String, Object> body = parseBody(request);
-        Map<String, Object> bodyProps = body.containsKey("properties") ? cast(body.get("properties")) : body;
+        Map<String, Object> properties = recordSetProperties(parseBody(request), zoneName, recordType,
+                relativeRecordSetName);
+        Written<Map<String, Object>> written = store.createOrUpdate(id, existing -> {
+            Map<String, Object> recordSet = new LinkedHashMap<>();
+            recordSet.put("id", firstCasing(existing, "id", id.id()));
+            recordSet.put("name", firstCasing(existing, "name", relativeRecordSetName));
+            recordSet.put("type", firstCasing(existing, "type", "Microsoft.Network/privateDnsZones/" + recordType));
+            recordSet.put("etag", "\"" + UUID.randomUUID() + "\"");
+            recordSet.put("properties", properties);
+            return recordSet;
+        });
 
-        Object ttlVal = bodyProps.containsKey("TTL") ? bodyProps.get("TTL") : bodyProps.get("ttl");
-        int ttl = ttlVal instanceof Number n ? n.intValue() : 3600;
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("fqdn", "@".equals(relativeRecordSetName) ? zoneName + "." : relativeRecordSetName + "." + zoneName + ".");
-        properties.put("TTL", ttl);
-
-        if (bodyProps.containsKey("metadata")) {
-            properties.put("metadata", bodyProps.get("metadata"));
-        } else if (bodyProps.containsKey("Metadata")) {
-            properties.put("metadata", bodyProps.get("Metadata"));
+        if (written.created()) {
+            adjustZoneCount(privateZoneId(sub, rg, zoneName), "numberOfRecordSets", 1, 1, 1);
         }
 
-        copyRecordProperties(recordType, bodyProps, properties);
-
-        Map<String, Object> recordSet = new LinkedHashMap<>();
-        recordSet.put("_sub", sub);
-        recordSet.put("_rg", rg);
-        recordSet.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName + "/" + recordType + "/" + relativeRecordSetName);
-        recordSet.put("name", relativeRecordSetName);
-        recordSet.put("type", "Microsoft.Network/privateDnsZones/" + recordType);
-        recordSet.put("etag", "\"" + UUID.randomUUID() + "\"");
-        recordSet.put("properties", properties);
-
-        resources.put(key, recordSet);
-
-        if (existingRecordSet == null) {
-            adjustPrivateZoneCount(sub, rg, zoneName, "numberOfRecordSets", 1, 1);
-        }
-
-        return Response.status(existingRecordSet == null ? 201 : 200).entity(stripInternal(recordSet)).build();
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(written.stored().value())).build();
     }
 
     private List<Map<String, Object>> listVirtualNetworkLinks(String sub, String rg, String zoneName) {
-        String prefix = privateZoneKey(sub, rg, zoneName) + "/virtualNetworkLinks/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .map(NetworkService::stripInternal)
-                .toList();
+        return children(sub, rg, privateZoneId(sub, rg, zoneName) + "/virtualNetworkLinks");
+    }
+
+    private static String virtualNetworkLinkId(String sub, String rg, String zoneName, String linkName) {
+        return privateZoneId(sub, rg, zoneName) + "/virtualNetworkLinks/" + linkName;
     }
 
     private Response getVirtualNetworkLink(String sub, String rg, String zoneName, String linkName) {
-        String key = privateZoneKey(sub, rg, zoneName) + "/virtualNetworkLinks/" + linkName;
-        Map<String, Object> link = resources.get(key);
-        if (link == null) {
-            return notFound("privateDnsZones/" + zoneName + "/virtualNetworkLinks/" + linkName);
-        }
-        return Response.ok(stripInternal(link)).build();
+        return find(virtualNetworkLinkId(sub, rg, zoneName, linkName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("privateDnsZones/" + zoneName + "/virtualNetworkLinks/" + linkName));
     }
 
     private Response createOrUpdateVirtualNetworkLink(AzureRequest request, String sub, String rg, String zoneName, String linkName) {
-        Map<String, Object> parentZone = resources.get(privateZoneKey(sub, rg, zoneName));
-        if (parentZone == null) {
+        if (find(privateZoneId(sub, rg, zoneName)).isEmpty()) {
             return Response.status(404).entity(Map.of("error", Map.of(
                     "code", "ParentResourceNotFound",
                     "message", "Private DNS Zone " + zoneName + " was not found."
             ))).build();
         }
 
-        String key = privateZoneKey(sub, rg, zoneName) + "/virtualNetworkLinks/" + linkName;
-        Map<String, Object> existing = resources.get(key);
-
+        ArmResourceId id = parseId(virtualNetworkLinkId(sub, rg, zoneName, linkName));
         Map<String, Object> body = parseBody(request);
         Map<String, Object> bodyProps = cast(body.get("properties"));
 
@@ -1223,35 +1274,32 @@ public class NetworkService {
         }
         properties.put("virtualNetworkLinkState", "Completed");
 
-        Map<String, Object> link = new LinkedHashMap<>();
-        link.put("_sub", sub);
-        link.put("_rg", rg);
-        link.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateDnsZones/" + zoneName + "/virtualNetworkLinks/" + linkName);
-        link.put("name", linkName);
-        link.put("type", "Microsoft.Network/privateDnsZones/virtualNetworkLinks");
-        link.put("location", bodyString(body, "location", "global"));
-        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            link.put("tags", tags);
+        Written<Map<String, Object>> written = store.createOrUpdate(id, existing -> {
+            Map<String, Object> link = new LinkedHashMap<>();
+            link.put("id", firstCasing(existing, "id", id.id()));
+            link.put("name", firstCasing(existing, "name", linkName));
+            link.put("type", "Microsoft.Network/privateDnsZones/virtualNetworkLinks");
+            link.put("location", bodyString(body, "location", "global"));
+            if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+                link.put("tags", tags);
+            }
+            link.put("etag", "\"" + UUID.randomUUID() + "\"");
+            link.put("properties", properties);
+            return link;
+        });
+
+        if (written.created()) {
+            adjustZoneCount(privateZoneId(sub, rg, zoneName), "numberOfVirtualNetworkLinks", 1, 0, 0);
         }
-        link.put("etag", "\"" + UUID.randomUUID() + "\"");
-        link.put("properties", properties);
 
-        resources.put(key, link);
-
-        if (existing == null) {
-            adjustPrivateZoneCount(sub, rg, zoneName, "numberOfVirtualNetworkLinks", 1, 0);
-        }
-
-        return Response.status(existing == null ? 201 : 200).entity(stripInternal(link)).build();
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(written.stored().value())).build();
     }
 
     private Response deleteVirtualNetworkLink(String sub, String rg, String zoneName, String linkName) {
-        String key = privateZoneKey(sub, rg, zoneName) + "/virtualNetworkLinks/" + linkName;
-        Map<String, Object> link = resources.remove(key);
-        if (link == null) {
+        if (store.delete(parseId(virtualNetworkLinkId(sub, rg, zoneName, linkName))).isEmpty()) {
             return notFound("privateDnsZones/" + zoneName + "/virtualNetworkLinks/" + linkName);
         }
-        adjustPrivateZoneCount(sub, rg, zoneName, "numberOfVirtualNetworkLinks", -1, 0);
+        adjustZoneCount(privateZoneId(sub, rg, zoneName), "numberOfVirtualNetworkLinks", -1, 0, 0);
         return Response.ok().build();
     }
 
@@ -1281,16 +1329,6 @@ public class NetworkService {
         return null;
     }
 
-    private void adjustPrivateZoneCount(String sub, String rg, String zoneName, String field, int delta, int floor) {
-        Map<String, Object> zone = resources.get(privateZoneKey(sub, rg, zoneName));
-        if (zone != null) {
-            Map<String, Object> props = new LinkedHashMap<>(cast(zone.get("properties")));
-            int count = ((Number) props.getOrDefault(field, floor)).intValue();
-            props.put(field, Math.max(floor, count + delta));
-            zone.put("properties", props);
-        }
-    }
-
     // ── Azure Private Endpoint Support ──────────────────────────────────────
 
     private Response handlePrivateEndpoints(AzureRequest request, String path, String method, String sub, String rg, String tail) {
@@ -1307,22 +1345,20 @@ public class NetworkService {
             String peName = parts[1];
             return switch (method) {
                 case "PUT"    -> createOrUpdatePrivateEndpoint(request, sub, rg, peName);
-                case "GET"    -> {
-                    Map<String, Object> pe = resources.get(privateEndpointKey(sub, rg, peName));
-                    yield pe == null ? notFound("privateEndpoints/" + peName) : Response.ok(stripInternal(pe)).build();
-                }
+                case "GET"    -> find(privateEndpointId(sub, rg, peName)).map(NetworkService::ok)
+                        .orElseGet(() -> notFound("privateEndpoints/" + peName));
                 case "DELETE" -> deletePrivateEndpoint(sub, rg, peName);
                 default       -> Response.status(405).build();
             };
         }
 
         // 2. List private DNS zone groups
-        if (parts.length == 3 && "privateDnsZoneGroups".equals(parts[2])) {
+        if (parts.length == 3 && isType(parts[2], "privateDnsZoneGroups")) {
             return Response.ok(Map.of("value", listPrivateDnsZoneGroups(sub, rg, parts[1]))).build();
         }
 
         // 3. Private DNS zone group CRUD
-        if (parts.length == 4 && "privateDnsZoneGroups".equals(parts[2])) {
+        if (parts.length == 4 && isType(parts[2], "privateDnsZoneGroups")) {
             String peName = parts[1];
             String groupName = parts[3];
             return switch (method) {
@@ -1336,83 +1372,88 @@ public class NetworkService {
         return notFound(tail);
     }
 
-    private static String privateEndpointKey(String sub, String rg, String peName) {
-        return sub + "/" + rg + "/net/privateEndpoints/" + peName;
+    private static String privateEndpointId(String sub, String rg, String peName) {
+        return resourceId(sub, rg, "privateEndpoints/" + peName);
     }
 
-    @SuppressWarnings("unchecked")
     private Response createOrUpdatePrivateEndpoint(AzureRequest request, String sub, String rg, String peName) {
-        String key = privateEndpointKey(sub, rg, peName);
-        String peId = "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateEndpoints/" + peName;
+        String requestedId = privateEndpointId(sub, rg, peName);
         Map<String, Object> body = parseBody(request);
-        Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
 
-        Map<String, Object> existingPe = resources.get(key);
+        // The NIC is written inside the endpoint's write, so a concurrent PUT of the same endpoint cannot
+        // synthesize a second one: the store's writes are atomic with respect to each other.
+        Written<Map<String, Object>> written = store.createOrUpdate(parseId(requestedId), existing -> {
+            String peId = firstCasing(existing, "id", requestedId);
+            Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
 
-        List<Object> connections = normalizeConnections(peId, properties.get("privateLinkServiceConnections"), false);
-        List<Object> manualConnections = normalizeConnections(peId, properties.get("manualPrivateLinkServiceConnections"), true);
-        properties.put("privateLinkServiceConnections", connections);
-        properties.put("manualPrivateLinkServiceConnections", manualConnections);
-        properties.putIfAbsent("customDnsConfigs", List.of());
+            List<Object> connections = normalizeConnections(peId, properties.get("privateLinkServiceConnections"), false);
+            List<Object> manualConnections = normalizeConnections(peId, properties.get("manualPrivateLinkServiceConnections"), true);
+            properties.put("privateLinkServiceConnections", connections);
+            properties.put("manualPrivateLinkServiceConnections", manualConnections);
+            properties.putIfAbsent("customDnsConfigs", List.of());
 
-        // The synthesized NIC is stable for the endpoint's lifetime (as in Azure), so
-        // reuse the existing one on update rather than minting a new randomly-named NIC
-        // on every PUT — otherwise prior NICs leak into the store and survive the
-        // endpoint's cascade delete. Only synthesize on first create or when an explicit
-        // customNetworkInterfaceName changes it (removing the NIC it replaces).
-        String customNicName = bodyString(properties, "customNetworkInterfaceName", null);
-        String existingNicKey = existingPe != null && existingPe.get("_nic") instanceof String s ? s : null;
-        String nicKey;
-        String nicId;
-        if (existingNicKey != null && resources.containsKey(existingNicKey)
-                && (customNicName == null || existingNicKey.equals(key(sub, rg, "networkInterfaces/" + customNicName)))) {
-            nicKey = existingNicKey;
-            nicId = String.valueOf(cast(resources.get(existingNicKey)).get("id"));
-        } else {
-            String nicName = customNicName != null ? customNicName
-                    : peName + ".nic." + UUID.randomUUID().toString().substring(0, 8);
-            nicKey = key(sub, rg, "networkInterfaces/" + nicName);
-            nicId = "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/networkInterfaces/" + nicName;
-            Map<String, Object> nicProps = new LinkedHashMap<>();
-            synthesizeProperties("Microsoft.Network/networkInterfaces", nicName, nicId, nicProps);
-            nicProps.put("provisioningState", "Succeeded");
-            Map<String, Object> nic = new LinkedHashMap<>();
-            nic.put("_sub", sub);
-            nic.put("_rg", rg);
-            nic.put("id", nicId);
-            nic.put("name", nicName);
-            nic.put("type", "Microsoft.Network/networkInterfaces");
-            nic.put("properties", nicProps);
-            resources.put(nicKey, nic);
-            if (existingNicKey != null && !existingNicKey.equals(nicKey)) {
-                resources.remove(existingNicKey);
+            properties.put("networkInterfaces", List.of(new LinkedHashMap<>(Map.of("id",
+                    endpointNic(sub, rg, peName, existing, bodyString(properties, "customNetworkInterfaceName", null))))));
+            properties.put("provisioningState", "Succeeded");
+
+            Map<String, Object> pe = new LinkedHashMap<>();
+            pe.put("id", peId);
+            pe.put("name", firstCasing(existing, "name", peName));
+            pe.put("type", "Microsoft.Network/privateEndpoints");
+            String location = bodyString(body, "location", null);
+            if (location != null) {
+                pe.put("location", location);
             }
-        }
-
-        properties.put("networkInterfaces", List.of(new LinkedHashMap<>(Map.of("id", nicId))));
-        properties.put("provisioningState", "Succeeded");
-
-        Map<String, Object> pe = new LinkedHashMap<>();
-        pe.put("_sub", sub);
-        pe.put("_rg", rg);
-        pe.put("_nic", nicKey);
-        pe.put("id", peId);
-        pe.put("name", peName);
-        pe.put("type", "Microsoft.Network/privateEndpoints");
-        String location = bodyString(body, "location", null);
-        if (location != null) {
-            pe.put("location", location);
-        }
-        if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            pe.put("tags", tags);
-        }
-        pe.put("properties", properties);
-
-        resources.put(key, pe);
-        return Response.status(existingPe == null ? 201 : 200).entity(stripInternal(pe)).build();
+            if (body.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+                pe.put("tags", tags);
+            }
+            pe.put("properties", properties);
+            return pe;
+        });
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(written.stored().value())).build();
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * The id of the NIC a private endpoint uses. The synthesized NIC is stable for the endpoint's lifetime (as in
+     * Azure), so an update reuses the existing one rather than minting a new randomly-named NIC on every PUT, which
+     * would leak prior NICs past the endpoint's cascade delete. A NIC is synthesized only on first create or when an
+     * explicit {@code customNetworkInterfaceName} changes it, removing the NIC it replaces.
+     */
+    private String endpointNic(String sub, String rg, String peName, Optional<Map<String, Object>> existingPe,
+                               String customNicName) {
+        Optional<String> existingNicId = existingPe.flatMap(NetworkService::endpointNicId);
+        Optional<Map<String, Object>> existingNic = existingNicId.flatMap(this::find);
+        if (existingNic.isPresent() && (customNicName == null || parseId(existingNicId.get()).canonicalKey()
+                .equals(parseId(resourceId(sub, rg, "networkInterfaces/" + customNicName)).canonicalKey()))) {
+            return String.valueOf(existingNic.get().get("id"));
+        }
+        String nicName = customNicName != null ? customNicName
+                : peName + ".nic." + UUID.randomUUID().toString().substring(0, 8);
+        String nicId = resourceId(sub, rg, "networkInterfaces/" + nicName);
+        Map<String, Object> nicProps = new LinkedHashMap<>();
+        synthesizeProperties("Microsoft.Network/networkInterfaces", nicName, nicId, nicProps);
+        nicProps.put("provisioningState", "Succeeded");
+        Map<String, Object> nic = new LinkedHashMap<>();
+        nic.put("id", nicId);
+        nic.put("name", nicName);
+        nic.put("type", "Microsoft.Network/networkInterfaces");
+        nic.put("properties", nicProps);
+        store.put(nic);
+        String nicKey = parseId(nicId).canonicalKey();
+        existingNicId.filter(previous -> !parseId(previous).canonicalKey().equals(nicKey))
+                .ifPresent(previous -> store.delete(parseId(previous)));
+        return nicId;
+    }
+
+    /** The id of the NIC a stored private endpoint references, from its {@code properties.networkInterfaces}. */
+    private static Optional<String> endpointNicId(Map<String, Object> pe) {
+        if (cast(pe.get("properties")).get("networkInterfaces") instanceof List<?> nics && !nics.isEmpty()
+                && cast(nics.getFirst()).get("id") instanceof String id) {
+            return Optional.of(id);
+        }
+        return Optional.empty();
+    }
+
     private List<Object> normalizeConnections(String peId, Object raw, boolean manual) {
         if (!(raw instanceof List<?> list)) {
             return new ArrayList<>();
@@ -1441,47 +1482,38 @@ public class NetworkService {
     }
 
     private Response deletePrivateEndpoint(String sub, String rg, String peName) {
-        String key = privateEndpointKey(sub, rg, peName);
-        Map<String, Object> pe = resources.remove(key);
-        if (pe == null) {
+        String peId = privateEndpointId(sub, rg, peName);
+        Optional<Stored<Map<String, Object>>> pe = store.delete(parseId(peId));
+        if (pe.isEmpty()) {
             return notFound("privateEndpoints/" + peName);
         }
-        if (pe.get("_nic") instanceof String nicKey) {
-            resources.remove(nicKey);
-        }
-        String prefix = key + "/";
-        resources.keySet().removeIf(k -> k.startsWith(prefix));
+        endpointNicId(pe.get().value()).ifPresent(nicId -> store.delete(parseId(nicId)));
+        deleteUnder(sub, rg, peId);
         return Response.ok().build();
     }
 
     private List<Map<String, Object>> listPrivateDnsZoneGroups(String sub, String rg, String peName) {
-        String prefix = privateEndpointKey(sub, rg, peName) + "/privateDnsZoneGroups/";
-        return resources.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .map(NetworkService::stripInternal)
-                .toList();
+        return children(sub, rg, privateEndpointId(sub, rg, peName) + "/privateDnsZoneGroups");
+    }
+
+    private static String privateDnsZoneGroupId(String sub, String rg, String peName, String groupName) {
+        return privateEndpointId(sub, rg, peName) + "/privateDnsZoneGroups/" + groupName;
     }
 
     private Response getPrivateDnsZoneGroup(String sub, String rg, String peName, String groupName) {
-        String key = privateEndpointKey(sub, rg, peName) + "/privateDnsZoneGroups/" + groupName;
-        Map<String, Object> group = resources.get(key);
-        if (group == null) {
-            return notFound("privateEndpoints/" + peName + "/privateDnsZoneGroups/" + groupName);
-        }
-        return Response.ok(stripInternal(group)).build();
+        return find(privateDnsZoneGroupId(sub, rg, peName, groupName)).map(NetworkService::ok)
+                .orElseGet(() -> notFound("privateEndpoints/" + peName + "/privateDnsZoneGroups/" + groupName));
     }
 
-    @SuppressWarnings("unchecked")
     private Response createOrUpdatePrivateDnsZoneGroup(AzureRequest request, String sub, String rg, String peName, String groupName) {
-        if (resources.get(privateEndpointKey(sub, rg, peName)) == null) {
+        if (find(privateEndpointId(sub, rg, peName)).isEmpty()) {
             return Response.status(404).entity(Map.of("error", Map.of(
                     "code", "ParentResourceNotFound",
                     "message", "Private Endpoint " + peName + " was not found."
             ))).build();
         }
 
-        String key = privateEndpointKey(sub, rg, peName) + "/privateDnsZoneGroups/" + groupName;
+        ArmResourceId id = parseId(privateDnsZoneGroupId(sub, rg, peName, groupName));
         Map<String, Object> body = parseBody(request);
         Map<String, Object> bodyProps = cast(body.get("properties"));
 
@@ -1500,23 +1532,20 @@ public class NetworkService {
         properties.put("provisioningState", "Succeeded");
         properties.put("privateDnsZoneConfigs", configs);
 
-        Map<String, Object> group = new LinkedHashMap<>();
-        group.put("_sub", sub);
-        group.put("_rg", rg);
-        group.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Network/privateEndpoints/" + peName + "/privateDnsZoneGroups/" + groupName);
-        group.put("name", groupName);
-        group.put("type", "Microsoft.Network/privateEndpoints/privateDnsZoneGroups");
-        group.put("etag", "\"" + UUID.randomUUID() + "\"");
-        group.put("properties", properties);
-
-        boolean created = resources.put(key, group) == null;
-        return Response.status(created ? 201 : 200).entity(stripInternal(group)).build();
+        Written<Map<String, Object>> written = store.createOrUpdate(id, existing -> {
+            Map<String, Object> group = new LinkedHashMap<>();
+            group.put("id", firstCasing(existing, "id", id.id()));
+            group.put("name", firstCasing(existing, "name", groupName));
+            group.put("type", "Microsoft.Network/privateEndpoints/privateDnsZoneGroups");
+            group.put("etag", "\"" + UUID.randomUUID() + "\"");
+            group.put("properties", properties);
+            return group;
+        });
+        return Response.status(written.created() ? 201 : 200).entity(stripInternal(written.stored().value())).build();
     }
 
     private Response deletePrivateDnsZoneGroup(String sub, String rg, String peName, String groupName) {
-        String key = privateEndpointKey(sub, rg, peName) + "/privateDnsZoneGroups/" + groupName;
-        Map<String, Object> group = resources.remove(key);
-        if (group == null) {
+        if (store.delete(parseId(privateDnsZoneGroupId(sub, rg, peName, groupName))).isEmpty()) {
             return notFound("privateEndpoints/" + peName + "/privateDnsZoneGroups/" + groupName);
         }
         return Response.ok().build();
