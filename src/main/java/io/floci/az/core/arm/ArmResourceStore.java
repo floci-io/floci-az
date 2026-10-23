@@ -209,6 +209,34 @@ public final class ArmResourceStore<T> {
         return List.copyOf(byKey.values());
     }
 
+    /**
+     * The resources whose ids sit under {@code scope}: its children and the extension resources on it, at any depth,
+     * but not {@code scope} itself. Only the entries whose canonical key starts with the scope's are read, so a
+     * caller that wants one resource's extensions does not decode the rest of the store; legacy entries are found
+     * through the index by the canonical key of the resource they hold. Canonical entries win on a clash, as in
+     * {@link #all()}.
+     */
+    public synchronized List<Stored<T>> under(ArmResourceId scope) {
+        String prefix = scope.canonicalKey() + "/";
+        Map<String, Stored<T>> byKey = new LinkedHashMap<>();
+        for (String key : backend.keys()) {
+            if (key.startsWith(prefix) && isCanonical(key)) {
+                backend.get(key).flatMap(this::decode).ifPresent(stored -> byKey.put(key, stored));
+            }
+        }
+        Map<String, Stored<T>> newestLegacy = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> resource : legacyIndex().entrySet()) {
+            if (resource.getKey().startsWith(prefix) && !byKey.containsKey(resource.getKey())) {
+                for (String key : resource.getValue()) {
+                    backend.get(key).flatMap(this::decode).ifPresent(stored ->
+                        newestLegacy.merge(resource.getKey(), stored, ArmResourceStore::newer));
+                }
+            }
+        }
+        newestLegacy.forEach(byKey::putIfAbsent);
+        return List.copyOf(byKey.values());
+    }
+
     /** Removes every entry this store owns, legacy ones included: {@code POST /_admin/reset}. */
     public synchronized void clear() {
         for (String key : backend.keys()) {

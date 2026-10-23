@@ -2,6 +2,7 @@ package io.floci.az.services.sql;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.storage.InMemoryStorage;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
@@ -42,7 +43,7 @@ class SqlHandlerConcurrencyTest {
     @Test
     void deleteWaitsForCreateToRegisterProvisioningOperation() throws Exception {
         EmulatorConfig config = managedConfig();
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         SqlServerManager serverManager = mock(SqlServerManager.class);
         SqlProvisioningService provisioningService = mock(SqlProvisioningService.class);
         CountDownLatch beginEntered = new CountDownLatch(1);
@@ -54,7 +55,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService);
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
 
         ExecutorService requests = Executors.newFixedThreadPool(2);
         try {
@@ -77,7 +78,7 @@ class SqlHandlerConcurrencyTest {
     @Test
     void changedPutReprovisionsRestoredCreatingServerWithoutActiveOperation() {
         EmulatorConfig config = managedConfig();
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         state.putServer(new SqlState.SqlServerEntry(
             "concurrentserver", "test-sub", "test-rg", "eastus", "sa", "OldPass1!",
             null, 0, "localhost", "Creating", null, null, Map.of(),
@@ -90,7 +91,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService);
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
 
         Response response = handler.handle(request("PUT", BODY));
 
@@ -99,6 +100,14 @@ class SqlHandlerConcurrencyTest {
             ArgumentCaptor.forClass(SqlState.SqlServerEntry.class);
         verify(provisioningService).begin(desired.capture());
         assertEquals("StrongPass1!", desired.getValue().administratorLoginPassword());
+    }
+
+    /** A registry that reserves every name, as an empty one does. */
+    private static GlobalNameRegistry names() {
+        GlobalNameRegistry names = mock(GlobalNameRegistry.class);
+        when(names.reserve(any(), any(), any(), any())).thenAnswer(invocation -> new GlobalNameRegistry.Reservation(
+            GlobalNameRegistry.Outcome.RESERVED, invocation.getArgument(3), 1));
+        return names;
     }
 
     private static EmulatorConfig managedConfig() {

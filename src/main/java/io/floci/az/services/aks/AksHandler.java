@@ -101,8 +101,31 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     @PostConstruct
     public void init() {
+        dropShadowedClusters();
         if (!config.services().aks().mocked()) {
             startReadinessPoller();
+        }
+    }
+
+    /**
+     * Old raw-case keys could hold one cluster under several casings, each with a k3s container of its own (named
+     * from the record's {@code instanceId}). The store serves one of them; the others are removed here, with their
+     * containers, before anything could drop them and leave the containers running.
+     */
+    void dropShadowedClusters() {
+        for (ArmResourceStore.Stored<ManagedCluster> shadowed : store.removeShadowedLegacy()) {
+            ManagedCluster cluster = shadowed.value();
+            LOG.infov("AKS cluster {0}: dropping the duplicate stored under {1}/{2}", cluster.getName(),
+                    cluster.getSubscriptionId(), cluster.getResourceGroup());
+            if (!config.services().aks().mocked()) {
+                try {
+                    clusterManager.removeCluster(cluster);
+                } catch (Exception e) {
+                    LOG.warnv("Could not remove the k3s container of duplicate AKS cluster {0}: {1}. Remove container"
+                            + " {2} (id {3}) and volume {2} by hand", cluster.getName(), e.getMessage(),
+                            clusterManager.containerName(cluster), cluster.getContainerId());
+                }
+            }
         }
     }
 
