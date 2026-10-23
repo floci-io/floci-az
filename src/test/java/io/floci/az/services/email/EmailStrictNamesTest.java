@@ -10,7 +10,6 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
 @TestProfile(EmailStrictNamesTest.StrictNames.class)
@@ -33,9 +32,9 @@ class EmailStrictNamesTest {
             .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
     }
 
-    private static void assertAccepted(String path) {
+    private static void assertCreated(String path) {
         given().contentType("application/json").body(BODY).when().put(BASE + path + API)
-            .then().body("error.code", not(equalTo("InvalidResourceName")));
+            .then().statusCode(201);
     }
 
     @Test
@@ -43,7 +42,7 @@ class EmailStrictNamesTest {
         for (String bad : new String[] {"has.dot", "x".repeat(64)}) {
             assertRefused("communicationServices/" + bad);
         }
-        assertAccepted("communicationServices/good_comm-1");
+        assertCreated("communicationServices/good_comm-1");
     }
 
     @Test
@@ -51,12 +50,13 @@ class EmailStrictNamesTest {
         for (String bad : new String[] {"under_score", "has.dot", "x".repeat(64)}) {
             assertRefused("emailServices/" + bad);
         }
-        assertAccepted("emailServices/good-mail-1");
+        assertCreated("emailServices/good-mail-1");
     }
 
     @Test
     void aDomainNameOutsideTheRuleIsRefused() {
+        assertCreated("emailServices/strict-mail");
         assertRefused("emailServices/strict-mail/domains/" + "d".repeat(254));
-        assertAccepted("emailServices/strict-mail/domains/mail.example.com");
+        assertCreated("emailServices/strict-mail/domains/mail.example.com");
     }
 }
