@@ -124,6 +124,10 @@ class ArmSurfaceGoldenTest {
     private static final String NAMED = """
         Microsoft.ApiManagement/service    1-50    APIM    409    ServiceAlreadyExists
         Microsoft.App/containerApps    2-32    null    0    null
+        Microsoft.Authorization/policyAssignments    1-64    null    0    null
+        Microsoft.Authorization/policyDefinitions    1-64    null    0    null
+        Microsoft.Authorization/policyExemptions    1-64    null    0    null
+        Microsoft.Authorization/policySetDefinitions    1-64    null    0    null
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
         Microsoft.Communication/communicationServices    1-63     COMMUNICATION    409    Conflict
         Microsoft.Communication/emailServices            1-63     null    0    null

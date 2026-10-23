@@ -10,8 +10,10 @@ resource write: `deny` refuses the request with `RequestDisallowedByPolicy`, `ap
 `audit` is recorded. Every evaluation leaves a **compliance state** served through
 `Microsoft.PolicyInsights` (`policyStates` queries, summaries and on-demand evaluation).
 
-> **HTTP-only, no Docker.** All policy state is in-memory and ephemeral, like the rest of the ARM
-> control plane.
+> **HTTP-only, no Docker.** Definitions, set definitions, assignments and exemptions are kept in the
+> `policy` store, which follows the global `storage.mode`, so they survive a restart in a persistent mode.
+> They are keyed by their lowercased id: a path that differs only in letter case addresses the same
+> resource, which keeps the id and name casing of the PUT that created it.
 
 > **Request-time effects, on-demand scans.** `deny`, `append` and `audit` fire when a resource is
 > written, and `triggerEvaluation` re-evaluates what already exists; there is no periodic scan and no
@@ -364,5 +366,5 @@ floci-az:
   a readable token is stamped with a fixed emulator identity. `metadata.updatedBy` / `updatedOn` appear
   only after the first update instead of being present as `null` from creation.
 - **Listings are unpaginated** (`nextLink` is never returned) and `$top` is ignored.
-- **Policy state is in-memory only**, regardless of `storage.mode`, like the rest of the ARM control
-  plane.
+- **Resource names are not validated by default.** With `strict-names` (on from `parity: strict`) a name
+  outside the rule in [Name syntax](arm.md#name-syntax) is refused with `400 InvalidResourceName`.

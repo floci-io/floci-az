@@ -1,76 +1,126 @@
 package io.floci.az.services.policy;
 
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmResourceStore.Stored;
+import io.floci.az.core.arm.ArmResourceStore.Written;
+import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.policy.PolicyPath.Type;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
-import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
- * In-memory ARM resource state for the Microsoft.Authorization policy resources: definitions, set
- * definitions, assignments and exemptions. Like the other ARM control-plane stores (Managed Identity,
- * Network) this does not use a StorageBackend: ARM state is ephemeral by convention.
+ * ARM resource state for the Microsoft.Authorization policy resources: definitions, set definitions, assignments and
+ * exemptions. Each type has its own {@link ArmResourceStore} over the one {@code policy} storage backend, keyed by the
+ * canonical (lowercased) resource id, so it follows the global storage mode and lookups are scope- and
+ * name-insensitive the way ARM itself is. The resources were kept in memory before, so no older key shape exists on
+ * disk and no key is legacy.
  *
- * <p>Every map is keyed by the lower-cased ARM resource id, so lookups are scope- and
- * name-insensitive the way ARM itself is. All access goes through methods: the handler holds a
- * normal-scoped client proxy, and direct field reads on a proxy would hit the proxy's own (empty)
- * maps instead of this contextual instance.</p>
+ * <p>Policy resources live at management-group, subscription, resource-group and resource scope, so the listings
+ * filter {@link #list(Type)} on the stored {@code _scope} rather than going through
+ * {@link ArmResourceStore#list}, which only knows subscriptions and resource groups.
+ *
+ * <p>A lookup takes an id as a client wrote it in a reference ({@code policyDefinitionId},
+ * {@code policyAssignmentId}): only an absolute id that names a resource of the store's own type addresses one, so a
+ * relative reference, another provider's id or a collection path stays missing as it always has, and a set
+ * definition's id never finds a definition in the shared backend. All access goes through methods: callers hold a
+ * normal-scoped client proxy.
  */
 @ApplicationScoped
 public class PolicyStore {
 
-    private final Map<String, Map<String, Object>> definitions = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> setDefinitions = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> assignments = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> exemptions = new ConcurrentHashMap<>();
+    static final String STORE = "policy";
 
-    static String key(String resourceId) {
-        return resourceId.toLowerCase(Locale.ROOT);
+    /** What a create-or-update wrote, and whether the resource was new. */
+    public record Write(Map<String, Object> resource, boolean created) {
     }
 
-    // ── Definitions ─────────────────────────────────────────────────────────────
+    private final Map<Type, ArmResourceStore<PolicyResource>> stores = new EnumMap<>(Type.class);
+
+    @Inject
+    public PolicyStore(StorageFactory storageFactory) {
+        for (Type type : Type.values()) {
+            stores.put(type, ArmResourceStore.create(storageFactory, STORE, type.armType(), PolicyResource.class,
+                PolicyResource::id, key -> false));
+        }
+    }
+
+    /** The resource of {@code type} with id {@code id}, or null. */
+    public Map<String, Object> get(Type type, String id) {
+        return resourceId(type, id).flatMap(stores.get(type)::get).map(stored -> stored.value().body()).orElse(null);
+    }
+
+    /** Every resource of {@code type}, at every scope. */
+    public List<Map<String, Object>> list(Type type) {
+        return stores.get(type).all().stream().map(stored -> stored.value().body()).toList();
+    }
+
+    /**
+     * Writes {@code change} applied to the stored resource, or to empty when there is none, atomically with respect
+     * to every other write of that type, so two concurrent creates leave one resource.
+     */
+    public Write createOrUpdate(Type type, String id, Function<Optional<Map<String, Object>>, Map<String, Object>> change) {
+        ArmResourceId resourceId = resourceId(type, id).orElseThrow(() ->
+            new IllegalArgumentException("not a " + type.armType() + " id: " + id));
+        Written<PolicyResource> written = stores.get(type).createOrUpdate(resourceId,
+            existing -> new PolicyResource(change.apply(existing.map(PolicyResource::body))));
+        return new Write(written.stored().value().body(), written.created());
+    }
+
+    /** Applies {@code change} to the stored resource and writes it; null when there is none. */
+    public Map<String, Object> update(Type type, String id, UnaryOperator<Map<String, Object>> change) {
+        return resourceId(type, id)
+            .flatMap(resourceId -> stores.get(type).update(resourceId,
+                stored -> new PolicyResource(change.apply(stored.body()))))
+            .map(stored -> stored.value().body())
+            .orElse(null);
+    }
+
+    /** Removes the resource; returns it, or null when there was none. */
+    public Map<String, Object> remove(Type type, String id) {
+        return resourceId(type, id).flatMap(stores.get(type)::delete).map(stored -> stored.value().body()).orElse(null);
+    }
 
     public Map<String, Object> getDefinition(String id) {
-        return definitions.get(key(id));
-    }
-
-    public void putDefinition(String id, Map<String, Object> resource) {
-        definitions.put(key(id), resource);
-    }
-
-    public Map<String, Object> removeDefinition(String id) {
-        return definitions.remove(key(id));
+        return get(Type.DEFINITION, id);
     }
 
     public List<Map<String, Object>> listDefinitions() {
-        return new ArrayList<>(definitions.values());
+        return list(Type.DEFINITION);
     }
-
-    // ── Set definitions ─────────────────────────────────────────────────────────
 
     public Map<String, Object> getSetDefinition(String id) {
-        return setDefinitions.get(key(id));
-    }
-
-    public void putSetDefinition(String id, Map<String, Object> resource) {
-        setDefinitions.put(key(id), resource);
-    }
-
-    public Map<String, Object> removeSetDefinition(String id) {
-        return setDefinitions.remove(key(id));
+        return get(Type.SET_DEFINITION, id);
     }
 
     public List<Map<String, Object>> listSetDefinitions() {
-        return new ArrayList<>(setDefinitions.values());
+        return list(Type.SET_DEFINITION);
+    }
+
+    public Map<String, Object> getAssignment(String id) {
+        return get(Type.ASSIGNMENT, id);
+    }
+
+    public List<Map<String, Object>> listAssignments() {
+        return list(Type.ASSIGNMENT);
+    }
+
+    public List<Map<String, Object>> listExemptions() {
+        return list(Type.EXEMPTION);
     }
 
     /** Id of the first set definition whose {@code policyDefinitions} reference {@code definitionId}. */
     public Optional<String> findSetDefinitionReferencing(String definitionId) {
         String wanted = key(definitionId);
-        for (Map<String, Object> set : setDefinitions.values()) {
+        for (Map<String, Object> set : listSetDefinitions()) {
             if (properties(set).get("policyDefinitions") instanceof List<?> references) {
                 for (Object reference : references) {
                     if (reference instanceof Map<?, ?> ref
@@ -84,28 +134,10 @@ public class PolicyStore {
         return Optional.empty();
     }
 
-    // ── Assignments ─────────────────────────────────────────────────────────────
-
-    public Map<String, Object> getAssignment(String id) {
-        return assignments.get(key(id));
-    }
-
-    public void putAssignment(String id, Map<String, Object> resource) {
-        assignments.put(key(id), resource);
-    }
-
-    public Map<String, Object> removeAssignment(String id) {
-        return assignments.remove(key(id));
-    }
-
-    public List<Map<String, Object>> listAssignments() {
-        return new ArrayList<>(assignments.values());
-    }
-
     /** Id of the first assignment whose {@code policyDefinitionId} is {@code definitionId} (definition or set). */
     public Optional<String> findAssignmentReferencing(String definitionId) {
         String wanted = key(definitionId);
-        for (Map<String, Object> assignment : assignments.values()) {
+        for (Map<String, Object> assignment : listAssignments()) {
             if (properties(assignment).get("policyDefinitionId") instanceof String id && wanted.equals(key(id))) {
                 return Optional.of(String.valueOf(assignment.get("id")));
             }
@@ -113,36 +145,33 @@ public class PolicyStore {
         return Optional.empty();
     }
 
-    // ── Exemptions ──────────────────────────────────────────────────────────────
-
-    public Map<String, Object> getExemption(String id) {
-        return exemptions.get(key(id));
-    }
-
-    public void putExemption(String id, Map<String, Object> resource) {
-        exemptions.put(key(id), resource);
-    }
-
-    public Map<String, Object> removeExemption(String id) {
-        return exemptions.remove(key(id));
-    }
-
-    public List<Map<String, Object>> listExemptions() {
-        return new ArrayList<>(exemptions.values());
-    }
-
     /** Removes every exemption bound to {@code assignmentId}; Azure deletes them with the assignment. */
     public void removeExemptionsForAssignment(String assignmentId) {
         String wanted = key(assignmentId);
-        exemptions.values().removeIf(exemption ->
-                properties(exemption).get("policyAssignmentId") instanceof String id && wanted.equals(key(id)));
+        ArmResourceStore<PolicyResource> exemptions = stores.get(Type.EXEMPTION);
+        for (Stored<PolicyResource> exemption : exemptions.all()) {
+            if (properties(exemption.value().body()).get("policyAssignmentId") instanceof String id
+                    && wanted.equals(key(id))) {
+                exemptions.delete(exemption.id());
+            }
+        }
     }
 
     public void clear() {
-        definitions.clear();
-        setDefinitions.clear();
-        assignments.clear();
-        exemptions.clear();
+        stores.values().forEach(ArmResourceStore::clear);
+    }
+
+    /**
+     * The id {@code id} names in the store of {@code type}: an absolute id of a resource of that type. The stores
+     * share one backend, and {@link ArmResourceStore#get} reads any canonical key in it, so the type is checked here.
+     */
+    private static Optional<ArmResourceId> resourceId(Type type, String id) {
+        return ArmResourceId.parse(id)
+            .filter(parsed -> parsed.name() != null && type.armType().equalsIgnoreCase(parsed.typePath()));
+    }
+
+    private static String key(String resourceId) {
+        return resourceId.toLowerCase(Locale.ROOT);
     }
 
     private static Map<?, ?> properties(Map<String, Object> resource) {

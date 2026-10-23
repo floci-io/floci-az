@@ -397,6 +397,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 |---|---|
 | `Microsoft.ApiManagement/service` | 1 to 50 letters, digits and hyphens, starting with a letter and ending with a letter or digit |
 | `Microsoft.App/containerApps` | 2 to 32 lowercase letters, digits and hyphens, starting with a letter and ending with a letter or digit |
+| `Microsoft.Authorization/policyAssignments`, `policyDefinitions`, `policyExemptions`, `policySetDefinitions` | 1 to 64 characters, none of `<>%&:\?/`, not ending with a space; an assignment's 24-character bound at management-group scope is not checked |
 | `Microsoft.Cache/redis` | 1 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.Communication/communicationServices` | 1 to 63 letters, digits, underscores and hyphens |
 | `Microsoft.Communication/emailServices` | 1 to 63 letters, digits and hyphens |

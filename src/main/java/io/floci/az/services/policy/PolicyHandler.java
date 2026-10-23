@@ -178,22 +178,21 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
                     "Failed to parse policy rule: the rule must be an object with an 'if' condition "
                             + "and a 'then' block that names an 'effect'.");
         }
-        Map<String, Object> existing = store.getDefinition(id);
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        putIfString(properties, "displayName", props);
-        properties.put("policyType", "Custom");
-        properties.put("mode", ArmJson.string(props, "mode", "Indexed"));
-        putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
-        properties.put("version", ArmJson.string(props, "version", "1.0.0"));
-        putIfMap(properties, "parameters", props);
-        properties.put("policyRule", rule);
-
-        Map<String, Object> resource = envelope(req, path, id, properties, existing);
-        store.putDefinition(id, resource);
+        PolicyStore.Write written = store.createOrUpdate(Type.DEFINITION, id, found -> {
+            Map<String, Object> existing = found.orElse(null);
+            Map<String, Object> properties = new LinkedHashMap<>();
+            putIfString(properties, "displayName", props);
+            properties.put("policyType", "Custom");
+            properties.put("mode", ArmJson.string(props, "mode", "Indexed"));
+            putIfString(properties, "description", props);
+            properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
+            properties.put("version", ArmJson.string(props, "version", "1.0.0"));
+            putIfMap(properties, "parameters", props);
+            properties.put("policyRule", rule);
+            return envelope(req, path, properties, existing);
+        });
         // Per the policy spec, CreateOrUpdate on a definition answers 201 for both create and update.
-        return Response.status(201).entity(strip(resource)).build();
+        return Response.status(201).entity(strip(written.resource())).build();
     }
 
     private Response deleteDefinition(PolicyPath path, String id) {
@@ -214,7 +213,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
                             + "policy assignment '" + assignment.get() + "'. Please remove this policy assignment "
                             + "before deleting the policy definition.");
         }
-        store.removeDefinition(id);
+        store.remove(Type.DEFINITION, id);
         return Response.ok().build();
     }
 
@@ -286,21 +285,20 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
             }
             normalized.add(reference);
         }
-        Map<String, Object> existing = store.getSetDefinition(id);
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        putIfString(properties, "displayName", props);
-        properties.put("policyType", "Custom");
-        putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
-        properties.put("version", ArmJson.string(props, "version", "1.0.0"));
-        putIfMap(properties, "parameters", props);
-        properties.put("policyDefinitions", normalized);
-        putIfList(properties, "policyDefinitionGroups", props);
-
-        Map<String, Object> resource = envelope(req, path, id, properties, existing);
-        store.putSetDefinition(id, resource);
-        return Response.status(existing == null ? 201 : 200).entity(strip(resource)).build();
+        PolicyStore.Write written = store.createOrUpdate(Type.SET_DEFINITION, id, found -> {
+            Map<String, Object> existing = found.orElse(null);
+            Map<String, Object> properties = new LinkedHashMap<>();
+            putIfString(properties, "displayName", props);
+            properties.put("policyType", "Custom");
+            putIfString(properties, "description", props);
+            properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
+            properties.put("version", ArmJson.string(props, "version", "1.0.0"));
+            putIfMap(properties, "parameters", props);
+            properties.put("policyDefinitions", normalized);
+            putIfList(properties, "policyDefinitionGroups", props);
+            return envelope(req, path, properties, existing);
+        });
+        return Response.status(written.created() ? 201 : 200).entity(strip(written.resource())).build();
     }
 
     private Response deleteSetDefinition(PolicyPath path, String id) {
@@ -314,7 +312,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
                             + "the policy assignment '" + assignment.get() + "'. Please remove this policy "
                             + "assignment before deleting the policy set definition.");
         }
-        store.removeSetDefinition(id);
+        store.remove(Type.SET_DEFINITION, id);
         return Response.ok().build();
     }
 
@@ -346,7 +344,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
                 }
                 // Exemptions are bound to their assignment and go with it, as on Azure.
                 store.removeExemptionsForAssignment(id);
-                store.removeAssignment(id);
+                store.remove(Type.ASSIGNMENT, id);
                 compliance.forgetAssignment(id);
                 yield Response.ok(strip(existing)).build();
             }
@@ -369,53 +367,59 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (missing != null) {
             return missing;
         }
-        Map<String, Object> existing = store.getAssignment(id);
+        PolicyStore.Write written = store.createOrUpdate(Type.ASSIGNMENT, id, found -> {
+            Map<String, Object> existing = found.orElse(null);
+            PolicyPath stored = storedPath(path, existing);
+            Map<String, Object> resource = new LinkedHashMap<>();
+            Map<String, Object> identity = buildIdentity(body.get("identity"), existing);
+            if (identity != null) {
+                resource.put("identity", identity);
+            }
+            Map<String, Object> properties = new LinkedHashMap<>();
+            putIfString(properties, "displayName", props);
+            properties.put("policyDefinitionId", definitionId);
+            properties.put("definitionVersion", ArmJson.string(props, "definitionVersion", "1.*.*"));
+            properties.put("scope", "/" + stored.scope());
+            putIfList(properties, "notScopes", props);
+            putIfMap(properties, "parameters", props);
+            putIfString(properties, "description", props);
+            properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
+            properties.put("enforcementMode", ArmJson.string(props, "enforcementMode", "Default"));
+            putIfList(properties, "nonComplianceMessages", props);
+            putIfList(properties, "resourceSelectors", props);
+            putIfList(properties, "overrides", props);
+            properties.put("instanceId", existing == null
+                    ? UUID.randomUUID().toString()
+                    : propertiesOf(existing).get("instanceId"));
 
-        Map<String, Object> resource = new LinkedHashMap<>();
-        Map<String, Object> identity = buildIdentity(body.get("identity"), existing);
-        if (identity != null) {
-            resource.put("identity", identity);
-        }
-        Map<String, Object> properties = new LinkedHashMap<>();
-        putIfString(properties, "displayName", props);
-        properties.put("policyDefinitionId", definitionId);
-        properties.put("definitionVersion", ArmJson.string(props, "definitionVersion", "1.*.*"));
-        properties.put("scope", "/" + path.scope());
-        putIfList(properties, "notScopes", props);
-        putIfMap(properties, "parameters", props);
-        putIfString(properties, "description", props);
-        properties.put("metadata", auditedMetadata(props.get("metadata"), existing, caller(req)));
-        properties.put("enforcementMode", ArmJson.string(props, "enforcementMode", "Default"));
-        putIfList(properties, "nonComplianceMessages", props);
-        putIfList(properties, "resourceSelectors", props);
-        putIfList(properties, "overrides", props);
-        properties.put("instanceId", existing == null
-                ? UUID.randomUUID().toString()
-                : propertiesOf(existing).get("instanceId"));
-
-        resource.put("properties", properties);
-        resource.put("id", id);
-        resource.put("type", path.type().armType());
-        resource.put("name", path.name());
-        if (body.get("location") instanceof String location) {
-            resource.put("location", location);
-        }
-        resource.put("systemData", systemData(existing, caller(req)));
-        resource.put(SCOPE_KEY, path.scopeKey());
-        store.putAssignment(id, resource);
+            resource.put("properties", properties);
+            resource.put("id", stored.resourceId());
+            resource.put("type", path.type().armType());
+            resource.put("name", stored.name());
+            if (body.get("location") instanceof String location) {
+                resource.put("location", location);
+            }
+            resource.put("systemData", systemData(existing, caller(req)));
+            resource.put(SCOPE_KEY, path.scopeKey());
+            return resource;
+        });
         // Per the policy spec, Create on an assignment answers 201 for both create and update.
-        return Response.status(201).entity(strip(resource)).build();
+        return Response.status(201).entity(strip(written.resource())).build();
     }
 
     /** PATCH updates only the identity, location, resource selectors and overrides (PolicyAssignmentUpdate). */
     private Response patchAssignment(AzureRequest req, PolicyPath path, String id) {
-        Map<String, Object> existing = store.getAssignment(id);
-        if (existing == null) {
+        if (store.getAssignment(id) == null) {
             return assignmentNotFound(path.name());
         }
         Map<String, Object> body = ArmJson.parseBodyStrict(req);
         Map<String, Object> patch = ArmJson.cast(body.get("properties"));
+        Map<String, Object> updated = store.update(Type.ASSIGNMENT, id, existing -> patchedAssignment(req, body, patch, existing));
+        return updated == null ? assignmentNotFound(path.name()) : Response.ok(strip(updated)).build();
+    }
 
+    private Map<String, Object> patchedAssignment(AzureRequest req, Map<String, Object> body,
+                                                  Map<String, Object> patch, Map<String, Object> existing) {
         Map<String, Object> updated = new LinkedHashMap<>();
         Object identity = body.containsKey("identity") ? buildIdentity(body.get("identity"), existing) : existing.get("identity");
         if (identity != null) {
@@ -439,8 +443,7 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         }
         updated.put("systemData", systemData(existing, caller(req)));
         updated.put(SCOPE_KEY, existing.get(SCOPE_KEY));
-        store.putAssignment(id, updated);
-        return Response.ok(strip(updated)).build();
+        return updated;
     }
 
     /**
@@ -514,11 +517,11 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
             case "PUT" -> putExemption(req, path, id);
             case "PATCH" -> patchExemption(req, path, id);
             case "GET" -> {
-                Map<String, Object> existing = store.getExemption(id);
+                Map<String, Object> existing = store.get(Type.EXEMPTION, id);
                 yield existing == null ? exemptionNotFound(path.name()) : Response.ok(strip(existing)).build();
             }
             case "DELETE" -> {
-                Map<String, Object> removed = store.removeExemption(id);
+                Map<String, Object> removed = store.remove(Type.EXEMPTION, id);
                 yield removed == null ? Response.status(204).build() : Response.ok(strip(removed)).build();
             }
             default -> methodNotAllowed(method);
@@ -543,41 +546,39 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         if (store.getAssignment(assignmentId) == null) {
             return assignmentNotFound(leaf(assignmentId));
         }
-        Map<String, Object> existing = store.getExemption(id);
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("policyAssignmentId", assignmentId);
-        putIfList(properties, "policyDefinitionReferenceIds", props);
-        properties.put("exemptionCategory", category);
-        putIfString(properties, "expiresOn", props);
-        putIfString(properties, "displayName", props);
-        putIfString(properties, "description", props);
-        properties.put("assignmentScopeValidation", ArmJson.string(props, "assignmentScopeValidation", "Default"));
-        putIfMap(properties, "metadata", props);
-        putIfList(properties, "resourceSelectors", props);
-
-        Map<String, Object> resource = envelope(req, path, id, properties, existing);
-        store.putExemption(id, resource);
-        return Response.status(existing == null ? 201 : 200).entity(strip(resource)).build();
+        PolicyStore.Write written = store.createOrUpdate(Type.EXEMPTION, id, found -> {
+            Map<String, Object> properties = new LinkedHashMap<>();
+            properties.put("policyAssignmentId", assignmentId);
+            putIfList(properties, "policyDefinitionReferenceIds", props);
+            properties.put("exemptionCategory", category);
+            putIfString(properties, "expiresOn", props);
+            putIfString(properties, "displayName", props);
+            putIfString(properties, "description", props);
+            properties.put("assignmentScopeValidation", ArmJson.string(props, "assignmentScopeValidation", "Default"));
+            putIfMap(properties, "metadata", props);
+            putIfList(properties, "resourceSelectors", props);
+            return envelope(req, path, properties, found.orElse(null));
+        });
+        return Response.status(written.created() ? 201 : 200).entity(strip(written.resource())).build();
     }
 
     /** PATCH updates only the resource selectors and the scope validation mode (PolicyExemptionUpdate). */
     private Response patchExemption(AzureRequest req, PolicyPath path, String id) {
-        Map<String, Object> existing = store.getExemption(id);
-        if (existing == null) {
+        if (store.get(Type.EXEMPTION, id) == null) {
             return exemptionNotFound(path.name());
         }
         Map<String, Object> patch = ArmJson.cast(ArmJson.parseBodyStrict(req).get("properties"));
-        Map<String, Object> properties = new LinkedHashMap<>(propertiesOf(existing));
-        if (patch.get("resourceSelectors") instanceof List<?> selectors) {
-            properties.put("resourceSelectors", selectors);
-        }
-        if (patch.get("assignmentScopeValidation") instanceof String validation) {
-            properties.put("assignmentScopeValidation", validation);
-        }
-        Map<String, Object> updated = envelope(req, path, id, properties, existing);
-        store.putExemption(id, updated);
-        return Response.ok(strip(updated)).build();
+        Map<String, Object> updated = store.update(Type.EXEMPTION, id, existing -> {
+            Map<String, Object> properties = new LinkedHashMap<>(propertiesOf(existing));
+            if (patch.get("resourceSelectors") instanceof List<?> selectors) {
+                properties.put("resourceSelectors", selectors);
+            }
+            if (patch.get("assignmentScopeValidation") instanceof String validation) {
+                properties.put("assignmentScopeValidation", validation);
+            }
+            return envelope(req, path, properties, existing);
+        });
+        return updated == null ? exemptionNotFound(path.name()) : Response.ok(strip(updated)).build();
     }
 
     private static Response exemptionNotFound(String name) {
@@ -732,17 +733,32 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
 
     // ── Shared: resource assembly ───────────────────────────────────────────────
 
-    /** Wraps {@code properties} in the ARM envelope: properties, id, type, name, systemData. */
-    private Map<String, Object> envelope(AzureRequest req, PolicyPath path, String id, Map<String, Object> properties,
+    /**
+     * Wraps {@code properties} in the ARM envelope: properties, id, type, name, systemData. The id and name keep the
+     * casing of the PUT that created the resource, as ARM does.
+     */
+    private Map<String, Object> envelope(AzureRequest req, PolicyPath path, Map<String, Object> properties,
                                          Map<String, Object> existing) {
+        PolicyPath stored = storedPath(path, existing);
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("properties", properties);
-        resource.put("id", id);
+        resource.put("id", stored.resourceId());
         resource.put("type", path.type().armType());
-        resource.put("name", path.name());
+        resource.put("name", stored.name());
         resource.put("systemData", systemData(existing, caller(req)));
         resource.put(SCOPE_KEY, path.scopeKey());
         return resource;
+    }
+
+    /** The path of the stored resource in the casing it was created with, or {@code path} for a new one. */
+    private static PolicyPath storedPath(PolicyPath path, Map<String, Object> existing) {
+        if (existing != null && existing.get("id") instanceof String storedId) {
+            PolicyPath stored = PolicyPath.parse(storedId);
+            if (stored != null && stored.type() == path.type() && stored.name() != null) {
+                return stored;
+            }
+        }
+        return path;
     }
 
     /**
