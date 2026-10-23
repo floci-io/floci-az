@@ -7,6 +7,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
 class UserAssignedIdentityRuleTest {
@@ -42,5 +43,27 @@ class UserAssignedIdentityRuleTest {
         given().contentType("application/json").body(appBody(IDENTITIES + "SomeBody"))
             .when().put(RG + "/providers/Microsoft.ContainerRegistry/registries/uairuleacr?api-version=2023-07-01")
             .then().statusCode(anyOf(is(200), is(201)));
+    }
+
+    @Test
+    void aPatchNamingAMissingIdentityIsRefusedAndChangesNothing() {
+        given().contentType("application/json").body("{\"location\":\"westeurope\"}")
+            .when().put(RG + "?api-version=2021-04-01")
+            .then().statusCode(anyOf(is(200), is(201)));
+        String registry = RG + "/providers/Microsoft.ContainerRegistry/registries/uairulepatch?api-version=2023-07-01";
+        given().contentType("application/json").body("{\"location\":\"westeurope\",\"tags\":{\"env\":\"dev\"},\"properties\":{}}")
+            .when().put(registry)
+            .then().statusCode(anyOf(is(200), is(201)));
+
+        given().contentType("application/json")
+            .body("{\"tags\":{\"env\":\"prod\"},\"identity\":{\"type\":\"UserAssigned\",\"userAssignedIdentities\":{\""
+                + IDENTITIES + "nobody\":{}}}}")
+            .when().patch(registry)
+            .then().statusCode(400)
+            .body("error.code", equalTo("FailedIdentityOperation"));
+
+        given().when().get(registry).then().statusCode(200)
+            .body("tags.env", equalTo("dev"))
+            .body("identity", nullValue());
     }
 }
