@@ -1,6 +1,9 @@
 package io.floci.az.services.mariadb;
 
+import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,7 +26,17 @@ class MariaDbStateTest {
 
     @BeforeEach
     void setup() {
-        state = new MariaDbState(new InMemoryStorage<>());
+        state = new MariaDbState(over(new InMemoryStorage<>()));
+    }
+
+    /** A factory whose every store is {@code backend}. */
+    static StorageFactory over(StorageBackend<String, StoredObject> backend) {
+        return new StorageFactory(null) {
+            @Override
+            public synchronized StorageBackend<String, StoredObject> create(String serviceName) {
+                return backend;
+            }
+        };
     }
 
     private MariaDbState.ServerEntry server(String name) {
