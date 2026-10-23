@@ -55,7 +55,6 @@ src/main/java/io/floci/az/services/servicebus/ServiceBusHandler.java	cloud-liter
 src/main/java/io/floci/az/services/signalr/SignalRHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/signalr/SignalRWebSockets.java	cloud-literal	3
 src/main/java/io/floci/az/services/sql/SqlHandler.java	location-literal	1
-src/main/java/io/floci/az/services/sql/SqlHandler.java	name-guard	1
 src/main/java/io/floci/az/services/sql/SqlHandler.java	scope-parse	3
 src/main/java/io/floci/az/services/sql/SqlState.java	cloud-literal	1
 src/main/java/io/floci/az/services/table/TableServiceHandler.java	cloud-literal	1

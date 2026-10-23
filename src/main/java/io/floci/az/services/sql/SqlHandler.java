@@ -10,9 +10,15 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -52,7 +58,7 @@ import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
  * </ul>
  */
 @ApplicationScoped
-public class SqlHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class SqlHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(SqlHandler.class);
     private static final String TYPE = "Microsoft.Sql/servers";
@@ -61,15 +67,17 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
     private final SqlState state;
     private final SqlServerManager serverManager;
     private final SqlProvisioningService provisioningService;
+    private final GlobalNameRegistry names;
     private final ObjectMapper mapper;
 
     @Inject
     public SqlHandler(EmulatorConfig config, SqlState state, SqlServerManager serverManager,
-                      SqlProvisioningService provisioningService) {
+                      SqlProvisioningService provisioningService, GlobalNameRegistry names) {
         this.config = config;
         this.state = state;
         this.serverManager = serverManager;
         this.provisioningService = provisioningService;
+        this.names = names;
         this.mapper = new ObjectMapper();
     }
 
@@ -102,9 +110,8 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             return handleCheckNameAvailability(request);
         }
 
-        Optional<Response> foreign = foreignServer(request, tail);
-        if (foreign.isPresent()) {
-            return foreign.get();
+        if (outOfScope(request, tail)) {
+            return notFound("Server '" + segment(tail, 1) + "' not found");
         }
 
         // Azure SQL server create long-running operation polling.
@@ -176,7 +183,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         try {
             JsonNode body = readBody(request.bodyStream());
             String name = body.path("name").asText();
-            boolean available = !state.serverExists(name);
+            boolean available = names.owner(cloud(request), CloudSuffix.SQL, name).isEmpty();
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("available", available);
             resp.put("name", name);
@@ -194,7 +201,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         return switch (method) {
             case "PUT"    -> createOrUpdateServer(request, serverName);
             case "GET"    -> getServer(serverName);
-            case "DELETE" -> deleteServer(serverName);
+            case "DELETE" -> deleteServer(request, serverName);
             default       -> methodNotAllowed();
         };
     }
@@ -225,22 +232,24 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
-            // Re-checked here, under this method's lock: the guard in handle() runs unlocked, so two
-            // concurrent creates of one name from different scopes can both pass it.
-            Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
-            if (foreign.isPresent()) {
-                return foreign.get();
-            }
+            // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before an ARM create
+            // runs, so a name another scope owns never reaches here.
+            ArmResourceId id = serverId(sub, rg, serverName);
             Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
-            boolean isNew = current.isEmpty();
 
             if (config.services().sql().dataPlaneProvider() == NONE) {
-                SqlState.SqlServerEntry ready = desiredEntry(current, serverName, sub, rg,
-                    location, login, password, tags, "Ready");
-                state.putServer(ready);
-                if (!state.databaseExists(serverName, "master")) {
-                    state.putDatabase(serverName, SqlState.SqlDatabaseEntry.master(serverName));
-                }
+                // A server of this name under another id (a create through the convenience paths) moves here,
+                // keeping its databases and firewall rules: one server per name.
+                Optional<SqlState.SqlServerEntry> named = current;
+                boolean created = state.createOrUpdateServer(id, existing -> {
+                    SqlState.SqlServerEntry ready = desiredEntry(existing.or(() -> named), serverName, sub, rg,
+                        location, login, password, tags, "Ready");
+                    ready.databases().putIfAbsent("master", SqlState.SqlDatabaseEntry.master(serverName));
+                    return ready;
+                });
+                boolean isNew = created && current.isEmpty();
+                holdName(request, id);
+                SqlState.SqlServerEntry ready = state.getServer(id).orElseThrow();
                 return Response.status(isNew ? 201 : 200).entity(serverResponse(ready)).build();
             }
 
@@ -265,12 +274,14 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
                     location, login, password, tags, "Ready");
                 state.putServer(updated);
+                holdName(request, id);
                 return Response.ok(serverResponse(updated)).build();
             }
 
             SqlState.SqlServerEntry desired = desiredEntry(current, serverName, sub, rg,
                 location, login, password, tags, "Creating");
             state.putServer(desired);
+            holdName(request, id);
             SqlProvisioningService.SqlProvisioningOperation operation =
                 provisioningService.begin(desired);
             return accepted(request, operation, desired);
@@ -380,13 +391,14 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             .orElse(notFound("Server '" + serverName + "' not found"));
     }
 
-    private synchronized Response deleteServer(String serverName) {
+    private synchronized Response deleteServer(AzureRequest request, String serverName) {
         if (!state.serverExists(serverName)) {
             return notFound("Server '" + serverName + "' not found");
         }
         provisioningService.cancel(serverName);
         Optional<SqlState.SqlServerEntry> entry = state.getServer(serverName);
         state.removeServer(serverName);
+        entry.ifPresent(server -> names.release(cloud(request), CloudSuffix.SQL, serverName, serverId(server)));
         entry.ifPresent(server -> {
             try {
                 serverManager.stopServer(server);
@@ -712,27 +724,53 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
 
     /**
-     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
-     * subscription or resource group is not the owner's must never reach that entry: creating the
-     * server there is a name conflict, and any other call is a 404.
+     * Whether an ARM path names a server stored under another scope. Child calls look a server up by its name,
+     * which is global, so a path whose scope does not hold the server of that name must not reach it: it reads as
+     * a 404, as a lookup by the path's id would. A PUT of the server itself passes: the gate's GlobalNameRule has
+     * already refused a name another scope owns. A path that names no resource group holds no server.
      */
-    private Optional<Response> foreignServer(AzureRequest request, String tail) {
+    private boolean outOfScope(AzureRequest request, String tail) {
         if (!tail.matches("servers/[^/]+(/.*)?")) {
-            return Optional.empty();
+            return false;
         }
         Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
         if (scope.isEmpty()) {
-            return Optional.empty();
+            return false;
         }
         String serverName = segment(tail, 1);
-        boolean createsServer = "PUT".equals(request.method()) && tail.matches("servers/[^/]+")
-            && scope.get().resourceGroup() != null;
-        return state.getServer(serverName)
-            .filter(s -> !scope.get().owns(s.subscriptionId(), s.resourceGroupName()))
-            .map(s -> createsServer
-                ? ArmErrors.error(400, "NameAlreadyExists",
-                    "The name '" + serverName + "' already exists. Choose a different name.")
-                : notFound("Server '" + serverName + "' not found"));
+        if (scope.get().resourceGroup() == null) {
+            return state.serverExists(serverName);
+        }
+        if ("PUT".equals(request.method()) && tail.matches("servers/[^/]+")) {
+            return false;
+        }
+        return state.serverExists(serverName)
+            && state.getServer(serverId(scope.get().subscription(), scope.get().resourceGroup(), serverName))
+                .isEmpty();
+    }
+
+    /**
+     * Holds the server's global name for it. The gate does this for an ARM create; a create through the
+     * {@code /{account}-sql/} paths or a path without a resource group passes no gate, and its name must still be
+     * taken. Nothing changes when the server already holds it.
+     */
+    private void holdName(AzureRequest request, ArmResourceId id) {
+        names.commit(cloud(request), CloudSuffix.SQL, id.name(), id);
+    }
+
+    private static ArmResourceId serverId(String subscriptionId, String resourceGroup, String serverName) {
+        return ArmResourceId.parse(String.format(
+            "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Sql/servers/%s",
+            subscriptionId, resourceGroup, serverName)).orElseThrow();
+    }
+
+    private static ArmResourceId serverId(SqlState.SqlServerEntry server) {
+        return ArmResourceId.parse(server.armId()).orElseThrow();
+    }
+
+    private static CloudProfile cloud(AzureRequest request) {
+        return request.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            : request.scope().cloud();
     }
 
     private static Response notFound(String message) {
@@ -799,6 +837,15 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         return servers.stream()
                 .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
                         server.location(), server.tags()))
+                .toList();
+    }
+
+    // ── GlobalNameSource ────────────────────────────────────────────────────────
+
+    @Override
+    public List<Claim> globalNames() {
+        return state.listServers().stream()
+                .map(server -> new Claim(CloudSuffix.SQL, server.serverName(), serverId(server)))
                 .toList();
     }
 }

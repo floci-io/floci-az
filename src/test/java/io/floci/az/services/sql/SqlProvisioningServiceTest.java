@@ -36,7 +36,7 @@ class SqlProvisioningServiceTest {
 
     @Test
     void provisionsOutsideCallerAndReusesActiveOperation() throws Exception {
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         SqlServerManager manager = mock(SqlServerManager.class);
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -71,7 +71,7 @@ class SqlProvisioningServiceTest {
 
     @Test
     void preservesFailedResourceAndOperation() throws Exception {
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         SqlServerManager manager = mock(SqlServerManager.class);
         when(manager.startServer(any())).thenThrow(new IllegalStateException("engine unavailable"));
         service = new SqlProvisioningService(state, manager, Executors.newSingleThreadExecutor());
@@ -92,7 +92,7 @@ class SqlProvisioningServiceTest {
 
     @Test
     void canceledProvisioningCleansLateContainer() throws Exception {
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         SqlServerManager manager = mock(SqlServerManager.class);
         CountDownLatch started = new CountDownLatch(1);
         Semaphore release = new Semaphore(0);
@@ -118,7 +118,7 @@ class SqlProvisioningServiceTest {
 
     @Test
     void boundsRetainedTerminalOperations() {
-        SqlState state = new SqlState(new InMemoryStorage<>());
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
         SqlServerManager manager = mock(SqlServerManager.class);
         when(manager.startServer(any())).thenAnswer(invocation ->
             ((SqlState.SqlServerEntry) invocation.getArgument(0))

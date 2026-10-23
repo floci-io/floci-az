@@ -1,10 +1,8 @@
 package io.floci.az.services.sql;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import io.floci.az.core.StoredObject;
-import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,24 +10,33 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * State store for the Azure SQL Database emulator.
  *
- * <p>Tracks logical servers and their child resources (databases, firewall rules).
- * Uses a dual-layer approach: an in-memory {@link ConcurrentHashMap} for O(1) reads
- * and a {@link StorageBackend} for pluggable persistence (memory / wal / hybrid /
- * persistent), configured via {@code FLOCI_AZ_STORAGE_SERVICES_SQL_MODE}.
+ * <p>Tracks logical servers and their child resources (databases, firewall rules), which live inside their
+ * server's record. Servers are kept in an {@link ArmResourceStore} over the {@code sql} backend, keyed by their
+ * canonical ARM id, so persistence follows {@code FLOCI_AZ_STORAGE_SERVICES_SQL_MODE}. Before the store, servers
+ * were kept under their lowercased name alone; those entries are read as they are and move to their canonical key
+ * on their next write.
  *
- * <p>When the emulator restarts with a persistent backend, server ARM metadata
- * (name, credentials, databases, firewall rules) is restored from disk.
- * Container runtime state ({@code containerId}, {@code hostPort}) is always
- * cleared on load — containers must be restarted on first use.
+ * <p>A server name is a global DNS name, so there is one server per name ({@code SqlArmSurface} declares it, and
+ * the gate's {@code GlobalNameRule} refuses a second owner): the name-based methods below find the one server of a
+ * name.
+ *
+ * <p>Container runtime state ({@code containerId}, {@code hostPort}, {@code host}) is not persisted: a server this
+ * process did not write itself was read back from storage after a restart, so it is served without its runtime and,
+ * when it was {@code Ready}, as {@code Creating}; its container restarts on the next request.
  *
  * <p>All public methods are thread-safe via {@code synchronized} blocks.
  */
@@ -38,66 +45,90 @@ public class SqlState {
 
     private static final Logger LOG = Logger.getLogger(SqlState.class);
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-        .registerModule(new JavaTimeModule())
-        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    /** The backend name, unchanged since before the store, so persisted servers keep loading. */
+    static final String STORE = "sql";
 
-    /** In-memory primary cache — source of truth for runtime reads. */
-    private final ConcurrentHashMap<String, SqlServerEntry> servers = new ConcurrentHashMap<>();
+    private final ArmResourceStore<SqlServerEntry> store;
 
-    /** Pluggable persistence backend — write-through on every mutation. */
-    private final StorageBackend<String, StoredObject> store;
+    /** The id of each server by lowercased name; null until first needed, rebuilt from the store. */
+    private Map<String, ArmResourceId> idsByName;
+
+    /** Canonical keys of the servers this process wrote, whose runtime fields are live. */
+    private final Set<String> live = new HashSet<>();
 
     @Inject
     public SqlState(StorageFactory factory) {
-        this.store = factory.create("sql");
-        loadFromStore();
+        this(ArmResourceStore.create(factory, STORE, SqlServerEntry.class, SqlServerEntry::armId,
+            SqlState::isLegacyKey));
     }
 
-    /** Package-private constructor for unit tests — bypasses CDI and uses the given backend. */
-    SqlState(StorageBackend<String, StoredObject> store) {
+    private SqlState(ArmResourceStore<SqlServerEntry> store) {
         this.store = store;
-        loadFromStore();
+        int restored = store.all().size();
+        if (restored > 0) {
+            LOG.infov("Restored {0} SQL server(s) from storage (containers will restart on next request)", restored);
+        }
+    }
+
+    /** Before the store, a server was kept under its lowercased name, which has no {@code /}. */
+    private static boolean isLegacyKey(String key) {
+        return key.indexOf('/') < 0;
     }
 
     // ── Servers ───────────────────────────────────────────────────────────────
 
     public synchronized boolean serverExists(String serverName) {
-        return servers.containsKey(key(serverName));
+        return getServer(serverName).isPresent();
     }
 
+    /** Writes {@code entry}, replacing any other server of the same name: one server per name. */
     public synchronized void putServer(SqlServerEntry entry) {
-        servers.put(key(entry.serverName()), entry);
-        persist(entry);
+        dropOtherServerNamed(entry.serverName(), idOf(entry));
+        write(store.put(entry).id(), entry);
+    }
+
+    /**
+     * Writes {@code change} applied to the server {@code id} names, or to empty when there is none, in one store
+     * operation, so two concurrent creates of one server keep the first one's record; true when it was created.
+     */
+    public synchronized boolean createOrUpdateServer(ArmResourceId id,
+                                                     Function<Optional<SqlServerEntry>, SqlServerEntry> change) {
+        dropOtherServerNamed(id.name(), id);
+        ArmResourceStore.Written<SqlServerEntry> written =
+            store.createOrUpdate(id, existing -> change.apply(existing.map(this::served)));
+        write(written.stored().id(), written.stored().value());
+        return written.created();
     }
 
     public synchronized Optional<SqlServerEntry> getServer(String serverName) {
-        return Optional.ofNullable(servers.get(key(serverName)));
+        return Optional.ofNullable(idsByName().get(key(serverName))).flatMap(this::getServer);
+    }
+
+    /** The server stored under {@code id}: a server of the same name in another scope is not it. */
+    public synchronized Optional<SqlServerEntry> getServer(ArmResourceId id) {
+        return store.get(id).map(stored -> served(stored.id(), stored.value()));
     }
 
     public synchronized boolean removeServer(String serverName) {
-        String k = key(serverName);
-        boolean removed = servers.remove(k) != null;
-        if (removed) store.delete(k);
-        return removed;
+        ArmResourceId id = idsByName().remove(key(serverName));
+        if (id == null) {
+            return false;
+        }
+        live.remove(id.canonicalKey());
+        return store.delete(id).isPresent();
     }
 
     public synchronized List<SqlServerEntry> listServers() {
-        return List.copyOf(servers.values());
+        return served(store.all());
     }
 
     public synchronized List<SqlServerEntry> listServersBySubscription(String subscriptionId) {
-        return servers.values().stream()
-            .filter(s -> s.subscriptionId().equalsIgnoreCase(subscriptionId))
-            .toList();
+        return served(store.list(new ArmScope(subscriptionId, null)));
     }
 
     public synchronized List<SqlServerEntry> listServersByResourceGroup(String subscriptionId,
                                                                          String resourceGroup) {
-        return servers.values().stream()
-            .filter(s -> s.subscriptionId().equalsIgnoreCase(subscriptionId)
-                      && s.resourceGroupName().equalsIgnoreCase(resourceGroup))
-            .toList();
+        return served(store.list(new ArmScope(subscriptionId, resourceGroup)));
     }
 
     // ── Databases ─────────────────────────────────────────────────────────────
@@ -111,7 +142,7 @@ public class SqlState {
     public synchronized void putDatabase(String serverName, SqlDatabaseEntry db) {
         getServer(serverName).ifPresent(s -> {
             s.databases().put(key(db.databaseName()), db);
-            persist(s);
+            putServer(s);
         });
     }
 
@@ -123,7 +154,9 @@ public class SqlState {
     public synchronized boolean removeDatabase(String serverName, String dbName) {
         return getServer(serverName).map(s -> {
             boolean removed = s.databases().remove(key(dbName)) != null;
-            if (removed) persist(s);
+            if (removed) {
+                putServer(s);
+            }
             return removed;
         }).orElse(false);
     }
@@ -139,7 +172,7 @@ public class SqlState {
     public synchronized void putFirewallRule(String serverName, SqlFirewallRule rule) {
         getServer(serverName).ifPresent(s -> {
             s.firewallRules().put(key(rule.name()), rule);
-            persist(s);
+            putServer(s);
         });
     }
 
@@ -151,7 +184,9 @@ public class SqlState {
     public synchronized boolean removeFirewallRule(String serverName, String ruleName) {
         return getServer(serverName).map(s -> {
             boolean removed = s.firewallRules().remove(key(ruleName)) != null;
-            if (removed) persist(s);
+            if (removed) {
+                putServer(s);
+            }
             return removed;
         }).orElse(false);
     }
@@ -165,75 +200,83 @@ public class SqlState {
     // ── Reset ─────────────────────────────────────────────────────────────────
 
     /**
-     * Removes all servers (and their child resources) from both the in-memory
-     * cache and the persistence backend.
+     * Removes all servers (and their child resources) from the store, legacy entries included.
      * Callers are responsible for stopping running containers beforehand.
      */
     public synchronized void clear() {
-        servers.clear();
         store.clear();
+        idsByName = null;
+        live.clear();
     }
 
-    // ── Persistence helpers ───────────────────────────────────────────────────
+    // ── Store helpers ─────────────────────────────────────────────────────────
 
-    /**
-     * Serialises {@code entry} and writes it to the backend.
-     * Silently logs on failure so a persistence hiccup never crashes the request.
-     */
-    private void persist(SqlServerEntry entry) {
-        try {
-            byte[] data = MAPPER.writeValueAsBytes(entry);
-            store.put(key(entry.serverName()), new StoredObject(
-                key(entry.serverName()), data,
-                Map.of("serverName", entry.serverName()),
-                entry.createdAt(),
-                UUID.randomUUID().toString()));
-        } catch (Exception e) {
-            LOG.warnf(e, "Failed to persist SQL server entry: %s", entry.serverName());
+    /** Removes the server named {@code serverName} when it is stored under an id other than {@code id}. */
+    private void dropOtherServerNamed(String serverName, ArmResourceId id) {
+        ArmResourceId previous = idsByName().get(key(serverName));
+        if (previous != null && !previous.canonicalKey().equals(id.canonicalKey())) {
+            store.delete(previous);
+            live.remove(previous.canonicalKey());
         }
     }
 
-    /**
-     * Reads all entries from the backend into the in-memory cache.
-     * Runtime-specific fields ({@code containerId}, {@code hostPort}) are always
-     * cleared — containers do not survive an emulator restart.
-     */
-    private void loadFromStore() {
-        int loaded = 0;
-        for (String serverKey : store.keys()) {
-            store.get(serverKey).ifPresent(obj -> {
-                try {
-                    SqlServerEntry e = MAPPER.readValue(obj.data(), SqlServerEntry.class);
-                    // Re-wrap maps as ConcurrentHashMap (Jackson deserialises them as LinkedHashMap)
-                    SqlServerEntry restored = new SqlServerEntry(
-                        e.serverName(), e.subscriptionId(), e.resourceGroupName(),
-                        e.location(), e.administratorLogin(), e.administratorLoginPassword(),
-                        null, 0, "localhost",   // containerId / hostPort / host are always reset on load
-                        "Ready".equals(e.provisioningState())
-                            ? "Creating"
-                            : e.provisioningState() != null ? e.provisioningState() : "Creating",
-                        e.failureCode(), e.failureMessage(),
-                        new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
-                        new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
-                        new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
-                        e.createdAt());
-                    servers.put(serverKey, restored);
-                } catch (Exception ex) {
-                    LOG.warnf(ex, "Failed to deserialize SQL server entry '%s' — skipping", serverKey);
-                    store.delete(serverKey);
+    private void write(ArmResourceId id, SqlServerEntry entry) {
+        idsByName().put(key(entry.serverName()), id);
+        live.add(id.canonicalKey());
+    }
+
+    private Map<String, ArmResourceId> idsByName() {
+        if (idsByName == null) {
+            idsByName = new HashMap<>();
+            for (ArmResourceStore.Stored<SqlServerEntry> stored : store.all()) {
+                ArmResourceId previous = idsByName.putIfAbsent(key(stored.value().serverName()), stored.id());
+                if (previous != null) {
+                    LOG.warnv("SQL server name {0} is stored as both {1} and {2}; serving the first",
+                        stored.value().serverName(), previous.id(), stored.id().id());
                 }
-            });
+            }
         }
-        if (!servers.isEmpty()) {
-            LOG.infof("Restored %d SQL server(s) from storage (containers will restart on next request)",
-                servers.size());
-        }
+        return idsByName;
+    }
+
+    private List<SqlServerEntry> served(List<ArmResourceStore.Stored<SqlServerEntry>> stored) {
+        return stored.stream().map(entry -> served(entry.id(), entry.value())).toList();
+    }
+
+    private SqlServerEntry served(SqlServerEntry entry) {
+        return served(idOf(entry), entry);
+    }
+
+    /**
+     * The entry as callers see it: mutable child maps, and, for a server this process did not write, no runtime
+     * fields, since its container did not survive the restart.
+     */
+    private SqlServerEntry served(ArmResourceId id, SqlServerEntry e) {
+        boolean restored = !live.contains(id.canonicalKey());
+        String provisioningState = e.provisioningState() != null ? e.provisioningState() : "Creating";
+        return new SqlServerEntry(
+            e.serverName(), e.subscriptionId(), e.resourceGroupName(),
+            e.location(), e.administratorLogin(), e.administratorLoginPassword(),
+            restored ? null : e.containerId(),
+            restored ? 0 : e.hostPort(),
+            restored ? "localhost" : e.host(),
+            restored && "Ready".equals(provisioningState) ? "Creating" : provisioningState,
+            e.failureCode(), e.failureMessage(),
+            new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
+            new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
+            new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
+            e.createdAt());
+    }
+
+    private static ArmResourceId idOf(SqlServerEntry entry) {
+        return ArmResourceId.parse(entry.armId()).orElseThrow(() -> new IllegalArgumentException(
+            "SQL server '" + entry.serverName() + "' has no ARM id"));
     }
 
     // ── Key helper ───────────────────────────────────────────────────────────
 
     private static String key(String name) {
-        return name == null ? "" : name.toLowerCase();
+        return name == null ? "" : name.toLowerCase(Locale.ROOT);
     }
 
     // ── Nested types ──────────────────────────────────────────────────────────
