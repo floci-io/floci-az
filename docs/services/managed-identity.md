@@ -17,7 +17,8 @@ applications use to acquire tokens without secrets.
   that stay stable across updates (msi spec `2024-11-30`)
 - **Identity references**: a `PUT` or `PATCH` of any resource whose
   `identity.userAssignedIdentities` names an identity that doesn't exist answers
-  `400 FailedIdentityOperation` and stores nothing
+  `400 FailedIdentityOperation` and stores nothing; a null entry, which removes an identity, needs no
+  existing identity
 - **Federated identity credentials**: CreateOrUpdate, Get, Delete, List with
   `issuer` / `subject` / `audiences` (as used by `azurerm_federated_identity_credential`)
 - **System-assigned identity read**: `GET {scope}/providers/Microsoft.ManagedIdentity/identities/default`
