@@ -112,8 +112,25 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     @PostConstruct
     public void init() {
+        dropShadowedCaches();
         if (!config.services().redis().mocked()) {
             startReadinessPoller();
+        }
+    }
+
+    /**
+     * Old raw-case keys could hold one cache under several casings, each with a container of its own (named from the
+     * record's {@code instanceId}). The store serves one of them; the others are removed here, with their containers,
+     * before anything could drop them and leave the containers running.
+     */
+    void dropShadowedCaches() {
+        for (ArmResourceStore.Stored<RedisCache> shadowed : store.removeShadowedLegacy()) {
+            RedisCache cache = shadowed.value();
+            LOG.infov("Redis cache {0}: dropping the duplicate stored under {1}/{2}", cache.getName(),
+                    cache.getSubscriptionId(), cache.getResourceGroup());
+            if (!config.services().redis().mocked()) {
+                stopQuietly(cache);
+            }
         }
     }
 
