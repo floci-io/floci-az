@@ -66,22 +66,23 @@ public class NetworkService {
             return notFound(tail);
         }
 
-        if (tail.startsWith("dnsZones") || tail.startsWith("dnszones")) {
+        String type = typeOf(tail);
+        if (isType(type, "dnsZones")) {
             return handleDnsZones(request, path, method, sub, rg, tail);
         }
 
-        if (tail.startsWith("privateDnsZones")) {
+        if (isType(type, "privateDnsZones")) {
             return handlePrivateDnsZones(request, path, method, sub, rg, tail);
         }
 
-        if (tail.startsWith("privateEndpoints")) {
+        if (isType(type, "privateEndpoints")) {
             return handlePrivateEndpoints(request, path, method, sub, rg, tail);
         }
 
         if (tail.matches("[^/]+")) {
             return Response.ok(Map.of("value", listResources(sub, rg, "Microsoft.Network/" + tail))).build();
         }
-        if (tail.matches("virtualNetworks/[^/]+/subnets")) {
+        if (tail.split("/").length == 3 && isChildPath(tail, "virtualNetworks", "subnets")) {
             return Response.ok(Map.of("value", children(sub, rg, resourceId(sub, rg, tail)))).build();
         }
 
@@ -89,15 +90,15 @@ public class NetworkService {
         // backend pools and NSG security rules this way, and azurerm manages them through
         // these dedicated child endpoints: routing them into the generic CRUD would store
         // a mis-typed sibling the parent read-back never sees.
-        if (tail.matches("loadBalancers/[^/?]+/backendAddressPools([/?].*)?")) {
+        if (isChildPath(tail, "loadBalancers", "backendAddressPools")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "loadBalancers", "backendAddressPools", false);
         }
-        if (tail.matches("networkSecurityGroups/[^/?]+/securityRules([/?].*)?")) {
+        if (isChildPath(tail, "networkSecurityGroups", "securityRules")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "networkSecurityGroups", "securityRules", false);
         }
-        if (tail.matches("networkSecurityGroups/[^/?]+/defaultSecurityRules([/?].*)?")) {
+        if (isChildPath(tail, "networkSecurityGroups", "defaultSecurityRules")) {
             return handleParentArrayChild(request, method, sub, rg, tail,
                     "networkSecurityGroups", "defaultSecurityRules", true);
         }
@@ -199,7 +200,7 @@ public class NetworkService {
 
     private void deleteChildren(String sub, String rg, String tail, String id) {
         String[] parts = tail.split("/");
-        if (parts.length == 2 && "virtualNetworks".equals(parts[0])) {
+        if (parts.length == 2 && isType(parts[0], "virtualNetworks")) {
             deleteUnder(sub, rg, id + "/subnets");
         }
     }
@@ -442,9 +443,28 @@ public class NetworkService {
         return result;
     }
 
+    /** The first segment of {@code tail}: the top-level resource type it addresses. */
+    private static String typeOf(String tail) {
+        return tail.split("/", 2)[0];
+    }
+
+    /**
+     * Whether {@code segment} names the resource type (or record type) {@code type}. ARM type names are
+     * case-insensitive, like the store's keys, so every type segment this service routes on is compared here.
+     */
+    private static boolean isType(String segment, String type) {
+        return type.equalsIgnoreCase(segment);
+    }
+
+    /** Whether {@code tail} is {@code parent/{name}/child}, or something below it. */
+    private static boolean isChildPath(String tail, String parent, String child) {
+        String[] parts = tail.split("/");
+        return parts.length >= 3 && isType(parts[0], parent) && isType(parts[2], child);
+    }
+
     private static String resourceType(String tail) {
         String[] parts = tail.split("/");
-        if (parts.length >= 4 && "subnets".equals(parts[2])) {
+        if (parts.length >= 4 && isType(parts[2], "subnets")) {
             return "Microsoft.Network/virtualNetworks/subnets";
         }
         return "Microsoft.Network/" + parts[0];
@@ -712,7 +732,7 @@ public class NetworkService {
     }
 
     private Response deleteRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        if ("@".equals(relativeRecordSetName) && ("SOA".equals(recordType) || "NS".equals(recordType))) {
+        if ("@".equals(relativeRecordSetName) && (isType(recordType, "SOA") || isType(recordType, "NS"))) {
             return Response.status(400).entity(Map.of("error", Map.of(
                     "code", "BadRequest",
                     "message", "Default SOA and NS record sets at the zone root cannot be deleted."
@@ -857,12 +877,12 @@ public class NetworkService {
         }
 
         // 3. List virtual network links
-        if (parts.length == 3 && "virtualNetworkLinks".equals(parts[2])) {
+        if (parts.length == 3 && isType(parts[2], "virtualNetworkLinks")) {
             return Response.ok(Map.of("value", listVirtualNetworkLinks(sub, rg, parts[1]))).build();
         }
 
         // 4. Virtual network link CRUD
-        if (parts.length == 4 && "virtualNetworkLinks".equals(parts[2])) {
+        if (parts.length == 4 && isType(parts[2], "virtualNetworkLinks")) {
             String zoneName = parts[1];
             String linkName = parts[3];
             return switch (method) {
@@ -1024,7 +1044,7 @@ public class NetworkService {
     }
 
     private Response deletePrivateRecordSet(String sub, String rg, String zoneName, String recordType, String relativeRecordSetName) {
-        if ("@".equals(relativeRecordSetName) && "SOA".equals(recordType)) {
+        if ("@".equals(relativeRecordSetName) && isType(recordType, "SOA")) {
             return Response.status(400).entity(Map.of("error", Map.of(
                     "code", "BadRequest",
                     "message", "The default SOA record set at the zone root cannot be deleted."
@@ -1188,12 +1208,12 @@ public class NetworkService {
         }
 
         // 2. List private DNS zone groups
-        if (parts.length == 3 && "privateDnsZoneGroups".equals(parts[2])) {
+        if (parts.length == 3 && isType(parts[2], "privateDnsZoneGroups")) {
             return Response.ok(Map.of("value", listPrivateDnsZoneGroups(sub, rg, parts[1]))).build();
         }
 
         // 3. Private DNS zone group CRUD
-        if (parts.length == 4 && "privateDnsZoneGroups".equals(parts[2])) {
+        if (parts.length == 4 && isType(parts[2], "privateDnsZoneGroups")) {
             String peName = parts[1];
             String groupName = parts[3];
             return switch (method) {

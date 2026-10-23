@@ -772,4 +772,77 @@ class NetworkHandlerTest {
                 .then().statusCode(200)
                 .body("value.name", containsInAnyOrder("elsewhere.example", "inunknown.example"));
     }
+
+    @Test
+    void aPrivateEndpointPutWithADifferentlyCasedTypeUpdatesItAndKeepsItsNic() {
+        String peBody = """
+                {
+                  "location": "eastus",
+                  "properties": {
+                    "privateLinkServiceConnections": [
+                      {"name": "conn1", "properties": {
+                        "privateLinkServiceId": "/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Storage/storageAccounts/sa1",
+                        "groupIds": ["blob"]}}
+                    ]
+                  }
+                }
+                """;
+
+        String nic = given().contentType("application/json").body(peBody)
+                .when().put(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(201)
+                .extract().path("properties.networkInterfaces[0].id");
+
+        given().contentType("application/json").body(peBody)
+                .when().put(BASE + "/privateendpoints/pe1" + API)
+                .then().statusCode(200)
+                .body("type", equalTo("Microsoft.Network/privateEndpoints"))
+                .body("properties.networkInterfaces[0].id", equalTo(nic));
+
+        given().when().get(BASE + "/privateEndpoints/pe1" + API)
+                .then().statusCode(200)
+                .body("properties.networkInterfaces[0].id", equalTo(nic));
+
+        given().when().get(BASE + "/networkInterfaces" + API)
+                .then().statusCode(200)
+                .body("value", hasSize(1));
+    }
+
+    @Test
+    void deletingAVirtualNetworkThroughADifferentlyCasedTypeRemovesItsSubnets() {
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"properties\":{\"addressSpace\":{\"addressPrefixes\":[\"10.20.0.0/16\"]}}}")
+                .when().put(BASE + "/virtualNetworks/vnet2" + API)
+                .then().statusCode(200);
+        given().contentType("application/json").body("{\"properties\":{\"addressPrefix\":\"10.20.1.0/24\"}}")
+                .when().put(BASE + "/virtualNetworks/vnet2/subnets/default" + API)
+                .then().statusCode(200);
+
+        given().when().delete(BASE + "/virtualnetworks/vnet2" + API)
+                .then().statusCode(200);
+
+        given().when().get(BASE + "/virtualNetworks/vnet2/subnets/default" + API)
+                .then().statusCode(404);
+    }
+
+    @Test
+    void theDefaultRootRecordSetsCannotBeDeletedThroughALowerCaseRecordType() {
+        given().contentType("application/json").body("{\"location\":\"global\"}")
+                .when().put(BASE + "/dnsZones/casing.example" + API)
+                .then().statusCode(201);
+        given().contentType("application/json").body("{\"location\":\"global\"}")
+                .when().put(BASE + "/privateDnsZones/casing.internal" + API)
+                .then().statusCode(201);
+
+        for (String record : new String[] {"/dnsZones/casing.example/soa/@", "/dnsZones/casing.example/ns/@",
+                "/privateDnsZones/casing.internal/soa/@"}) {
+            given().when().delete(BASE + record + API)
+                    .then().statusCode(400)
+                    .body("error.code", equalTo("BadRequest"));
+        }
+
+        given().when().get(BASE + "/dnsZones/casing.example/SOA/@" + API).then().statusCode(200);
+        given().when().get(BASE + "/dnsZones/casing.example/NS/@" + API).then().statusCode(200);
+        given().when().get(BASE + "/privateDnsZones/casing.internal/SOA/@" + API).then().statusCode(200);
+    }
 }
