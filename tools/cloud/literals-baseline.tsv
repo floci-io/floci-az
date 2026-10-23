@@ -42,7 +42,6 @@ src/main/java/io/floci/az/services/mariadb/MariaDbHandler.java	name-guard	1
 src/main/java/io/floci/az/services/mariadb/MariaDbHandler.java	scope-parse	1
 src/main/java/io/floci/az/services/monitor/MonitorHandler.java	location-literal	3
 src/main/java/io/floci/az/services/mysql/MySqlHandler.java	location-literal	1
-src/main/java/io/floci/az/services/mysql/MySqlHandler.java	name-guard	1
 src/main/java/io/floci/az/services/mysql/MySqlHandler.java	scope-parse	1
 src/main/java/io/floci/az/services/network/NetworkService.java	scope-parse	1
 src/main/java/io/floci/az/services/postgres/PostgresHandler.java	location-literal	1

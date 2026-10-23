@@ -128,6 +128,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         Microsoft.ContainerService/managedClusters               1-63    null    0    null
         Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
+        Microsoft.DBforMySQL/flexibleServers    3-63    MYSQL    409    ServerNameAlreadyExists
         """;
 
     @Inject
