@@ -119,6 +119,16 @@ class PolicyResourceStoreTest {
     }
 
     @Test
+    void aRelativeDefinitionReferenceIsNotFoundAndCannotPinTheDefinition() {
+        put(DEFINITIONS + "/relative-def", DENY_ALL).statusCode(201);
+
+        put(RG_SCOPE + AUTH + "/policyAssignments/relative-assign",
+                "{\"properties\": {\"policyDefinitionId\": \"" + DEFINITIONS.substring(1) + "/relative-def\"}}")
+                .statusCode(404).body("error.code", equalTo("PolicyDefinitionNotFound"));
+        given().when().delete(DEFINITIONS + "/relative-def" + API).then().statusCode(200);
+    }
+
+    @Test
     void anAssignmentAlreadyInTheBackendIsServedListedAndEnforced() throws Exception {
         String definitionId = DEFINITIONS + "/disk-def";
         String assignmentId = RG_SCOPE + AUTH + "/policyAssignments/disk-assign";

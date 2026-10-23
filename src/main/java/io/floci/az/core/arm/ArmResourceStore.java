@@ -181,6 +181,20 @@ public final class ArmResourceStore<T> {
     }
 
     /**
+     * Removes every resource {@code condition} accepts, atomically with respect to every other write to this store,
+     * so a resource a concurrent write changed in between is judged on what it holds now; returns what it removed.
+     */
+    public synchronized List<Stored<T>> deleteIf(Predicate<T> condition) {
+        List<Stored<T>> removed = new ArrayList<>();
+        for (Stored<T> stored : all()) {
+            if (condition.test(stored.value())) {
+                delete(stored.id()).ifPresent(removed::add);
+            }
+        }
+        return removed;
+    }
+
+    /**
      * The resources in {@code scope}: the whole subscription when it names no resource group, else that group.
      * Subscriptions and groups compare case-insensitively; canonical entries win on a clash.
      */

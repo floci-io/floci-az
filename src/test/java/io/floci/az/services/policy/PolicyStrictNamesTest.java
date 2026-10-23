@@ -10,7 +10,6 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
 @TestProfile(PolicyStrictNamesTest.StrictNames.class)
@@ -39,7 +38,7 @@ class PolicyStrictNamesTest {
 
     private static void assertAccepted(String path, String body) {
         given().contentType("application/json").body(body).when().put(path + API)
-            .then().body("error.code", not(equalTo("InvalidResourceName")));
+            .then().statusCode(201);
     }
 
     @Test

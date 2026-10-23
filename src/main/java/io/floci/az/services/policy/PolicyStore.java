@@ -2,7 +2,6 @@ package io.floci.az.services.policy;
 
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
-import io.floci.az.core.arm.ArmResourceStore.Stored;
 import io.floci.az.core.arm.ArmResourceStore.Written;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.policy.PolicyPath.Type;
@@ -148,13 +147,8 @@ public class PolicyStore {
     /** Removes every exemption bound to {@code assignmentId}; Azure deletes them with the assignment. */
     public void removeExemptionsForAssignment(String assignmentId) {
         String wanted = key(assignmentId);
-        ArmResourceStore<PolicyResource> exemptions = stores.get(Type.EXEMPTION);
-        for (Stored<PolicyResource> exemption : exemptions.all()) {
-            if (properties(exemption.value().body()).get("policyAssignmentId") instanceof String id
-                    && wanted.equals(key(id))) {
-                exemptions.delete(exemption.id());
-            }
-        }
+        stores.get(Type.EXEMPTION).deleteIf(exemption ->
+            properties(exemption.body()).get("policyAssignmentId") instanceof String id && wanted.equals(key(id)));
     }
 
     public void clear() {
@@ -164,8 +158,13 @@ public class PolicyStore {
     /**
      * The id {@code id} names in the store of {@code type}: an absolute id of a resource of that type. The stores
      * share one backend, and {@link ArmResourceStore#get} reads any canonical key in it, so the type is checked here.
+     * {@link ArmResourceId#parse} also reads a relative path, which would find a resource that the reference
+     * comparisons ({@link #findAssignmentReferencing}) then miss, so the leading slash is checked first.
      */
     private static Optional<ArmResourceId> resourceId(Type type, String id) {
+        if (id == null || !id.startsWith("/")) {
+            return Optional.empty();
+        }
         return ArmResourceId.parse(id)
             .filter(parsed -> parsed.name() != null && type.armType().equalsIgnoreCase(parsed.typePath()));
     }

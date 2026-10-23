@@ -135,6 +135,21 @@ class ArmResourceStoreTest {
     }
 
     @Test
+    void deleteIfRemovesWhatTheConditionAcceptsAndReturnsIt() throws Exception {
+        String other = ID.replace("things/a", "things/b");
+        String legacy = ID.replace("things/a", "things/c");
+        putLegacy("Sub-1/RG-One/c", new Thing(legacy, "drop"));
+        store.put(new Thing(ID, "drop"));
+        store.put(new Thing(other, "keep"));
+
+        List<ArmResourceStore.Stored<Thing>> removed = store.deleteIf(thing -> thing.label().equals("drop"));
+
+        assertEquals(Set.of(ID, legacy), Set.copyOf(removed.stream().map(stored -> stored.id().id()).toList()));
+        assertEquals(List.of(other), store.all().stream().map(stored -> stored.id().id()).toList());
+        assertEquals(Set.of(other.toLowerCase()), backend.keys());
+    }
+
+    @Test
     void aCanonicalEntryWinsOverALegacyOneForTheSameResource() throws Exception {
         store.put(new Thing(ID, "canonical"));
         putLegacy("Sub-1/RG-One/a", new Thing(ID, "stale"));
