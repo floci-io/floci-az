@@ -1,5 +1,8 @@
 package io.floci.az.services.mysql;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
@@ -164,5 +167,69 @@ class MySqlStateTest {
         state.putServer(server("x"));
         state.clear();
         assertEquals(0, state.listServers().size());
+    }
+
+    /** {@code live} with another version: a server update built from a read. */
+    private static MySqlState.ServerEntry upgraded(MySqlState.ServerEntry live) {
+        return new MySqlState.ServerEntry(live.serverName(), live.subscriptionId(), live.resourceGroupName(),
+            live.location(), "8.4", live.administratorLogin(), live.administratorLoginPassword(),
+            live.skuName(), live.skuTier(), live.storageSizeGB(), live.containerId(), live.hostPort(), live.host(),
+            live.tags(), live.databases(), live.firewallRules(), live.configurations(), live.createdAt());
+    }
+
+    @Test
+    void aServerUpdateKeepsTheChildrenWrittenSinceItsRead() {
+        state.putServer(server("upd"));
+        MySqlState.ServerEntry live = state.getServer("upd").orElseThrow();
+
+        state.putDatabase("upd", MySqlState.DatabaseEntry.create("db1", "upd", null, null));
+        state.putFirewallRule("upd", new MySqlState.FirewallRule("AllowAll", "0.0.0.0", "255.255.255.255"));
+        state.putConfiguration("upd", "max_connections", "200");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        MySqlState.ServerEntry stored = state.getServer("upd").orElseThrow();
+        assertEquals("8.4", stored.version());
+        assertTrue(state.getDatabase("upd", "db1").isPresent());
+        assertTrue(state.getFirewallRule("upd", "AllowAll").isPresent());
+        assertEquals("200", state.getConfiguration("upd", "max_connections").orElse(""));
+    }
+
+    @Test
+    void aServerUpdateDoesNotBringBackADeletedChild() {
+        state.putServer(server("upd-del"));
+        state.putDatabase("upd-del", MySqlState.DatabaseEntry.create("db1", "upd-del", null, null));
+        MySqlState.ServerEntry live = state.getServer("upd-del").orElseThrow();
+
+        state.removeDatabase("upd-del", "db1");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        assertFalse(state.getDatabase("upd-del", "db1").isPresent());
+    }
+
+    @Test
+    void aServerStoredBeforeTheStateStartedIsFoundByName() throws Exception {
+        InMemoryStorage<String, StoredObject> backend = new InMemoryStorage<>();
+        new MySqlState(over(backend)).putServer(server("Canonical1"));
+        MySqlState.ServerEntry legacy = server("Legacy1", "sub-legacy", "rg-legacy");
+        byte[] data = new ObjectMapper().registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).writeValueAsBytes(legacy);
+        backend.put("legacy1", new StoredObject("legacy1", data, Map.of(), Instant.now(), "legacy1"));
+
+        MySqlState restarted = new MySqlState(over(backend));
+
+        assertTrue(restarted.getServer("canonical1").isPresent());
+        assertEquals("sub-legacy", restarted.getServer("LEGACY1").orElseThrow().subscriptionId());
+    }
+
+    @Test
+    void aNameDeletedAndCreatedInAnotherScopeFindsTheNewServer() {
+        MySqlState.ServerEntry first = server("moved", "sub-a", "rg-a");
+        state.putServer(first);
+        assertTrue(state.removeServer(MySqlState.serverId(first)));
+        assertFalse(state.getServer("moved").isPresent());
+
+        state.putServer(server("moved", "sub-b", "rg-b"));
+        assertFalse(state.removeServer(MySqlState.serverId(first)));
+        assertEquals("sub-b", state.getServer("moved").orElseThrow().subscriptionId());
     }
 }

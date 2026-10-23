@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * their canonical key on their next write.
  *
  * <p>A server name is a global DNS name, so the state holds one server per name, and a lookup by name alone (the
- * account path, {@code /{account}-mysql/...}) finds at most one.
+ * account path, {@code /{account}-mysql/...}) finds at most one. That lookup goes through an in-memory index of
+ * name to id, built from the store at startup and kept in step by every write and delete, so it reads one server
+ * rather than decoding them all.
  *
  * <p>Container runtime state ({@code containerId}, {@code hostPort}, {@code host}) is never persisted: it is kept in
  * memory beside the store, so after a restart a server reads back without a container, which restarts on first use.
@@ -52,11 +55,14 @@ public class MySqlState {
     /** The container of each server started in this run, by canonical id. */
     private final Map<String, Runtime> runtime = new ConcurrentHashMap<>();
 
+    /** The id of each stored server, by lowercased name; legacy entries included. */
+    private final Map<String, ArmResourceId> idsByName = new HashMap<>();
+
     @Inject
     public MySqlState(StorageFactory factory) {
         this.store = ArmResourceStore.create(factory, "mysql", ServerEntry.class, ServerEntry::armId,
             key -> !key.contains("/"));
-        int restored = store.all().size();
+        int restored = reindex();
         if (restored > 0) {
             LOG.infov("Restored {0} MySQL server(s) from storage (containers will restart on next request)",
                 restored);
@@ -112,15 +118,17 @@ public class MySqlState {
     }
 
     /**
-     * Stores {@code updated} while the stored server is still the one {@code expected} was read from. False
-     * once that server was deleted, or deleted and claimed again, so an update never writes a server back.
+     * Stores the server fields of {@code updated} while the stored server is still the one {@code expected} was
+     * read from. False once that server was deleted, or deleted and claimed again, so an update never writes a
+     * server back. The container and the child resources are the stored ones: a database, firewall rule or
+     * configuration written since {@code expected} was read is kept.
      */
     public synchronized boolean replaceServer(ServerEntry expected, ServerEntry updated) {
         Optional<ServerEntry> current = getServer(serverId(expected));
         if (current.isEmpty() || !current.get().createdAt().equals(expected.createdAt())) {
             return false;
         }
-        write(updated);
+        write(updated.withChildrenOf(current.get()));
         return true;
     }
 
@@ -141,11 +149,8 @@ public class MySqlState {
         if (serverName == null) {
             return Optional.empty();
         }
-        return store.all().stream()
-            .map(ArmResourceStore.Stored::value)
-            .filter(server -> serverName.equalsIgnoreCase(server.serverName()))
-            .findFirst()
-            .map(this::withRuntime);
+        ArmResourceId id = idsByName.get(key(serverName));
+        return id == null ? Optional.empty() : getServer(id);
     }
 
     /** The server {@code id} names; empty for a server of that name in another scope. */
@@ -270,6 +275,7 @@ public class MySqlState {
     public synchronized void clear() {
         store.clear();
         runtime.clear();
+        idsByName.clear();
     }
 
     // ── Store helpers ─────────────────────────────────────────────────────────
@@ -283,11 +289,30 @@ public class MySqlState {
         String key = serverId(entry).canonicalKey();
         runtime.put(key, new Runtime(entry.containerId(), entry.hostPort(), entry.host()));
         store.put(entry.withContainer(Runtime.NONE.containerId(), Runtime.NONE.hostPort(), Runtime.NONE.host()));
+        idsByName.put(key(entry.serverName()), serverId(entry));
     }
 
     private boolean delete(ArmResourceId id) {
         runtime.remove(id.canonicalKey());
-        return store.delete(id).isPresent();
+        Optional<ArmResourceStore.Stored<ServerEntry>> removed = store.delete(id);
+        removed.ifPresent(stored -> {
+            String name = key(stored.value().serverName());
+            ArmResourceId indexed = idsByName.get(name);
+            if (indexed != null && indexed.canonicalKey().equals(id.canonicalKey())) {
+                idsByName.remove(name);
+            }
+        });
+        return removed.isPresent();
+    }
+
+    /** Rebuilds the name index from the store; the number of servers stored. */
+    private int reindex() {
+        idsByName.clear();
+        List<ArmResourceStore.Stored<ServerEntry>> stored = store.all();
+        for (ArmResourceStore.Stored<ServerEntry> server : stored) {
+            idsByName.putIfAbsent(key(server.value().serverName()), server.id());
+        }
+        return stored.size();
     }
 
     /**
@@ -348,6 +373,15 @@ public class MySqlState {
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
                 id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt);
+        }
+
+        /** This server's own fields over the container and child resources of {@code stored}. */
+        public ServerEntry withChildrenOf(ServerEntry stored) {
+            return new ServerEntry(serverName, subscriptionId, resourceGroupName,
+                location, version, administratorLogin, administratorLoginPassword,
+                skuName, skuTier, storageSizeGB,
+                stored.containerId(), stored.hostPort(), stored.host(), tags,
+                stored.databases(), stored.firewallRules(), stored.configurations(), createdAt);
         }
 
         public String fullyQualifiedDomainName() {
