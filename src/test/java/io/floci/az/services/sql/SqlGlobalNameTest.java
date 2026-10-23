@@ -1,13 +1,20 @@
 package io.floci.az.services.sql;
 
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestProfile(SqlHandlerMockedTest.MockedProfile.class)
@@ -19,6 +26,11 @@ class SqlGlobalNameTest {
         + "\"administratorLogin\":\"sa\",\"administratorLoginPassword\":\"FlociAz_Strong123!\"}}";
     private static final String CHECK =
         "/subscriptions/sub-check/providers/Microsoft.Sql/checkNameAvailability" + API;
+
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
+
+    @Inject
+    GlobalNameRegistry names;
 
     @BeforeEach
     void reset() {
@@ -73,5 +85,40 @@ class SqlGlobalNameTest {
         given().when().delete("/devstoreaccount1-sql/servers/convsrv").then().statusCode(204);
         given().contentType("application/json").body(BODY).when().put(server("sub-arm", "rg", "convsrv") + API)
             .then().statusCode(201);
+    }
+
+    @Test
+    void anAccountPathUpdateKeepsTheServerAndItsNameWhereTheyAre() {
+        given().contentType("application/json").body(BODY).when().put(server("sub-owner", "rg", "keptsrv") + API)
+            .then().statusCode(201);
+        given().contentType("application/json").body(BODY).when().put("/devstoreaccount1-sql/servers/keptsrv")
+            .then().statusCode(200)
+            .body("id", equalTo(server("sub-owner", "rg", "keptsrv")));
+        given().when().get(server("sub-owner", "rg", "keptsrv") + API).then().statusCode(200);
+
+        given().when().delete("/devstoreaccount1-sql/servers/keptsrv").then().statusCode(204);
+        given().contentType("application/json").body(check("keptsrv")).when().post(CHECK).then().statusCode(200)
+            .body("available", equalTo(true));
+        given().contentType("application/json").body(BODY).when().put(server("sub-other", "rg", "keptsrv") + API)
+            .then().statusCode(201);
+    }
+
+    @Test
+    void anAccountPathCreateDoesNotOvertakeAnArmCreateInFlight() {
+        GlobalNameRegistry.Reservation armCreate = names.reserve(PUBLIC, CloudSuffix.SQL, "pendingsrv",
+            ArmResourceId.parse(server("sub-arm", "rg", "pendingsrv")).orElseThrow());
+        assertEquals(GlobalNameRegistry.Outcome.RESERVED, armCreate.outcome());
+
+        given().contentType("application/json").body(BODY).when().put("/devstoreaccount1-sql/servers/pendingsrv")
+            .then().statusCode(400).body("error.code", equalTo("NameAlreadyExists"));
+
+        // The ARM create fails and frees its reservation: the account path may now take the name, and keeps it.
+        names.releasePending(PUBLIC, CloudSuffix.SQL, "pendingsrv", armCreate.token());
+        given().contentType("application/json").body(check("pendingsrv")).when().post(CHECK).then().statusCode(200)
+            .body("available", equalTo(true));
+        given().contentType("application/json").body(BODY).when().put("/devstoreaccount1-sql/servers/pendingsrv")
+            .then().statusCode(201);
+        given().contentType("application/json").body(check("pendingsrv")).when().post(CHECK).then().statusCode(200)
+            .body("available", equalTo(false));
     }
 }

@@ -9,11 +9,13 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -144,6 +146,40 @@ class SqlProvisioningServiceTest {
 
         assertTrue(service.get(firstOperationId).isEmpty());
         assertTrue(service.get(lastOperationId).isPresent());
+    }
+
+    @Test
+    void aStartedContainerKeepsTheChildrenWrittenWhileItStarted() {
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
+        SqlServerManager manager = mock(SqlServerManager.class);
+        when(manager.startServer(any())).thenAnswer(invocation -> {
+            // Requests that land while the container starts.
+            state.putDatabase("busy-server",
+                SqlState.SqlDatabaseEntry.create("appdb", "busy-server", null, null, null));
+            state.putFirewallRule("busy-server", new SqlState.SqlFirewallRule("office", "10.0.0.1", "10.0.0.1"));
+            state.removeDatabase("busy-server", "olddb");
+            return ((SqlState.SqlServerEntry) invocation.getArgument(0))
+                .withContainer("container-id", 14330, "localhost");
+        });
+        ExecutorService executor = mock(ExecutorService.class);
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(executor).execute(any());
+        service = new SqlProvisioningService(state, manager, executor);
+        SqlState.SqlServerEntry desired = server("busy-server");
+        state.putServer(desired);
+        state.putDatabase("busy-server", SqlState.SqlDatabaseEntry.create("olddb", "busy-server", null, null, null));
+
+        service.begin(state.getServer("busy-server").orElseThrow());
+
+        SqlState.SqlServerEntry ready = state.getServer("busy-server").orElseThrow();
+        assertEquals("Ready", ready.provisioningState());
+        assertEquals("container-id", ready.containerId());
+        assertTrue(state.databaseExists("busy-server", "appdb"));
+        assertTrue(state.databaseExists("busy-server", "master"));
+        assertFalse(state.databaseExists("busy-server", "olddb"));
+        assertTrue(state.getFirewallRule("busy-server", "office").isPresent());
     }
 
     private SqlProvisioningService.SqlProvisioningOperation awaitTerminal(

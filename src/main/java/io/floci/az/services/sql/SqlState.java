@@ -88,6 +88,27 @@ public class SqlState {
     }
 
     /**
+     * Writes the server fields of {@code updated} over the stored server of its name, whose databases and firewall
+     * rules are kept: one written since {@code updated} was read is not undone. Writes {@code updated} as it is when
+     * no server of its name is stored.
+     */
+    public synchronized void updateServer(SqlServerEntry updated) {
+        putServer(getServer(updated.serverName()).map(updated::withChildrenOf).orElse(updated));
+    }
+
+    /**
+     * Records a started container on the stored server of its name, which turns {@code Ready}; every other field is
+     * the stored one, so a database, firewall rule or update written while the container started is kept. Empty,
+     * and nothing written, when no server of that name is stored any more.
+     */
+    public synchronized Optional<SqlServerEntry> attachContainer(SqlServerEntry started) {
+        Optional<SqlServerEntry> attached = getServer(started.serverName())
+            .map(current -> current.withContainer(started.containerId(), started.hostPort(), started.host()));
+        attached.ifPresent(this::putServer);
+        return attached;
+    }
+
+    /**
      * Writes {@code change} applied to the server {@code id} names, or to empty when there is none, in one store
      * operation, so two concurrent creates of one server keep the first one's record; true when it was created.
      */
@@ -328,6 +349,14 @@ public class SqlState {
                 location, administratorLogin, administratorLoginPassword,
                 id, port, reachableHost, "Ready", null, null,
                 tags, databases, firewallRules, createdAt);
+        }
+
+        /** This server's own fields over the databases and firewall rules of {@code stored}. */
+        public SqlServerEntry withChildrenOf(SqlServerEntry stored) {
+            return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
+                location, administratorLogin, administratorLoginPassword,
+                containerId, hostPort, host, provisioningState, failureCode, failureMessage,
+                tags, stored.databases(), stored.firewallRules(), createdAt);
         }
 
         public SqlServerEntry withProvisioningState(String newState, String code, String message) {

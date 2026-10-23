@@ -55,8 +55,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService,
-            mock(GlobalNameRegistry.class));
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
 
         ExecutorService requests = Executors.newFixedThreadPool(2);
         try {
@@ -92,8 +91,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService,
-            mock(GlobalNameRegistry.class));
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
 
         Response response = handler.handle(request("PUT", BODY));
 
@@ -102,6 +100,14 @@ class SqlHandlerConcurrencyTest {
             ArgumentCaptor.forClass(SqlState.SqlServerEntry.class);
         verify(provisioningService).begin(desired.capture());
         assertEquals("StrongPass1!", desired.getValue().administratorLoginPassword());
+    }
+
+    /** A registry that reserves every name, as an empty one does. */
+    private static GlobalNameRegistry names() {
+        GlobalNameRegistry names = mock(GlobalNameRegistry.class);
+        when(names.reserve(any(), any(), any(), any())).thenAnswer(invocation -> new GlobalNameRegistry.Reservation(
+            GlobalNameRegistry.Outcome.RESERVED, invocation.getArgument(3), 1));
+        return names;
     }
 
     private static EmulatorConfig managedConfig() {

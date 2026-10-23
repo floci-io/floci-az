@@ -338,4 +338,18 @@ class SqlStateTest {
             }
         };
     }
+
+    @Test
+    void aServerUpdateKeepsTheChildrenWrittenSinceItsRead() {
+        state.putServer(server("upd"));
+        SqlState.SqlServerEntry live = state.getServer("upd").orElseThrow();
+
+        state.putDatabase("upd", SqlState.SqlDatabaseEntry.create("db1", "upd", null, null, null));
+        state.putFirewallRule("upd", new SqlState.SqlFirewallRule("AllowAll", "0.0.0.0", "255.255.255.255"));
+
+        state.updateServer(live.withProvisioningState("Creating", null, null));
+        assertEquals("Creating", state.getServer("upd").orElseThrow().provisioningState());
+        assertTrue(state.databaseExists("upd", "db1"));
+        assertTrue(state.getFirewallRule("upd", "AllowAll").isPresent());
+    }
 }

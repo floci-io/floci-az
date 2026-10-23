@@ -13,6 +13,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalName;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
@@ -229,63 +230,81 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             }
 
             Map<String, String> tags = parseTags(body.path("tags"));
-            String sub = extractSubscriptionId(request.resourcePath());
-            String rg  = extractResourceGroup(request.resourcePath());
+            Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
+            // The account path names no scope: it updates the server of this name where it is stored, so the name
+            // keeps its owner. A create there goes to the default scope.
+            boolean accountPath = ArmScope.of(request.resourcePath()).isEmpty();
+            String sub = accountPath && current.isPresent() ? current.get().subscriptionId()
+                : extractSubscriptionId(request.resourcePath());
+            String rg  = accountPath && current.isPresent() ? current.get().resourceGroupName()
+                : extractResourceGroup(request.resourcePath());
 
             // The name is reserved in the GlobalNameRegistry by the gate's GlobalNameRule before an ARM create
-            // runs, so a name another scope owns never reaches here.
+            // runs, so a name another scope owns never reaches here. A create outside the gate reserves it here
+            // (an ARM create finds its own reservation OWNED), so it cannot overtake an ARM create in flight.
             ArmResourceId id = serverId(sub, rg, serverName);
-            Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
-
-            if (config.services().sql().dataPlaneProvider() == NONE) {
-                // A server of this name under another id (a create through the convenience paths) moves here,
-                // keeping its databases and firewall rules: one server per name.
-                Optional<SqlState.SqlServerEntry> named = current;
-                boolean created = state.createOrUpdateServer(id, existing -> {
-                    SqlState.SqlServerEntry ready = desiredEntry(existing.or(() -> named), serverName, sub, rg,
-                        location, login, password, tags, "Ready");
-                    ready.databases().putIfAbsent("master", SqlState.SqlDatabaseEntry.master(serverName));
-                    return ready;
-                });
-                boolean isNew = created && current.isEmpty();
-                holdName(request, id);
-                SqlState.SqlServerEntry ready = state.getServer(id).orElseThrow();
-                return Response.status(isNew ? 201 : 200).entity(serverResponse(ready)).build();
-            }
-
-            serverManager.requireEulaAccepted();
-            if (current.isPresent() && "Creating".equals(current.get().provisioningState())) {
-                Optional<SqlProvisioningService.SqlProvisioningOperation> active =
-                    provisioningService.activeOperation(serverName);
-                if (active.isPresent()) {
-                    if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
-                        return ArmErrors.error(409, "ConflictingServerOperation",
-                            "A conflicting create or update operation is in progress for SQL server '"
-                                + serverName + "'.");
-                    }
-                    return accepted(request, active.get(), current.get());
+            long reservation = 0;
+            if (current.isEmpty()) {
+                GlobalNameRegistry.Reservation reserved = names.reserve(cloud(request), CloudSuffix.SQL, serverName,
+                    id);
+                if (reserved.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
+                    return nameTaken(serverName);
                 }
-                current = state.getServer(serverName);
+                reservation = reserved.token();
             }
+            try {
+                if (config.services().sql().dataPlaneProvider() == NONE) {
+                    // A server of this name under another id (a create through the convenience paths) moves here,
+                    // keeping its databases and firewall rules: one server per name.
+                    Optional<SqlState.SqlServerEntry> named = current;
+                    boolean created = state.createOrUpdateServer(id, existing -> {
+                        SqlState.SqlServerEntry ready = desiredEntry(existing.or(() -> named), serverName, sub, rg,
+                            location, login, password, tags, "Ready");
+                        ready.databases().putIfAbsent("master", SqlState.SqlDatabaseEntry.master(serverName));
+                        return ready;
+                    });
+                    boolean isNew = created && current.isEmpty();
+                    holdName(request, id);
+                    SqlState.SqlServerEntry ready = state.getServer(id).orElseThrow();
+                    return Response.status(isNew ? 201 : 200).entity(serverResponse(ready)).build();
+                }
 
-            if (current.isPresent()
-                    && "Ready".equals(current.get().provisioningState())
-                    && hasDataPlaneRuntime(current.get())) {
-                SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
-                    location, login, password, tags, "Ready");
-                state.putServer(updated);
+                serverManager.requireEulaAccepted();
+                if (current.isPresent() && "Creating".equals(current.get().provisioningState())) {
+                    Optional<SqlProvisioningService.SqlProvisioningOperation> active =
+                        provisioningService.activeOperation(serverName);
+                    if (active.isPresent()) {
+                        if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
+                            return ArmErrors.error(409, "ConflictingServerOperation",
+                                "A conflicting create or update operation is in progress for SQL server '"
+                                    + serverName + "'.");
+                        }
+                        return accepted(request, active.get(), current.get());
+                    }
+                    current = state.getServer(serverName);
+                }
+
+                if (current.isPresent()
+                        && "Ready".equals(current.get().provisioningState())
+                        && hasDataPlaneRuntime(current.get())) {
+                    SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
+                        location, login, password, tags, "Ready");
+                    state.updateServer(updated);
+                    holdName(request, id);
+                    return Response.ok(serverResponse(updated)).build();
+                }
+
+                SqlState.SqlServerEntry desired = desiredEntry(current, serverName, sub, rg,
+                    location, login, password, tags, "Creating");
+                state.updateServer(desired);
                 holdName(request, id);
-                return Response.ok(serverResponse(updated)).build();
+                SqlProvisioningService.SqlProvisioningOperation operation =
+                    provisioningService.begin(desired);
+                return accepted(request, operation, desired);
+            } finally {
+                // A no-op once the create committed the name, and for a reservation this request did not make.
+                names.releasePending(cloud(request), CloudSuffix.SQL, serverName, reservation);
             }
-
-            SqlState.SqlServerEntry desired = desiredEntry(current, serverName, sub, rg,
-                location, login, password, tags, "Creating");
-            state.putServer(desired);
-            holdName(request, id);
-            SqlProvisioningService.SqlProvisioningOperation operation =
-                provisioningService.begin(desired);
-            return accepted(request, operation, desired);
-
         } catch (SqlServerManager.EulaNotAcceptedException e) {
             return ArmErrors.error(503, "EulaNotAccepted", e.getMessage());
         } catch (Exception e) {
@@ -756,6 +775,13 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
      */
     private void holdName(AzureRequest request, ArmResourceId id) {
         names.commit(cloud(request), CloudSuffix.SQL, id.name(), id);
+    }
+
+    /** A create that found the name reserved for another server: Azure SQL's name conflict. */
+    private static Response nameTaken(String serverName) {
+        GlobalName global = SqlArmSurface.SERVER_DNS_NAME;
+        return ArmErrors.error(global.conflictStatus(), global.conflictCode(),
+            String.format(global.conflictMessage(), serverName));
     }
 
     private static ArmResourceId serverId(String subscriptionId, String resourceGroup, String serverName) {
