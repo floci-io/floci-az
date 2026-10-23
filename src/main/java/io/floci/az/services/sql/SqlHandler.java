@@ -233,7 +233,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
             // The account path names no scope: it updates the server of this name where it is stored, so the name
             // keeps its owner. A create there goes to the default scope.
-            boolean accountPath = ArmScope.of(request.resourcePath()).isEmpty();
+            boolean accountPath = scope(request).isEmpty();
             String sub = accountPath && current.isPresent() ? current.get().subscriptionId()
                 : extractSubscriptionId(request.resourcePath());
             String rg  = accountPath && current.isPresent() ? current.get().resourceGroupName()
@@ -742,6 +742,11 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
     // ── Standard error responses ──────────────────────────────────────────────
 
 
+    /** The subscription and resource group of an ARM path; empty for the account path. */
+    private static Optional<ArmScope> scope(AzureRequest request) {
+        return ArmScope.of(request.resourcePath());
+    }
+
     /**
      * Whether an ARM path names a server stored under another scope. Child calls look a server up by its name,
      * which is global, so a path whose scope does not hold the server of that name must not reach it: it reads as
@@ -752,7 +757,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (!tail.matches("servers/[^/]+(/.*)?")) {
             return false;
         }
-        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
+        Optional<ArmScope> scope = scope(request);
         if (scope.isEmpty()) {
             return false;
         }
