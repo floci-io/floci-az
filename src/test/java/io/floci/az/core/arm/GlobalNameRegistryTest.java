@@ -94,6 +94,28 @@ class GlobalNameRegistryTest {
     }
 
     @Test
+    void aDeleteThatFinishesAfterAPutRecreatedTheResourceKeepsTheName() {
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        GlobalNameSource.Claim claim = new GlobalNameSource.Claim(CloudSuffix.REDIS, "c1", owner);
+        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        stored.add(claim);
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+
+        stored.remove(claim);
+        assertEquals(GlobalNameRegistry.Outcome.OWNED,
+            registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner).outcome(),
+            "a PUT to the same cache while the DELETE is in flight finds the name owned");
+        stored.add(claim);
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+
+        assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow(),
+            "the PUT stored the cache again, so the DELETE's release keeps the name");
+        assertEquals(GlobalNameRegistry.Outcome.TAKEN,
+            registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", cache("s2", "rg", "c1")).outcome());
+    }
+
+    @Test
     void eachCloudAndEachSuffixHasItsOwnNames() {
         registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", cache("s1", "rg", "c1"));
 

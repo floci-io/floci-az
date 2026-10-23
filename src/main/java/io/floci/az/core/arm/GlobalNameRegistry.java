@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
  * a concurrent PUT from another resource, so concurrent creates leave one owner. Only the request that made a
  * reservation can release it, by its {@link Reservation#token() token}: a concurrent PUT to the same resource
  * finds it {@link Outcome#OWNED} and holds no token, so its failure cannot free a name the first request is still
- * creating.
+ * creating. A {@link #release delete} frees a name only once its owner is no longer stored, so a PUT that recreated
+ * the resource while the delete was finishing keeps it.
  *
  * <p>Nothing is persisted: the registry rebuilds from every {@link GlobalNameSource} on first use, and again after
  * {@code POST /_admin/reset}, so it cannot drift from the stores it mirrors.
@@ -126,11 +127,15 @@ public class GlobalNameRegistry implements Resettable {
         }
     }
 
-    /** Frees the name {@code owner} holds: it was deleted. */
+    /**
+     * Frees the name {@code owner} holds: it was deleted. A name whose owner is still stored stays held: a PUT to the
+     * same resource that ran between the delete's store removal and this release found the name owned, created the
+     * resource again and committed, so freeing the name would let another resource take a name a stored one uses.
+     */
     public synchronized void release(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
         String key = key(cloud, suffix, name);
         Entry existing = names.get(key);
-        if (existing != null && sameResource(existing.owner(), owner)) {
+        if (existing != null && sameResource(existing.owner(), owner) && !stored(cloud, suffix, name, owner)) {
             names.remove(key);
         }
     }

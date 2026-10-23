@@ -15,7 +15,7 @@ import java.util.Optional;
  * The gate rule for global DNS names ({@link GlobalName}): a PUT of a resource whose type declares one reserves the
  * name in the {@link GlobalNameRegistry} before its handler runs, and is answered with the type's own conflict when
  * another resource owns it. The reservation is committed when the handler answers 2xx and released otherwise; a
- * 2xx DELETE releases the name. Every other request passes: a read or delete through another resource's scope
+ * 2xx DELETE releases the name, unless a concurrent PUT to the same resource stored it again. Every other request passes: a read or delete through another resource's scope
  * misses that resource's key and is the handler's 404, as before.
  *
  * <p>Only the request that made a reservation releases it on failure: the gate hands each exit hook the call

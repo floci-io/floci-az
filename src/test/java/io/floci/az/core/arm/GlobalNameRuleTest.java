@@ -8,9 +8,10 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -33,7 +34,8 @@ class GlobalNameRuleTest {
             ArmResourceType.resourceGroup("Microsoft.Storage", "storageAccounts", LocationPolicy.REQUIRED)
                 .withGlobalName(ACCOUNT)))));
 
-    private final GlobalNameRegistry names = new GlobalNameRegistry(List::of,
+    private final List<GlobalNameSource.Claim> stored = new ArrayList<>();
+    private final GlobalNameRegistry names = new GlobalNameRegistry(() -> List.of(() -> List.copyOf(stored)),
         subscription -> CloudCatalog.forNameOrPublic("AzureCloud"), () -> Set.of(CloudSuffix.REDIS));
     private final GlobalNameRule rule = new GlobalNameRule(TYPES, names);
 
@@ -107,6 +109,27 @@ class GlobalNameRuleTest {
         assertEquals(first.id().canonicalKey(),
             names.owner(CloudCatalog.forNameOrPublic("AzureCloud"), CloudSuffix.REDIS, "c1").orElseThrow()
                 .canonicalKey());
+    }
+
+    @Test
+    void aDeleteFinishingAfterAPutRecreatedTheCacheKeepsItsName() {
+        ArmCall create = call("PUT", cache("s1", "rg", "c1"));
+        GlobalNameSource.Claim claim = new GlobalNameSource.Claim(CloudSuffix.REDIS, "c1", create.id());
+        rule.enter(create);
+        stored.add(claim);
+        rule.exit(create, Response.status(201).build());
+
+        ArmCall delete = call("DELETE", cache("s1", "rg", "c1"));
+        rule.enter(delete);
+        stored.remove(claim);
+        ArmCall recreate = call("PUT", cache("s1", "rg", "c1"));
+        assertEquals(ArmVerdict.proceed(), rule.enter(recreate), "the owner may PUT while its DELETE runs");
+        stored.add(claim);
+        rule.exit(recreate, Response.status(201).build());
+        rule.exit(delete, Response.status(202).build());
+
+        assertInstanceOf(ArmVerdict.Respond.class, rule.enter(call("PUT", cache("s2", "rg", "c1"))),
+            "the recreated cache still owns its name");
     }
 
     @Test
