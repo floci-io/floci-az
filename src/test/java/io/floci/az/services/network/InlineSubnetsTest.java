@@ -3,6 +3,9 @@ package io.floci.az.services.network;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.stream.IntStream;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -48,6 +51,33 @@ class InlineSubnetsTest {
         given().when().get(VNETS + "vnet-b/subnets/db" + API).then().statusCode(404);
         given().when().get(VNETS + "vnet-b/subnets" + API)
             .then().statusCode(200).body("value.name", contains("apps"));
+    }
+
+    @Test
+    void aVnetPutWithoutSubnetsKeepsListingTheChildren() {
+        putVnet("vnet-d", null);
+        putSubnet("vnet-d", "a", "10.40.6.0/24");
+        putSubnet("vnet-d", "b", "10.40.7.0/24");
+        putVnet("vnet-d", null);
+        putSubnet("vnet-d", "a", "10.40.8.0/24");
+
+        given().when().get(VNETS + "vnet-d" + API)
+            .then().statusCode(200).body("properties.subnets.name", contains("a", "b"));
+    }
+
+    @Test
+    void parallelSubnetWritesAllReachTheVnetList() {
+        putVnet("vnet-e", null);
+        List<String> names = IntStream.range(0, 16).mapToObj(i -> "s" + i).toList();
+        names.parallelStream().forEach(name -> putSubnet("vnet-e", name, "10.40.9.0/24"));
+
+        given().when().get(VNETS + "vnet-e" + API)
+            .then().statusCode(200).body("properties.subnets.name", containsInAnyOrder(names.toArray()));
+    }
+
+    private static void putSubnet(String vnet, String name, String prefix) {
+        given().contentType("application/json").body("{\"properties\":{\"addressPrefix\":\"" + prefix + "\"}}")
+            .when().put(VNETS + vnet + "/subnets/" + name + API).then().statusCode(200);
     }
 
     @Test
