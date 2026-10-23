@@ -4,8 +4,8 @@
       "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
       "azure-cli/src/azure-cli/azure/cli/command_modules/container/tests/latest/test_container_commands.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
       "azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py": "f86c78ae126c4f3c8e110a116dde8e6f0cfdc04e",
-      "azure-docs/articles/azure-government/compare-azure-government-global-azure.md": "bdb58b863b974833d8bfd7b3f5ff3230e594e9c3",
-      "azure-docs/articles/azure-government/documentation-government-welcome.md": "bdb58b863b974833d8bfd7b3f5ff3230e594e9c3",
+      "azure-docs/articles/azure-government/compare-azure-government-global-azure.md": "71cd94cdccddcbfcee5ea700485a8d194c2a1fc3",
+      "azure-docs/articles/azure-government/documentation-government-welcome.md": "71cd94cdccddcbfcee5ea700485a8d194c2a1fc3",
       "azure-rest-api-specs/specification/app/resource-manager/Microsoft.App/ContainerApps/stable/2024-03-01/examples/Revisions_Get.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
       "azure-rest-api-specs/specification/communication/data-plane/Messages/stable/2024-08-30/communicationservicesmessages.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
       "azure-rest-api-specs/specification/containerservice/resource-manager/Microsoft.ContainerService/aks/stable/2026-02-01/examples/ManagedClustersCreate_Update.json": "7efab4ca79331ad2ac48eb67fb944d030745918d",
@@ -784,6 +784,10 @@
           "source": "azure-rest-api-specs/specification/containerservice/resource-manager/Microsoft.ContainerService/aks/stable/2026-02-01/examples/ManagedClustersCreate_Update.json (fqdn {dnsPrefix}-{hash}.hcp.{location}.azmk8s.io)",
           "value": "azmk8s.io"
         },
+        "APIM": {
+          "source": "go-azure-sdk/sdk/environments/azure_public.go; azure-docs/articles/azure-government/compare-azure-government-global-azure.md (API Management Gateway, Azure Public)",
+          "value": "azure-api.net"
+        },
         "APPCONFIG": {
           "source": "go-azure-sdk/sdk/environments/azure_public.go",
           "value": "azconfig.io"
@@ -1140,6 +1144,10 @@
           "source": "UNSETTLED: AKS host suffix in AzureUSGovernment; no local source",
           "value": null
         },
+        "APIM": {
+          "source": "go-azure-sdk/sdk/environments/azure_gov.go; azure-docs/articles/azure-government/compare-azure-government-global-azure.md (API Management Gateway, Azure Government)",
+          "value": "azure-api.us"
+        },
         "APPCONFIG": {
           "source": "go-azure-sdk/sdk/environments/azure_gov.go",
           "value": "azconfig.azure.us"
@@ -1494,6 +1502,10 @@
         "AKS": {
           "source": "UNSETTLED: AKS host suffix in AzureChinaCloud; no local source",
           "value": null
+        },
+        "APIM": {
+          "source": "go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "azure-api.cn"
         },
         "APPCONFIG": {
           "source": "go-azure-sdk/sdk/environments/azure_china.go",

@@ -2,6 +2,8 @@ package io.floci.az.services.sql;
 
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +27,7 @@ class SqlStateTest {
 
     @BeforeEach
     void setup() {
-        state = new SqlState(new InMemoryStorage<>());
+        state = new SqlState(over(new InMemoryStorage<>()));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -241,7 +243,7 @@ class SqlStateTest {
     void persistenceReload() {
         // Shared backend simulates a persistent store (WAL, hybrid, persistent mode).
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
-        SqlState original = new SqlState(sharedBackend);
+        SqlState original = new SqlState(over(sharedBackend));
 
         // Populate: server with containerId/hostPort/host set (as if a container is running on a
         // shared Docker network, so host is the container name rather than localhost).
@@ -254,7 +256,7 @@ class SqlStateTest {
             new SqlState.SqlFirewallRule("rule1", "10.0.0.1", "10.0.0.254"));
 
         // Simulate emulator restart: new SqlState backed by the same storage
-        SqlState reloaded = new SqlState(sharedBackend);
+        SqlState reloaded = new SqlState(over(sharedBackend));
 
         // ── ARM metadata is fully restored ────────────────────────────────────
         assertTrue(reloaded.serverExists("persist-srv"), "server should survive reload");
@@ -293,17 +295,17 @@ class SqlStateTest {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
 
         // First session: create server
-        SqlState session1 = new SqlState(sharedBackend);
+        SqlState session1 = new SqlState(over(sharedBackend));
         session1.putServer(server("srv"));
 
         // Second session (reload): add a database
-        SqlState session2 = new SqlState(sharedBackend);
+        SqlState session2 = new SqlState(over(sharedBackend));
         assertTrue(session2.serverExists("srv"), "server visible in second session");
         session2.putDatabase("srv",
             SqlState.SqlDatabaseEntry.create("newdb", "srv", null, null, null));
 
         // Third session (reload): database should be there
-        SqlState session3 = new SqlState(sharedBackend);
+        SqlState session3 = new SqlState(over(sharedBackend));
         assertTrue(session3.databaseExists("srv", "newdb"),
             "database added in session2 must survive into session3");
     }
@@ -312,7 +314,7 @@ class SqlStateTest {
     @DisplayName("clear removes entries from both in-memory cache and backend")
     void clearPurgesBackend() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();
-        SqlState s = new SqlState(sharedBackend);
+        SqlState s = new SqlState(over(sharedBackend));
 
         s.putServer(server("s1"));
         s.putServer(server("s2"));
@@ -322,8 +324,32 @@ class SqlStateTest {
         assertEquals(0, s.listServers().size(), "in-memory cache cleared");
 
         // A fresh load from the same backend must also be empty
-        SqlState reloaded = new SqlState(sharedBackend);
+        SqlState reloaded = new SqlState(over(sharedBackend));
         assertEquals(0, reloaded.listServers().size(),
             "backend cleared — reload produces no entries");
+    }
+
+    /** A factory whose every store is {@code backend}, so a test builds the state over a backend it holds. */
+    static StorageFactory over(StorageBackend<String, StoredObject> backend) {
+        return new StorageFactory(null) {
+            @Override
+            public synchronized StorageBackend<String, StoredObject> create(String serviceName) {
+                return backend;
+            }
+        };
+    }
+
+    @Test
+    void aServerUpdateKeepsTheChildrenWrittenSinceItsRead() {
+        state.putServer(server("upd"));
+        SqlState.SqlServerEntry live = state.getServer("upd").orElseThrow();
+
+        state.putDatabase("upd", SqlState.SqlDatabaseEntry.create("db1", "upd", null, null, null));
+        state.putFirewallRule("upd", new SqlState.SqlFirewallRule("AllowAll", "0.0.0.0", "255.255.255.255"));
+
+        state.updateServer(live.withProvisioningState("Creating", null, null));
+        assertEquals("Creating", state.getServer("upd").orElseThrow().provisioningState());
+        assertTrue(state.databaseExists("upd", "db1"));
+        assertTrue(state.getFirewallRule("upd", "AllowAll").isPresent());
     }
 }

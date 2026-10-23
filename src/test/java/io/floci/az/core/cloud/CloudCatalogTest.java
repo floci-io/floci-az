@@ -94,6 +94,8 @@ class CloudCatalogTest {
         assertEquals(Optional.of("vault.azure.cn"), china.suffix(CloudSuffix.KEYVAULT));
         assertEquals(Optional.of("azurecr.cn"), china.suffix(CloudSuffix.ACR));
         assertEquals(Optional.empty(), china.suffix(CloudSuffix.REDIS));
+        assertEquals(Optional.of("azure-api.us"), gov.suffix(CloudSuffix.APIM));
+        assertEquals(Optional.of("azure-api.cn"), china.suffix(CloudSuffix.APIM));
     }
 
     @Test

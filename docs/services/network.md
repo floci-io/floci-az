@@ -9,7 +9,10 @@ Compatible with ARM-speaking clients, Terraform's AzureRM provider, and OpenTofu
 ## Features
 
 - **Virtual networks**: CreateOrUpdate, Get, Delete, and List by resource group
-- **Subnets**: CreateOrUpdate, Get, Delete, and List under a virtual network
+- **Subnets**: CreateOrUpdate, Get, Delete, and List under a virtual network. Subnets a VNet PUT names
+  inline in `properties.subnets` are stored as child subnets, and a later VNet PUT whose list leaves
+  one out removes it. A VNet PUT without `subnets` keeps the existing ones. A subnet written on its own
+  shows in its VNet's `properties.subnets`
 - **Network interfaces**: CreateOrUpdate, Get, Delete, and List by resource group
 - **Public IP addresses**: CreateOrUpdate, Get, Delete, and List by resource group
 - **Network security groups**: CreateOrUpdate, Get, Delete, and List by resource group; inline and standalone `securityRules` (child endpoint) with synthesized rule IDs, plus the six real-Azure `defaultSecurityRules`
