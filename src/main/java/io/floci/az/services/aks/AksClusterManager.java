@@ -211,6 +211,17 @@ public class AksClusterManager {
             LOG.infov("Leaving k3s container for AKS cluster {0} running", cluster.getName());
             return;
         }
+        removeCluster(cluster);
+    }
+
+    /**
+     * Stops and removes the k3s container and its data volume whatever {@code keepRunningOnShutdown} says. For a record
+     * that is being dropped for good, whose container nothing could reach again once the record is gone.
+     */
+    public void removeCluster(ManagedCluster cluster) {
+        if (cluster.getContainerId() == null) {
+            return;
+        }
         lifecycleManager.stopAndRemove(cluster.getContainerId(), null);
         lifecycleManager.removeVolume(containerName(cluster));
         releaseHostPort(cluster.getContainerId());
@@ -227,7 +238,7 @@ public class AksClusterManager {
         }
     }
 
-    private String containerName(ManagedCluster cluster) {
+    String containerName(ManagedCluster cluster) {
         return ContainerStorageHelper.dockerName(config, "aks-" + cluster.getInstanceId());
     }
 

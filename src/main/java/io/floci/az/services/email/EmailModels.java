@@ -1,10 +1,12 @@
 package io.floci.az.services.email;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -177,6 +179,43 @@ public final class EmailModels {
     ) {
         EmailSendResult(String id, String status) {
             this(id, status, null);
+        }
+    }
+
+    // ── ARM resource models ────────────────────────────────────────────────
+
+    /**
+     * A {@code Microsoft.Communication} resource as the ARM plane stores it: a communication service, an email
+     * service or an email domain. Persisted in the {@code email} backend's {@code ArmResourceStore}s, keyed by
+     * its canonical id.
+     *
+     * @param id         the ARM id, in the casing of the PUT that created it
+     * @param tags       the {@code tags} the client sent, or null when it sent none
+     * @param properties the response {@code properties}
+     */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record CommunicationResource(
+            String id,
+            String name,
+            String type,
+            String location,
+            Object tags,
+            Map<String, Object> properties
+    ) {
+        /** The resource's wire body. */
+        public Map<String, Object> toArm() {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("id", id);
+            body.put("name", name);
+            body.put("type", type);
+            body.put("location", location);
+            body.put("properties", properties);
+            if (tags != null) {
+                body.put("tags", tags);
+            }
+            return body;
         }
     }
 }

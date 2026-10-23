@@ -7,7 +7,13 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameSource;
+import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.apim.ApiManagementModels.ApimService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -22,12 +28,16 @@ import java.util.Objects;
 import java.util.UUID;
 
 @ApplicationScoped
-public class ApiManagementService {
+public class ApiManagementService implements GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(ApiManagementService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final Map<String, Map<String, Object>> services;
+    /**
+     * Every service, keyed by its canonical id. Services were kept in memory before this store, so no entry was ever
+     * written under another key shape and there are no legacy keys to read.
+     */
+    private final ArmResourceStore<ApimService> services;
     private final Map<String, Map<String, Object>> apis;
     private final Map<String, Map<String, Object>> operations;
     private final Map<String, Map<String, Object>> policies;
@@ -39,9 +49,10 @@ public class ApiManagementService {
     private final EmulatorConfig config;
 
     @Inject
-    public ApiManagementService(EmulatorConfig config, ApiManagementStore store) {
+    public ApiManagementService(EmulatorConfig config, ApiManagementStore store, StorageFactory storageFactory) {
         this.config = config;
-        this.services = store.services;
+        this.services = ArmResourceStore.create(storageFactory, "apim", ApimService.class, ApimService::id,
+                key -> false);
         this.apis = store.apis;
         this.operations = store.operations;
         this.policies = store.policies;
@@ -64,18 +75,33 @@ public class ApiManagementService {
             return notFound(path);
         }
 
-        String serviceName = parts[1];
+        ArmResourceId requested = serviceId(sub, rg, parts[1]);
         if (parts.length == 2) {
             return switch (method) {
-                case "PUT" -> createOrUpdateService(request, sub, rg, serviceName);
-                case "GET" -> getResource(serviceKey(sub, rg, serviceName), services, "service/" + serviceName);
+                case "PUT" -> createOrUpdateService(request, requested);
+                case "GET" -> services.get(requested)
+                        .map(stored -> Response.ok(stored.value().toArm()).build())
+                        .orElseGet(() -> notFound("service/" + requested.name()));
                 case "DELETE" -> {
-                    deleteService(sub, rg, serviceName);
+                    deleteService(requested);
                     yield Response.ok().build();
                 }
                 default -> Response.status(405).build();
             };
         }
+        return handleChild(request, path, method, services.get(requested).map(ArmResourceStore.Stored::id)
+                .orElse(requested), parts);
+    }
+
+    /**
+     * A request below a service. The children are keyed by the service's own casing, so a path that differs from it
+     * only in case reaches the same children.
+     */
+    private Response handleChild(AzureRequest request, String path, String method, ArmResourceId service,
+                                 String[] parts) {
+        String sub = service.subscriptionId();
+        String rg = service.resourceGroup();
+        String serviceName = service.name();
 
         if (parts.length >= 3 && "policies".equals(parts[2])) {
             return handlePolicy(request, method, serviceKey(sub, rg, serviceName),
@@ -153,49 +179,56 @@ public class ApiManagementService {
     }
 
     public List<Map<String, Object>> listServices(String sub, String rg) {
-        return services.values().stream()
-                .filter(s -> sub.equals(s.get("_sub")) && rg.equals(s.get("_rg")))
-                .map(ApiManagementService::stripInternal)
-                .toList();
+        return list(new ArmScope(sub, rg));
     }
 
     public List<Map<String, Object>> listSubscriptionServices(String sub) {
-        return services.values().stream()
-                .filter(s -> sub.equals(s.get("_sub")))
-                .map(ApiManagementService::stripInternal)
+        return list(new ArmScope(sub, null));
+    }
+
+    private List<Map<String, Object>> list(ArmScope scope) {
+        return services.list(scope).stream().map(stored -> stored.value().toArm()).toList();
+    }
+
+    /** Whether a service of exactly this name exists, in any scope: the gateway knows the name alone. */
+    public boolean hasServiceNamed(String serviceName) {
+        return services.all().stream().anyMatch(stored -> serviceName.equals(stored.value().name()));
+    }
+
+    private synchronized Response createOrUpdateService(AzureRequest request, ArmResourceId requested) {
+        Map<String, Object> body = parseBody(request);
+        ArmResourceStore.Written<ApimService> written = services.createOrUpdate(requested, existing -> {
+            // A service keeps the casing of the PUT that created it, as ARM does.
+            ArmResourceId id = existing.map(service -> serviceId(service.id())).orElse(requested);
+            return newService(id, body);
+        });
+        LOG.infov("ARM: {0} API Management service {1}", written.created() ? "created" : "updated",
+                written.stored().value().name());
+        return Response.ok(written.stored().value().toArm()).build();
+    }
+
+    @Override
+    public List<Claim> globalNames() {
+        return services.all().stream()
+                .map(stored -> new Claim(CloudSuffix.APIM, stored.value().name(), stored.id()))
                 .toList();
     }
 
-    private synchronized Response createOrUpdateService(AzureRequest request, String sub, String rg, String serviceName) {
-        // Service names are global ({name}.azure-api.net): a second scope cannot claim one already in use.
-        ArmScope scope = new ArmScope(sub, rg);
-        boolean ownedElsewhere = services.values().stream().anyMatch(s -> serviceName.equalsIgnoreCase((String) s.get("name"))
-                && !scope.owns((String) s.get("_sub"), (String) s.get("_rg")));
-        if (ownedElsewhere) {
-            return ArmErrors.error(409, "ServiceAlreadyExists", "Api service already exists: " + serviceName);
-        }
-        Map<String, Object> body = parseBody(request);
+    private ApimService newService(ArmResourceId id, Map<String, Object> body) {
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
         properties.put("provisioningState", "Succeeded");
-        properties.putIfAbsent("gatewayUrl", gatewayUrl(serviceName));
-        properties.putIfAbsent("managementApiUrl", config.effectiveBaseUrl() + "/subscriptions/" + sub
-                + "/resourceGroups/" + rg + "/providers/Microsoft.ApiManagement/service/" + serviceName);
+        properties.putIfAbsent("gatewayUrl", gatewayUrl(id.name()));
+        properties.putIfAbsent("managementApiUrl", config.effectiveBaseUrl() + id.id());
         properties.putIfAbsent("publisherEmail", "admin@example.com");
         properties.putIfAbsent("publisherName", "floci-az");
-
-        Map<String, Object> resource = resource(sub, rg, "Microsoft.ApiManagement/service", serviceName,
-                "/subscriptions/" + sub + "/resourceGroups/" + rg
-                        + "/providers/Microsoft.ApiManagement/service/" + serviceName,
-                bodyString(body, "location", "eastus"), properties);
         Object sku = body.get("sku");
-        resource.put("sku", sku instanceof Map<?, ?> ? sku : Map.of("name", "Developer", "capacity", 1));
-        services.put(serviceKey(sub, rg, serviceName), resource);
-        LOG.infof("ARM: created API Management service %s", serviceName);
-        return Response.ok(stripInternal(resource)).build();
+        Map<String, Object> skuValue = sku instanceof Map<?, ?> ? cast(sku) : Map.of("name", "Developer", "capacity", 1);
+        return new ApimService(id.id(), id.name(), bodyString(body, "location", "eastus"),
+                "\"" + UUID.randomUUID() + "\"", properties, skuValue);
     }
 
     private Response createOrUpdateApi(AzureRequest request, String sub, String rg, String serviceName, String apiId) {
-        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+        if (services.get(serviceId(sub, rg, serviceName)).isEmpty()) {
             return notFound("service/" + serviceName);
         }
         Map<String, Object> body = parseBody(request);
@@ -341,8 +374,11 @@ public class ApiManagementService {
         return resource == null ? notFound(path) : Response.ok(stripInternal(resource)).build();
     }
 
-    private void deleteService(String sub, String rg, String serviceName) {
-        services.remove(serviceKey(sub, rg, serviceName));
+    private void deleteService(ArmResourceId requested) {
+        ArmResourceId service = services.delete(requested).map(ArmResourceStore.Stored::id).orElse(requested);
+        String sub = service.subscriptionId();
+        String rg = service.resourceGroup();
+        String serviceName = service.name();
         apis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
         operations.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
         policies.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName)));
@@ -466,7 +502,7 @@ public class ApiManagementService {
 
     private Response createOrUpdateProduct(AzureRequest request, String sub, String rg,
                                            String serviceName, String productId) {
-        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+        if (services.get(serviceId(sub, rg, serviceName)).isEmpty()) {
             return notFound("service/" + serviceName);
         }
         Map<String, Object> body = parseBody(request);
@@ -508,7 +544,7 @@ public class ApiManagementService {
 
     private Response createOrUpdateSubscription(AzureRequest request, String sub, String rg,
                                                 String serviceName, String subscriptionId) {
-        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+        if (services.get(serviceId(sub, rg, serviceName)).isEmpty()) {
             return notFound("service/" + serviceName);
         }
         Map<String, Object> body = parseBody(request);
@@ -549,7 +585,7 @@ public class ApiManagementService {
 
     private Response createOrUpdateNamedValue(AzureRequest request, String sub, String rg,
                                               String serviceName, String namedValueId) {
-        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+        if (services.get(serviceId(sub, rg, serviceName)).isEmpty()) {
             return notFound("service/" + serviceName);
         }
         Map<String, Object> body = parseBody(request);
@@ -586,7 +622,7 @@ public class ApiManagementService {
 
     private Response createOrUpdateBackend(AzureRequest request, String sub, String rg,
                                            String serviceName, String backendId) {
-        if (!services.containsKey(serviceKey(sub, rg, serviceName))) {
+        if (services.get(serviceId(sub, rg, serviceName)).isEmpty()) {
             return notFound("service/" + serviceName);
         }
         Map<String, Object> body = parseBody(request);
@@ -710,6 +746,15 @@ public class ApiManagementService {
 
     private Response notFound(String message) {
         return ArmErrors.notFound(message);
+    }
+
+    private static ArmResourceId serviceId(String sub, String rg, String serviceName) {
+        return serviceId("/subscriptions/" + sub + "/resourceGroups/" + rg
+                + "/providers/Microsoft.ApiManagement/service/" + serviceName);
+    }
+
+    private static ArmResourceId serviceId(String id) {
+        return ArmResourceId.parse(id).orElseThrow(() -> new IllegalArgumentException("not a service id: " + id));
     }
 
     private static String serviceKey(String sub, String rg, String serviceName) {

@@ -121,13 +121,19 @@ class ArmSurfaceGoldenTest {
 
     /** The types that declare a name rule or a global DNS name: their bounds, suffix and conflict answer. */
     private static final String NAMED = """
+        Microsoft.ApiManagement/service    1-50    APIM    409    ServiceAlreadyExists
         Microsoft.App/containerApps    2-32    null    0    null
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
+        Microsoft.Communication/communicationServices    1-63     COMMUNICATION    409    Conflict
+        Microsoft.Communication/emailServices            1-63     null    0    null
+        Microsoft.Communication/emailServices/domains    1-253    null    0    null
         Microsoft.Compute/virtualMachines    1-64    null    0    null
         Microsoft.ContainerInstance/containerGroups    1-63    null    0    null
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         Microsoft.ContainerService/managedClusters               1-63    null    0    null
         Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
+        Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
+        Microsoft.EventGrid/topics    3-50    null    0    null
         Microsoft.Network/networkInterfaces        1-80    null    0    null
         Microsoft.Network/networkSecurityGroups    1-80    null    0    null
         Microsoft.Network/publicIPAddresses        1-80    null    0    null

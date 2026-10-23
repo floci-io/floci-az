@@ -25,7 +25,8 @@ checkouts that is not part of this repository (`tools/cloud/README.md` says how 
 - azure-docs `compare-azure-government-global-azure.md`, entra-docs
   `authentication-national-cloud.md`, the azure-cli storage client factory and a few REST spec
   files: the suffixes and hosts the SDK tables do not carry. Each such value must appear verbatim
-  in its file or the generation fails.
+  in its file or the generation fails. The same comparison table also cross-checks the API
+  Management suffix go-azure-sdk gives for the public and US Gov clouds.
 
 A cell no local file settles is emitted as `{"value": null, "source": "UNSETTLED: <what to
 verify>"}` and never as fact. A metadata key with no source (or with sources that disagree) is
@@ -99,7 +100,7 @@ API_VERSIONS = ["2018-01-01", "2019-05-01", "2022-09-01"]
 # Must stay in step with io.floci.az.core.cloud.CloudSuffix (CloudCatalogTest checks the Java side).
 SUFFIX_KEYS = ["BLOB", "DFS", "QUEUE", "TABLE", "KEYVAULT", "MHSM", "ACR", "SERVICEBUS", "SIGNALR", "APPCONFIG",
                "SQL", "POSTGRES", "MYSQL", "MARIADB", "REDIS", "EVENTGRID", "CONTAINERAPPS", "COMMUNICATION", "AKS",
-               "ACI"]
+               "ACI", "APIM"]
 STORAGE_SERVICES = {"BLOB": "blob", "DFS": "dfs", "QUEUE": "queue", "TABLE": "table"}
 # CloudSuffix -> (cloud.py CloudSuffixes attribute, go-azure-sdk environment field). Either may be None.
 SDK_SUFFIXES = {
@@ -112,6 +113,12 @@ SDK_SUFFIXES = {
     "POSTGRES": ("postgresql_server_endpoint", "Postgresql"),
     "MYSQL": ("mysql_server_endpoint", "MySql"),
     "MARIADB": ("mariadb_server_endpoint", "MariaDB"),
+    "APIM": (None, "ApiManagement"),
+}
+# CloudSuffix -> compare-azure-government-global-azure.md endpoint row that must agree with the SDK value
+# in the public and US Gov clouds (the doc has no China column).
+GOV_COMPARE_SUFFIXES = {
+    "APIM": "API Management Gateway",
 }
 # Public-cloud-only suffixes read from one REST spec or test file each: (file, literal that must appear).
 PUBLIC_EVIDENCE = {
@@ -436,6 +443,18 @@ def build_suffixes(cloud: str, cli: dict, go_env: dict, gov_compare: dict[str, t
             result[key] = unsettled(f"{key} suffix in {cloud}: neither cloud.py nor go-azure-sdk names one")
             continue
         result[key] = cell(agree(f"{cloud} {key} suffix", cli_value, go_value), "; ".join(witnesses))
+    for key, row in GOV_COMPARE_SUFFIXES.items():
+        if cloud not in ("AzureCloud", "AzureUSGovernment"):
+            continue
+        pair = gov_compare.get(row)
+        if pair is None:
+            raise SourceError(f"{GOV_COMPARE}: no {row} row")
+        column = "Azure Public" if cloud == "AzureCloud" else "Azure Government"
+        doc_value = norm_suffix(pair[0] if cloud == "AzureCloud" else pair[1])
+        sdk_value = result[key]["value"]
+        sources = [result[key]["source"]] if sdk_value is not None else []
+        sources.append(f"{GOV_COMPARE} ({row}, {column})")
+        result[key] = cell(agree(f"{cloud} {key} suffix", sdk_value, doc_value), "; ".join(sources))
     redis = gov_compare.get("Azure Cache for Redis")
     if redis is None:
         raise SourceError(f"{GOV_COMPARE}: no Azure Cache for Redis row")
