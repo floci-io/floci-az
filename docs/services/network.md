@@ -127,6 +127,12 @@ floci-az:
 - No route table or NAT gateway behavior; load balancers and application gateways are ARM-state synthesis only: no traffic is balanced or routed
 - Private endpoints and private DNS zones are ARM-state only: a backing NIC with a synthesized `10.0.0.4` is created and connections are auto-approved, but there is no real private-link traffic, name registration, or DNS resolution against the private zone records
 - No real IP address management; default private and public IPs are synthesized for SDK and provider compatibility
-- Deletes are state-only; deleting a VNet also removes its child subnets from the in-memory store
+- Deletes are state-only; deleting a VNet also removes its child subnets from the store
+
+## Storage
+
+Network resources live in the `network` store, which follows the global `floci-az.storage.mode`, so in a
+persistent mode they survive a restart. Resource ids compare case-insensitively, as in Azure: a request whose
+path differs only in case addresses the same resource, and responses keep the casing of its first `PUT`.
 
 The goal is API parity for local provisioning workflows, especially SDK, Azure CLI, Terraform, and OpenTofu flows that need Network dependencies before creating other Azure resources.

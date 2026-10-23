@@ -43,6 +43,24 @@ class InlineSubnetsTest {
     }
 
     @Test
+    void pathsThatDifferOnlyInCaseSyncTheSameSubnets() {
+        String lower = RG + "/providers/Microsoft.Network/virtualnetworks/";
+        given().contentType("application/json")
+            .body("{\"location\":\"westeurope\",\"properties\":{\"addressSpace\":{\"addressPrefixes\":[\"10.40.0.0/16\"]},"
+                + "\"subnets\":[{\"name\":\"apps\",\"properties\":{\"addressPrefix\":\"10.40.0.0/23\"}}]}}")
+            .when().put(lower + "vnet-case" + API)
+            .then().statusCode(200);
+        given().contentType("application/json").body("{\"properties\":{\"addressPrefix\":\"10.40.2.0/24\"}}")
+            .when().put(lower + "vnet-case/SUBNETS/db" + API)
+            .then().statusCode(200);
+
+        given().when().get(VNETS + "vnet-case/subnets" + API)
+            .then().statusCode(200).body("value.name", containsInAnyOrder("apps", "db"));
+        given().when().get(VNETS + "vnet-case" + API)
+            .then().statusCode(200).body("properties.subnets.name", containsInAnyOrder("apps", "db"));
+    }
+
+    @Test
     void aVnetPutThatDropsASubnetRemovesIt() {
         putVnet("vnet-b", "[{\"name\":\"apps\",\"properties\":{\"addressPrefix\":\"10.40.0.0/23\"}},"
             + "{\"name\":\"db\",\"properties\":{\"addressPrefix\":\"10.40.2.0/24\"}}]");

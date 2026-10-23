@@ -411,6 +411,11 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.DBforPostgreSQL/flexibleServers` | 3 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
 | `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
+| `Microsoft.Network/networkInterfaces` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/networkSecurityGroups` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/publicIPAddresses` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/virtualNetworks/subnets` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/virtualNetworks` | 2 to 64 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
 | `Microsoft.OperationalInsights/workspaces` | 4 to 63 letters, digits and hyphens, starting and ending with a letter or digit |
 | `Microsoft.Sql/servers/databases` | 1 to 128 characters without `<>*%&:\/?` or control characters, not ending with a period or a space |
 | `Microsoft.Sql/servers/firewallRules` | 1 to 128 characters without `<>*%&:;\/?` or control characters, not ending with a period |
