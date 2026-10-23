@@ -63,6 +63,12 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
     private final ObjectMapper mapper = new ObjectMapper();
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
+    /**
+     * Held while a create claims a server and while a delete decides whether to free its name, so a delete cannot
+     * free the name of a server created again at its id in between.
+     */
+    private final Object serverNames = new Object();
+
     @Inject
     public MariaDbHandler(EmulatorConfig config, MariaDbState state, MariaDbServerManager serverManager,
                           GlobalNameRegistry names) {
@@ -200,39 +206,21 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                if (state.claimServer(entry)) {
-                    if (config.services().mariaDb().mocked()) {
-                        return created(request, entry);
+                // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
+                // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
+                GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.MARIADB,
+                    serverName, MariaDbState.serverId(entry));
+                if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
+                    return nameTaken(request, serverName);
+                }
+                try {
+                    Optional<Response> createdResponse = createServer(request, entry);
+                    if (createdResponse.isPresent()) {
+                        return createdResponse.get();
                     }
-
-                    MariaDbState.ServerEntry claimed = entry;
-                    try {
-                        Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                        synchronized (lock) {
-                            Optional<MariaDbState.ServerEntry> current =
-                                state.getServer(MariaDbState.serverId(claimed));
-                            if (current.isPresent() && current.get().containerId() != null) {
-                                entry = current.get();
-                            } else {
-                                entry = serverManager.startServer(claimed);
-                                Optional<MariaDbState.ServerEntry> attached = state.attachContainer(entry);
-                                if (attached.isPresent()) {
-                                    entry = attached.get();
-                                } else {
-                                    // Deleted while its container started: writing it back would resurrect
-                                    // a name another subscription may have claimed since.
-                                    stopQuietly(entry);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        state.releaseClaim(claimed);
-                        LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
-                        return Response.status(500)
-                            .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
-                            .build();
-                    }
-                    return created(request, entry);
+                } finally {
+                    // A no-op once the create committed the name, and for a reservation this request did not make.
+                    names.releasePending(cloud(request), CloudSuffix.MARIADB, serverName, reservation.token());
                 }
                 // The name was claimed between the lookup and this write. A concurrent create of this server
                 // takes this request as an update; a server of this name elsewhere is a conflict.
@@ -322,13 +310,69 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
     private Response deleteServer(AzureRequest request, String serverName) {
         Optional<MariaDbState.ServerEntry> entry = server(request, serverName);
         if (entry.isEmpty()) return notFound("Server '" + serverName + "' not found");
-        ArmResourceId id = MariaDbState.serverId(entry.get());
-        state.removeServer(id);
-        names.release(cloud(request), CloudSuffix.MARIADB, entry.get().serverName(), id);
+        state.removeServer(MariaDbState.serverId(entry.get()));
+        releaseNameIfGone(cloud(request), entry.get());
         try { serverManager.stopServer(entry.get()); } catch (Exception e) {
             LOG.warnf(e, "Error stopping MariaDB container for server %s", serverName);
         }
         return Response.status(204).build();
+    }
+
+    /**
+     * Claims {@code claimed} and starts its container: the created answer, or the container failure. Empty when
+     * another create stored the name first.
+     */
+    private Optional<Response> createServer(AzureRequest request, MariaDbState.ServerEntry claimed) {
+        String serverName = claimed.serverName();
+        synchronized (serverNames) {
+            if (!state.claimServer(claimed)) {
+                return Optional.empty();
+            }
+        }
+        if (config.services().mariaDb().mocked()) {
+            return Optional.of(created(request, claimed));
+        }
+
+        MariaDbState.ServerEntry entry;
+        try {
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                Optional<MariaDbState.ServerEntry> current = state.getServer(MariaDbState.serverId(claimed));
+                if (current.isPresent() && current.get().containerId() != null) {
+                    entry = current.get();
+                } else {
+                    entry = serverManager.startServer(claimed);
+                    Optional<MariaDbState.ServerEntry> attached = state.attachContainer(entry);
+                    if (attached.isPresent()) {
+                        entry = attached.get();
+                    } else {
+                        // Deleted while its container started: writing it back would resurrect
+                        // a name another subscription may have claimed since.
+                        stopQuietly(entry);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            state.releaseClaim(claimed);
+            LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
+            return Optional.of(Response.status(500)
+                .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                .build());
+        }
+        return Optional.of(created(request, entry));
+    }
+
+    /**
+     * Frees the name of a deleted server, unless a create stored a server at its id again since: that create's
+     * commit holds the name now. Creates claim under the same lock, so none lands between the check and the release.
+     */
+    void releaseNameIfGone(CloudProfile cloud, MariaDbState.ServerEntry deleted) {
+        ArmResourceId id = MariaDbState.serverId(deleted);
+        synchronized (serverNames) {
+            if (state.getServer(id).isEmpty()) {
+                names.release(cloud, CloudSuffix.MARIADB, deleted.serverName(), id);
+            }
+        }
     }
 
     private Response handleServerList(AzureRequest request) {

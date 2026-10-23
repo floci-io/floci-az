@@ -79,7 +79,9 @@ class MariaDbResourceStoreTest {
             .body("properties.fullyQualifiedDomainName", equalTo("localhost"));
         given().when().get("/subscriptions/Sub-Legacy/providers/Microsoft.DBforMariaDB/servers" + API)
             .then().statusCode(200).body("value", hasSize(1));
-        given().when().get("/devstoreaccount1-mariadb/servers/legacymaria/connect").then().statusCode(200);
+        // The account path finds a server by name through an index built when the state starts, as it does after a
+        // restart over an older store; this entry was written after this run's state started.
+        assertTrue(new MariaDbState(storageFactory).getServer("legacymaria").isPresent());
 
         given().contentType("application/json").body("{\"tags\":{\"env\":\"t\"}}")
             .when().patch(server("Sub-Legacy", "RG-Legacy", "LegacyMaria") + API).then().statusCode(200);
@@ -88,5 +90,6 @@ class MariaDbResourceStoreTest {
             .anyMatch(key -> key.equals(server("sub-legacy", "rg-legacy", "legacymaria").toLowerCase())));
         given().when().get(server("Sub-Legacy", "RG-Legacy", "LegacyMaria") + API).then().statusCode(200)
             .body("tags.env", equalTo("t"));
+        given().when().get("/devstoreaccount1-mariadb/servers/legacymaria/connect").then().statusCode(200);
     }
 }
