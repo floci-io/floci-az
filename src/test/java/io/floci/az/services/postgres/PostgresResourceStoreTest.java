@@ -79,7 +79,9 @@ class PostgresResourceStoreTest {
             .body("properties.fullyQualifiedDomainName", equalTo("localhost"));
         given().when().get("/subscriptions/Sub-Legacy/providers/Microsoft.DBforPostgreSQL/flexibleServers" + API)
             .then().statusCode(200).body("value", hasSize(1));
-        given().when().get("/devstoreaccount1-postgres/flexibleServers/legacypg/connect").then().statusCode(200);
+        // The account path finds a server by name through an index built when the state starts, as it does after a
+        // restart over an older store; this entry was written after this run's state started.
+        assertTrue(new PostgresState(storageFactory).getServer("legacypg").isPresent());
 
         given().contentType("application/json").body("{\"tags\":{\"env\":\"t\"}}")
             .when().patch(server("Sub-Legacy", "RG-Legacy", "LegacyPg") + API).then().statusCode(202);
@@ -88,5 +90,6 @@ class PostgresResourceStoreTest {
             .anyMatch(key -> key.equals(server("sub-legacy", "rg-legacy", "legacypg").toLowerCase())));
         given().when().get(server("Sub-Legacy", "RG-Legacy", "LegacyPg") + API).then().statusCode(200)
             .body("tags.env", equalTo("t"));
+        given().when().get("/devstoreaccount1-postgres/flexibleServers/legacypg/connect").then().statusCode(200);
     }
 }

@@ -98,6 +98,12 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     /** Guards concurrent server-start operations (per server name). */
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
 
+    /**
+     * Held while a create claims a server and while a delete decides whether to free its name, so a delete cannot
+     * free the name of a server created again at its id in between.
+     */
+    private final Object serverNames = new Object();
+
     @Inject
     public PostgresHandler(EmulatorConfig config, PostgresState state, PostgresServerManager serverManager,
                            GlobalNameRegistry names) {
@@ -283,40 +289,21 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                if (state.claimServer(entry)) {
-                    if (config.services().postgres().mocked()) {
-                        // Control-plane only: no container, data plane unavailable. Reports Ready.
-                        return created(request, entry);
+                // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
+                // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
+                GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.POSTGRES,
+                    serverName, PostgresState.serverId(entry));
+                if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
+                    return nameTaken(request, serverName);
+                }
+                try {
+                    Optional<Response> createdResponse = createServer(request, entry);
+                    if (createdResponse.isPresent()) {
+                        return createdResponse.get();
                     }
-
-                    PostgresState.ServerEntry claimed = entry;
-                    try {
-                        Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                        synchronized (lock) {
-                            Optional<PostgresState.ServerEntry> current =
-                                state.getServer(PostgresState.serverId(claimed));
-                            if (current.isPresent() && current.get().containerId() != null) {
-                                entry = current.get();
-                            } else {
-                                entry = serverManager.startServer(claimed);
-                                Optional<PostgresState.ServerEntry> attached = state.attachContainer(entry);
-                                if (attached.isPresent()) {
-                                    entry = attached.get();
-                                } else {
-                                    // Deleted while its container started: writing it back would resurrect
-                                    // a name another subscription may have claimed since.
-                                    stopQuietly(entry);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        state.releaseClaim(claimed);
-                        LOG.errorf(e, "Failed to start PostgreSQL container for server=%s", serverName);
-                        return Response.status(500)
-                            .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
-                            .build();
-                    }
-                    return created(request, entry);
+                } finally {
+                    // A no-op once the create committed the name, and for a reservation this request did not make.
+                    names.releasePending(cloud(request), CloudSuffix.POSTGRES, serverName, reservation.token());
                 }
                 // The name was claimed between the lookup and this write. A concurrent create of this server
                 // takes this request as an update; a server of this name elsewhere is a conflict.
@@ -387,13 +374,70 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     private Response deleteServer(AzureRequest request, String serverName) {
         Optional<PostgresState.ServerEntry> entry = server(request, serverName);
         if (entry.isEmpty()) return notFound("Server '" + serverName + "' not found");
-        ArmResourceId id = PostgresState.serverId(entry.get());
-        state.removeServer(id);
-        names.release(cloud(request), CloudSuffix.POSTGRES, entry.get().serverName(), id);
+        state.removeServer(PostgresState.serverId(entry.get()));
+        releaseNameIfGone(cloud(request), entry.get());
         try { serverManager.stopServer(entry.get()); } catch (Exception e) {
             LOG.warnf(e, "Error stopping PostgreSQL container for server %s", serverName);
         }
         return Response.status(204).build();
+    }
+
+    /**
+     * Claims {@code claimed} and starts its container: the created answer, or the container failure. Empty when
+     * another create stored the name first.
+     */
+    private Optional<Response> createServer(AzureRequest request, PostgresState.ServerEntry claimed) {
+        String serverName = claimed.serverName();
+        synchronized (serverNames) {
+            if (!state.claimServer(claimed)) {
+                return Optional.empty();
+            }
+        }
+        if (config.services().postgres().mocked()) {
+            // Control-plane only: no container, data plane unavailable. Reports Ready.
+            return Optional.of(created(request, claimed));
+        }
+
+        PostgresState.ServerEntry entry;
+        try {
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                Optional<PostgresState.ServerEntry> current = state.getServer(PostgresState.serverId(claimed));
+                if (current.isPresent() && current.get().containerId() != null) {
+                    entry = current.get();
+                } else {
+                    entry = serverManager.startServer(claimed);
+                    Optional<PostgresState.ServerEntry> attached = state.attachContainer(entry);
+                    if (attached.isPresent()) {
+                        entry = attached.get();
+                    } else {
+                        // Deleted while its container started: writing it back would resurrect
+                        // a name another subscription may have claimed since.
+                        stopQuietly(entry);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            state.releaseClaim(claimed);
+            LOG.errorf(e, "Failed to start PostgreSQL container for server=%s", serverName);
+            return Optional.of(Response.status(500)
+                .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                .build());
+        }
+        return Optional.of(created(request, entry));
+    }
+
+    /**
+     * Frees the name of a deleted server, unless a create stored a server at its id again since: that create's
+     * commit holds the name now. Creates claim under the same lock, so none lands between the check and the release.
+     */
+    void releaseNameIfGone(CloudProfile cloud, PostgresState.ServerEntry deleted) {
+        ArmResourceId id = PostgresState.serverId(deleted);
+        synchronized (serverNames) {
+            if (state.getServer(id).isEmpty()) {
+                names.release(cloud, CloudSuffix.POSTGRES, deleted.serverName(), id);
+            }
+        }
     }
 
     private Response handleServerList(AzureRequest request) {

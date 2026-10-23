@@ -1,13 +1,19 @@
 package io.floci.az.services.postgres;
 
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestProfile(PostgresHandlerMockedTest.MockedProfile.class)
@@ -17,6 +23,17 @@ class PostgresGlobalNameTest {
     private static final String API = "?api-version=2025-08-01";
     private static final String BODY = "{\"location\":\"eastus\",\"sku\":{\"name\":\"Standard_B1ms\",\"tier\":\"Burstable\"},"
         + "\"properties\":{\"administratorLogin\":\"a\",\"administratorLoginPassword\":\"P@ssw0rd1234\",\"version\":\"16\"}}";
+
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
+
+    @Inject
+    GlobalNameRegistry names;
+
+    @Inject
+    PostgresState state;
+
+    @Inject
+    PostgresHandler handler;
 
     @BeforeEach
     void reset() {
@@ -66,5 +83,40 @@ class PostgresGlobalNameTest {
 
         given().when().delete("/devstoreaccount1-postgres/flexibleServers/pg-account").then().statusCode(204);
         assertAvailable("pg-account", true);
+    }
+
+    @Test
+    void anAccountPathCreateDoesNotOvertakeAnArmCreateInFlight() {
+        GlobalNameRegistry.Reservation armCreate = names.reserve(PUBLIC, CloudSuffix.POSTGRES, "pg-pending",
+            PostgresState.serverId("sub-a", "rg", "pg-pending"));
+        assertEquals(GlobalNameRegistry.Outcome.RESERVED, armCreate.outcome());
+
+        given().contentType("application/json").body(BODY)
+            .when().put("/devstoreaccount1-postgres/flexibleServers/pg-pending")
+            .then().statusCode(409)
+            .body("error.code", equalTo("ServerNameAlreadyExists"));
+
+        // The ARM create fails and frees its reservation: the account path may now take the name, and keeps it.
+        names.releasePending(PUBLIC, CloudSuffix.POSTGRES, "pg-pending", armCreate.token());
+        assertAvailable("pg-pending", true);
+        given().contentType("application/json").body(BODY)
+            .when().put("/devstoreaccount1-postgres/flexibleServers/pg-pending").then().statusCode(202);
+        assertAvailable("pg-pending", false);
+    }
+
+    @Test
+    void aDeleteDoesNotFreeTheNameOfAServerCreatedAgainAtItsId() {
+        given().contentType("application/json").body(BODY)
+            .when().put("/devstoreaccount1-postgres/flexibleServers/pg-again").then().statusCode(202);
+        PostgresState.ServerEntry deleted = state.getServer("pg-again").orElseThrow();
+
+        // A delete removes the server, then a create at the same id runs to completion before the delete frees
+        // the name.
+        state.removeServer(PostgresState.serverId(deleted));
+        given().contentType("application/json").body(BODY)
+            .when().put("/devstoreaccount1-postgres/flexibleServers/pg-again").then().statusCode(202);
+        handler.releaseNameIfGone(PUBLIC, deleted);
+
+        assertAvailable("pg-again", false);
     }
 }

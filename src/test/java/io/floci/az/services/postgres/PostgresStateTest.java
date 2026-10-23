@@ -1,5 +1,8 @@
 package io.floci.az.services.postgres;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
@@ -264,5 +267,69 @@ class PostgresStateTest {
 
         PostgresState reloaded = new PostgresState(over(sharedBackend));
         assertEquals(0, reloaded.listServers().size(), "backend cleared — reload produces no entries");
+    }
+
+    /** {@code live} with another version: a server update built from a read. */
+    private static PostgresState.ServerEntry upgraded(PostgresState.ServerEntry live) {
+        return new PostgresState.ServerEntry(live.serverName(), live.subscriptionId(), live.resourceGroupName(),
+            live.location(), "17", live.administratorLogin(), live.administratorLoginPassword(),
+            live.skuName(), live.skuTier(), live.storageSizeGB(), live.containerId(), live.hostPort(), live.host(),
+            live.tags(), live.databases(), live.firewallRules(), live.configurations(), live.createdAt());
+    }
+
+    @Test
+    void aServerUpdateKeepsTheChildrenWrittenSinceItsRead() {
+        state.putServer(server("upd"));
+        PostgresState.ServerEntry live = state.getServer("upd").orElseThrow();
+
+        state.putDatabase("upd", PostgresState.DatabaseEntry.create("db1", "upd", null, null));
+        state.putFirewallRule("upd", new PostgresState.FirewallRule("AllowAll", "0.0.0.0", "255.255.255.255"));
+        state.putConfiguration("upd", "max_connections", "200");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        PostgresState.ServerEntry stored = state.getServer("upd").orElseThrow();
+        assertEquals("17", stored.version());
+        assertTrue(state.getDatabase("upd", "db1").isPresent());
+        assertTrue(state.getFirewallRule("upd", "AllowAll").isPresent());
+        assertEquals("200", state.getConfiguration("upd", "max_connections").orElse(""));
+    }
+
+    @Test
+    void aServerUpdateDoesNotBringBackADeletedChild() {
+        state.putServer(server("upd-del"));
+        state.putDatabase("upd-del", PostgresState.DatabaseEntry.create("db1", "upd-del", null, null));
+        PostgresState.ServerEntry live = state.getServer("upd-del").orElseThrow();
+
+        state.removeDatabase("upd-del", "db1");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        assertFalse(state.getDatabase("upd-del", "db1").isPresent());
+    }
+
+    @Test
+    void aServerStoredBeforeTheStateStartedIsFoundByName() throws Exception {
+        InMemoryStorage<String, StoredObject> backend = new InMemoryStorage<>();
+        new PostgresState(over(backend)).putServer(server("Canonical1"));
+        PostgresState.ServerEntry legacy = server("Legacy1", "sub-legacy", "rg-legacy");
+        byte[] data = new ObjectMapper().registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).writeValueAsBytes(legacy);
+        backend.put("legacy1", new StoredObject("legacy1", data, Map.of(), Instant.now(), "legacy1"));
+
+        PostgresState restarted = new PostgresState(over(backend));
+
+        assertTrue(restarted.getServer("canonical1").isPresent());
+        assertEquals("sub-legacy", restarted.getServer("LEGACY1").orElseThrow().subscriptionId());
+    }
+
+    @Test
+    void aNameDeletedAndCreatedInAnotherScopeFindsTheNewServer() {
+        PostgresState.ServerEntry first = server("moved", "sub-a", "rg-a");
+        state.putServer(first);
+        assertTrue(state.removeServer(PostgresState.serverId(first)));
+        assertFalse(state.getServer("moved").isPresent());
+
+        state.putServer(server("moved", "sub-b", "rg-b"));
+        assertFalse(state.removeServer(PostgresState.serverId(first)));
+        assertEquals("sub-b", state.getServer("moved").orElseThrow().subscriptionId());
     }
 }
