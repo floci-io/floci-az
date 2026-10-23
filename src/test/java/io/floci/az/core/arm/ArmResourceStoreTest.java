@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -224,14 +225,79 @@ class ArmResourceStoreTest {
         assertThrows(IllegalArgumentException.class, () -> things.put(new Thing(other, "wrong store")));
     }
 
+    private static List<String> labels(List<ArmResourceStore.Stored<Thing>> stored) {
+        return stored.stream().map(entry -> entry.value().label()).sorted().toList();
+    }
+
+    @Test
+    void underReturnsTheChildrenAndExtensionsOfAScopeButNotASiblingWithTheSamePrefix() {
+        String sibling = ID + "b";
+        store.put(new Thing(ID, "scope"));
+        store.put(new Thing(ID + "/children/c", "child"));
+        store.put(new Thing(ID + "/providers/Microsoft.Ext/subs/s1", "extension"));
+        store.put(new Thing(sibling, "sibling"));
+        store.put(new Thing(sibling + "/providers/Microsoft.Ext/subs/s1", "sibling extension"));
+
+        assertEquals(List.of("child", "extension"), labels(store.under(id(ID))));
+        assertEquals(List.of("child", "extension"), labels(store.under(id(ID.toUpperCase()))),
+            "the scope compares case-insensitively");
+        assertEquals(List.of("sibling extension"), labels(store.under(id(sibling))));
+    }
+
+    @Test
+    void underFindsLegacyEntriesAndPrefersTheCanonicalOne() throws Exception {
+        String first = ID + "/providers/Microsoft.Ext/subs/s1";
+        String second = ID + "/providers/Microsoft.Ext/subs/s2";
+        putLegacy("Sub-1/RG-One/a/s1", new Thing(first, "legacy s1"));
+        putLegacy("Sub-1/RG-One/a/s2", new Thing(second, "legacy s2"));
+        putLegacy("Sub-1/RG-One/ab/s1", new Thing(ID + "b/providers/Microsoft.Ext/subs/s1", "legacy sibling"));
+        putLegacy(second.toLowerCase(), new Thing(second, "canonical s2"));
+
+        assertEquals(List.of("canonical s2", "legacy s1"), labels(store.under(id(ID))));
+    }
+
+    @Test
+    void underInATypedStoreSkipsAnotherTypesEntries() {
+        ArmResourceStore<Thing> things = ArmResourceStore.over(backend, "shared", "Microsoft.Ext/subs",
+            Thing.class, Thing::id, key -> false);
+        ArmResourceStore<Thing> others = ArmResourceStore.over(backend, "shared", "Microsoft.Ext/others",
+            Thing.class, Thing::id, key -> false);
+        things.put(new Thing(ID + "/providers/Microsoft.Ext/subs/s1", "mine"));
+        others.put(new Thing(ID + "/providers/Microsoft.Ext/others/o1", "theirs"));
+
+        assertEquals(List.of("mine"), labels(things.under(id(ID))));
+    }
+
+    @Test
+    void underDecodesOnlyTheEntriesUnderTheScope() {
+        CountingStorage counting = new CountingStorage();
+        ArmResourceStore<Thing> counted = ArmResourceStore.over(counting, "things", Thing.class, Thing::id,
+            key -> true);
+        for (int i = 0; i < 20; i++) {
+            counted.put(new Thing(ID.replace("/a", "/n" + i) + "/providers/Microsoft.Ext/subs/s", "elsewhere"));
+        }
+        counted.put(new Thing(ID + "/providers/Microsoft.Ext/subs/s", "here"));
+        counting.reads = 0;
+
+        assertEquals(List.of("here"), labels(counted.under(id(ID))));
+        assertEquals(1, counting.reads, "only the matching entry is read");
+    }
+
     /** Counts how often the store walks the backend's keys. */
     static final class CountingStorage extends InMemoryStorage<String, StoredObject> {
         int keyScans;
+        int reads;
 
         @Override
         public Set<String> keys() {
             keyScans++;
             return super.keys();
+        }
+
+        @Override
+        public Optional<StoredObject> get(String key) {
+            reads++;
+            return super.get(key);
         }
     }
 }

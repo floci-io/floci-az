@@ -28,11 +28,13 @@ public class ApiManagementGateway {
     private static final Logger LOG = Logger.getLogger(ApiManagementGateway.class);
 
     private final ApiManagementStore store;
+    private final ApiManagementService services;
     private final ApiManagementProxy proxy;
 
     @Inject
-    public ApiManagementGateway(ApiManagementStore store, ApiManagementProxy proxy) {
+    public ApiManagementGateway(ApiManagementStore store, ApiManagementService services, ApiManagementProxy proxy) {
         this.store = store;
+        this.services = services;
         this.proxy = proxy;
     }
 
@@ -44,11 +46,7 @@ public class ApiManagementGateway {
         int slash = cleanPath.indexOf('/');
         String serviceName = slash < 0 ? cleanPath : cleanPath.substring(0, slash);
         String gatewayPath = slash < 0 ? "" : cleanPath.substring(slash + 1);
-        Map<String, Object> service = store.services.values().stream()
-                .filter(s -> serviceName.equals(s.get("name")))
-                .findFirst()
-                .orElse(null);
-        if (service == null) {
+        if (!services.hasServiceNamed(serviceName)) {
             return notFound("APIM service not found: " + serviceName);
         }
 

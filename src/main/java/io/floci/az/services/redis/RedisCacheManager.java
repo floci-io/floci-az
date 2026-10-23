@@ -310,7 +310,7 @@ public class RedisCacheManager {
         }
     }
 
-    private String containerName(RedisCache cache) {
+    String containerName(RedisCache cache) {
         return ContainerStorageHelper.dockerName(config, "redis-" + cache.getInstanceId());
     }
 

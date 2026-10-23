@@ -119,8 +119,10 @@ floci-az:
 
 ## Notes & limitations
 
-- **No delivery.** Messages are captured in-memory only; nothing is sent over SMTP and no external
-  recipient receives anything. The mailbox is not persisted and is cleared on restart.
+- **No delivery.** Messages are captured, never sent: nothing goes out over SMTP and no external
+  recipient receives anything. The mailbox and the ARM resources are kept in the `email` storage
+  backend, so they follow `floci-az.storage.services.email.mode` (the global `storage.mode` by
+  default, `memory` unless set).
 - **Operations always succeed immediately.** There is no `Running`→`Succeeded` transition delay and
   no failure simulation. `Retry-After: 3` is still returned on the `202` to match ACS, but the first
   poll already reports `Succeeded`.
@@ -129,3 +131,9 @@ floci-az:
 - **ARM resources are state-only.** `communicationServices`/`emailServices`/`domains` return
   `Succeeded` provisioning state with synthesized properties (`hostName`, `dataLocation`); domain
   verification (SPF/DKIM TXT records) is not emulated.
+- **Communication service names are global.** A communication service owns
+  `{name}.communication.azure.com`: the first subscription to create a name owns it, a create of
+  the same name from another subscription or resource group answers `409 Conflict`, and the name is
+  free again once the owner deletes it. Email services and domains are scoped to their resource
+  group. A path that differs from the creating one only in case addresses the same resource, which
+  keeps the casing of its first PUT.

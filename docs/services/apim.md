@@ -49,6 +49,21 @@ The policy engine intentionally supports a focused subset:
 - `<return-response>` with nested `<set-status code="...">` and `<set-body>`
 - Named-value interpolation with `{{name}}` in supported policy values
 
+## Service names
+
+A service name is a global DNS name (`{name}.azure-api.net`, `azure-api.us` in Azure US Government, `azure-api.cn` in
+Azure China): the first subscription and resource group to create it own it, and a create of the same name from any
+other scope is refused with `409 ServiceAlreadyExists` until the owner deletes it. Another scope reads the name as
+`404`, and its `DELETE` is a no-op `200` that leaves the owner's service in place. The name is unique across every
+cloud the emulator serves, since one gateway serves every service by name. There is no `checkNameAvailability` for API
+Management services. Paths that differ only in case address the same service and its child resources. With
+`parity-overrides.strict-names` a name outside 1 to 50 letters, digits and hyphens, starting with a letter and ending
+with a letter or digit, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
+
+Services are kept through the storage layer under the store name `apim`, so they follow the global `storage.mode`.
+Their child resources (APIs, operations, policies, products, subscriptions, named values and backends) are still kept
+in memory only, so under a persistent mode a restart keeps the services but not their children.
+
 ## Configuration
 
 ```yaml

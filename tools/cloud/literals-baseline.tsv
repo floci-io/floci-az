@@ -15,7 +15,6 @@ src/main/java/io/floci/az/services/aks/AksHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/aks/AksHandler.java	location-literal	1
 src/main/java/io/floci/az/services/aks/AksHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/apim/ApiManagementService.java	location-literal	1
-src/main/java/io/floci/az/services/apim/ApiManagementService.java	name-guard	1
 src/main/java/io/floci/az/services/apim/ApiManagementService.java	scope-parse	1
 src/main/java/io/floci/az/services/appconfig/AppConfigHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	cloud-literal	6
@@ -27,7 +26,7 @@ src/main/java/io/floci/az/services/containerapps/ContainerAppsHandler.java	locat
 src/main/java/io/floci/az/services/containerapps/ContainerAppsHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/email/EmailHandler.java	cloud-literal	2
 src/main/java/io/floci/az/services/email/EmailHandler.java	location-literal	3
-src/main/java/io/floci/az/services/email/EmailHandler.java	scope-parse	4
+src/main/java/io/floci/az/services/email/EmailHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/entra/DiscoveryProvider.java	cloud-literal	1
 src/main/java/io/floci/az/services/entra/IssuerFactory.java	cloud-literal	1
 src/main/java/io/floci/az/services/eventgrid/EventGridDelivery.java	cloud-literal	1
