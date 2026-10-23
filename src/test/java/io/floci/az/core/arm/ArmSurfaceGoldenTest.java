@@ -128,6 +128,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         Microsoft.ContainerService/managedClusters               1-63    null    0    null
         Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
+        Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
+        Microsoft.EventGrid/topics    3-50    null    0    null
         """;
 
     @Inject
