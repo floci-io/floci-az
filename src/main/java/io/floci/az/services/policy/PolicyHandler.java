@@ -9,6 +9,7 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.services.entra.TokenIssuer;
+import io.floci.az.services.managedidentity.ManagedIdentityModels.UserAssignedIdentity;
 import io.floci.az.services.managedidentity.ManagedIdentityStore;
 import io.floci.az.services.policy.PolicyPath.ScopeKind;
 import io.floci.az.services.policy.PolicyPath.Type;
@@ -480,11 +481,10 @@ public class PolicyHandler implements AzureServiceHandler, Resettable {
         return identity;
     }
 
-    private static Map<String, Object> identityIds(Map<String, Object> identity) {
-        Map<String, Object> props = ArmJson.cast(identity.get("properties"));
+    private static Map<String, Object> identityIds(UserAssignedIdentity identity) {
         Map<String, Object> ids = new LinkedHashMap<>();
-        ids.put("principalId", props.get("principalId"));
-        ids.put("clientId", props.get("clientId"));
+        ids.put("principalId", identity.principalId());
+        ids.put("clientId", identity.clientId());
         return ids;
     }
 

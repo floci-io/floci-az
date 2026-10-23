@@ -9,8 +9,12 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
-import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.services.entra.TokenIssuer;
+import io.floci.az.services.managedidentity.ManagedIdentityModels.FederatedIdentityCredential;
+import io.floci.az.services.managedidentity.ManagedIdentityModels.UserAssignedIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -22,6 +26,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -47,8 +52,8 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     private static final Logger LOG = Logger.getLogger(ManagedIdentityHandler.class);
 
     private static final String PROVIDER_MARKER = "/providers/Microsoft.ManagedIdentity/";
-    private static final String IDENTITY_TYPE = "Microsoft.ManagedIdentity/userAssignedIdentities";
-    private static final String FIC_TYPE = IDENTITY_TYPE + "/federatedIdentityCredentials";
+    private static final String IDENTITY_TYPE = ManagedIdentityStore.IDENTITY_TYPE;
+    private static final String FIC_TYPE = ManagedIdentityStore.CREDENTIAL_TYPE;
 
     private final EmulatorConfig config;
     private final ManagedIdentityStore store;
@@ -144,24 +149,12 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
 
     /** ARM-shaped identities in a resource group, for ArmHandler's RG resource listing. */
     public List<Map<String, Object>> listResources(String sub, String rg) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Map<String, Object> resource : store.listIdentities()) {
-            if (sub.equalsIgnoreCase(String.valueOf(resource.get("_sub")))
-                    && rg.equalsIgnoreCase(String.valueOf(resource.get("_rg")))) {
-                result.add(ArmResources.stripInternal(resource));
-            }
-        }
-        return result;
+        return store.identities(new ArmScope(sub, rg)).stream().map(ManagedIdentityHandler::identityResponse).toList();
     }
 
     public List<Map<String, Object>> listResources(String sub) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Map<String, Object> resource : store.listIdentities()) {
-            if (sub.equalsIgnoreCase(String.valueOf(resource.get("_sub")))) {
-                result.add(ArmResources.stripInternal(resource));
-            }
-        }
-        return result;
+        return store.identities(new ArmScope(sub, null)).stream().map(ManagedIdentityHandler::identityResponse)
+                .toList();
     }
 
     // ── ARM: userAssignedIdentities ─────────────────────────────────────────────
@@ -177,21 +170,16 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
 
         String sub = ArmPaths.subscription(path, "unknown");
         String rg = ArmPaths.resourceGroup(path, "unknown");
-        String key = ManagedIdentityStore.identityKey(sub, rg, name);
+        ArmResourceId id = identityId(sub, rg, name);
 
         return switch (method) {
-            case "PUT" -> putIdentity(req, sub, rg, name, key);
-            case "PATCH" -> patchIdentity(req, key);
-            case "GET" -> {
-                Map<String, Object> existing = store.getIdentity(key);
-                yield existing == null
-                        ? ArmErrors.error(404, "ResourceNotFound", "Resource not found: userAssignedIdentities/" + name)
-                        : Response.ok(ArmResources.stripInternal(existing)).build();
-            }
-            case "DELETE" -> {
-                Map<String, Object> removed = store.removeIdentity(key);
-                yield Response.status(removed == null ? 204 : 200).build();
-            }
+            case "PUT" -> putIdentity(req, id, name);
+            case "PATCH" -> patchIdentity(req, id);
+            case "GET" -> store.identity(id)
+                    .map(identity -> Response.ok(identityResponse(identity)).build())
+                    .orElseGet(() -> ArmErrors.error(404, "ResourceNotFound",
+                            "Resource not found: userAssignedIdentities/" + name));
+            case "DELETE" -> Response.status(store.deleteIdentity(id).isEmpty() ? 204 : 200).build();
             default -> ArmErrors.error(405, "MethodNotAllowed", "Method not allowed: " + method);
         };
     }
@@ -199,66 +187,41 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     private Response listIdentities(String path) {
         String sub = ArmPaths.subscription(path, "unknown");
         String rg = path.toLowerCase().contains("/resourcegroups/") ? ArmPaths.resourceGroup(path, "unknown") : null;
-        List<Map<String, Object>> value = new ArrayList<>();
-        for (Map<String, Object> resource : store.listIdentities()) {
-            if (!sub.equalsIgnoreCase(String.valueOf(resource.get("_sub")))) {
-                continue;
-            }
-            if (rg != null && !rg.equalsIgnoreCase(String.valueOf(resource.get("_rg")))) {
-                continue;
-            }
-            value.add(ArmResources.stripInternal(resource));
-        }
+        List<Map<String, Object>> value = store.identities(new ArmScope(sub, rg)).stream()
+                .map(ManagedIdentityHandler::identityResponse).toList();
         return Response.ok(Map.of("value", value)).build();
     }
 
-    private Response putIdentity(AzureRequest req, String sub, String rg, String name, String key) {
+    private Response putIdentity(AzureRequest req, ArmResourceId id, String name) {
         Map<String, Object> body = ArmJson.parseBodyStrict(req);
-        Map<String, Object> existing = store.getIdentity(key);
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        if (existing != null && existing.get("properties") instanceof Map<?, ?> existingProps) {
-            properties.put("tenantId", existingProps.get("tenantId"));
-            properties.put("principalId", existingProps.get("principalId"));
-            properties.put("clientId", existingProps.get("clientId"));
-        } else {
-            properties.put("tenantId", config.services().entra().defaultTenantId());
-            properties.put("principalId", UUID.randomUUID().toString());
-            properties.put("clientId", UUID.randomUUID().toString());
-        }
-
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("id", identityId(sub, rg, name));
-        resource.put("name", name);
-        resource.put("type", IDENTITY_TYPE);
-        resource.put("location", ArmJson.string(body, "location",
-                existing != null ? ArmJson.string(existing, "location", "eastus") : "eastus"));
         // ARM PUT is full-replace for mutable properties: omitted tags clear existing ones
-        // (location is create-only per TrackedResource x-ms-mutability and stays).
-        resource.put("tags", body.getOrDefault("tags", Map.of()));
-        resource.put("properties", properties);
-        resource.put("_sub", sub);
-        resource.put("_rg", rg);
-
-        store.putIdentity(key, resource);
-        return Response.status(existing == null ? 201 : 200).entity(ArmResources.stripInternal(resource)).build();
+        // (location is create-only per TrackedResource x-ms-mutability and stays). The generated
+        // ids and the id's casing are the creating request's.
+        Object tags = body.getOrDefault("tags", Map.of());
+        ArmResourceStore.Written<UserAssignedIdentity> written = store.createOrUpdateIdentity(id, existing ->
+                existing.map(identity -> replaced(identity, body, tags)).orElseGet(() -> new UserAssignedIdentity(
+                        id.id(), name, ArmJson.string(body, "location", "eastus"), tags,
+                        config.services().entra().defaultTenantId(),
+                        UUID.randomUUID().toString(), UUID.randomUUID().toString())));
+        return Response.status(written.created() ? 201 : 200)
+                .entity(identityResponse(written.stored().value())).build();
     }
 
-    private Response patchIdentity(AzureRequest req, String key) {
-        Map<String, Object> existing = store.getIdentity(key);
-        if (existing == null) {
+    private static UserAssignedIdentity replaced(UserAssignedIdentity identity, Map<String, Object> body, Object tags) {
+        String location = ArmJson.string(body, "location", Objects.requireNonNullElse(identity.location(), "eastus"));
+        return new UserAssignedIdentity(identity.id(), identity.name(), location, tags, identity.tenantId(),
+                identity.principalId(), identity.clientId());
+    }
+
+    private Response patchIdentity(AzureRequest req, ArmResourceId id) {
+        if (store.identity(id).isEmpty()) {
             return ArmErrors.error(404, "ResourceNotFound", "Resource not found");
         }
         Map<String, Object> body = ArmJson.parseBodyStrict(req);
-        // Copy-then-replace: never mutate the live stored map in place — the store's
-        // ConcurrentHashMap only guards its structure, not the LinkedHashMap values, so a
-        // concurrent PATCH/GET on the same identity could race on that map.
-        Map<String, Object> updated = new LinkedHashMap<>(existing);
-        if (body.get("tags") instanceof Map<?, ?> tags) {
-            updated.put("tags", tags);
-        }
-        store.putIdentity(key, updated);
-        return Response.ok(ArmResources.stripInternal(updated)).build();
+        Object tags = body.get("tags") instanceof Map<?, ?> patched ? patched : null;
+        return store.updateIdentity(id, identity -> tags == null ? identity : identity.withTags(tags))
+                .map(identity -> Response.ok(identityResponse(identity)).build())
+                .orElseGet(() -> ArmErrors.error(404, "ResourceNotFound", "Resource not found"));
     }
 
     // ── ARM: federatedIdentityCredentials ───────────────────────────────────────
@@ -267,10 +230,9 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         String sub = ArmPaths.subscription(path, "unknown");
         String rg = ArmPaths.resourceGroup(path, "unknown");
         String identityName = ArmPaths.resourceName(path, "userAssignedIdentities").orElse(null);
-        String identityKey = ManagedIdentityStore.identityKey(sub, rg, identityName == null ? "" : identityName);
-        if (identityName == null || !store.identityExists(identityKey)) {
-            return ArmErrors.error(404, "ResourceNotFound",
-                    "Resource not found: userAssignedIdentities/" + identityName);
+        ArmResourceId identityId = identityName == null ? null : identityId(sub, rg, identityName);
+        if (identityId == null || store.identity(identityId).isEmpty()) {
+            return identityNotFound(identityName);
         }
 
         String ficName = ArmPaths.resourceName(path, "federatedIdentityCredentials").orElse(null);
@@ -278,52 +240,45 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
             if (!"GET".equals(method)) {
                 return ArmErrors.error(405, "MethodNotAllowed", "Method not allowed on credential collection");
             }
-            return Response.ok(Map.of("value", store.listFederatedCredentials(identityKey))).build();
+            return Response.ok(Map.of("value", store.credentials(identityId).stream()
+                    .map(ManagedIdentityHandler::credentialResponse).toList())).build();
         }
 
-        String key = ManagedIdentityStore.ficKey(identityKey, ficName);
+        ArmResourceId id = credentialId(identityId, ficName);
         return switch (method) {
-            case "PUT" -> putFederatedCredential(req, sub, rg, identityName, ficName, key);
-            case "GET" -> {
-                Map<String, Object> existing = store.getFederatedCredential(key);
-                yield existing == null
-                        ? ArmErrors.error(404, "ResourceNotFound",
-                                "Resource not found: federatedIdentityCredentials/" + ficName)
-                        : Response.ok(existing).build();
-            }
-            case "DELETE" -> {
-                Map<String, Object> removed = store.removeFederatedCredential(key);
-                yield Response.status(removed == null ? 204 : 200).build();
-            }
+            case "PUT" -> putFederatedCredential(req, identityId, id, identityName, ficName);
+            case "GET" -> store.credential(id)
+                    .map(credential -> Response.ok(credentialResponse(credential)).build())
+                    .orElseGet(() -> ArmErrors.error(404, "ResourceNotFound",
+                            "Resource not found: federatedIdentityCredentials/" + ficName));
+            case "DELETE" -> Response.status(store.deleteCredential(id).isEmpty() ? 204 : 200).build();
             default -> ArmErrors.error(405, "MethodNotAllowed", "Method not allowed: " + method);
         };
     }
 
-    private Response putFederatedCredential(AzureRequest req, String sub, String rg,
-                                            String identityName, String ficName, String key) {
+    private Response putFederatedCredential(AzureRequest req, ArmResourceId identityId, ArmResourceId id,
+                                            String identityName, String ficName) {
         Map<String, Object> body = ArmJson.parseBodyStrict(req);
         Map<String, Object> bodyProps = ArmJson.cast(body.get("properties"));
         String issuer = ArmJson.string(bodyProps, "issuer", null);
         String subject = ArmJson.string(bodyProps, "subject", null);
-        Object audiences = bodyProps.get("audiences");
-        if (issuer == null || subject == null || !(audiences instanceof List<?>)) {
+        if (issuer == null || subject == null || !(bodyProps.get("audiences") instanceof List<?> audiences)) {
             return ArmErrors.error(400, "BadRequest",
                     "federatedIdentityCredential requires properties.issuer, properties.subject and properties.audiences");
         }
 
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("issuer", issuer);
-        properties.put("subject", subject);
-        properties.put("audiences", audiences);
+        List<Object> audienceList = new ArrayList<>(audiences);
+        return store.createOrUpdateCredential(identityId, id, existing -> new FederatedIdentityCredential(
+                        existing.map(FederatedIdentityCredential::id).orElse(id.id()),
+                        existing.map(FederatedIdentityCredential::name).orElse(ficName),
+                        issuer, subject, audienceList))
+                .map(written -> Response.status(written.created() ? 201 : 200)
+                        .entity(credentialResponse(written.stored().value())).build())
+                .orElseGet(() -> identityNotFound(identityName));
+    }
 
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("id", identityId(sub, rg, identityName) + "/federatedIdentityCredentials/" + ficName);
-        resource.put("name", ficName);
-        resource.put("type", FIC_TYPE);
-        resource.put("properties", properties);
-
-        boolean existed = store.putFederatedCredential(key, resource);
-        return Response.status(existed ? 200 : 201).entity(resource).build();
+    private static Response identityNotFound(String identityName) {
+        return ArmErrors.error(404, "ResourceNotFound", "Resource not found: userAssignedIdentities/" + identityName);
     }
 
     // ── ARM: system-assigned identities/default ─────────────────────────────────
@@ -477,7 +432,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         }
 
         if (clientId != null || objectId != null || resId != null) {
-            Optional<Map<String, Object>> selected;
+            Optional<UserAssignedIdentity> selected;
             if (clientId != null) {
                 selected = store.findByClientId(clientId);
             } else if (objectId != null) {
@@ -485,13 +440,11 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
             } else {
                 selected = store.findByResourceId(resId);
             }
-            Map<String, Object> identity = selected.orElse(null);
-            if (identity == null) {
-                return PrincipalResolution.Failure.NOT_FOUND;
-            }
-            return new PrincipalResolution.Found(
-                    identityProperty(identity, "principalId"), identityProperty(identity, "clientId"),
-                    String.valueOf(identity.get("id")));
+            return selected
+                    .<PrincipalResolution>map(identity -> new PrincipalResolution.Found(
+                            String.valueOf(identity.principalId()), String.valueOf(identity.clientId()),
+                            identity.id()))
+                    .orElse(PrincipalResolution.Failure.NOT_FOUND);
         }
 
         // System-assigned: same deterministic GUIDs as identities/default for the configured scope.
@@ -506,13 +459,43 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         return RequestUrls.resolveBaseUrl(request, config);
     }
 
-    private static String identityId(String sub, String rg, String name) {
-        return "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + PROVIDER_MARKER + "userAssignedIdentities/" + name;
+    private static ArmResourceId identityId(String sub, String rg, String name) {
+        return ArmResourceId.parse("/subscriptions/" + sub + "/resourceGroups/" + rg
+                + PROVIDER_MARKER + "userAssignedIdentities/" + name).orElseThrow();
     }
 
-    private static String identityProperty(Map<String, Object> identity, String key) {
-        return String.valueOf(ArmJson.cast(identity.get("properties")).get(key));
+    private static ArmResourceId credentialId(ArmResourceId identityId, String name) {
+        return ArmResourceId.parse(identityId.id() + "/federatedIdentityCredentials/" + name).orElseThrow();
+    }
+
+    private static Map<String, Object> identityResponse(UserAssignedIdentity identity) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("tenantId", identity.tenantId());
+        properties.put("principalId", identity.principalId());
+        properties.put("clientId", identity.clientId());
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("id", identity.id());
+        resource.put("name", identity.name());
+        resource.put("type", IDENTITY_TYPE);
+        resource.put("location", identity.location());
+        resource.put("tags", identity.tags());
+        resource.put("properties", properties);
+        return resource;
+    }
+
+    private static Map<String, Object> credentialResponse(FederatedIdentityCredential credential) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("issuer", credential.issuer());
+        properties.put("subject", credential.subject());
+        properties.put("audiences", credential.audiences());
+
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("id", credential.id());
+        resource.put("name", credential.name());
+        resource.put("type", FIC_TYPE);
+        resource.put("properties", properties);
+        return resource;
     }
 
     private static String systemPrincipalId(String scope) {
@@ -528,19 +511,10 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         return value == null || value.isBlank() ? null : value;
     }
 
-
-
-
-
-
-
-
-
     private static String stripQuery(String path) {
         int q = path.indexOf('?');
         return q >= 0 ? path.substring(0, q) : path;
     }
-
 
     private static Response imdsError(int status, String code, String description) {
         return Response.status(status)

@@ -137,6 +137,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.DBforPostgreSQL/flexibleServers    3-63    POSTGRES    409    ServerNameAlreadyExists
         Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
         Microsoft.EventGrid/topics    3-50    null    0    null
+        Microsoft.ManagedIdentity/userAssignedIdentities    3-128    null    0    null
+        Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials    3-120    null    0    null
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null

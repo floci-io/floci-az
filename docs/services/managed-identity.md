@@ -5,7 +5,7 @@ Compatible with the `azure-identity` `ManagedIdentityCredential` (Java, Python, 
 identities** (with federated identity credentials) and the **IMDS token endpoint** that
 applications use to acquire tokens without secrets.
 
-> **HTTP-only: no Docker.** ARM CRUD state is in-memory; IMDS tokens are minted with the same
+> **HTTP-only: no Docker.** ARM CRUD state follows `storage.mode`; IMDS tokens are minted with the same
 > RSA signing key as the [Entra ID](entra.md) emulation, so they verify against the emulator JWKS.
 
 ---
@@ -229,8 +229,10 @@ Token tenant, issuer, and lifetime follow the [Entra ID](entra.md) settings
   (default: the default subscription). `identities/default` reads for *other* scopes return
   different (deterministic) GUIDs; set `system-assigned-scope` to your resource's scope when
   your code compares an ARM-read `principalId` against the token's `oid`.
-- **Identity state is in-memory only**: like the rest of the ARM control plane, identities and
-  federated credentials do not persist across restarts, regardless of `storage.mode`.
+- **Identity state follows `storage.mode`**: identities and federated credentials are kept in the
+  `managedidentity` store, so under a persistent mode they survive a restart with the same client and
+  principal ids. An identity addressed in another casing (`resourcegroups/RG`, `MyIdentity`) is the same
+  identity, and responses keep the casing of the request that created it.
 - **Resource-group deletion does not cascade**: deleting a resource group leaves its identities
   behind (consistent with the other ARM resources in the emulator). Identities do appear in
   `GET .../resourceGroups/{rg}/resources`, so `prevent_deletion_if_contains_resources` works.
