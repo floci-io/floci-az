@@ -297,9 +297,16 @@ public class EventGridService {
                 .toList();
     }
 
-    /** The event subscriptions scoped to {@code topicResourceId}, compared as ARM ids (case-insensitively). */
+    /**
+     * The event subscriptions scoped to {@code topicResourceId}, compared as ARM ids (case-insensitively). An event
+     * subscription's id is {@code {topicResourceId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}}, so only
+     * the entries under the topic are read.
+     */
     public List<EventSubscription> subscriptionsForTopic(String topicResourceId) {
-        return subscriptions.all().stream()
+        List<Stored<EventSubscription>> candidates = ArmResourceId.parse(topicResourceId)
+                .map(subscriptions::under)
+                .orElseGet(subscriptions::all);
+        return candidates.stream()
                 .map(Stored::value)
                 .filter(s -> s.topicResourceId().equalsIgnoreCase(topicResourceId))
                 .toList();
