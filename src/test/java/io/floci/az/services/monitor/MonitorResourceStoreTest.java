@@ -105,6 +105,40 @@ class MonitorResourceStoreTest {
     }
 
     @Test
+    void ingestionAndQueriesFollowRulesAndWorkspacesThroughDeleteAndRecreate() {
+        String workspace = GROUP + "/providers/Microsoft.OperationalInsights/workspaces/ingest-ws";
+        String customerId = given().contentType(ContentType.JSON).body("{\"location\":\"eastus\"}")
+            .when().put(workspace + API).then().statusCode(201).extract().path("properties.customerId");
+        String rule = GROUP + "/providers/Microsoft.Insights/dataCollectionRules/ingest-dcr";
+        String ruleBody = "{\"location\":\"eastus\",\"properties\":{\"destinations\":{\"logAnalytics\":"
+            + "[{\"name\":\"la\",\"workspaceResourceId\":\"" + workspace + "\"}]}}}";
+        String first = given().contentType(ContentType.JSON).body(ruleBody)
+            .when().put(rule + API).then().statusCode(201).extract().path("properties.immutableId");
+
+        given().contentType(ContentType.JSON).body("[{\"Message\":\"one\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", first, STREAM).then().statusCode(204);
+        given().contentType(ContentType.JSON).body(Map.of("query", STREAM + " | project Message"))
+            .when().post("/v1/workspaces/{workspaceId}/query", customerId)
+            .then().statusCode(200).body("tables[0].rows", hasSize(1));
+
+        given().when().delete(rule + API).then().statusCode(200);
+        given().contentType(ContentType.JSON).body("[{\"Message\":\"gone\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", first, STREAM).then().statusCode(404);
+
+        String second = given().contentType(ContentType.JSON).body(ruleBody)
+            .when().put(rule + API).then().statusCode(201).extract().path("properties.immutableId");
+        assertFalse(first.equals(second), "a recreated rule gets a new immutableId");
+        given().contentType(ContentType.JSON).body("[{\"Message\":\"two\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", second, STREAM).then().statusCode(204);
+        given().contentType(ContentType.JSON).body("[{\"Message\":\"stale\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", first, STREAM).then().statusCode(404);
+
+        given().when().delete(workspace + API).then().statusCode(200);
+        given().contentType(ContentType.JSON).body("[{\"Message\":\"orphan\"}]")
+            .when().post("/dataCollectionRules/{dcr}/streams/{stream}", second, STREAM).then().statusCode(404);
+    }
+
+    @Test
     void diagnosticSettingsAreListedByTheResourceTheyExtendInAnyCasing() {
         String server = GROUP + "/providers/Microsoft.Sql/servers/diag-sql";
         String other = GROUP + "/providers/Microsoft.Sql/servers/diag-other";

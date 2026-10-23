@@ -104,6 +104,13 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private final ArmResourceStore<MonitorResource> diagnosticSettings;
     private final EmulatorConfig config;
     private final long maxDecodedBodyBytes;
+    /**
+     * Rule ids by immutableId and workspace ids by customerId, the names the ingestion and query URLs carry. Built
+     * from the stores on first use, so they cover what an earlier run wrote, and kept on every write after that, so
+     * neither path walks the backend, which also holds every ingested record. Null until first needed.
+     */
+    private Map<String, ArmResourceId> rulesByImmutableId;
+    private Map<String, ArmResourceId> workspacesByCustomerId;
 
     @Inject
     ActivityLogEndpoint activityLog;
@@ -283,20 +290,24 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
             Map<String, Object> props = bodyProperties(body);
-            MonitorResource workspace = workspaces.createOrUpdate(id, existing -> {
-                // customerId is read-only: a redeploy keeps the one the workspace was created with
-                String customerId = existing.map(ws -> ws.property("customerId"))
-                    .orElse(props.get("customerId") instanceof String text ? text : null);
-                if (isBlank(customerId)) {
-                    customerId = UUID.randomUUID().toString();
-                }
-                Map<String, Object> newProps = new LinkedHashMap<>(props);
-                newProps.put("provisioningState", "Succeeded");
-                newProps.put("customerId", customerId);
-                return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                    existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body),
-                    newProps);
-            }).stored().value();
+            MonitorResource workspace;
+            synchronized (this) {
+                workspace = workspaces.createOrUpdate(id, existing -> {
+                    // customerId is read-only: a redeploy keeps the one the workspace was created with
+                    String customerId = existing.map(ws -> ws.property("customerId"))
+                        .orElse(props.get("customerId") instanceof String text ? text : null);
+                    if (isBlank(customerId)) {
+                        customerId = UUID.randomUUID().toString();
+                    }
+                    Map<String, Object> newProps = new LinkedHashMap<>(props);
+                    newProps.put("provisioningState", "Succeeded");
+                    newProps.put("customerId", customerId);
+                    return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
+                        existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body),
+                        newProps);
+                }).stored().value();
+                workspaceIndex().put(workspace.property("customerId"), id);
+            }
             return Response.status(201).entity(workspace).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
             Optional<ArmResourceStore.Stored<MonitorResource>> workspace = workspaces.get(id);
@@ -305,9 +316,14 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             }
             return Response.ok(workspace.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
-            workspaces.delete(id).map(ArmResourceStore.Stored::value)
-                .map(workspace -> workspace.property("customerId"))
-                .ifPresent(customerId -> store.delete(LEGACY_WORKSPACE_LOOKUP + customerId));
+            synchronized (this) {
+                workspaces.delete(id).map(ArmResourceStore.Stored::value)
+                    .map(workspace -> workspace.property("customerId"))
+                    .ifPresent(customerId -> {
+                        workspaceIndex().remove(customerId);
+                        store.delete(LEGACY_WORKSPACE_LOOKUP + customerId);
+                    });
+            }
             return Response.ok().build();
         }
         return Response.status(405).build();
@@ -388,19 +404,23 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
             Map<String, Object> props = bodyProperties(body);
-            MonitorResource dcr = rules.createOrUpdate(id, existing -> {
-                // immutableId is read-only, and the ingestion URL carries it: a redeploy keeps it
-                String immutableId = existing.map(rule -> rule.property("immutableId"))
-                    .orElse(props.get("immutableId") instanceof String text ? text : null);
-                if (isBlank(immutableId)) {
-                    immutableId = "dcr-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-                }
-                Map<String, Object> newProps = new LinkedHashMap<>(props);
-                newProps.put("provisioningState", "Succeeded");
-                newProps.put("immutableId", immutableId);
-                return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                    existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body), newProps);
-            }).stored().value();
+            MonitorResource dcr;
+            synchronized (this) {
+                dcr = rules.createOrUpdate(id, existing -> {
+                    // immutableId is read-only, and the ingestion URL carries it: a redeploy keeps it
+                    String immutableId = existing.map(rule -> rule.property("immutableId"))
+                        .orElse(props.get("immutableId") instanceof String text ? text : null);
+                    if (isBlank(immutableId)) {
+                        immutableId = "dcr-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+                    }
+                    Map<String, Object> newProps = new LinkedHashMap<>(props);
+                    newProps.put("provisioningState", "Succeeded");
+                    newProps.put("immutableId", immutableId);
+                    return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
+                        existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body), newProps);
+                }).stored().value();
+                ruleIndex().put(dcr.property("immutableId"), id);
+            }
             return Response.status(201).entity(dcr).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
             Optional<ArmResourceStore.Stored<MonitorResource>> dcr = rules.get(id);
@@ -409,9 +429,14 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             }
             return Response.ok(dcr.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
-            rules.delete(id).map(ArmResourceStore.Stored::value)
-                .map(rule -> rule.property("immutableId"))
-                .ifPresent(immutableId -> store.delete(LEGACY_RULE_LOOKUP + immutableId));
+            synchronized (this) {
+                rules.delete(id).map(ArmResourceStore.Stored::value)
+                    .map(rule -> rule.property("immutableId"))
+                    .ifPresent(immutableId -> {
+                        ruleIndex().remove(immutableId);
+                        store.delete(LEGACY_RULE_LOOKUP + immutableId);
+                    });
+            }
             return Response.ok().build();
         }
         return Response.status(405).build();
@@ -498,9 +523,9 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         String stream = parts[3];
 
         // The ingestion URL names the rule by its immutableId
-        Optional<MonitorResource> rule = rules.all().stream().map(ArmResourceStore.Stored::value)
-            .filter(candidate -> dcrId.equals(candidate.property("immutableId")))
-            .findFirst();
+        Optional<MonitorResource> rule = indexed(ruleIndex(), dcrId).flatMap(rules::get)
+            .map(ArmResourceStore.Stored::value)
+            .filter(candidate -> dcrId.equals(candidate.property("immutableId")));
         if (rule.isEmpty()) {
             return Response.status(404).entity("DCR not found with immutableId: " + dcrId).build();
         }
@@ -593,9 +618,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
         // The path names the workspace by its customerId, under which its records are kept, or by its name
         String requested = parts[2];
-        List<MonitorResource> known = workspaces.all().stream().map(ArmResourceStore.Stored::value).toList();
-        if (known.stream().noneMatch(ws -> requested.equals(ws.property("customerId")))) {
-            Optional<String> byName = known.stream()
+        if (indexed(workspaceIndex(), requested).isEmpty()) {
+            Optional<String> byName = workspaces.all().stream().map(ArmResourceStore.Stored::value)
                 .filter(ws -> requested.equals(ws.name()))
                 .map(ws -> ws.property("customerId"))
                 .filter(customerId -> customerId != null)
@@ -844,11 +868,42 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             .toList();
     }
 
-    public void clear() {
+    public synchronized void clear() {
         workspaces.clear();
         endpoints.clear();
         rules.clear();
         diagnosticSettings.clear();
         store.clear();
+        rulesByImmutableId = null;
+        workspacesByCustomerId = null;
+    }
+
+    private synchronized Map<String, ArmResourceId> ruleIndex() {
+        if (rulesByImmutableId == null) {
+            rulesByImmutableId = index(rules, "immutableId");
+        }
+        return rulesByImmutableId;
+    }
+
+    private synchronized Map<String, ArmResourceId> workspaceIndex() {
+        if (workspacesByCustomerId == null) {
+            workspacesByCustomerId = index(workspaces, "customerId");
+        }
+        return workspacesByCustomerId;
+    }
+
+    private static Map<String, ArmResourceId> index(ArmResourceStore<MonitorResource> resources, String property) {
+        Map<String, ArmResourceId> index = new HashMap<>();
+        for (ArmResourceStore.Stored<MonitorResource> resource : resources.all()) {
+            String key = resource.value().property(property);
+            if (key != null) {
+                index.put(key, resource.id());
+            }
+        }
+        return index;
+    }
+
+    private synchronized Optional<ArmResourceId> indexed(Map<String, ArmResourceId> index, String key) {
+        return Optional.ofNullable(index.get(key));
     }
 }
