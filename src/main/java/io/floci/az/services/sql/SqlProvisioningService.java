@@ -110,10 +110,10 @@ public class SqlProvisioningService {
             SqlState.SqlServerEntry ready = serverManager.startServer(desired);
             boolean superseded;
             synchronized (this) {
+                // Only the container is taken from the start: the children and fields stored now are kept.
                 superseded = !isActive(operationId, desired.serverName())
-                    || state.getServer(desired.serverName()).isEmpty();
+                    || state.attachContainer(ready).isEmpty();
                 if (!superseded) {
-                    state.putServer(ready);
                     state.putDatabase(desired.serverName(),
                         SqlState.SqlDatabaseEntry.master(desired.serverName()));
                     complete(operationId, "Succeeded", null, null);

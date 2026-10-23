@@ -18,6 +18,14 @@ against a real SQL Server 2025 container.
 - **Connection strings**: managed mode returns JDBC, ADO.NET, pyodbc, and EF Core strings
 - **EULA guard**: managed server creation requires `FLOCI_AZ_SERVICES_SQL_ACCEPT_EULA=Y`
 
+A server name is a global DNS name: the first subscription to create it owns it, and a create of the same name
+from another subscription or resource group is `400 NameAlreadyExists` until the owner deletes it. A server created
+through the `/{account}-sql/` paths holds its name too. In Azure each cloud has its own zone, but floci-az names a
+server's container after the server alone, so a name is unique across every configured cloud, not per cloud.
+`checkNameAvailability` answers from the same ownership. Paths that differ only in case address the same server.
+With `parity-overrides.strict-names` a server, database or firewall rule name outside Azure's naming rule is refused
+with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
+
 ---
 
 ## Data-plane providers

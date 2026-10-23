@@ -132,6 +132,9 @@ class ArmSurfaceGoldenTest {
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         Microsoft.ContainerService/managedClusters               1-63    null    0    null
         Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
+        Microsoft.DBforMariaDB/servers    3-63    MARIADB    409    ServerNameAlreadyExists
+        Microsoft.DBforMySQL/flexibleServers    3-63    MYSQL    409    ServerNameAlreadyExists
+        Microsoft.DBforPostgreSQL/flexibleServers    3-63    POSTGRES    409    ServerNameAlreadyExists
         Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
         Microsoft.EventGrid/topics    3-50    null    0    null
         Microsoft.Network/networkInterfaces        1-80    null    0    null
@@ -139,6 +142,9 @@ class ArmSurfaceGoldenTest {
         Microsoft.Network/publicIPAddresses        1-80    null    0    null
         Microsoft.Network/virtualNetworks          2-64    null    0    null
         Microsoft.Network/virtualNetworks/subnets  1-80    null    0    null
+        Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
+        Microsoft.Sql/servers/databases        1-128    null    0      null
+        Microsoft.Sql/servers/firewallRules    1-128    null    0      null
         """;
 
     @Inject

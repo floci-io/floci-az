@@ -8,9 +8,16 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalName;
+import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -41,19 +48,35 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code Microsoft.DBforMariaDB/servers}, not flexibleServers).
  */
 @ApplicationScoped
-public class MariaDbHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class MariaDbHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(MariaDbHandler.class);
     private static final String TYPE = "Microsoft.DBforMariaDB/servers";
 
     private static final String NS = "/providers/Microsoft.DBforMariaDB/";
 
-    @Inject EmulatorConfig config;
-    @Inject MariaDbState state;
-    @Inject MariaDbServerManager serverManager;
+    private final EmulatorConfig config;
+    private final MariaDbState state;
+    private final MariaDbServerManager serverManager;
+    private final GlobalNameRegistry names;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
+
+    /**
+     * Held while a create claims a server and while a delete decides whether to free its name, so a delete cannot
+     * free the name of a server created again at its id in between.
+     */
+    private final Object serverNames = new Object();
+
+    @Inject
+    public MariaDbHandler(EmulatorConfig config, MariaDbState state, MariaDbServerManager serverManager,
+                          GlobalNameRegistry names) {
+        this.config = config;
+        this.state = state;
+        this.serverManager = serverManager;
+        this.names = names;
+    }
 
     @Override public String getServiceType()           { return "mariadb"; }
 
@@ -81,34 +104,29 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
             return handleCheckNameAvailability(request);
         }
 
-        Optional<Response> foreign = foreignServer(request, tail);
-        if (foreign.isPresent()) {
-            return foreign.get();
-        }
-
         if (tail.matches("servers/[^/]+/connect")) {
-            return handleServerConnect(segment(tail, 1));
+            return handleServerConnect(request, segment(tail, 1));
         }
 
         if (tail.matches("servers/[^/]+/configurations/[^/]+")) {
             return handleConfiguration(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("servers/[^/]+/configurations")) {
-            return handleConfigurationList(segment(tail, 1));
+            return handleConfigurationList(request, segment(tail, 1));
         }
 
         if (tail.matches("servers/[^/]+/firewallRules/[^/]+")) {
             return handleFirewallRule(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("servers/[^/]+/firewallRules")) {
-            return handleFirewallRuleList(method, segment(tail, 1));
+            return handleFirewallRuleList(method, request, segment(tail, 1));
         }
 
         if (tail.matches("servers/[^/]+/databases/[^/]+")) {
             return handleDatabase(method, request, segment(tail, 1), segment(tail, 3));
         }
         if (tail.matches("servers/[^/]+/databases")) {
-            return handleDatabaseList(segment(tail, 1));
+            return handleDatabaseList(request, segment(tail, 1));
         }
 
         if (tail.matches("servers/[^/]+")) {
@@ -125,11 +143,12 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     // ── checkNameAvailability ─────────────────────────────────────────────────
 
+    /** Whether the name is owned, answered from the {@link GlobalNameRegistry} in the shape it always had. */
     private Response handleCheckNameAvailability(AzureRequest request) {
         try {
             JsonNode body = readBody(request.bodyStream());
             String name = body.path("name").asText();
-            boolean available = !state.serverExists(name);
+            boolean available = names.owner(cloud(request), CloudSuffix.MARIADB, name).isEmpty();
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("nameAvailable", available);
             resp.put("name", name);
@@ -147,8 +166,8 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         return switch (method) {
             case "PUT"    -> createOrUpdateServer(request, serverName, false);
             case "PATCH"  -> createOrUpdateServer(request, serverName, true);
-            case "GET"    -> getServer(serverName);
-            case "DELETE" -> deleteServer(serverName);
+            case "GET"    -> getServer(request, serverName);
+            case "DELETE" -> deleteServer(request, serverName);
             default       -> methodNotAllowed();
         };
     }
@@ -163,16 +182,9 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
             String sub = extractSubscriptionId(request.resourcePath());
             String rg  = extractResourceGroup(request.resourcePath());
 
-            boolean isNew = !state.serverExists(serverName);
-            if (!isNew) {
-                // The guard in handle() runs unlocked, so a create that raced another scope's claim
-                // arrives here as an update. An existing server's owner never changes, so checking
-                // it now is enough to refuse the update.
-                Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
-                if (foreign.isPresent()) {
-                    return foreign.get();
-                }
-            }
+            // A name another resource owns never reaches here through an ARM path: the gate's GlobalNameRule
+            // answers the conflict before this runs.
+            boolean isNew = server(request, serverName).isEmpty();
 
             if (isPatch && isNew) {
                 return notFound("Server '" + serverName + "' not found");
@@ -194,44 +206,26 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
                     Instant.now());
-                if (state.claimServer(entry)) {
-                    if (config.services().mariaDb().mocked()) {
-                        return Response.status(201).entity(serverResponse(entry)).build();
-                    }
-
-                    MariaDbState.ServerEntry claimed = entry;
-                    try {
-                        Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
-                        synchronized (lock) {
-                            Optional<MariaDbState.ServerEntry> current = state.getServer(serverName);
-                            if (current.isPresent() && current.get().containerId() != null) {
-                                entry = current.get();
-                            } else {
-                                entry = serverManager.startServer(claimed);
-                                Optional<MariaDbState.ServerEntry> attached = state.attachContainer(entry);
-                                if (attached.isPresent()) {
-                                    entry = attached.get();
-                                } else {
-                                    // Deleted while its container started: writing it back would resurrect
-                                    // a name another subscription may have claimed since.
-                                    stopQuietly(entry);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        state.releaseClaim(claimed);
-                        LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
-                        return Response.status(500)
-                            .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
-                            .build();
-                    }
-                    return Response.status(201).entity(serverResponse(entry)).build();
+                // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
+                // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
+                GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.MARIADB,
+                    serverName, MariaDbState.serverId(entry));
+                if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
+                    return nameTaken(request, serverName);
                 }
-                // A concurrent create claimed the name between the existence check and this write.
-                // Another scope's claim is a conflict; this scope's claim takes this request as an update.
-                Optional<Response> foreign = foreignServer(request, "servers/" + serverName);
-                if (foreign.isPresent()) {
-                    return foreign.get();
+                try {
+                    Optional<Response> createdResponse = createServer(request, entry);
+                    if (createdResponse.isPresent()) {
+                        return createdResponse.get();
+                    }
+                } finally {
+                    // A no-op once the create committed the name, and for a reservation this request did not make.
+                    names.releasePending(cloud(request), CloudSuffix.MARIADB, serverName, reservation.token());
+                }
+                // The name was claimed between the lookup and this write. A concurrent create of this server
+                // takes this request as an update; a server of this name elsewhere is a conflict.
+                if (server(request, serverName).isEmpty()) {
+                    return nameTaken(request, serverName);
                 }
             }
 
@@ -246,18 +240,14 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
             MariaDbState.ServerEntry updated;
             Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
             synchronized (lock) {
-                Optional<MariaDbState.ServerEntry> current = state.getServer(serverName);
+                // Everything below reads the entry as it is now. The wait for the lock can outlast
+                // a delete and another scope's claim of the name, which this scope no longer reaches,
+                // and an earlier queued update may have changed the fields this request leaves out.
+                Optional<MariaDbState.ServerEntry> current = server(request, serverName);
                 if (current.isEmpty()) {
                     return notFound("Server '" + serverName + "' not found");
                 }
-                // Everything below reads the entry as it is now. The wait for the lock can outlast
-                // a delete and another scope's claim of the name, and an earlier queued update may
-                // have changed the fields this request leaves out.
                 MariaDbState.ServerEntry live = current.get();
-                Optional<Response> foreign = foreignEntry(request, live, serverName, true);
-                if (foreign.isPresent()) {
-                    return foreign.get();
-                }
                 String version  = props.path("version").asText(live.version());
                 int storageMB   = props.path("storageProfile").path("storageMB").asInt(live.storageMB());
                 Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
@@ -268,7 +258,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                     serverManager.rotateAdminPassword(live, password);
                 }
                 updated = new MariaDbState.ServerEntry(
-                    serverName, live.subscriptionId(), live.resourceGroupName(),
+                    live.serverName(), live.subscriptionId(), live.resourceGroupName(),
                     live.location(), version, live.administratorLogin(),
                     password.isBlank() ? live.administratorLoginPassword() : password,
                     storageMB,
@@ -311,20 +301,78 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
     }
 
-    private Response getServer(String serverName) {
-        return state.getServer(serverName)
+    private Response getServer(AzureRequest request, String serverName) {
+        return server(request, serverName)
             .map(s -> Response.ok(serverResponse(rehydrateBestEffort(s))).build())
             .orElse(notFound("Server '" + serverName + "' not found"));
     }
 
-    private Response deleteServer(String serverName) {
-        Optional<MariaDbState.ServerEntry> entry = state.getServer(serverName);
+    private Response deleteServer(AzureRequest request, String serverName) {
+        Optional<MariaDbState.ServerEntry> entry = server(request, serverName);
         if (entry.isEmpty()) return notFound("Server '" + serverName + "' not found");
-        state.removeServer(serverName);
+        state.removeServer(MariaDbState.serverId(entry.get()));
+        releaseNameIfGone(cloud(request), entry.get());
         try { serverManager.stopServer(entry.get()); } catch (Exception e) {
             LOG.warnf(e, "Error stopping MariaDB container for server %s", serverName);
         }
         return Response.status(204).build();
+    }
+
+    /**
+     * Claims {@code claimed} and starts its container: the created answer, or the container failure. Empty when
+     * another create stored the name first.
+     */
+    private Optional<Response> createServer(AzureRequest request, MariaDbState.ServerEntry claimed) {
+        String serverName = claimed.serverName();
+        synchronized (serverNames) {
+            if (!state.claimServer(claimed)) {
+                return Optional.empty();
+            }
+        }
+        if (config.services().mariaDb().mocked()) {
+            return Optional.of(created(request, claimed));
+        }
+
+        MariaDbState.ServerEntry entry;
+        try {
+            Object lock = startLocks.computeIfAbsent(serverName.toLowerCase(), k -> new Object());
+            synchronized (lock) {
+                Optional<MariaDbState.ServerEntry> current = state.getServer(MariaDbState.serverId(claimed));
+                if (current.isPresent() && current.get().containerId() != null) {
+                    entry = current.get();
+                } else {
+                    entry = serverManager.startServer(claimed);
+                    Optional<MariaDbState.ServerEntry> attached = state.attachContainer(entry);
+                    if (attached.isPresent()) {
+                        entry = attached.get();
+                    } else {
+                        // Deleted while its container started: writing it back would resurrect
+                        // a name another subscription may have claimed since.
+                        stopQuietly(entry);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            state.releaseClaim(claimed);
+            LOG.errorf(e, "Failed to start MariaDB container for server=%s", serverName);
+            return Optional.of(Response.status(500)
+                .entity(Map.of("error", "ContainerStartFailed", "message", String.valueOf(e.getMessage())))
+                .build());
+        }
+        return Optional.of(created(request, entry));
+    }
+
+    /**
+     * Frees the name of a deleted server, unless a create stored a server at its id again since: that create's
+     * commit holds the name now. Creates claim under the same lock, so none lands between the check and the release.
+     */
+    void releaseNameIfGone(CloudProfile cloud, MariaDbState.ServerEntry deleted) {
+        ArmResourceId id = MariaDbState.serverId(deleted);
+        synchronized (serverNames) {
+            if (state.getServer(id).isEmpty()) {
+                names.release(cloud, CloudSuffix.MARIADB, deleted.serverName(), id);
+            }
+        }
     }
 
     private Response handleServerList(AzureRequest request) {
@@ -347,14 +395,14 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                                     String serverName, String dbName) {
         return switch (method) {
             case "PUT"    -> createOrUpdateDatabase(request, serverName, dbName);
-            case "GET"    -> getDatabase(serverName, dbName);
-            case "DELETE" -> deleteDatabase(serverName, dbName);
+            case "GET"    -> getDatabase(request, serverName, dbName);
+            case "DELETE" -> deleteDatabase(request, serverName, dbName);
             default       -> methodNotAllowed();
         };
     }
 
     private Response createOrUpdateDatabase(AzureRequest request, String serverName, String dbName) {
-        Optional<MariaDbState.ServerEntry> serverOpt = state.getServer(serverName);
+        Optional<MariaDbState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
 
         try {
@@ -377,16 +425,16 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
     }
 
-    private Response getDatabase(String serverName, String dbName) {
-        Optional<MariaDbState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response getDatabase(AzureRequest request, String serverName, String dbName) {
+        Optional<MariaDbState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         return state.getDatabase(serverName, dbName)
             .map(db -> Response.ok(databaseResponse(db, serverOpt.get())).build())
             .orElse(notFound("Database '" + dbName + "' not found on server '" + serverName + "'"));
     }
 
-    private Response deleteDatabase(String serverName, String dbName) {
-        Optional<MariaDbState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response deleteDatabase(AzureRequest request, String serverName, String dbName) {
+        Optional<MariaDbState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         if (!state.databaseExists(serverName, dbName))
             return notFound("Database '" + dbName + "' not found");
@@ -394,8 +442,8 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         return Response.status(204).build();
     }
 
-    private Response handleDatabaseList(String serverName) {
-        Optional<MariaDbState.ServerEntry> serverOpt = state.getServer(serverName);
+    private Response handleDatabaseList(AzureRequest request, String serverName) {
+        Optional<MariaDbState.ServerEntry> serverOpt = server(request, serverName);
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         List<Map<String, Object>> value = state.listDatabases(serverName).stream()
             .map(db -> databaseResponse(db, serverOpt.get()))
@@ -407,7 +455,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     private Response handleFirewallRule(String method, AzureRequest request,
                                         String serverName, String ruleName) {
-        if (!state.serverExists(serverName))
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         return switch (method) {
             case "PUT"    -> createFirewallRule(request, serverName, ruleName);
@@ -442,8 +490,8 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
     }
 
-    private Response handleFirewallRuleList(String method, String serverName) {
-        if (!state.serverExists(serverName))
+    private Response handleFirewallRuleList(String method, AzureRequest request, String serverName) {
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         if ("GET".equals(method)) {
             List<Map<String, Object>> value = state.listFirewallRules(serverName).stream()
@@ -458,7 +506,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     private Response handleConfiguration(String method, AzureRequest request,
                                          String serverName, String cfgName) {
-        if (!state.serverExists(serverName))
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         return switch (method) {
             case "PUT", "PATCH" -> {
@@ -479,8 +527,8 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         };
     }
 
-    private Response handleConfigurationList(String serverName) {
-        if (!state.serverExists(serverName))
+    private Response handleConfigurationList(AzureRequest request, String serverName) {
+        if (server(request, serverName).isEmpty())
             return notFound("Server '" + serverName + "' not found");
         List<Map<String, Object>> value = state.listConfigurations(serverName).entrySet().stream()
             .map(e -> configurationResponse(serverName, e.getKey(), e.getValue()))
@@ -501,7 +549,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
         Object lock = startLocks.computeIfAbsent(entry.serverName().toLowerCase(), k -> new Object());
         synchronized (lock) {
-            Optional<MariaDbState.ServerEntry> found = state.getServer(entry.serverName());
+            Optional<MariaDbState.ServerEntry> found = state.getServer(MariaDbState.serverId(entry));
             if (found.isEmpty()) {
                 // Deleted since the caller read it: starting a container would bring it back.
                 return entry;
@@ -521,8 +569,8 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         }
     }
 
-    private Response handleServerConnect(String serverName) {
-        Optional<MariaDbState.ServerEntry> found = state.getServer(serverName);
+    private Response handleServerConnect(AzureRequest request, String serverName) {
+        Optional<MariaDbState.ServerEntry> found = server(request, serverName);
         if (found.isEmpty()) {
             return notFound("Server '" + serverName + "' not found");
         }
@@ -679,34 +727,54 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
     }
 
     /**
-     * Server names are global DNS names, so the state keeps one entry per name. An ARM path whose
-     * subscription or resource group is not the owner's must never reach that entry: creating the
-     * server there is a name conflict, and any other call is a 404.
+     * The server a path addresses. An ARM path reaches the server stored under its own id, so a server of that name
+     * in another subscription or resource group is not found; a subscription-level path names no resource group and
+     * owns nothing ({@link ArmScope}). The account path ({@code /{account}-mariadb/...}) has no scope and finds the
+     * server by its name alone, which is unique.
      */
-    private Optional<Response> foreignServer(AzureRequest request, String tail) {
-        if (!tail.matches("servers/[^/]+(/.*)?")) {
+    private Optional<MariaDbState.ServerEntry> server(AzureRequest request, String serverName) {
+        Optional<ArmScope> scope = scope(request);
+        if (scope.isEmpty()) {
+            return state.getServer(serverName);
+        }
+        if (scope.get().resourceGroup() == null) {
             return Optional.empty();
         }
-        String serverName = segment(tail, 1);
-        boolean targetsServer = tail.matches("servers/[^/]+");
-        return state.getServer(serverName).flatMap(s -> foreignEntry(request, s, serverName, targetsServer));
+        return state.getServer(MariaDbState.serverId(scope.get().subscription(), scope.get().resourceGroup(),
+            serverName));
     }
 
     /**
-     * The owner check of {@link #foreignServer} against an entry already read, so an update can repeat it
-     * under the start lock. {@code targetsServer} is true when the path names the server itself, where a
-     * PUT from another scope is a create and so a name conflict.
+     * A create answered 2xx: the name is kept in the {@link GlobalNameRegistry}. The gate's {@code GlobalNameRule}
+     * commits it too for an ARM create; this also covers the creates outside the gate (the account path, and a
+     * path with no resource group), so the registry knows every stored server.
      */
-    private Optional<Response> foreignEntry(AzureRequest request, MariaDbState.ServerEntry entry, String serverName,
-                                            boolean targetsServer) {
-        Optional<ArmScope> scope = ArmScope.of(request.resourcePath());
-        if (scope.isEmpty() || scope.get().owns(entry.subscriptionId(), entry.resourceGroupName())) {
-            return Optional.empty();
+    private Response created(AzureRequest request, MariaDbState.ServerEntry entry) {
+        names.commit(cloud(request), CloudSuffix.MARIADB, entry.serverName(), MariaDbState.serverId(entry));
+        return Response.status(201).entity(serverResponse(entry)).build();
+    }
+
+    /**
+     * A create that found the name held by a server this path cannot reach: the type's own conflict for a create in
+     * a resource group, and a 404 for a path that names none, which creates nothing of its own.
+     */
+    private static Response nameTaken(AzureRequest request, String serverName) {
+        if (scope(request).filter(armScope -> armScope.resourceGroup() == null).isPresent()) {
+            return notFound("Server '" + serverName + "' not found");
         }
-        boolean createsServer = targetsServer && "PUT".equals(request.method()) && scope.get().resourceGroup() != null;
-        return Optional.of(createsServer
-            ? ArmErrors.error(409, "ServerNameAlreadyExists", "Specified server name is already used.")
-            : notFound("Server '" + serverName + "' not found"));
+        GlobalName global = MariaDbArmSurface.SERVER_DNS_NAME;
+        return ArmErrors.error(global.conflictStatus(), global.conflictCode(),
+            String.format(global.conflictMessage(), serverName));
+    }
+
+    /** The subscription and resource group of an ARM path; empty for the account path. */
+    private static Optional<ArmScope> scope(AzureRequest request) {
+        return ArmScope.of(request.resourcePath());
+    }
+
+    private static CloudProfile cloud(AzureRequest request) {
+        return request.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
+            : request.scope().cloud();
     }
 
     private static Response notFound(String message) {
@@ -760,6 +828,15 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
         return servers.stream()
                 .map(server -> ArmResources.indexEntry(server.armId(), server.serverName(), TYPE,
                         server.location(), server.tags()))
+                .toList();
+    }
+
+    // ── GlobalNameSource ────────────────────────────────────────────────────────
+
+    @Override
+    public List<Claim> globalNames() {
+        return state.listServers().stream()
+                .map(server -> new Claim(CloudSuffix.MARIADB, server.serverName(), MariaDbState.serverId(server)))
                 .toList();
     }
 }
