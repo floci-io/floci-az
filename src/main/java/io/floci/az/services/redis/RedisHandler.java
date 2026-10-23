@@ -129,7 +129,13 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
             LOG.infov("Redis cache {0}: dropping the duplicate stored under {1}/{2}", cache.getName(),
                     cache.getSubscriptionId(), cache.getResourceGroup());
             if (!config.services().redis().mocked()) {
-                stopQuietly(cache);
+                try {
+                    cacheManager.stopCache(cache);
+                } catch (Exception e) {
+                    LOG.warnv("Could not remove the container of duplicate Redis cache {0}: {1}. Remove container {2}"
+                            + " (id {3}) by hand", cache.getName(), e.getMessage(), cacheManager.containerName(cache),
+                            cache.getContainerId());
+                }
             }
         }
     }

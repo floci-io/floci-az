@@ -119,10 +119,11 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                     cluster.getSubscriptionId(), cluster.getResourceGroup());
             if (!config.services().aks().mocked()) {
                 try {
-                    clusterManager.stopCluster(cluster);
+                    clusterManager.removeCluster(cluster);
                 } catch (Exception e) {
-                    LOG.warnv("Error stopping the container of duplicate AKS cluster {0}: {1}", cluster.getName(),
-                            e.getMessage());
+                    LOG.warnv("Could not remove the k3s container of duplicate AKS cluster {0}: {1}. Remove container"
+                            + " {2} (id {3}) and volume {2} by hand", cluster.getName(), e.getMessage(),
+                            clusterManager.containerName(cluster), cluster.getContainerId());
                 }
             }
         }
