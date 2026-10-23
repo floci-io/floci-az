@@ -128,6 +128,11 @@ class ArmSurfaceGoldenTest {
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
         Microsoft.ContainerService/managedClusters               1-63    null    0    null
         Microsoft.ContainerService/managedClusters/agentPools    1-12    null    0    null
+        Microsoft.Network/networkInterfaces        1-80    null    0    null
+        Microsoft.Network/networkSecurityGroups    1-80    null    0    null
+        Microsoft.Network/publicIPAddresses        1-80    null    0    null
+        Microsoft.Network/virtualNetworks          2-64    null    0    null
+        Microsoft.Network/virtualNetworks/subnets  1-80    null    0    null
         """;
 
     @Inject

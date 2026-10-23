@@ -402,6 +402,11 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.ContainerRegistry/registries` | 5 to 50 letters and digits |
 | `Microsoft.ContainerService/managedClusters` | 1 to 63 letters, digits, underscores and hyphens, starting and ending with a letter or digit |
 | `Microsoft.ContainerService/managedClusters/agentPools` | 1 to 12 lowercase letters and digits, starting with a letter; also checked for the pools in a cluster PUT body |
+| `Microsoft.Network/networkInterfaces` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/networkSecurityGroups` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/publicIPAddresses` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/virtualNetworks` | 2 to 64 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
+| `Microsoft.Network/virtualNetworks/subnets` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
 
 The other types declare theirs as they move to the shared resource store. The code is an emulator choice: no local
 source records Azure's answer for a name outside the rule.
