@@ -10,10 +10,14 @@ import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmProviderService;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.monitor.MonitorModels.MonitorResource;
 import io.quarkus.runtime.configuration.MemorySize;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,7 +35,6 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
 @ApplicationScoped
@@ -67,7 +71,37 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         "(.+)/providers/microsoft\\.insights/diagnosticsettings(?:/([^/?]+))?",
         Pattern.CASE_INSENSITIVE);
 
+    /** The workspaces, data collection endpoints and rules a resource group or subscription lists. */
+    private static final Pattern COLLECTION_PATTERN = Pattern.compile(
+        "subscriptions/([^/]+)(?:/resourceGroups/([^/]+))?/providers/"
+            + "(Microsoft\\.OperationalInsights/workspaces|Microsoft\\.Insights/dataCollectionEndpoints"
+            + "|Microsoft\\.Insights/dataCollectionRules)/?(?:\\?.*)?",
+        Pattern.CASE_INSENSITIVE);
+
+    static final String WORKSPACE_TYPE = "Microsoft.OperationalInsights/workspaces";
+    static final String DCE_TYPE = "Microsoft.Insights/dataCollectionEndpoints";
+    static final String DCR_TYPE = "Microsoft.Insights/dataCollectionRules";
+    static final String DIAGNOSTIC_SETTINGS_TYPE = "Microsoft.Insights/diagnosticSettings";
+
+    /**
+     * Before the stores, the handler kept lookups from a workspace's customerId and a rule's immutableId to their
+     * keys. Nothing reads them now; deleting the resource removes its old lookup with it.
+     */
+    private static final String LEGACY_WORKSPACE_LOOKUP = "workspaceId/";
+    private static final String LEGACY_RULE_LOOKUP = "dcrId/";
+
+    /**
+     * The {@code monitor} backend holds the ARM resources, each type in its own store over canonical keys, and the
+     * ingested log records under {@code {customerId}/{stream}/{time}/{uuid}}. Before the stores, the resources were
+     * kept under {@code workspace/}, {@code dce/} and {@code dcr/} plus the raw-case {@code sub/rg/name}, and under
+     * {@code diag/} plus the lowercased resource URI and setting name; those entries are read as they are and move to
+     * their canonical key on their next write.
+     */
     private final StorageBackend<String, StoredObject> store;
+    private final ArmResourceStore<MonitorResource> workspaces;
+    private final ArmResourceStore<MonitorResource> endpoints;
+    private final ArmResourceStore<MonitorResource> rules;
+    private final ArmResourceStore<MonitorResource> diagnosticSettings;
     private final EmulatorConfig config;
     private final long maxDecodedBodyBytes;
 
@@ -79,6 +113,14 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                           @ConfigProperty(name = "quarkus.http.limits.max-body-size", defaultValue = "2G")
                           MemorySize maxBodySize) {
         this.store = factory.create("monitor");
+        this.workspaces = ArmResourceStore.create(factory, "monitor", WORKSPACE_TYPE, MonitorResource.class,
+            MonitorResource::id, key -> key.startsWith("workspace/"));
+        this.endpoints = ArmResourceStore.create(factory, "monitor", DCE_TYPE, MonitorResource.class,
+            MonitorResource::id, key -> key.startsWith("dce/"));
+        this.rules = ArmResourceStore.create(factory, "monitor", DCR_TYPE, MonitorResource.class,
+            MonitorResource::id, key -> key.startsWith("dcr/"));
+        this.diagnosticSettings = ArmResourceStore.create(factory, "monitor", DIAGNOSTIC_SETTINGS_TYPE,
+            MonitorResource.class, MonitorResource::id, key -> key.startsWith("diag/"));
         this.config = config;
         this.maxDecodedBodyBytes = maxBodySize.asLongValue();
     }
@@ -129,29 +171,45 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             }
             return activityLog.list(req, sub);
         }
+        Matcher collection = COLLECTION_PATTERN.matcher(path);
+        if (collection.matches()) {
+            return "GET".equals(method)
+                ? listCollection(collection.group(3), new ArmScope(collection.group(1), collection.group(2)))
+                : Response.status(405).build();
+        }
         if (path.contains("/providers/Microsoft.OperationalInsights/workspaces/")) {
-            return handleWorkspaceArm(req, path, method, sub);
+            return handleWorkspaceArm(req, path, method);
         } else if (path.contains("/providers/Microsoft.Insights/dataCollectionEndpoints/")) {
-            return handleDceArm(req, path, method, sub);
+            return handleDceArm(req, path, method);
         } else if (path.contains("/providers/Microsoft.Insights/dataCollectionRules/")) {
-            return handleDcrArm(req, path, method, sub);
+            return handleDcrArm(req, path, method);
         } else if (isDiagnosticSettingsPath(path)) {
             return handleDiagnosticSettingsArm(req, path, method.toUpperCase());
         }
         return Response.status(404).entity("Provider resource not found").build();
     }
 
-    /** Key prefixes of the tracked resources the index lists: workspaces, data collection endpoints and rules. */
-    private static final List<String> INDEXED_PREFIXES = List.of("workspace/", "dce/", "dcr/");
+    /** The workspaces, data collection endpoints or rules in a resource group, or in a whole subscription. */
+    private Response listCollection(String type, ArmScope scope) {
+        List<MonitorResource> value = storeOf(type).list(scope).stream().map(ArmResourceStore.Stored::value).toList();
+        return Response.ok(Map.of("value", value)).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    private ArmResourceStore<MonitorResource> storeOf(String type) {
+        if (WORKSPACE_TYPE.equalsIgnoreCase(type)) {
+            return workspaces;
+        }
+        return DCE_TYPE.equalsIgnoreCase(type) ? endpoints : rules;
+    }
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(sub, rg);
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(sub, null);
+        return indexEntries(new ArmScope(sub, null));
     }
 
     @Override
@@ -169,11 +227,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
      * Workspaces, data collection endpoints and rules in a subscription, or in one of its resource groups.
      * Diagnostic settings are extension resources and are not listed.
      */
-    private List<Map<String, Object>> indexEntries(String sub, String rg) {
-        return store.scan(k -> INDEXED_PREFIXES.stream().anyMatch(k::startsWith)).stream()
-                .map(this::parseStoredData)
-                .filter(resource -> ArmResources.inScope(resource.get("id"), sub, rg))
-                .map(ArmResources::indexEntry)
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return Stream.of(workspaces, endpoints, rules)
+                .flatMap(resources -> resources.list(scope).stream())
+                .map(ArmResourceStore.Stored::value)
+                .map(resource -> ArmResources.indexEntry(resource.id(), resource.name(), resource.type(),
+                    resource.location(), null))
                 .toList();
     }
 
@@ -187,84 +246,82 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         return DIAG_SETTINGS_PATTERN.matcher(path).find();
     }
 
+    /** The id of the resource {@code matched} addresses: the matched part of the path, in the client's casing. */
+    private static ArmResourceId resourceId(String matched) {
+        return ArmResourceId.parse("/" + matched).orElseThrow();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> bodyProperties(Map<String, Object> body) {
+        return body.get("properties") instanceof Map<?, ?> props
+            ? new LinkedHashMap<>((Map<String, Object>) props) : new LinkedHashMap<>();
+    }
+
+    private static String bodyLocation(Map<String, Object> body) {
+        return (String) body.getOrDefault("location", "eastus");
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     // -------------------------------------------------------------------------
     // Workspace ARM CRUD
     // -------------------------------------------------------------------------
 
-    @SuppressWarnings("unchecked")
-    private Response handleWorkspaceArm(AzureRequest req, String path, String method, String sub) {
+    private Response handleWorkspaceArm(AzureRequest req, String path, String method) {
         Matcher m = WORKSPACE_PATTERN.matcher(path);
         if (!m.find()) {
             return Response.status(400).entity("Invalid workspace path").build();
         }
-        String rg = m.group(2);
-        String name = m.group(3);
-        String key = String.format("workspace/%s/%s/%s", sub, rg, name);
+        ArmResourceId id = resourceId(m.group(0));
 
         if (WORKSPACE_KEYS_ACTION.matcher(path).find()) {
-            return "POST".equals(method) ? sharedKeys(key) : Response.status(405).build();
+            return "POST".equals(method) ? sharedKeys(id) : Response.status(405).build();
         }
 
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
-            String location = (String) body.getOrDefault("location", "eastus");
-            Map<String, Object> props = (Map<String, Object>) body.getOrDefault("properties", new HashMap<>());
-            String customerId = store.get(key).map(obj -> obj.metadata().get("customerId"))
-                .orElse((String) props.get("customerId"));
-            if (customerId == null || customerId.isBlank()) {
-                customerId = UUID.randomUUID().toString();
-            }
-
-            Map<String, Object> workspace = new LinkedHashMap<>();
-            workspace.put("id", "/" + path);
-            workspace.put("name", name);
-            workspace.put("type", "Microsoft.OperationalInsights/workspaces");
-            workspace.put("location", location);
-            
-            Map<String, Object> newProps = new LinkedHashMap<>(props);
-            newProps.put("provisioningState", "Succeeded");
-            newProps.put("customerId", customerId);
-            workspace.put("properties", newProps);
-
-            store.put(key, new StoredObject(key, toBytes(workspace), Map.of("customerId", customerId), Instant.now(), UUID.randomUUID().toString()));
-            
-            String lookupKey = "workspaceId/" + customerId;
-            store.put(lookupKey, new StoredObject(lookupKey, key.getBytes(StandardCharsets.UTF_8), Map.of(), Instant.now(), ""));
-
+            Map<String, Object> props = bodyProperties(body);
+            MonitorResource workspace = workspaces.createOrUpdate(id, existing -> {
+                // customerId is read-only: a redeploy keeps the one the workspace was created with
+                String customerId = existing.map(ws -> ws.property("customerId"))
+                    .orElse(props.get("customerId") instanceof String text ? text : null);
+                if (isBlank(customerId)) {
+                    customerId = UUID.randomUUID().toString();
+                }
+                Map<String, Object> newProps = new LinkedHashMap<>(props);
+                newProps.put("provisioningState", "Succeeded");
+                newProps.put("customerId", customerId);
+                return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
+                    existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body),
+                    newProps);
+            }).stored().value();
             return Response.status(201).entity(workspace).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
-            Optional<StoredObject> obj = store.get(key);
-            if (obj.isEmpty()) {
+            Optional<ArmResourceStore.Stored<MonitorResource>> workspace = workspaces.get(id);
+            if (workspace.isEmpty()) {
                 return Response.status(404).entity("Workspace not found").build();
             }
-            return Response.ok(parseStoredData(obj.get())).type(MediaType.APPLICATION_JSON).build();
+            return Response.ok(workspace.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
-            Optional<StoredObject> obj = store.get(key);
-            if (obj.isPresent()) {
-                Map<String, Object> workspace = parseStoredData(obj.get());
-                Map<String, Object> props = (Map<String, Object>) workspace.get("properties");
-                if (props != null) {
-                    String customerId = (String) props.get("customerId");
-                    if (customerId != null) {
-                        store.delete("workspaceId/" + customerId);
-                    }
-                }
-                store.delete(key);
-            }
+            workspaces.delete(id).map(ArmResourceStore.Stored::value)
+                .map(workspace -> workspace.property("customerId"))
+                .ifPresent(customerId -> store.delete(LEGACY_WORKSPACE_LOOKUP + customerId));
             return Response.ok().build();
         }
         return Response.status(405).build();
     }
 
     /** The workspace's shared keys, derived from its customer id so they hold for the workspace's life. */
-    private Response sharedKeys(String key) {
-        Optional<StoredObject> obj = store.get(key);
-        if (obj.isEmpty()) {
+    private Response sharedKeys(ArmResourceId id) {
+        Optional<ArmResourceStore.Stored<MonitorResource>> workspace = workspaces.get(id);
+        if (workspace.isEmpty()) {
             return Response.status(404)
                 .entity(Map.of("error", Map.of("code", "ResourceNotFound", "message", "Workspace not found")))
                 .type(MediaType.APPLICATION_JSON).build();
         }
-        String customerId = obj.get().metadata().get("customerId");
+        String customerId = workspace.get().value().property("customerId");
         Map<String, Object> keys = new LinkedHashMap<>();
         keys.put("primarySharedKey", sharedKey("primary", customerId));
         keys.put("secondarySharedKey", sharedKey("secondary", customerId));
@@ -285,43 +342,33 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     // Data Collection Endpoints (DCE) ARM CRUD
     // -------------------------------------------------------------------------
 
-    private Response handleDceArm(AzureRequest req, String path, String method, String sub) {
+    private Response handleDceArm(AzureRequest req, String path, String method) {
         Matcher m = DCE_PATTERN.matcher(path);
         if (!m.find()) {
             return Response.status(400).entity("Invalid DCE path").build();
         }
-        String rg = m.group(2);
-        String name = m.group(3);
-        String key = String.format("dce/%s/%s/%s", sub, rg, name);
+        ArmResourceId id = resourceId(m.group(0));
 
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
-            String location = (String) body.getOrDefault("location", "eastus");
-            
-            Map<String, Object> dce = new LinkedHashMap<>();
-            dce.put("id", "/" + path);
-            dce.put("name", name);
-            dce.put("type", "Microsoft.Insights/dataCollectionEndpoints");
-            dce.put("location", location);
-
             String ingestUrl = config.effectiveBaseUrl();
-
-            Map<String, Object> props = new LinkedHashMap<>();
-            props.put("provisioningState", "Succeeded");
-            props.put("logsIngestion", Map.of("endpoint", ingestUrl));
-            props.put("configurationAccess", Map.of("endpoint", ingestUrl));
-            dce.put("properties", props);
-
-            store.put(key, new StoredObject(key, toBytes(dce), Map.of(), Instant.now(), UUID.randomUUID().toString()));
+            MonitorResource dce = endpoints.createOrUpdate(id, existing -> {
+                Map<String, Object> props = new LinkedHashMap<>();
+                props.put("provisioningState", "Succeeded");
+                props.put("logsIngestion", Map.of("endpoint", ingestUrl));
+                props.put("configurationAccess", Map.of("endpoint", ingestUrl));
+                return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
+                    existing.map(MonitorResource::name).orElse(id.name()), DCE_TYPE, bodyLocation(body), props);
+            }).stored().value();
             return Response.status(201).entity(dce).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
-            Optional<StoredObject> obj = store.get(key);
-            if (obj.isEmpty()) {
+            Optional<ArmResourceStore.Stored<MonitorResource>> dce = endpoints.get(id);
+            if (dce.isEmpty()) {
                 return Response.status(404).entity("DCE not found").build();
             }
-            return Response.ok(parseStoredData(obj.get())).type(MediaType.APPLICATION_JSON).build();
+            return Response.ok(dce.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
-            store.delete(key);
+            endpoints.delete(id);
             return Response.ok().build();
         }
         return Response.status(405).build();
@@ -331,61 +378,40 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     // Data Collection Rules (DCR) ARM CRUD
     // -------------------------------------------------------------------------
 
-    @SuppressWarnings("unchecked")
-    private Response handleDcrArm(AzureRequest req, String path, String method, String sub) {
+    private Response handleDcrArm(AzureRequest req, String path, String method) {
         Matcher m = DCR_PATTERN.matcher(path);
         if (!m.find()) {
             return Response.status(400).entity("Invalid DCR path").build();
         }
-        String rg = m.group(2);
-        String name = m.group(3);
-        String key = String.format("dcr/%s/%s/%s", sub, rg, name);
+        ArmResourceId id = resourceId(m.group(0));
 
         if ("PUT".equals(method)) {
             Map<String, Object> body = parseBody(req);
-            String location = (String) body.getOrDefault("location", "eastus");
-            Map<String, Object> props = (Map<String, Object>) body.getOrDefault("properties", new HashMap<>());
-            String immutableId = (String) props.get("immutableId");
-            if (immutableId == null || immutableId.isBlank()) {
-                immutableId = "dcr-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-            }
-
-            Map<String, Object> dcr = new LinkedHashMap<>();
-            dcr.put("id", "/" + path);
-            dcr.put("name", name);
-            dcr.put("type", "Microsoft.Insights/dataCollectionRules");
-            dcr.put("location", location);
-
-            Map<String, Object> newProps = new LinkedHashMap<>(props);
-            newProps.put("provisioningState", "Succeeded");
-            newProps.put("immutableId", immutableId);
-            dcr.put("properties", newProps);
-
-            store.put(key, new StoredObject(key, toBytes(dcr), Map.of("immutableId", immutableId), Instant.now(), UUID.randomUUID().toString()));
-            
-            String lookupKey = "dcrId/" + immutableId;
-            store.put(lookupKey, new StoredObject(lookupKey, key.getBytes(StandardCharsets.UTF_8), Map.of(), Instant.now(), ""));
-
+            Map<String, Object> props = bodyProperties(body);
+            MonitorResource dcr = rules.createOrUpdate(id, existing -> {
+                // immutableId is read-only, and the ingestion URL carries it: a redeploy keeps it
+                String immutableId = existing.map(rule -> rule.property("immutableId"))
+                    .orElse(props.get("immutableId") instanceof String text ? text : null);
+                if (isBlank(immutableId)) {
+                    immutableId = "dcr-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+                }
+                Map<String, Object> newProps = new LinkedHashMap<>(props);
+                newProps.put("provisioningState", "Succeeded");
+                newProps.put("immutableId", immutableId);
+                return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
+                    existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body), newProps);
+            }).stored().value();
             return Response.status(201).entity(dcr).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
-            Optional<StoredObject> obj = store.get(key);
-            if (obj.isEmpty()) {
+            Optional<ArmResourceStore.Stored<MonitorResource>> dcr = rules.get(id);
+            if (dcr.isEmpty()) {
                 return Response.status(404).entity("DCR not found").build();
             }
-            return Response.ok(parseStoredData(obj.get())).type(MediaType.APPLICATION_JSON).build();
+            return Response.ok(dcr.get().value()).type(MediaType.APPLICATION_JSON).build();
         } else if ("DELETE".equals(method)) {
-            Optional<StoredObject> obj = store.get(key);
-            if (obj.isPresent()) {
-                Map<String, Object> dcr = parseStoredData(obj.get());
-                Map<String, Object> props = (Map<String, Object>) dcr.get("properties");
-                if (props != null) {
-                    String immutableId = (String) props.get("immutableId");
-                    if (immutableId != null) {
-                        store.delete("dcrId/" + immutableId);
-                    }
-                }
-                store.delete(key);
-            }
+            rules.delete(id).map(ArmResourceStore.Stored::value)
+                .map(rule -> rule.property("immutableId"))
+                .ifPresent(immutableId -> store.delete(LEGACY_RULE_LOOKUP + immutableId));
             return Response.ok().build();
         }
         return Response.status(405).build();
@@ -471,19 +497,15 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         String dcrId = parts[1];
         String stream = parts[3];
 
-        // Find DCR key from lookup
-        Optional<StoredObject> dcrLookup = store.get("dcrId/" + dcrId);
-        if (dcrLookup.isEmpty()) {
+        // The ingestion URL names the rule by its immutableId
+        Optional<MonitorResource> rule = rules.all().stream().map(ArmResourceStore.Stored::value)
+            .filter(candidate -> dcrId.equals(candidate.property("immutableId")))
+            .findFirst();
+        if (rule.isEmpty()) {
             return Response.status(404).entity("DCR not found with immutableId: " + dcrId).build();
         }
-        String dcrKey = new String(dcrLookup.get().data(), StandardCharsets.UTF_8);
-        Optional<StoredObject> dcrObj = store.get(dcrKey);
-        if (dcrObj.isEmpty()) {
-            return Response.status(404).entity("DCR not found").build();
-        }
 
-        Map<String, Object> dcr = parseStoredData(dcrObj.get());
-        Map<String, Object> props = (Map<String, Object>) dcr.get("properties");
+        Map<String, Object> props = rule.get().properties();
         if (props == null) {
             return Response.status(400).entity("DCR has no properties").build();
         }
@@ -502,17 +524,17 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return Response.status(400).entity("DCR has no workspaceResourceId").build();
         }
 
-        // Get workspace ID (customerId) from the workspace resource ID
-        String workspaceStoreKey = mapResourceIdToStoreKey(workspaceResourceId);
-        Optional<StoredObject> workspaceObj = store.get(workspaceStoreKey);
-        if (workspaceObj.isEmpty()) {
+        // Get workspace ID (customerId) from the workspace resource ID, which compares case-insensitively
+        Optional<MonitorResource> workspace = ArmResourceId.parse(workspaceResourceId)
+            .filter(id -> WORKSPACE_TYPE.equalsIgnoreCase(id.typePath()))
+            .flatMap(workspaces::get)
+            .map(ArmResourceStore.Stored::value);
+        if (workspace.isEmpty()) {
             return Response.status(404).entity("Workspace not found: " + workspaceResourceId).build();
         }
-        Map<String, Object> workspace = parseStoredData(workspaceObj.get());
-        Map<String, Object> wsProps = (Map<String, Object>) workspace.get("properties");
-        String workspaceId = wsProps != null ? (String) wsProps.get("customerId") : null;
+        String workspaceId = workspace.get().property("customerId");
         if (workspaceId == null) {
-            workspaceId = (String) workspace.get("name");
+            workspaceId = workspace.get().name();
         }
 
         // Parse log records array from body stream; the ingestion clients gzip every upload
@@ -557,28 +579,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         return Response.noContent().build();
     }
 
-    private String mapResourceIdToStoreKey(String resourceId) {
-        String clean = resourceId;
-        if (clean.startsWith("/")) {
-            clean = clean.substring(1);
-        }
-        String[] parts = clean.split("/");
-        String sub = "unknown";
-        String rg = "unknown";
-        String name = "unknown";
-        for (int i = 0; i < parts.length - 1; i++) {
-            if ("subscriptions".equalsIgnoreCase(parts[i])) sub = parts[i+1];
-            if ("resourceGroups".equalsIgnoreCase(parts[i])) rg = parts[i+1];
-            if ("workspaces".equalsIgnoreCase(parts[i])) name = parts[i+1];
-        }
-        return String.format("workspace/%s/%s/%s", sub, rg, name);
-    }
-
     // -------------------------------------------------------------------------
     // Log Query API
     // -------------------------------------------------------------------------
 
-    @SuppressWarnings("unchecked")
     private Response handleQuery(AzureRequest req) {
         String path = req.resourcePath();
         String[] parts = path.split("/");
@@ -587,17 +591,17 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         }
         String workspaceId = parts[2];
 
-        // Resolve workspace to get the actual customerId GUID if workspaceId is name/resourceId
-        Optional<StoredObject> wsLookup = store.get("workspaceId/" + workspaceId);
-        if (wsLookup.isEmpty()) {
-            // Check if workspaceId is name
-            List<StoredObject> workspaces = store.scan(k -> k.startsWith("workspace/") && k.endsWith("/" + parts[2]));
-            if (!workspaces.isEmpty()) {
-                Map<String, Object> ws = parseStoredData(workspaces.get(0));
-                Map<String, Object> props = (Map<String, Object>) ws.get("properties");
-                if (props != null && props.containsKey("customerId")) {
-                    workspaceId = (String) props.get("customerId");
-                }
+        // The path names the workspace by its customerId, under which its records are kept, or by its name
+        String requested = parts[2];
+        List<MonitorResource> known = workspaces.all().stream().map(ArmResourceStore.Stored::value).toList();
+        if (known.stream().noneMatch(ws -> requested.equals(ws.property("customerId")))) {
+            Optional<String> byName = known.stream()
+                .filter(ws -> requested.equals(ws.name()))
+                .map(ws -> ws.property("customerId"))
+                .filter(customerId -> customerId != null)
+                .findFirst();
+            if (byName.isPresent()) {
+                workspaceId = byName.get();
             }
         }
 
@@ -721,18 +725,18 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         }
         String resourceUri = m.group(1);
         String settingsName = m.group(2);
-
-        String resourceKey = resourceUri.toLowerCase();
+        Optional<ArmResourceId> target = ArmResourceId.parse(resourceUri);
+        if (target.isEmpty()) {
+            return Response.status(400).entity("Invalid diagnosticSettings path").build();
+        }
 
         if ("GET".equals(method) && settingsName == null) {
-            // List all diagnostic settings for the resource
-            final String prefix = "diag/" + resourceKey + "/";
-            List<Map<String, Object>> settings = new ArrayList<>();
-            for (String k : store.keys()) {
-                if (k.startsWith(prefix)) {
-                    store.get(k).ifPresent(obj -> settings.add(parseStoredData(obj)));
-                }
-            }
+            // The settings extend one resource: the scope of their id is that resource's id
+            String targetKey = target.get().canonicalKey();
+            List<MonitorResource> settings = diagnosticSettings.all().stream()
+                .filter(stored -> stored.id().scope() != null && targetKey.equals(stored.id().scope().canonicalKey()))
+                .map(ArmResourceStore.Stored::value)
+                .toList();
             return Response.ok(Map.of("value", settings)).type(MediaType.APPLICATION_JSON).build();
         }
 
@@ -740,7 +744,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             return Response.status(400).entity("diagnosticSettings name is required for this operation").build();
         }
 
-        String storeKey = "diag/" + resourceKey + "/" + settingsName.toLowerCase();
+        ArmResourceId id = resourceId(m.group(0));
 
         return switch (method) {
             case "PUT" -> {
@@ -749,33 +753,28 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 if (rawProps != null && !(rawProps instanceof Map<?, ?>)) {
                     yield Response.status(400).entity("'properties' must be an object").build();
                 }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> props = rawProps instanceof Map<?, ?> ? (Map<String, Object>) rawProps : new LinkedHashMap<>();
-
-                Map<String, Object> setting = new LinkedHashMap<>();
-                setting.put("id", "/" + path);
-                setting.put("name", settingsName);
-                setting.put("type", "Microsoft.Insights/diagnosticSettings");
-                setting.put("properties", buildDiagnosticSettingsProperties(props, resourceUri));
-
-                store.put(storeKey, new StoredObject(storeKey, toBytes(setting), Map.of(), Instant.now(),
-                    UUID.randomUUID().toString()));
+                Map<String, Object> props = bodyProperties(body);
+                Map<String, Object> settingProps = buildDiagnosticSettingsProperties(props, resourceUri);
+                MonitorResource setting = diagnosticSettings.createOrUpdate(id, existing -> new MonitorResource(
+                    existing.map(MonitorResource::id).orElse(id.id()),
+                    existing.map(MonitorResource::name).orElse(settingsName),
+                    DIAGNOSTIC_SETTINGS_TYPE, null, settingProps)).stored().value();
 
                 LOG.infof("Diagnostic settings configured: resource=%s name=%s", resourceUri, settingsName);
                 yield Response.ok(setting).type(MediaType.APPLICATION_JSON).build();
             }
             case "GET" -> {
-                Optional<StoredObject> obj = store.get(storeKey);
-                if (obj.isEmpty()) {
+                Optional<ArmResourceStore.Stored<MonitorResource>> setting = diagnosticSettings.get(id);
+                if (setting.isEmpty()) {
                     yield Response.status(404)
                         .entity(Map.of("error", Map.of("code", "ResourceNotFound",
                             "message", "Diagnostic settings '" + settingsName + "' not found")))
                         .build();
                 }
-                yield Response.ok(parseStoredData(obj.get())).type(MediaType.APPLICATION_JSON).build();
+                yield Response.ok(setting.get().value()).type(MediaType.APPLICATION_JSON).build();
             }
             case "DELETE" -> {
-                store.delete(storeKey);
+                diagnosticSettings.delete(id);
                 yield Response.ok().build();
             }
             default -> Response.status(405).build();
@@ -846,6 +845,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     }
 
     public void clear() {
+        workspaces.clear();
+        endpoints.clear();
+        rules.clear();
+        diagnosticSettings.clear();
         store.clear();
     }
 }

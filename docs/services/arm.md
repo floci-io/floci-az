@@ -411,6 +411,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.DBforPostgreSQL/flexibleServers` | 3 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
 | `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
+| `Microsoft.OperationalInsights/workspaces` | 4 to 63 letters, digits and hyphens, starting and ending with a letter or digit |
 | `Microsoft.Sql/servers/databases` | 1 to 128 characters without `<>*%&:\/?` or control characters, not ending with a period or a space |
 | `Microsoft.Sql/servers/firewallRules` | 1 to 128 characters without `<>*%&:;\/?` or control characters, not ending with a period |
 | `Microsoft.Sql/servers` | 1 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen |

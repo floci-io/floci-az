@@ -13,13 +13,19 @@ the **Log Analytics query API** (read them back with a subset of KQL), all in-pr
 ## Features
 
 - **Log Analytics workspaces**: `Microsoft.OperationalInsights/workspaces` CreateOrUpdate, Get,
-  Delete; a `customerId` (workspace GUID) is generated when not supplied, kept across redeploys, and
+  Delete, and List in a resource group; a `customerId` (workspace GUID) is generated when not supplied, kept across redeploys, and
   indexed for query resolution. `sharedKeys` (and the `listKeys` form ARM templates call) answer
   `primarySharedKey` and `secondarySharedKey`, stable for the workspace's life
 - **Data Collection Endpoints (DCE)**: `Microsoft.Insights/dataCollectionEndpoints` CreateOrUpdate,
-  Get, Delete; the returned `logsIngestion.endpoint` points back at the emulator base URL
+  Get, Delete, List in a resource group; the returned `logsIngestion.endpoint` points back at the emulator base URL
 - **Data Collection Rules (DCR)**: `Microsoft.Insights/dataCollectionRules` CreateOrUpdate, Get,
-  Delete; an `immutableId` is generated when not supplied and used to route ingestion
+  Delete, List in a resource group; an `immutableId` is generated when not supplied, kept across
+  redeploys, and used to route ingestion
+- **Diagnostic settings**: `{resourceUri}/providers/Microsoft.Insights/diagnosticSettings/{name}` on any
+  resource: CreateOrUpdate, Get, Delete, and List for the resource they extend
+- **Resource ids** compare case-insensitively, as in ARM: a PUT through another casing of the same id
+  updates the one resource, and the id keeps the casing it was created with. Workspaces, data
+  collection endpoints and rules and diagnostic settings persist under the `monitor` storage mode
 - **Logs Ingestion API**: `POST /dataCollectionRules/{immutableId}/streams/{stream}` accepts a JSON
   array of log records (plain or `Content-Encoding: gzip`, which the ingestion SDKs always send), resolves the DCR's Log Analytics destination, and stores each record against
   the destination workspace (`TimeGenerated` is honoured or defaulted to now)
@@ -34,16 +40,19 @@ Management operations use ARM paths; ingestion and query use the Monitor data-pl
 
 ```
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/sharedKeys
 POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/listKeys
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionEndpoints/{name}
 
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionRules/{name}
+GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionRules
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionRules/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/dataCollectionRules/{name}
 
