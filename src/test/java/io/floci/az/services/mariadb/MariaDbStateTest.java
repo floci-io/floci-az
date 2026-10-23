@@ -1,6 +1,12 @@
 package io.floci.az.services.mariadb;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.storage.StorageFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,7 +29,17 @@ class MariaDbStateTest {
 
     @BeforeEach
     void setup() {
-        state = new MariaDbState(new InMemoryStorage<>());
+        state = new MariaDbState(over(new InMemoryStorage<>()));
+    }
+
+    /** A factory whose every store is {@code backend}. */
+    static StorageFactory over(StorageBackend<String, StoredObject> backend) {
+        return new StorageFactory(null) {
+            @Override
+            public synchronized StorageBackend<String, StoredObject> create(String serviceName) {
+                return backend;
+            }
+        };
     }
 
     private MariaDbState.ServerEntry server(String name) {
@@ -144,5 +160,69 @@ class MariaDbStateTest {
         state.putServer(server("x"));
         state.clear();
         assertEquals(0, state.listServers().size());
+    }
+
+    /** {@code live} with another version: a server update built from a read. */
+    private static MariaDbState.ServerEntry upgraded(MariaDbState.ServerEntry live) {
+        return new MariaDbState.ServerEntry(live.serverName(), live.subscriptionId(), live.resourceGroupName(),
+            live.location(), "10.5", live.administratorLogin(), live.administratorLoginPassword(),
+            live.storageMB(), live.containerId(), live.hostPort(), live.host(),
+            live.tags(), live.databases(), live.firewallRules(), live.configurations(), live.createdAt());
+    }
+
+    @Test
+    void aServerUpdateKeepsTheChildrenWrittenSinceItsRead() {
+        state.putServer(server("upd"));
+        MariaDbState.ServerEntry live = state.getServer("upd").orElseThrow();
+
+        state.putDatabase("upd", MariaDbState.DatabaseEntry.create("db1", "upd", null, null));
+        state.putFirewallRule("upd", new MariaDbState.FirewallRule("AllowAll", "0.0.0.0", "255.255.255.255"));
+        state.putConfiguration("upd", "max_connections", "200");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        MariaDbState.ServerEntry stored = state.getServer("upd").orElseThrow();
+        assertEquals("10.5", stored.version());
+        assertTrue(state.getDatabase("upd", "db1").isPresent());
+        assertTrue(state.getFirewallRule("upd", "AllowAll").isPresent());
+        assertEquals("200", state.getConfiguration("upd", "max_connections").orElse(""));
+    }
+
+    @Test
+    void aServerUpdateDoesNotBringBackADeletedChild() {
+        state.putServer(server("upd-del"));
+        state.putDatabase("upd-del", MariaDbState.DatabaseEntry.create("db1", "upd-del", null, null));
+        MariaDbState.ServerEntry live = state.getServer("upd-del").orElseThrow();
+
+        state.removeDatabase("upd-del", "db1");
+
+        assertTrue(state.replaceServer(live, upgraded(live)));
+        assertFalse(state.getDatabase("upd-del", "db1").isPresent());
+    }
+
+    @Test
+    void aServerStoredBeforeTheStateStartedIsFoundByName() throws Exception {
+        InMemoryStorage<String, StoredObject> backend = new InMemoryStorage<>();
+        new MariaDbState(over(backend)).putServer(server("Canonical1"));
+        MariaDbState.ServerEntry legacy = server("Legacy1", "sub-legacy", "rg-legacy");
+        byte[] data = new ObjectMapper().registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).writeValueAsBytes(legacy);
+        backend.put("legacy1", new StoredObject("legacy1", data, Map.of(), Instant.now(), "legacy1"));
+
+        MariaDbState restarted = new MariaDbState(over(backend));
+
+        assertTrue(restarted.getServer("canonical1").isPresent());
+        assertEquals("sub-legacy", restarted.getServer("LEGACY1").orElseThrow().subscriptionId());
+    }
+
+    @Test
+    void aNameDeletedAndCreatedInAnotherScopeFindsTheNewServer() {
+        MariaDbState.ServerEntry first = server("moved", "sub-a", "rg-a");
+        state.putServer(first);
+        assertTrue(state.removeServer(MariaDbState.serverId(first)));
+        assertFalse(state.getServer("moved").isPresent());
+
+        state.putServer(server("moved", "sub-b", "rg-b"));
+        assertFalse(state.removeServer(MariaDbState.serverId(first)));
+        assertEquals("sub-b", state.getServer("moved").orElseThrow().subscriptionId());
     }
 }

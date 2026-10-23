@@ -395,14 +395,24 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 
 | Type | Rule |
 |---|---|
+| `Microsoft.ApiManagement/service` | 1 to 50 letters, digits and hyphens, starting with a letter and ending with a letter or digit |
 | `Microsoft.App/containerApps` | 2 to 32 lowercase letters, digits and hyphens, starting with a letter and ending with a letter or digit |
 | `Microsoft.Cache/redis` | 1 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
+| `Microsoft.Communication/communicationServices` | 1 to 63 letters, digits, underscores and hyphens |
+| `Microsoft.Communication/emailServices` | 1 to 63 letters, digits and hyphens |
+| `Microsoft.Communication/emailServices/domains` | 1 to 253 characters |
 | `Microsoft.Compute/virtualMachines` | 1 to 64 characters with no spaces or special characters (`_` included), not ending with a period or hyphen; Linux's bound, Windows' 15 is not checked |
 | `Microsoft.ContainerInstance/containerGroups` | 1 to 63 lowercase letters, digits and hyphens, no leading, trailing or consecutive hyphen |
 | `Microsoft.ContainerRegistry/registries` | 5 to 50 letters and digits |
 | `Microsoft.ContainerService/managedClusters` | 1 to 63 letters, digits, underscores and hyphens, starting and ending with a letter or digit |
 | `Microsoft.ContainerService/managedClusters/agentPools` | 1 to 12 lowercase letters and digits, starting with a letter; also checked for the pools in a cluster PUT body |
+| `Microsoft.DBforMariaDB/servers` | 3 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen |
 | `Microsoft.DBforPostgreSQL/flexibleServers` | 3 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
+| `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
+| `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
+| `Microsoft.Sql/servers/databases` | 1 to 128 characters without `<>*%&:\/?` or control characters, not ending with a period or a space |
+| `Microsoft.Sql/servers/firewallRules` | 1 to 128 characters without `<>*%&:;\/?` or control characters, not ending with a period |
+| `Microsoft.Sql/servers` | 1 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen |
 
 The other types declare theirs as they move to the shared resource store. The code is an emulator choice: no local
 source records Azure's answer for a name outside the rule.

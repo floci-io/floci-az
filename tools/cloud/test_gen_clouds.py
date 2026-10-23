@@ -401,3 +401,21 @@ def test_no_unsettled_cell_is_emitted_as_fact():
                 walk(value)
 
     walk(document["clouds"])
+
+
+def test_apim_suffix_is_cross_checked_against_the_government_comparison():
+    cli = g.parse_cli_cloud(CLI_CLOUD)
+    gov_compare = {"Azure Cache for Redis": ("redis.cache.windows.net", "redis.cache.usgovcloudapi.net"),
+                   "API Management Gateway": ("azure-api.net", "azure-api.us")}
+    with_sdk = g.parse_go_environment(GO_GOV.replace(
+        "    return &env", '    env.ApiManagement = ApiManagementAPI("azure-api.us")\n\n    return &env', 1))
+    apim = g.build_suffixes("AzureUSGovernment", cli, with_sdk, gov_compare)["APIM"]
+    assert apim["value"] == "azure-api.us"
+    assert apim["source"] == (f"{g.GO_ENV['AzureUSGovernment']}; {g.GOV_COMPARE} "
+                              f"(API Management Gateway, Azure Government)")
+    doc_only = g.build_suffixes("AzureUSGovernment", cli, g.parse_go_environment(GO_GOV), gov_compare)["APIM"]
+    assert doc_only == {"source": f"{g.GOV_COMPARE} (API Management Gateway, Azure Government)",
+                        "value": "azure-api.us"}
+    disputed = {**gov_compare, "API Management Gateway": ("azure-api.net", "azure-api.example")}
+    with pytest.raises(g.SourceError, match="APIM suffix"):
+        g.build_suffixes("AzureUSGovernment", cli, with_sdk, disputed)

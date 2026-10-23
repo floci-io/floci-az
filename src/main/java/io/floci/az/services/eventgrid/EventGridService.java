@@ -1,11 +1,14 @@
 package io.floci.az.services.eventgrid;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
-import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
+import io.floci.az.core.arm.ArmResourceStore.Stored;
 import io.floci.az.core.arm.ArmResources;
-import io.floci.az.core.storage.StorageBackend;
+import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterDestination;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterIdentity;
@@ -14,16 +17,12 @@ import io.floci.az.services.eventgrid.EventGridModels.EventSubscription;
 import io.floci.az.services.eventgrid.EventGridModels.Filter;
 import io.floci.az.services.eventgrid.EventGridModels.RetryPolicy;
 import io.floci.az.services.eventgrid.EventGridModels.Topic;
-import io.floci.az.core.arm.ArmErrors;
-import io.floci.az.core.arm.ArmJson;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.io.IOException;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,28 +31,41 @@ import java.util.Optional;
 
 /**
  * ARM (management-plane) handler for {@code Microsoft.EventGrid/topics} and the classic scoped
- * {@code eventSubscriptions}. State is persisted via {@link StorageBackend}; the ARM resource JSON
- * returned to clients is projected from the stored {@link EventGridModels} records.
+ * {@code eventSubscriptions}. Both are kept in {@link ArmResourceStore}s over the {@code eventgrid} backend,
+ * keyed by canonical id; the ARM resource JSON returned to clients is projected from the stored
+ * {@link EventGridModels} records.
  */
 @ApplicationScoped
 public class EventGridService {
 
     private static final Logger LOG = Logger.getLogger(EventGridService.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private static final String TOPIC_PREFIX = "eg/topics/";
-    private static final String SUB_PREFIX = "eg/subs/";
+    /** The key prefixes topics and event subscriptions were kept under before the stores. */
+    private static final String LEGACY_TOPIC_PREFIX = "eg/topics/";
+    private static final String LEGACY_SUB_PREFIX = "eg/subs/";
+    private static final String TOPIC_TYPE = "Microsoft.EventGrid/topics";
+    private static final String SUBSCRIPTION_TYPE = "Microsoft.EventGrid/eventSubscriptions";
     private static final String ES_MARKER = "/providers/Microsoft.EventGrid/eventSubscriptions";
     private static final String EG_MARKER = "/providers/Microsoft.EventGrid/";
 
-    private final StorageBackend<String, StoredObject> store;
+    /**
+     * Topics and event subscriptions share the {@code eventgrid} backend, each store owning its own type's canonical
+     * keys. Before the stores they were kept under {@code eg/topics/sub/rg/name} (raw case) and
+     * {@code eg/subs/{lowercased topic id}/name}; those entries are read as they are and move to their canonical key
+     * on their next write.
+     */
+    private final ArmResourceStore<Topic> topics;
+    private final ArmResourceStore<EventSubscription> subscriptions;
     private final EmulatorConfig config;
     private final EventGridDelivery delivery;
 
     @Inject
     public EventGridService(StorageFactory factory, EmulatorConfig config, EventGridDelivery delivery) {
-        this.store = factory.create("eventgrid");
+        this.topics = ArmResourceStore.create(factory, "eventgrid", TOPIC_TYPE, Topic.class, Topic::resourceId,
+                key -> key.startsWith(LEGACY_TOPIC_PREFIX));
+        this.subscriptions = ArmResourceStore.create(factory, "eventgrid", SUBSCRIPTION_TYPE, EventSubscription.class,
+                EventSubscription::resourceId, key -> key.startsWith(LEGACY_SUB_PREFIX));
         this.config = config;
         this.delivery = delivery;
     }
@@ -83,11 +95,13 @@ public class EventGridService {
             if (!"GET".equals(method)) {
                 return Response.status(405).build();
             }
-            return rg == null ? Response.ok(Map.of("value", listTopicsBySubscription(sub))).build()
-                    : Response.ok(Map.of("value", listTopicsByResourceGroup(sub, rg))).build();
+            return Response.ok(Map.of("value", listTopics(sub, rg))).build();
         }
 
         String topicName = seg[1];
+        if (rg == null) {
+            return notFound(path);
+        }
         if (seg.length == 2) {
             return switch (method) {
                 case "PUT" -> createOrUpdateTopic(req, sub, rg, topicName);
@@ -114,12 +128,11 @@ public class EventGridService {
         String inputSchema = stringOr(properties.get("inputSchema"), EventGridModels.SCHEMA_EVENT_GRID);
         String location = stringOr(body.get("location"), config.services().eventGrid().defaultRegion());
 
-        Topic existing = readTopic(sub, rg, name).orElse(null);
-        String key1 = existing != null ? existing.key1() : generateKey();
-        String key2 = existing != null ? existing.key2() : generateKey();
-
-        Topic topic = new Topic(sub, rg, name, location, inputSchema, key1, key2);
-        writeTopic(topic);
+        Topic topic = topics.createOrUpdate(topicId(sub, rg, name), existing -> existing
+                .map(t -> new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), location, inputSchema,
+                        t.key1(), t.key2()))
+                .orElseGet(() -> new Topic(sub, rg, name, location, inputSchema, generateKey(), generateKey())))
+                .stored().value();
         LOG.infov("ARM: created Event Grid topic {0} (schema={1})", name, inputSchema);
         return Response.ok(topicJson(topic)).build();
     }
@@ -131,13 +144,8 @@ public class EventGridService {
     }
 
     private Response deleteTopic(String sub, String rg, String name) {
-        Optional<Topic> topic = readTopic(sub, rg, name);
-        store.delete(topicKey(sub, rg, name));
-        topic.ifPresent(t -> {
-            String prefix = SUB_PREFIX + t.resourceId().toLowerCase() + "/";
-            store.keys().stream().filter(k -> k.startsWith(prefix)).toList()
-                    .forEach(store::delete);
-        });
+        topics.delete(topicId(sub, rg, name)).ifPresent(t -> subscriptionsForTopic(t.value().resourceId())
+                .forEach(s -> subscriptions.delete(eventSubscriptionId(s.topicResourceId(), s.name()))));
         return Response.ok().build();
     }
 
@@ -148,17 +156,18 @@ public class EventGridService {
     }
 
     private Response regenerateKey(AzureRequest req, String sub, String rg, String name) {
-        Optional<Topic> existing = readTopic(sub, rg, name);
-        if (existing.isEmpty()) {
+        if (readTopic(sub, rg, name).isEmpty()) {
             return notFound("topics/" + name);
         }
-        Topic t = existing.get();
         String keyName = stringOr(parseBody(req).get("keyName"), "key1");
-        Topic updated = "key2".equalsIgnoreCase(keyName)
-                ? new Topic(sub, rg, name, t.location(), t.inputSchema(), t.key1(), generateKey())
-                : new Topic(sub, rg, name, t.location(), t.inputSchema(), generateKey(), t.key2());
-        writeTopic(updated);
-        return Response.ok(Map.of("key1", updated.key1(), "key2", updated.key2())).build();
+        Optional<Stored<Topic>> updated = topics.update(topicId(sub, rg, name), t -> "key2".equalsIgnoreCase(keyName)
+                ? new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), t.location(), t.inputSchema(),
+                        t.key1(), generateKey())
+                : new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), t.location(), t.inputSchema(),
+                        generateKey(), t.key2()));
+        return updated
+                .<Response>map(s -> Response.ok(Map.of("key1", s.value().key1(), "key2", s.value().key2())).build())
+                .orElseGet(() -> notFound("topics/" + name));
     }
 
     // ── Event subscriptions ─────────────────────────────────────────────────────
@@ -185,7 +194,7 @@ public class EventGridService {
                     .<Response>map(s -> Response.ok(subscriptionJson(s)).build())
                     .orElseGet(() -> notFound("eventSubscriptions/" + name));
             case "DELETE" -> {
-                store.delete(subKey(topicResourceId, name));
+                subscriptions.delete(eventSubscriptionId(topicResourceId, name));
                 yield Response.ok().build();
             }
             default -> Response.status(405).build();
@@ -210,11 +219,14 @@ public class EventGridService {
         DeadLetterWithResourceIdentity deadLetterWithIdentity =
                 parseDeadLetterWithIdentity(cast(properties.get("deadLetterWithResourceIdentity")));
 
-        EventSubscription es = new EventSubscription(name, topicResourceId, endpointUrl,
-                schema, filter, retry, deadLetter, deadLetterWithIdentity);
-        writeSubscription(es);
+        EventSubscription es = subscriptions.createOrUpdate(eventSubscriptionId(topicResourceId, name), existing -> {
+            String scope = existing.map(EventSubscription::topicResourceId).orElse(topicResourceId);
+            String storedName = existing.map(EventSubscription::name).orElse(name);
+            return new EventSubscription(storedName, scope, endpointUrl, schema, filter, retry, deadLetter,
+                    deadLetterWithIdentity);
+        }).stored().value();
 
-        boolean validated = delivery.validate(es, topicResourceId);
+        boolean validated = delivery.validate(es, es.topicResourceId());
         LOG.infov("ARM: created Event Grid subscription {0} → {1} (validated={2})",
                 name, endpointUrl, validated);
         return Response.ok(subscriptionJson(es)).build();
@@ -262,10 +274,14 @@ public class EventGridService {
 
     // ── Lookups used by the data plane ──────────────────────────────────────────
 
+    /**
+     * The topic a {@code {topic}-eventgrid} data-plane request names. The data plane is keyed by name alone, so the
+     * first topic of that name in any subscription or resource group answers, as before the stores.
+     */
     public Optional<Topic> findTopicByName(String name) {
-        return store.scan(k -> k.startsWith(TOPIC_PREFIX)).stream()
-                .map(this::toTopicFrom)
-                .filter(t -> t != null && t.name().equals(name))
+        return topics.all().stream()
+                .map(Stored::value)
+                .filter(t -> t.name().equals(name))
                 .findFirst();
     }
 
@@ -275,24 +291,30 @@ public class EventGridService {
      * them with it.
      */
     public List<Map<String, Object>> topicIndexEntries(String sub, String rg) {
-        return store.scan(k -> k.startsWith(TOPIC_PREFIX)).stream()
-                .map(this::toTopicFrom)
-                .filter(t -> t != null && ArmResources.inScope(t.resourceId(), sub, rg))
-                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), "Microsoft.EventGrid/topics",
-                        t.location(), null))
+        return topics.list(new ArmScope(sub, rg)).stream()
+                .map(Stored::value)
+                .map(t -> ArmResources.indexEntry(t.resourceId(), t.name(), TOPIC_TYPE, t.location(), null))
                 .toList();
     }
 
+    /**
+     * The event subscriptions scoped to {@code topicResourceId}, compared as ARM ids (case-insensitively). An event
+     * subscription's id is {@code {topicResourceId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}}, so only
+     * the entries under the topic are read.
+     */
     public List<EventSubscription> subscriptionsForTopic(String topicResourceId) {
-        String prefix = SUB_PREFIX + topicResourceId.toLowerCase() + "/";
-        return store.scan(k -> k.startsWith(prefix)).stream()
-                .map(this::toSubscriptionFrom)
-                .filter(s -> s != null)
+        List<Stored<EventSubscription>> candidates = ArmResourceId.parse(topicResourceId)
+                .map(subscriptions::under)
+                .orElseGet(subscriptions::all);
+        return candidates.stream()
+                .map(Stored::value)
+                .filter(s -> s.topicResourceId().equalsIgnoreCase(topicResourceId))
                 .toList();
     }
 
     public void clear() {
-        store.clear();
+        topics.clear();
+        subscriptions.clear();
     }
 
     // ── JSON projection ─────────────────────────────────────────────────────────
@@ -385,71 +407,34 @@ public class EventGridService {
         return config.effectiveBaseUrl().replaceAll("/+$", "") + "/" + name + "-eventgrid/api/events";
     }
 
-    private List<Map<String, Object>> listTopicsByResourceGroup(String sub, String rg) {
-        return store.scan(k -> k.startsWith(topicRgPrefix(sub, rg))).stream()
-                .map(this::toTopicFrom).filter(t -> t != null)
+    /** The topics in {@code sub}, or in its resource group {@code rg} when that is non-null. */
+    private List<Map<String, Object>> listTopics(String sub, String rg) {
+        return topics.list(new ArmScope(sub, rg)).stream()
+                .map(Stored::value)
                 .map(this::topicJson).toList();
     }
 
-    private List<Map<String, Object>> listTopicsBySubscription(String sub) {
-        return store.scan(k -> k.startsWith(TOPIC_PREFIX + sub + "/")).stream()
-                .map(this::toTopicFrom).filter(t -> t != null)
-                .map(this::topicJson).toList();
-    }
-
-    // ── Persistence helpers ──────────────────────────────────────────────────────
+    // ── Store helpers ──────────────────────────────────────────────────────────────
 
     private Optional<Topic> readTopic(String sub, String rg, String name) {
-        return store.get(topicKey(sub, rg, name)).map(this::toTopicFrom);
-    }
-
-    private void writeTopic(Topic t) {
-        store.put(topicKey(t.subscriptionId(), t.resourceGroup(), t.name()), serialize(t));
+        return topics.get(topicId(sub, rg, name)).map(Stored::value);
     }
 
     private Optional<EventSubscription> readSubscription(String topicResourceId, String name) {
-        return store.get(subKey(topicResourceId, name)).map(this::toSubscriptionFrom);
+        return subscriptions.get(eventSubscriptionId(topicResourceId, name)).map(Stored::value);
     }
 
-    private void writeSubscription(EventSubscription s) {
-        store.put(subKey(s.topicResourceId(), s.name()), serialize(s));
+    private static ArmResourceId topicId(String sub, String rg, String name) {
+        return armId(new Topic(sub, rg, name, null, null, null, null).resourceId());
     }
 
-    private Topic toTopicFrom(StoredObject obj) {
-        return deserialize(obj, Topic.class);
+    private static ArmResourceId eventSubscriptionId(String topicResourceId, String name) {
+        return armId(topicResourceId + "/providers/" + SUBSCRIPTION_TYPE + "/" + name);
     }
 
-    private EventSubscription toSubscriptionFrom(StoredObject obj) {
-        return deserialize(obj, EventSubscription.class);
-    }
-
-    private <T> StoredObject serialize(T value) {
-        try {
-            return new StoredObject("eg", MAPPER.writeValueAsBytes(value), Map.of(), Instant.now(), "eg");
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize Event Grid model", e);
-        }
-    }
-
-    private <T> T deserialize(StoredObject obj, Class<T> type) {
-        try {
-            return MAPPER.readValue(obj.data(), type);
-        } catch (Exception e) {
-            LOG.warnv("Failed to deserialize Event Grid {0}: {1}", type.getSimpleName(), e.getMessage());
-            return null;
-        }
-    }
-
-    private static String topicKey(String sub, String rg, String name) {
-        return topicRgPrefix(sub, rg) + name;
-    }
-
-    private static String topicRgPrefix(String sub, String rg) {
-        return TOPIC_PREFIX + sub + "/" + rg + "/";
-    }
-
-    private static String subKey(String topicResourceId, String name) {
-        return SUB_PREFIX + topicResourceId.toLowerCase() + "/" + name;
+    private static ArmResourceId armId(String id) {
+        return ArmResourceId.parse(id)
+                .orElseThrow(() -> new IllegalArgumentException("not an ARM resource id: " + id));
     }
 
     // ── Generic parsing helpers ──────────────────────────────────────────────────

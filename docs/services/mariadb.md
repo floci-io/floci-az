@@ -20,7 +20,12 @@ Compatible with MariaDB Connector/J (JDBC), MySQL Connector/J, `mysqlclient` / `
 - **Databases**: create, get, list, delete (metadata only, see note below)
 - **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
 - **Configurations**: get, list, put (server parameters stored as metadata)
-- **Name availability check**: `POST .../checkNameAvailability`
+- **Name availability check**: `POST .../checkNameAvailability`. A server name is a global DNS name: the first
+  subscription to create it owns it, and another subscription's or resource group's create is
+  `409 ServerNameAlreadyExists` until the owner deletes it. floci-az names each server's container after the server,
+  so a name is unique across every configured cloud, not per cloud. Paths that differ only in case address the same
+  server. With `parity-overrides.strict-names` a name outside Azure's rule is refused with `400 InvalidResourceName`
+  (see [ARM name syntax](arm.md#name-syntax))
 - **Connection strings**: convenience endpoint returns JDBC, URI, CLI, and .NET strings
 - **Mocked mode**: management plane only, no Docker, for fast `plan`/CI
 

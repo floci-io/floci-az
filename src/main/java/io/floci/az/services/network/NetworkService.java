@@ -10,17 +10,23 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 @ApplicationScoped
 public class NetworkService {
 
+    private static final String VNET_TYPE = "Microsoft.Network/virtualNetworks";
+    private static final String SUBNET_TYPE = "Microsoft.Network/virtualNetworks/subnets";
 
     private final Map<String, Map<String, Object>> resources;
+    private final Object subnetLock = new Object();
 
     @Inject
     public NetworkService(NetworkStore store) {
@@ -73,15 +79,27 @@ public class NetworkService {
         String key = key(sub, rg, tail);
 
         return switch (method) {
-            case "PUT" -> createOrUpdateResource(request, sub, rg, tail, resourceType, name, key);
+            case "PUT" -> {
+                if (VNET_TYPE.equals(resourceType) || SUBNET_TYPE.equals(resourceType)) {
+                    synchronized (subnetLock) {
+                        yield createOrUpdateResource(request, sub, rg, tail, resourceType, name, key);
+                    }
+                }
+                yield createOrUpdateResource(request, sub, rg, tail, resourceType, name, key);
+            }
             case "GET" -> {
                 Map<String, Object> resource = resources.get(key);
                 yield resource == null ? notFound(tail) : Response.ok(stripInternal(resource)).build();
             }
             case "PATCH" -> updateTags(request, tail, key);
             case "DELETE" -> {
-                resources.remove(key);
-                deleteChildren(sub, rg, tail);
+                synchronized (subnetLock) {
+                    resources.remove(key);
+                    deleteChildren(sub, rg, tail);
+                    if (SUBNET_TYPE.equals(resourceType)) {
+                        refreshParentSubnets(sub, rg, tail);
+                    }
+                }
                 yield Response.ok().build();
             }
             default -> Response.status(405).build();
@@ -174,8 +192,82 @@ public class NetworkService {
             }
         }
         resource.put("properties", properties);
+        if (VNET_TYPE.equals(resourceType) && tail.split("\\?")[0].split("/").length == 2) {
+            syncInlineSubnets(sub, rg, tail, id, properties, resources.get(key));
+        }
         resources.put(key, resource);
+        if (SUBNET_TYPE.equals(resourceType)) {
+            refreshParentSubnets(sub, rg, tail);
+        }
         return Response.ok(stripInternal(resource)).build();
+    }
+
+    /**
+     * A VNet PUT that names {@code subnets} makes that list the VNet's subnets, as ARM does: each entry is stored as
+     * a {@code virtualNetworks/subnets} child, and a child the list leaves out is removed. A PUT without the key
+     * keeps the children and lists them, in the previous VNet's order.
+     */
+    private void syncInlineSubnets(String sub, String rg, String tail, String id, Map<String, Object> properties,
+                                   Map<String, Object> previous) {
+        String vnet = tail.split("[/?]")[1];
+        if (!(properties.get("subnets") instanceof List<?>)) {
+            properties.put("subnets", childSubnets(sub, rg, vnet, previous == null ? List.of() : parentSubnets(previous)));
+            return;
+        }
+        stampChildArray(properties, "subnets", id, entryProps -> { });
+        List<?> subnets = (List<?>) properties.get("subnets");
+        Set<String> kept = new HashSet<>();
+        for (Object item : subnets) {
+            Map<String, Object> entry = cast(item);
+            String name = bodyString(entry, "name", null);
+            String childKey = key(sub, rg, "virtualNetworks/" + vnet + "/subnets/" + name);
+            kept.add(childKey);
+            Map<String, Object> child = new LinkedHashMap<>();
+            child.put("_sub", sub);
+            child.put("_rg", rg);
+            child.put("id", entry.get("id"));
+            child.put("name", name);
+            child.put("type", SUBNET_TYPE);
+            child.put("properties", entry.get("properties"));
+            resources.put(childKey, child);
+        }
+        String prefix = key(sub, rg, "virtualNetworks/" + vnet + "/subnets/");
+        resources.keySet().removeIf(k -> k.startsWith(prefix) && !kept.contains(k));
+    }
+
+    /** A subnet written or deleted on its own also updates its VNet's {@code subnets}, so a later VNet PUT that echoes them keeps it. */
+    private void refreshParentSubnets(String sub, String rg, String tail) {
+        String vnet = tail.split("[/?]")[1];
+        resources.computeIfPresent(key(sub, rg, "virtualNetworks/" + vnet), (k, existing) -> {
+            Map<String, Object> properties = new LinkedHashMap<>(cast(existing.get("properties")));
+            properties.put("subnets", childSubnets(sub, rg, vnet, parentSubnets(existing)));
+            Map<String, Object> copy = new LinkedHashMap<>(existing);
+            copy.put("properties", properties);
+            return copy;
+        });
+    }
+
+    /** The VNet's child subnets as {@code properties.subnets} entries: those named in {@code order} first, then the rest by name. */
+    private List<Object> childSubnets(String sub, String rg, String vnet, List<?> order) {
+        Map<String, Map<String, Object>> byName = new TreeMap<>();
+        for (Map<String, Object> child : listSubnets(sub, rg, vnet)) {
+            Map<String, Object> entry = new LinkedHashMap<>(child);
+            entry.remove("location");
+            byName.put(String.valueOf(child.get("name")), entry);
+        }
+        List<Object> entries = new ArrayList<>();
+        for (Object item : order) {
+            Map<String, Object> entry = byName.remove(String.valueOf(cast(item).get("name")));
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+        entries.addAll(byName.values());
+        return entries;
+    }
+
+    private static List<?> parentSubnets(Map<String, Object> vnet) {
+        return cast(vnet.get("properties")).get("subnets") instanceof List<?> list ? list : List.of();
     }
 
     private void deleteChildren(String sub, String rg, String tail) {

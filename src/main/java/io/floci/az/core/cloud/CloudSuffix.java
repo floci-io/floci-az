@@ -29,7 +29,8 @@ public enum CloudSuffix {
     CONTAINERAPPS(true),
     COMMUNICATION(true),
     AKS(false),
-    ACI(false);
+    ACI(false),
+    APIM(false);
 
     private final boolean hostRouted;
 
