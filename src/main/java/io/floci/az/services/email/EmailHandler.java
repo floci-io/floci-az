@@ -11,12 +11,17 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.email.EmailModels.CapturedEmail;
+import io.floci.az.services.email.EmailModels.CommunicationResource;
 import io.floci.az.services.email.EmailModels.EmailSendRequest;
 import io.floci.az.services.email.EmailModels.EmailSendResult;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -59,7 +64,7 @@ import java.util.regex.Pattern;
  * <p>Emails are captured in-memory for local inspection; no actual delivery occurs.
  */
 @ApplicationScoped
-public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(EmailHandler.class);
 
@@ -72,20 +77,34 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     private static final String OPERATION_ID_HEADER = "Operation-Id";
     private static final String RETRY_AFTER_SECONDS = "3";
 
-    // Captured messages go through StorageFactory like every other service, so the backend
-    // honours floci-az.storage.mode and joins the load/flush/reset lifecycle. The ARM-plane maps
-    // below stay in memory: they are control-plane records that /_admin/reset clears.
+    private static final String STORE = "email";
+    private static final String COMMUNICATION_SERVICES = "Microsoft.Communication/communicationServices";
+    private static final String EMAIL_SERVICES = "Microsoft.Communication/emailServices";
+    private static final String EMAIL_DOMAINS = "Microsoft.Communication/emailServices/domains";
+
+    // Captured messages and the ARM resources share the email backend, so both honour
+    // floci-az.storage.services.email and join the load/flush/reset lifecycle. Captured messages are keyed by
+    // operation id; the ARM resources by canonical id, which starts with a slash. The ARM resources were
+    // kept in memory before, so no older key shape exists on disk.
     private final StorageBackend<String, StoredObject> emailStorage;
-    private final Map<String, Map<String, Object>> communicationServices = new LinkedHashMap<>();
-    private final Map<String, Map<String, Object>> emailServices = new LinkedHashMap<>();
-    private final Map<String, Map<String, Object>> emailDomains = new LinkedHashMap<>();
+    private final ArmResourceStore<CommunicationResource> communicationServices;
+    private final ArmResourceStore<CommunicationResource> emailServices;
+    private final ArmResourceStore<CommunicationResource> emailDomains;
 
     private final EmulatorConfig config;
 
     @Inject
     public EmailHandler(EmulatorConfig config, StorageFactory storageFactory) {
         this.config = config;
-        this.emailStorage = storageFactory.create("email");
+        this.emailStorage = storageFactory.create(STORE);
+        this.communicationServices = armStore(storageFactory, COMMUNICATION_SERVICES);
+        this.emailServices = armStore(storageFactory, EMAIL_SERVICES);
+        this.emailDomains = armStore(storageFactory, EMAIL_DOMAINS);
+    }
+
+    private static ArmResourceStore<CommunicationResource> armStore(StorageFactory storageFactory, String type) {
+        return ArmResourceStore.create(storageFactory, STORE, type, CommunicationResource.class,
+                CommunicationResource::id, key -> false);
     }
 
     @Override
@@ -136,7 +155,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
 
         // ── Inspection: DELETE /emailMessages (clear all) ──────────────────
         if (path.matches("emailMessages(\\?.*)?") && "DELETE".equals(method)) {
-            emailStorage.clear();
+            emailStorage.keys().stream().filter(EmailHandler::isCapturedEmailKey).toList().forEach(emailStorage::delete);
             return Response.ok(Map.of("message", "All captured emails cleared")).type("application/json").build();
         }
 
@@ -146,6 +165,11 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
         }
 
         return notFound("Unknown email path: " + path);
+    }
+
+    /** A captured message's key: an operation id, never an ARM id. */
+    private static boolean isCapturedEmailKey(String key) {
+        return !key.startsWith("/");
     }
 
     // ── POST /emails:send ──────────────────────────────────────────────────────
@@ -218,7 +242,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     private Response handleListCapturedEmails() {
         List<Map<String, Object>> emails = new ArrayList<>();
-        emailStorage.scan(k -> true).forEach(so -> {
+        emailStorage.scan(EmailHandler::isCapturedEmailKey).forEach(so -> {
             try {
                 CapturedEmail captured = MAPPER.readValue(so.data(), CapturedEmail.class);
                 Map<String, Object> summary = new LinkedHashMap<>();
@@ -265,176 +289,115 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     private Response handleArmCommunication(AzureRequest req, String path, String method) {
         String tail = extractCommunicationPath(path);
 
-        // ── communicationServices ──────────────────────────────────────────
-        // LIST
-        if (tail.matches("communicationServices(\\?.*)?") && "GET".equals(method)) {
-            return Response.ok(Map.of("value", inListScope(communicationServices, path)))
-                    .type("application/json").build();
+        // Every Communication resource lives in a resource group, so a path that names none addresses none.
+        if (tail.matches("(communicationServices|emailServices)/[^/?]+.*")
+                && ArmScope.of(path).map(ArmScope::resourceGroup).isEmpty()) {
+            return notFound(tail.replaceAll("^([^/]+/[^/?]+).*", "$1"));
         }
-        // Single resource CRUD
+
+        // ── communicationServices ──────────────────────────────────────────
+        if (tail.matches("communicationServices(\\?.*)?") && "GET".equals(method)) {
+            return list(communicationServices, path);
+        }
         if (tail.matches("communicationServices/[^/?]+(\\?.*)?")) {
             String name = extractSegment(tail, "communicationServices");
-            return handleCommunicationServiceCrud(req, path, method, name);
+            return handleCrud(req, path, method, communicationServices, "communicationServices/" + name,
+                    (id, body, existing) -> new CommunicationResource(id.id(), id.name(), COMMUNICATION_SERVICES,
+                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                                    "provisioningState", "Succeeded",
+                                    "dataLocation", "United States",
+                                    "hostName", id.name() + ".communication.azure.com",
+                                    "immutableResourceId", existing
+                                            .map(resource -> resource.properties().get("immutableResourceId"))
+                                            .orElseGet(() -> UUID.randomUUID().toString()))));
         }
 
         // ── emailServices ─────────────────────────────────────────────────
-        // Email services and their domains live in a resource group; a path that names none
-        // addresses no email service.
-        if (tail.matches("emailServices/[^/?]+.*") && ArmScope.of(path).map(ArmScope::resourceGroup).isEmpty()) {
-            return notFound("emailServices/" + extractSegment(tail, "emailServices"));
-        }
         // Domain CRUD: emailServices/{name}/domains/{domain}
         if (tail.matches("emailServices/[^/]+/domains/[^/?]+(\\?.*)?")) {
-            String emailServiceName = extractSegment(tail, "emailServices");
             String domainName = extractSegment(tail, "domains");
-            return handleEmailDomainCrud(req, path, method, emailServiceName, domainName);
+            return handleCrud(req, path, method, emailDomains, "domains/" + domainName,
+                    (id, body, existing) -> new CommunicationResource(id.id(), id.name(), EMAIL_DOMAINS,
+                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                                    "provisioningState", "Succeeded",
+                                    "domainManagement", bodyString(
+                                            bodyMap(body, "properties"), "domainManagement", "CustomerManaged"),
+                                    "fromSenderDomain", id.name(),
+                                    "mailFromSenderDomain", id.name())));
         }
-        // emailServices LIST
         if (tail.matches("emailServices(\\?.*)?") && "GET".equals(method)) {
-            return Response.ok(Map.of("value", inListScope(emailServices, path)))
-                    .type("application/json").build();
+            return list(emailServices, path);
         }
-        // emailServices single CRUD
         if (tail.matches("emailServices/[^/?]+(\\?.*)?")) {
             String name = extractSegment(tail, "emailServices");
-            return handleEmailServiceCrud(req, path, method, name);
+            return handleCrud(req, path, method, emailServices, "emailServices/" + name,
+                    (id, body, existing) -> new CommunicationResource(id.id(), id.name(), EMAIL_SERVICES,
+                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                                    "provisioningState", "Succeeded",
+                                    "dataLocation", "United States")));
         }
 
         return notFound("Unknown Communication path: " + tail);
     }
 
-    private synchronized Response handleCommunicationServiceCrud(AzureRequest req, String path, String method, String name) {
-        // Names are global ({name}.communication.azure.com), so the map holds one entry per name. A path
-        // under another subscription or resource group must not reach it.
-        Map<String, Object> existing = communicationServices.get(name);
-        if (existing != null && !ownedByPathScope(existing, path)) {
-            return "PUT".equals(method)
-                    // No public source gives the create-conflict code; ARM's generic Conflict stands in.
-                    ? ArmErrors.error(409, "Conflict", "The communication service name '" + name + "' is already in use.")
-                    : notFound("communicationServices/" + name);
+    /** Builds the resource a PUT writes, from the request body and the resource it replaces, if any. */
+    @FunctionalInterface
+    private interface ResourceBuilder {
+        CommunicationResource build(ArmResourceId id, Map<String, Object> body, Optional<CommunicationResource> existing);
+    }
+
+    /**
+     * PUT, GET and DELETE of one resource. A communication service name is global: the gate's
+     * {@code GlobalNameRule} answers a PUT for a name another resource owns before this runs, and a path under
+     * another scope misses the owner's canonical key, so it reads as not found.
+     */
+    private Response handleCrud(AzureRequest req, String path, String method,
+                                ArmResourceStore<CommunicationResource> store, String label, ResourceBuilder builder) {
+        Optional<ArmResourceId> parsed = ArmResourceId.parse(path);
+        if (parsed.isEmpty()) {
+            return notFound(label);
         }
+        ArmResourceId id = parsed.get();
         return switch (method) {
             case "PUT" -> {
                 Map<String, Object> body = readBodyMap(req);
-                String location = bodyString(body, "location", "eastus");
-                Map<String, Object> resource = new LinkedHashMap<>();
-                resource.put("id", armId(path, "communicationServices", name));
-                resource.put("name", name);
-                resource.put("type", "Microsoft.Communication/communicationServices");
-                resource.put("location", location);
-                resource.put("properties", Map.of(
-                        "provisioningState", "Succeeded",
-                        "dataLocation", "United States",
-                        "hostName", name + ".communication.azure.com",
-                        "immutableResourceId", UUID.randomUUID().toString()
-                ));
-                if (body.containsKey("tags")) {
-                    resource.put("tags", body.get("tags"));
-                }
-                communicationServices.put(name, resource);
-                LOG.infof("ARM: created communication service %s", name);
-                yield Response.status(201).entity(resource).type("application/json").build();
+                // The read and the write are one store operation, so concurrent creates keep one resource, and the
+                // id keeps the casing of the PUT that created it.
+                ArmResourceStore.Written<CommunicationResource> written = store.createOrUpdate(id, existing ->
+                        builder.build(existing.map(resource -> ArmResourceId.parse(resource.id()).orElseThrow())
+                                .orElse(id), body, existing));
+                LOG.infov("ARM: wrote {0}", written.stored().value().id());
+                yield Response.status(201).entity(written.stored().value().toArm()).type("application/json").build();
             }
-            case "GET" -> {
-                Map<String, Object> resource = communicationServices.get(name);
-                yield resource != null
-                        ? Response.ok(resource).type("application/json").build()
-                        : notFound("communicationServices/" + name);
-            }
+            case "GET" -> store.get(id)
+                    .map(stored -> Response.ok(stored.value().toArm()).type("application/json").build())
+                    .orElseGet(() -> notFound(label));
             case "DELETE" -> {
-                communicationServices.remove(name);
+                store.delete(id);
                 yield Response.ok().build();
             }
             default -> Response.status(405).build();
         };
     }
 
-    private Response handleEmailServiceCrud(AzureRequest req, String path, String method, String name) {
-        String key = scopedKey(path, name);
-        return switch (method) {
-            case "PUT" -> {
-                Map<String, Object> body = readBodyMap(req);
-                String location = bodyString(body, "location", "eastus");
-                Map<String, Object> resource = new LinkedHashMap<>();
-                resource.put("id", armId(path, "emailServices", name));
-                resource.put("name", name);
-                resource.put("type", "Microsoft.Communication/emailServices");
-                resource.put("location", location);
-                resource.put("properties", Map.of(
-                        "provisioningState", "Succeeded",
-                        "dataLocation", "United States"
-                ));
-                if (body.containsKey("tags")) {
-                    resource.put("tags", body.get("tags"));
-                }
-                emailServices.put(key, resource);
-                LOG.infof("ARM: created email service %s", name);
-                yield Response.status(201).entity(resource).type("application/json").build();
-            }
-            case "GET" -> {
-                Map<String, Object> resource = emailServices.get(key);
-                yield resource != null
-                        ? Response.ok(resource).type("application/json").build()
-                        : notFound("emailServices/" + name);
-            }
-            case "DELETE" -> {
-                emailServices.remove(key);
-                yield Response.ok().build();
-            }
-            default -> Response.status(405).build();
-        };
-    }
-
-    private Response handleEmailDomainCrud(AzureRequest req, String path, String method,
-                                            String emailServiceName, String domainName) {
-        String key = scopedKey(path, emailServiceName + "/" + domainName);
-        return switch (method) {
-            case "PUT" -> {
-                Map<String, Object> body = readBodyMap(req);
-                String location = bodyString(body, "location", "eastus");
-                Map<String, Object> resource = new LinkedHashMap<>();
-                resource.put("id", armId(path, "domains", domainName));
-                resource.put("name", domainName);
-                resource.put("type", "Microsoft.Communication/emailServices/domains");
-                resource.put("location", location);
-                resource.put("properties", Map.of(
-                        "provisioningState", "Succeeded",
-                        "domainManagement", bodyString(
-                                bodyMap(body, "properties"), "domainManagement", "CustomerManaged"),
-                        "fromSenderDomain", domainName,
-                        "mailFromSenderDomain", domainName
-                ));
-                if (body.containsKey("tags")) {
-                    resource.put("tags", body.get("tags"));
-                }
-                emailDomains.put(key, resource);
-                LOG.infof("ARM: created email domain %s under %s", domainName, emailServiceName);
-                yield Response.status(201).entity(resource).type("application/json").build();
-            }
-            case "GET" -> {
-                Map<String, Object> resource = emailDomains.get(key);
-                yield resource != null
-                        ? Response.ok(resource).type("application/json").build()
-                        : notFound("domains/" + domainName);
-            }
-            case "DELETE" -> {
-                emailDomains.remove(key);
-                yield Response.ok().build();
-            }
-            default -> Response.status(405).build();
-        };
+    /** The resources under the list path's subscription, and resource group when it names one. */
+    private static Response list(ArmResourceStore<CommunicationResource> store, String path) {
+        List<Map<String, Object>> value = ArmScope.of(path)
+                .map(scope -> store.list(scope).stream().map(stored -> stored.value().toArm()).toList())
+                .orElse(List.of());
+        return Response.ok(Map.of("value", value)).type("application/json").build();
     }
 
     // ── Resource index ───────────────────────────────────────────────────────
 
     @Override
     public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(sub, rg);
+        return indexEntries(new ArmScope(sub, rg));
     }
 
     @Override
     public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(sub, null);
+        return indexEntries(new ArmScope(sub, null));
     }
 
     @Override
@@ -449,44 +412,21 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     /** Communication services, email services and their domains in a subscription, or one of its groups. */
-    private synchronized List<Map<String, Object>> indexEntries(String sub, String rg) {
+    private List<Map<String, Object>> indexEntries(ArmScope scope) {
         List<Map<String, Object>> entries = new ArrayList<>();
-        for (Map<String, Map<String, Object>> store : List.of(communicationServices, emailServices, emailDomains)) {
-            store.values().stream()
-                    .filter(resource -> ArmResources.inScope(resource.get("id"), sub, rg))
-                    .map(ArmResources::indexEntry)
-                    .forEach(entries::add);
+        for (ArmResourceStore<CommunicationResource> store : List.of(communicationServices, emailServices, emailDomains)) {
+            store.list(scope).forEach(stored -> entries.add(ArmResources.indexEntry(stored.value().toArm())));
         }
         return entries;
     }
 
-    // ── ARM scope helpers ────────────────────────────────────────────────────
+    // ── GlobalNameSource ─────────────────────────────────────────────────────
 
-    /**
-     * Email services and their domains are resource-group scoped: the key carries the path's subscription
-     * and group. Callers reject a path without a resource group before reaching here.
-     */
-    private static String scopedKey(String path, String name) {
-        return ArmScope.of(path)
-                .filter(scope -> scope.resourceGroup() != null)
-                .map(scope -> scope.subscription().toLowerCase() + "/" + scope.resourceGroup().toLowerCase() + "/" + name)
-                .orElse(name);
-    }
-
-    private static boolean ownedByPathScope(Map<String, Object> resource, String path) {
-        Optional<ArmScope> requested = ArmScope.of(path);
-        Optional<ArmScope> owner = ArmScope.of(String.valueOf(resource.get("id")));
-        return requested.isEmpty() || owner.isEmpty()
-                || requested.get().owns(owner.get().subscription(), owner.get().resourceGroup());
-    }
-
-    /** The resources whose id falls under the list path's subscription (and resource group, when it names one). */
-    private static List<Map<String, Object>> inListScope(Map<String, Map<String, Object>> store, String path) {
-        String normalized = path.startsWith("/") ? path : "/" + path;
-        int providers = normalized.indexOf(PROVIDER_COMMUNICATION);
-        String prefix = (providers >= 0 ? normalized.substring(0, providers) : "").toLowerCase() + "/";
-        return store.values().stream()
-                .filter(r -> String.valueOf(r.get("id")).toLowerCase().startsWith(prefix))
+    /** Every communication service owns {@code {name}.communication.azure.com}. */
+    @Override
+    public List<Claim> globalNames() {
+        return communicationServices.all().stream()
+                .map(stored -> new Claim(CloudSuffix.COMMUNICATION, stored.id().name(), stored.id()))
                 .toList();
     }
 
@@ -515,22 +455,14 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
         return q >= 0 ? rest.substring(0, q) : rest;
     }
 
-    private static String armId(String fullPath, String resourceType, String name) {
-        // Build a best-effort ARM resource ID from the full path
-        int idx = fullPath.indexOf("/providers/Microsoft.Communication/");
-        if (idx >= 0) {
-            return "/" + fullPath.substring(0, fullPath.indexOf('?') >= 0
-                    ? fullPath.indexOf('?') : fullPath.length());
-        }
-        return "/subscriptions/default/providers/Microsoft.Communication/" + resourceType + "/" + name;
-    }
-
     // ── Header parsing helpers ───────────────────────────────────────────────
 
     private String clientOperationId(AzureRequest req) {
         return Optional.ofNullable(req.headers())
                 .map(h -> h.getHeaderString(OPERATION_ID_HEADER))
                 .filter(id -> !id.isBlank())
+                // An operation id is a captured message's key, so it must not take the shape of an ARM resource's.
+                .filter(EmailHandler::isCapturedEmailKey)
                 .orElseGet(() -> UUID.randomUUID().toString());
     }
 
@@ -570,11 +502,8 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
         return ArmErrors.error(500, "InternalError", message);
     }
 
-    /** Wipes all email data — used by {@code POST /_admin/reset}. */
+    /** Wipes the captured emails and the Communication resources: {@code POST /_admin/reset}. */
     public void clear() {
         emailStorage.clear();
-        communicationServices.clear();
-        emailServices.clear();
-        emailDomains.clear();
     }
 }

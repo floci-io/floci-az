@@ -123,6 +123,9 @@ class ArmSurfaceGoldenTest {
     private static final String NAMED = """
         Microsoft.App/containerApps    2-32    null    0    null
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
+        Microsoft.Communication/communicationServices    1-63     COMMUNICATION    409    Conflict
+        Microsoft.Communication/emailServices            1-63     null    0    null
+        Microsoft.Communication/emailServices/domains    1-253    null    0    null
         Microsoft.Compute/virtualMachines    1-64    null    0    null
         Microsoft.ContainerInstance/containerGroups    1-63    null    0    null
         Microsoft.ContainerRegistry/registries    5-50    ACR    409    AlreadyInUse
