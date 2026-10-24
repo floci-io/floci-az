@@ -342,6 +342,12 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
     }
 
     @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.WEB
+            && sites.get(owner).filter(stored -> name.equalsIgnoreCase(nameOf(stored.value()))).isPresent();
+    }
+
+    @Override
     public void clear() {
         sites.clear();
     }

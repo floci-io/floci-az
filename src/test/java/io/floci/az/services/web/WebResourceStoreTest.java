@@ -1,6 +1,8 @@
 package io.floci.az.services.web;
 
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -19,6 +21,8 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 @DisplayName("Web ARM: sites in the ARM resource store, names owned by the registry")
@@ -30,6 +34,9 @@ class WebResourceStoreTest {
 
     @Inject
     StorageFactory storageFactory;
+
+    @Inject
+    WebArmService webArmService;
 
     @BeforeEach
     void reset() {
@@ -63,6 +70,21 @@ class WebResourceStoreTest {
         given().when().get("/subscriptions/sub-sitecase/resourceGroups/RG-CASE/resources" + API)
             .then().statusCode(200).body("value", hasSize(1))
             .body("value[0].type", equalTo("Microsoft.Web/sites"));
+    }
+
+    @Test
+    void holdsAnswersFromTheStoredSiteAlone() {
+        put(site("sub-holds", "RG", "HeldSite"), SITE_BODY, 200);
+        ArmResourceId owner = ArmResourceId.parse(site("sub-holds", "RG", "HeldSite")).orElseThrow();
+        ArmResourceId other = ArmResourceId.parse(site("sub-other", "RG", "HeldSite")).orElseThrow();
+
+        assertTrue(webArmService.holds(CloudSuffix.WEB, "heldsite", owner));
+        assertFalse(webArmService.holds(CloudSuffix.REDIS, "HeldSite", owner));
+        assertFalse(webArmService.holds(CloudSuffix.WEB, "AnotherSite", owner));
+        assertFalse(webArmService.holds(CloudSuffix.WEB, "HeldSite", other));
+
+        given().when().delete(site("sub-holds", "RG", "HeldSite") + API).then().statusCode(200);
+        assertFalse(webArmService.holds(CloudSuffix.WEB, "HeldSite", owner));
     }
 
     @Test
