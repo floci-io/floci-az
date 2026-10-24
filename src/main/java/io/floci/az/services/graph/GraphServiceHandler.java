@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
@@ -76,7 +78,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
         String sub = path.substring("v1.0/".length());
         String[] segments = sub.split("/");
 
-        Response applications = new GraphApplications(store, mapper, "https://graph.microsoft.com/v1.0/",
+        Response applications = new GraphApplications(store, mapper, graphBase(request),
                 config.services().entra().defaultTenantId()).handle(request, segments);
         if (applications != null) {
             return applications;
@@ -148,7 +150,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
                 .toList();
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("@odata.context", "https://graph.microsoft.com/v1.0/$metadata#Collection(Edm.String)");
+        body.put("@odata.context", graphBase(request) + "$metadata#Collection(Edm.String)");
         body.put("value", value);
         return json(body);
     }
@@ -206,6 +208,13 @@ public class GraphServiceHandler implements AzureServiceHandler {
         } catch (IOException e) {
             return Map.of();
         }
+    }
+
+    /** The {@code v1.0} base of the Graph endpoint of the request's cloud, for {@code @odata.context} values. */
+    private static String graphBase(AzureRequest request) {
+        CloudProfile cloud = request.scope() == null
+            ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : request.scope().cloud();
+        return cloud.endpoints().microsoftGraph() + "/v1.0/";
     }
 
     private static String stripSlashes(String path) {
