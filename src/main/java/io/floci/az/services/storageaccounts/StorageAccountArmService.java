@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCOUNT_KEY;
 
@@ -65,6 +66,32 @@ public class StorageAccountArmService
 
     private static final String NAMESPACE = "Microsoft.Storage";
     private static final String ACCOUNT_TYPE = NAMESPACE + "/storageAccounts";
+
+    /**
+     * A resource group's account collection, query stripped. The namespace matches in any casing, as clients
+     * disagree on it; the type and child segments in the casing {@link ArmPaths#resourceName} reads the account
+     * name with.
+     */
+    private static final String RG_ACCOUNTS_PATH =
+        "subscriptions/[^/]+/(?i:resourceGroups)/[^/]+/providers/(?i:Microsoft\\.Storage)/storageAccounts";
+    private static final Pattern RG_ACCOUNTS = Pattern.compile(RG_ACCOUNTS_PATH);
+    private static final Pattern ACCOUNT = Pattern.compile(RG_ACCOUNTS_PATH + "/[^/]+");
+
+    /** The account sub-paths this service serves; every other one is a 404. */
+    private enum Child {
+        LIST_KEYS("listKeys"),
+        BLOB_SERVICE("blobServices/default"),
+        BLOB_CONTAINER("blobServices/default/containers/[^/]+"),
+        QUEUE_SERVICE("queueServices/default"),
+        QUEUE("queueServices/default/queues/[^/]+"),
+        FILE_SERVICE("fileServices/default");
+
+        private final Pattern pattern;
+
+        Child(String suffix) {
+            this.pattern = Pattern.compile(RG_ACCOUNTS_PATH + "/[^/]+/" + suffix);
+        }
+    }
 
     private final ArmResourceStore<Map<String, Object>> accounts;
     private final GlobalNameRegistry names;
@@ -160,65 +187,74 @@ public class StorageAccountArmService
     // ── Resource group level ────────────────────────────────────────────────
 
     private Response handleResourceGroupPath(AzureRequest req, String path, String method, String sub, String rg) {
-        // Containers, queues and keys reach the shared data plane, which knows only the account name.
-        // Under a scope that does not own the account they must stop here, before touching the owner's data.
-        if (path.contains("/storageAccounts/") && !path.matches(".*/storageAccounts/[^/?]+([?].*)?")) {
-            String account = accountName(path);
-            if (ownedByAnother(req, accountId(sub, rg, account))) {
-                return armNotFound("storageAccounts/" + account);
-            }
-        }
-
-        // POST .../storageAccounts/{name}/listKeys
-        if (path.contains("/storageAccounts/") && path.endsWith("/listKeys")) {
-            return listKeys(accountName(path));
-        }
-
-        // .../storageAccounts/{name}/blobServices/default/containers/{container}
-        if (path.contains("/blobServices/default/containers/")) {
-            return handleBlobContainer(req, path, method);
-        }
-
-        // .../storageAccounts/{name}/blobServices/default  (blobServices properties)
-        if (path.contains("/blobServices/default") && !path.contains("/containers/")) {
-            return Response.ok(Map.of("id", path, "name", "default",
-                    "type", "Microsoft.Storage/storageAccounts/blobServices",
-                    "properties", Map.of())).build();
-        }
-
-        // .../storageAccounts/{name}/queueServices/default/queues/{queue}
-        if (path.contains("/queueServices/default/queues/")) {
-            return handleQueueResource(path, method);
-        }
-
-        // .../storageAccounts/{name}/queueServices/default  (queueServices properties)
-        if (path.contains("/queueServices/default") && !path.contains("/queues/")) {
-            return Response.ok(Map.of("id", path, "name", "default",
-                    "type", "Microsoft.Storage/storageAccounts/queueServices",
-                    "properties", Map.of())).build();
-        }
-
+        String bare = withoutQuery(path);
         // GET .../storageAccounts  (list in RG)
-        if (path.matches(".*/providers/(?i:Microsoft\\.Storage)/storageAccounts([?].*)?")) {
+        if (RG_ACCOUNTS.matcher(bare).matches()) {
             return list(new ArmScope(sub, rg));
         }
-
-        // PUT/GET/DELETE .../storageAccounts/{name}
-        if (path.contains("/storageAccounts/")) {
-            String account = accountName(path);
-            ArmResourceId id = accountId(sub, rg, account);
-            return switch (method) {
-                case "PUT"    -> createOrUpdate(req, id);
-                case "PATCH"  -> update(req, id);
-                case "GET"    -> accounts.get(id)
-                        .map(stored -> Response.ok(stored.value()).build())
-                        .orElseGet(() -> armNotFound("storageAccounts/" + account));
-                case "DELETE" -> delete(id);
-                default       -> Response.status(405).build();
-            };
+        // PUT/PATCH/GET/DELETE .../storageAccounts/{name}: the one path that writes an account, and the one the
+        // gate's name rules check.
+        if (ACCOUNT.matcher(bare).matches()) {
+            return handleAccount(req, method, accountId(sub, rg, accountName(path)));
+        }
+        Child child = child(bare);
+        if (child == null) {
+            // A child type this service does not serve. Never an account write: the gate checks names on the
+            // exact account path only, so treating it as one would create an account no name rule saw.
+            return armNotFound(path);
         }
 
-        return armNotFound(path);
+        // Containers, queues and keys reach the shared data plane, which knows only the account name.
+        // Under a scope that does not own the account they must stop here, before touching the owner's data.
+        String account = accountName(path);
+        if (ownedByAnother(req, accountId(sub, rg, account))) {
+            return armNotFound("storageAccounts/" + account);
+        }
+        return switch (child) {
+            case LIST_KEYS -> listKeys(account);
+            case BLOB_CONTAINER -> handleBlobContainer(req, path, method);
+            case QUEUE -> handleQueueResource(path, method);
+            case BLOB_SERVICE -> serviceProperties(path, "blobServices");
+            case QUEUE_SERVICE -> serviceProperties(path, "queueServices");
+            case FILE_SERVICE -> serviceProperties(path, "fileServices");
+        };
+    }
+
+    private Response handleAccount(AzureRequest req, String method, ArmResourceId id) {
+        return switch (method) {
+            case "PUT"    -> createOrUpdate(req, id);
+            case "PATCH"  -> update(req, id);
+            case "GET"    -> accounts.get(id)
+                    .map(stored -> Response.ok(stored.value()).build())
+                    .orElseGet(() -> armNotFound("storageAccounts/" + id.name()));
+            case "DELETE" -> delete(id);
+            default       -> Response.status(405).build();
+        };
+    }
+
+    /** The served child an account sub-path addresses, or null for any other child path. */
+    private static Child child(String bare) {
+        for (Child child : Child.values()) {
+            if (child.pattern.matcher(bare).matches()) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The synthesized {@code default} service of an account: {@code blobServices} and {@code queueServices}, and
+     * {@code fileServices}, which azurerm reads back for every StorageV2 account.
+     */
+    private static Response serviceProperties(String path, String service) {
+        return Response.ok(Map.of("id", withoutQuery(path), "name", "default",
+                "type", ACCOUNT_TYPE + "/" + service,
+                "properties", Map.of())).build();
+    }
+
+    private static String withoutQuery(String path) {
+        int q = path.indexOf('?');
+        return q < 0 ? path : path.substring(0, q);
     }
 
     /** Whether the account's name belongs to a resource other than {@code id}, in another scope. */

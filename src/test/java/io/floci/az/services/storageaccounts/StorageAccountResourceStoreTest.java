@@ -108,4 +108,44 @@ class StorageAccountResourceStoreTest {
             .then().statusCode(400)
             .body("error.code", equalTo("AccountNameInvalid"));
     }
+
+    @Test
+    void aChildPathNeverCreatesAnAccountOrTakesItsName() {
+        String check = "/subscriptions/sub-child/providers/Microsoft.Storage/checkNameAvailability" + API;
+        String request = "{\"name\":\"filesa\",\"type\":\"Microsoft.Storage/storageAccounts\"}";
+
+        given().contentType("application/json").body(BODY)
+            .when().put(account("sub-child", "rg", "filesa") + "/fileServices/default" + API)
+            .then().statusCode(200)
+            .body("type", equalTo("Microsoft.Storage/storageAccounts/fileServices"));
+        given().contentType("application/json").body(BODY)
+            .when().put(account("sub-child", "rg", "filesa") + "/tableServices/default" + API)
+            .then().statusCode(404);
+        given().contentType("application/json").body(BODY)
+            .when().put(account("sub-child", "rg", "filesa") + "/fileServices/default/shares/share1" + API)
+            .then().statusCode(404);
+
+        given().when().get(account("sub-child", "rg", "filesa") + API).then().statusCode(404);
+        given().when().get("/subscriptions/sub-child/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts" + API)
+            .then().statusCode(200).body("value", hasSize(0));
+        given().contentType("application/json").body(request).when().post(check).then().statusCode(200)
+            .body("nameAvailable", equalTo(true));
+        given().contentType("application/json").body(BODY).when().put(account("sub-elsewhere", "rg", "filesa") + API)
+            .then().statusCode(200);
+    }
+
+    @Test
+    void anInvalidNameThroughAChildPathCreatesNothing() {
+        given().contentType("application/json").body(BODY)
+            .when().put(account("sub-badchild", "rg", "Bad-Name") + "/tableServices/default" + API)
+            .then().statusCode(404);
+        given().contentType("application/json").body(BODY)
+            .when().put(account("sub-badchild", "rg", "Bad-Name") + "/fileServices/default" + API)
+            .then().statusCode(200);
+        given().when().get("/subscriptions/sub-badchild/providers/Microsoft.Storage/storageAccounts" + API)
+            .then().statusCode(200).body("value", hasSize(0));
+        given().contentType("application/json").body(BODY).when().put(account("sub-badchild", "rg", "Bad-Name") + API)
+            .then().statusCode(400)
+            .body("error.code", equalTo("AccountNameInvalid"));
+    }
 }
