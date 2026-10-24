@@ -4,6 +4,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -120,6 +121,96 @@ class KeyVaultResourceStoreTest {
         put(vault("sub-hsm-b", "rg", "ownedhsm"), VAULT_BODY, 200);
     }
 
+    private static final String TENANT = "00000000-0000-0000-0000-000000000002";
+
+    private static String policy(String objectId, String category, String... permissions) {
+        return "{\"tenantId\":\"" + TENANT + "\",\"objectId\":\"" + objectId + "\",\"permissions\":{\""
+            + category + "\":[\"" + String.join("\",\"", permissions) + "\"]}}";
+    }
+
+    private static ValidatableResponse updateAccessPolicy(String vaultPath, String kind, String... entries) {
+        return given().contentType("application/json")
+            .body("{\"properties\":{\"accessPolicies\":[" + String.join(",", entries) + "]}}")
+            .when().put(vaultPath + "/accessPolicies/" + kind + API).then();
+    }
+
+    @Test
+    void addMergesPermissionsPerIdentityAndTheVaultReadsThemBack() {
+        String vault = vault("sub-policy", "rg", "policyvault");
+        put(vault, VAULT_BODY, 200);
+
+        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get"))
+            .statusCode(200)
+            .body("type", equalTo("Microsoft.KeyVault/vaults/accessPolicies"))
+            .body("id", equalTo(vault + "/accessPolicies/"))
+            .body("properties.accessPolicies", hasSize(1))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"))
+            .body("properties.accessPolicies[0].permissions.secrets", equalTo(List.of("get")));
+        // The operation kind matches in any case; the same identity merges, a new one is appended.
+        updateAccessPolicy(vault, "ADD", policy("OBJ-A", "keys", "encrypt"), policy("obj-a", "secrets", "Get", "list"))
+            .statusCode(200);
+        updateAccessPolicy(vault, "Add", policy("obj-b", "certificates", "get")).statusCode(200);
+
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(2))
+            .body("properties.accessPolicies[0].tenantId", equalTo(TENANT))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"))
+            .body("properties.accessPolicies[0].permissions.secrets", equalTo(List.of("get", "list")))
+            .body("properties.accessPolicies[0].permissions.keys", equalTo(List.of("encrypt")))
+            .body("properties.accessPolicies[1].objectId", equalTo("obj-b"))
+            .body("properties.accessPolicies[1].permissions.certificates", equalTo(List.of("get")))
+            .body("properties.vaultUri", equalTo("https://policyvault.vault.azure.net/"));
+    }
+
+    @Test
+    void removeTakesPermissionsAwayAndDropsAnEntryLeftEmpty() {
+        String vault = vault("sub-policy", "rg", "removevault");
+        put(vault, VAULT_BODY, 200);
+        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get", "list"), policy("obj-b", "keys", "get"))
+            .statusCode(200);
+
+        updateAccessPolicy(vault, "remove", policy("obj-a", "secrets", "list")).statusCode(200);
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(2))
+            .body("properties.accessPolicies[0].permissions.secrets", equalTo(List.of("get")));
+
+        updateAccessPolicy(vault, "remove", policy("obj-b", "keys", "get")).statusCode(200);
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(1))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"));
+        // Removing an identity the vault does not list changes nothing.
+        updateAccessPolicy(vault, "remove", policy("obj-none", "keys", "get")).statusCode(200);
+        given().when().get(vault + API).then().statusCode(200).body("properties.accessPolicies", hasSize(1));
+    }
+
+    @Test
+    void replaceReplacesTheVaultsList() {
+        String vault = vault("sub-policy", "rg", "replacevault");
+        put(vault, VAULT_BODY, 200);
+        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get"), policy("obj-b", "keys", "get"))
+            .statusCode(200);
+
+        updateAccessPolicy(vault, "replace", policy("obj-c", "storage", "get")).statusCode(200)
+            .body("properties.accessPolicies", hasSize(1));
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(1))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-c"))
+            .body("properties.accessPolicies[0].permissions.storage", equalTo(List.of("get")));
+    }
+
+    @Test
+    void anUnknownOperationKindOrAMissingVaultIsNotFoundAndWritesNothing() {
+        String vault = vault("sub-policy", "rg", "kindvault");
+        put(vault, VAULT_BODY, 200);
+
+        updateAccessPolicy(vault, "merge", policy("obj-a", "secrets", "get"))
+            .statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+        updateAccessPolicy(vault("sub-policy", "rg", "novault"), "add", policy("obj-a", "secrets", "get"))
+            .statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+        given().when().get(vault("sub-policy", "rg", "novault") + API).then().statusCode(404);
+        given().when().get(vault + API).then().statusCode(200).body("properties.accessPolicies", hasSize(0));
+    }
+
     @Test
     void aChildPutFromAnotherSubscriptionNeitherWritesNorTakesTheVault() {
         put(vault("sub-child-a", "rg", "takenvault"), VAULT_BODY, 200);
@@ -132,9 +223,11 @@ class KeyVaultResourceStoreTest {
         given().when().get(vault("sub-child-b", "rg", "takenvault") + API).then().statusCode(404);
         given().when().get("/subscriptions/sub-child-b/providers/Microsoft.KeyVault/vaults" + API)
             .then().statusCode(200).body("value", hasSize(0));
-        // A child DELETE or GET does not reach the parent either.
-        given().when().delete(vault("sub-child-a", "rg", "takenvault") + "/accessPolicies/add" + API)
+        // A child DELETE does not reach the parent either; accessPolicies takes PUT only.
+        given().when().delete(vault("sub-child-a", "rg", "takenvault") + "/privateEndpointConnections/pe" + API)
             .then().statusCode(404);
+        given().when().delete(vault("sub-child-a", "rg", "takenvault") + "/accessPolicies/add" + API)
+            .then().statusCode(405);
 
         given().when().get(vault("sub-child-a", "rg", "takenvault") + API).then().statusCode(200)
             .body("id", equalTo(vault("sub-child-a", "rg", "takenvault")))
