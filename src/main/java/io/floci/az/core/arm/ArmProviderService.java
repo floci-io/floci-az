@@ -37,4 +37,15 @@ public interface ArmProviderService {
     default boolean armEnabled() {
         return true;
     }
+
+    /**
+     * Whether {@code ArmHandler} also hands this service its namespace's subscription-level paths
+     * ({@code subscriptions/{sub}/providers/Microsoft.X/...}, no resource group): its subscription-wide lists and
+     * provider actions such as {@code checkNameAvailability}. Off by default, so a service that serves only
+     * resource-group paths keeps answering as before; one that turns it on answers every such path, the
+     * {@code 404} for an unknown one included.
+     */
+    default boolean servesSubscriptionPaths() {
+        return false;
+    }
 }

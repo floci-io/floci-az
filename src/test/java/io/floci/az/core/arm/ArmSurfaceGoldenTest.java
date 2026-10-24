@@ -121,11 +121,11 @@ class ArmSurfaceGoldenTest {
         Microsoft.Sql/servers/firewallRules                                            RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/restorableDroppedDatabases                               RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/sqlVulnerabilityAssessments                              RESOURCE_GROUP  OPTIONAL  FILTER
-        Microsoft.Storage/storageAccounts                                              RESOURCE_GROUP  REQUIRED  ARM_HANDLER
-        Microsoft.Storage/storageAccounts/blobServices                                 RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
-        Microsoft.Storage/storageAccounts/blobServices/containers                      RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
-        Microsoft.Storage/storageAccounts/queueServices                                RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
-        Microsoft.Storage/storageAccounts/queueServices/queues                         RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
+        Microsoft.Storage/storageAccounts                                              RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
+        Microsoft.Storage/storageAccounts/blobServices                                 RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
+        Microsoft.Storage/storageAccounts/blobServices/containers                      RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
+        Microsoft.Storage/storageAccounts/queueServices                                RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
+        Microsoft.Storage/storageAccounts/queueServices/queues                         RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.Web/sites                                                            RESOURCE_GROUP  REQUIRED  ARM_HANDLER
         Microsoft.Web/sites/config                                                     RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         """;
@@ -163,6 +163,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null
+        Microsoft.Storage/storageAccounts    3-24    BLOB    409    StorageAccountAlreadyTaken
         """;
 
     @Inject

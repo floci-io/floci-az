@@ -94,6 +94,13 @@ Lake Gen2 alias `{account}.dfs.core.windows.net`, which maps to the same blob ba
 ARM storage account responses include both `blob` and `dfs` primary endpoints so Data Lake SDK
 clients can discover the Gen2 endpoint shape.
 
+ARM storage accounts are kept in the `arm-storage` store, which follows the global storage mode, so under
+`persistent` or `hybrid` an account survives a restart with its data, its tags and its `isHnsEnabled`
+setting. ARM ids are case-insensitive: a `PUT` that differs from the account's id only in case updates that
+account, and responses keep the casing of its first `PUT`. An account name is owned by one account across every
+subscription, resource group and cloud until that account is deleted; `checkNameAvailability` answers from that
+ownership.
+
 ## Quickstart
 
 === "Python"
