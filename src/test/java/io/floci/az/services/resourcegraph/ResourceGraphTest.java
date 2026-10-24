@@ -20,6 +20,8 @@ import static org.hamcrest.Matchers.nullValue;
 class ResourceGraphTest {
 
     private static final String SUB = "aaaaaaaa-1111-1111-1111-000000000001";
+    private static final String TENANT = "00000000-0000-0000-0000-000000000002";
+    private static final String ROOT_GROUP = "/providers/Microsoft.Management/managementGroups/" + TENANT;
     private static final String SUB2 = "aaaaaaaa-1111-1111-1111-000000000002";
     private static final String SUB_SCOPE = "/subscriptions/" + SUB;
     private static final String RG = "rg-graph";
@@ -92,13 +94,53 @@ class ResourceGraphTest {
                 | order by id asc
                 """)
                 .statusCode(200)
-                .body("totalRecords", equalTo(2))
-                .body("data[0].id", equalTo(SUB_SCOPE))
-                .body("data[0].type", equalTo("microsoft.resources/subscriptions"))
-                .body("data[0].tenantId", notNullValue())
-                .body("data[1].id", equalTo(RG_SCOPE))
-                .body("data[1].name", equalTo(RG))
-                .body("data[1].parent", equalTo(SUB_SCOPE));
+                .body("totalRecords", equalTo(3))
+                .body("data[0].id", equalTo(ROOT_GROUP))
+                .body("data[0].type", equalTo("microsoft.management/managementgroups"))
+                .body("data[0].parent", equalTo(""))
+                .body("data[1].id", equalTo(SUB_SCOPE))
+                .body("data[1].type", equalTo("microsoft.resources/subscriptions"))
+                .body("data[1].tenantId", equalTo(TENANT))
+                .body("data[1].parent", equalTo(ROOT_GROUP))
+                .body("data[2].id", equalTo(RG_SCOPE))
+                .body("data[2].name", equalTo(RG))
+                .body("data[2].parent", equalTo(SUB_SCOPE));
+    }
+
+    @Test
+    void publishesTheManagementGroupHierarchyAndEachSubscriptionsAncestorsChain() {
+        String groups = "/providers/Microsoft.Management/managementGroups";
+        putJson(groups + "/platform?api-version=2023-04-01", "{\"properties\": {\"displayName\": \"Platform\"}}").statusCode(200);
+        putJson(groups + "/corp?api-version=2023-04-01",
+                "{\"properties\": {\"displayName\": \"Corp\", \"details\": {\"parent\": {\"id\": \"" + groups + "/platform\"}}}}").statusCode(200);
+        given().when().put(groups + "/corp/subscriptions/" + SUB + "?api-version=2023-04-01").then().statusCode(200);
+
+        query("""
+                resourcecontainers
+                | where type == 'microsoft.management/managementgroups'
+                | project name, displayName = tostring(properties.displayName), parent = tostring(properties.details.parent.name),
+                          depth = array_length(properties.details.managementGroupAncestorsChain)
+                | order by name asc
+                """)
+                .statusCode(200)
+                .body("totalRecords", equalTo(3))
+                .body("data[0].name", equalTo(TENANT))
+                .body("data[0].displayName", equalTo("Tenant Root Group"))
+                .body("data[0].depth", equalTo(0))
+                .body("data[1].name", equalTo("corp"))
+                .body("data[1].parent", equalTo("platform"))
+                .body("data[1].depth", equalTo(2))
+                .body("data[2].name", equalTo("platform"))
+                .body("data[2].parent", equalTo(TENANT));
+        scopedQuery(SUB, """
+                resourcecontainers
+                | where type == 'microsoft.resources/subscriptions'
+                | project chain = properties.managementGroupAncestorsChain
+                """)
+                .statusCode(200)
+                .body("totalRecords", equalTo(1))
+                .body("data[0].chain.name", equalTo(java.util.List.of("corp", "platform", TENANT)))
+                .body("data[0].chain[0].displayName", equalTo("Corp"));
     }
 
     @Test

@@ -1,12 +1,16 @@
 package io.floci.az.services.resourcegraph;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
 import io.floci.az.core.directory.Subscription;
+import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.arm.ArmHandler;
+import io.floci.az.services.managementgroups.ManagementGroupStore;
+import io.floci.az.services.managementgroups.ManagementGroupStore.Group;
 import io.floci.az.services.policy.PolicyStore;
 import io.floci.az.services.resourcegraph.kql.KqlEngine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,8 +29,8 @@ import java.util.Set;
  * <ul>
  *   <li>{@code resources}: every resource the ARM resource index lists, across the subscriptions the
  *       directory knows;</li>
- *   <li>{@code resourcecontainers}: subscriptions and resource groups (management groups are not modelled,
- *       so a subscription's {@code managementGroupAncestorsChain} is empty);</li>
+ *   <li>{@code resourcecontainers}: management groups, subscriptions (with their
+ *       {@code managementGroupAncestorsChain}, direct parent first) and resource groups;</li>
  *   <li>{@code policyresources}: policy definitions, set definitions, assignments and exemptions;</li>
  *   <li>{@code authorizationresources}: empty, since role assignments and definitions are not stored.</li>
  * </ul>
@@ -42,13 +46,18 @@ public class GraphTables implements KqlEngine.Tables {
     private final AzureDirectory directory;
     private final ResourceGroups resourceGroups;
     private final PolicyStore policyStore;
+    private final ManagementGroupStore managementGroups;
+    private final EmulatorConfig config;
 
     @Inject
-    public GraphTables(ArmHandler armHandler, AzureDirectory directory, ResourceGroups resourceGroups, PolicyStore policyStore) {
+    public GraphTables(ArmHandler armHandler, AzureDirectory directory, ResourceGroups resourceGroups, PolicyStore policyStore,
+                       ManagementGroupStore managementGroups, EmulatorConfig config) {
         this.armHandler = armHandler;
         this.directory = directory;
         this.resourceGroups = resourceGroups;
         this.policyStore = policyStore;
+        this.managementGroups = managementGroups;
+        this.config = config;
     }
 
     /** The columns every table publishes, in the order {@link #row} writes them. */
@@ -113,6 +122,13 @@ public class GraphTables implements KqlEngine.Tables {
 
     private List<Map<String, Object>> resourceContainers() {
         List<Map<String, Object>> rows = new ArrayList<>();
+        if (managementGroupsEnabled()) {
+            for (Tenant tenant : directory.tenants()) {
+                for (Group group : managementGroups.list(tenant.id())) {
+                    rows.add(managementGroupRow(tenant.id(), group));
+                }
+            }
+        }
         for (String subscriptionId : subscriptionIds()) {
             Subscription subscription = directory.subscription(subscriptionId).orElse(null);
             String tenantId = tenantOf(subscriptionId);
@@ -132,7 +148,7 @@ public class GraphTables implements KqlEngine.Tables {
             properties.put("subscriptionId", subscriptionId);
             properties.put("displayName", row.get("name"));
             properties.put("state", subscription == null ? "Enabled" : subscription.state().toString());
-            properties.put("managementGroupAncestorsChain", List.of());
+            properties.put("managementGroupAncestorsChain", ancestorsChain(tenantId, subscriptionId));
             row.put("properties", properties);
             row.put("tags", null);
             row.put("identity", null);
@@ -163,6 +179,73 @@ public class GraphTables implements KqlEngine.Tables {
             }
         }
         return rows;
+    }
+
+    private boolean managementGroupsEnabled() {
+        return config.services().managementGroups().enabled();
+    }
+
+    /** A subscription's management-group ancestors, direct parent first up to the tenant root, as Resource Graph publishes them. */
+    private List<Map<String, Object>> ancestorsChain(String tenantId, String subscriptionId) {
+        if (!managementGroupsEnabled()) {
+            return List.of();
+        }
+        Group parent = managementGroups.parentOf(tenantId, subscriptionId);
+        List<Map<String, Object>> chain = new ArrayList<>();
+        chain.add(pathElement(parent));
+        for (Group ancestor : managementGroups.ancestors(tenantId, parent.name())) {
+            chain.add(pathElement(ancestor));
+        }
+        return chain;
+    }
+
+    private static Map<String, Object> pathElement(Group group) {
+        Map<String, Object> element = new LinkedHashMap<>();
+        element.put("name", group.name());
+        element.put("displayName", group.displayName());
+        return element;
+    }
+
+    /** A {@code microsoft.management/managementgroups} container row: tenant-level, so no subscription or location. */
+    private Map<String, Object> managementGroupRow(String tenantId, Group group) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", group.id());
+        row.put("name", group.name());
+        row.put("type", "microsoft.management/managementgroups");
+        row.put("tenantId", tenantId);
+        row.put("kind", null);
+        row.put("location", null);
+        row.put("resourceGroup", null);
+        row.put("subscriptionId", null);
+        row.put("managedBy", null);
+        row.put("sku", null);
+        row.put("plan", null);
+        Map<String, Object> details = new LinkedHashMap<>();
+        Group parent = group.parent() == null ? null : managementGroups.get(tenantId, group.parent()).orElse(null);
+        if (parent != null) {
+            Map<String, Object> parentElement = pathElement(parent);
+            parentElement.put("id", parent.id());
+            details.put("parent", parentElement);
+        }
+        details.put("version", group.version());
+        details.put("updatedTime", group.updatedTime() == null ? null : group.updatedTime().toString());
+        details.put("updatedBy", group.updatedBy());
+        List<Map<String, Object>> chain = new ArrayList<>();
+        for (Group ancestor : managementGroups.ancestors(tenantId, group.name())) {
+            chain.add(pathElement(ancestor));
+        }
+        details.put("managementGroupAncestorsChain", chain);
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("tenantId", tenantId);
+        properties.put("displayName", group.displayName());
+        properties.put("details", details);
+        row.put("properties", properties);
+        row.put("tags", null);
+        row.put("identity", null);
+        row.put("zones", null);
+        row.put("extendedLocation", null);
+        row.put("systemData", null);
+        return row;
     }
 
     private List<Map<String, Object>> policyResources() {

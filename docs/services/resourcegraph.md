@@ -52,6 +52,9 @@ against it yet.
   `options.$skipToken` the previous page returned; `totalRecords`, `count`, `resultTruncated` and
   `$skipToken` in the response, as the service answers them.
 - **Scoping** with the request's `subscriptions` list; `managementGroups` is accepted and ignored.
+- **Management groups** in `resourcecontainers` (`microsoft.management/managementgroups`, with their parent
+  and ancestors under `properties.details`) and each subscription's `properties.managementGroupAncestorsChain`,
+  direct parent first up to the tenant root group, from the emulator's management-group hierarchy.
 - **Azure error shapes**: a query that does not parse or names an unknown table or function answers
   `400 BadRequest` with `details` of `InvalidQuery` plus `ParserFailure` or `SemanticError`;
   `NullOrEmptyQuery` for a missing query; `InvalidSkipToken`; `InvalidQueryOption` for a `$skip` out of range; `InvalidResourceType` for other paths
@@ -98,9 +101,6 @@ floci-az:
 
 ## Intentional deviations
 
-- **No management groups.** `resourcecontainers` carries subscriptions and resource groups only; a
-  subscription's `properties.managementGroupAncestorsChain` is empty, so hierarchy queries that
-  derive a parent from it get a parent id under a management group named `null`.
 - **`authorizationresources` is empty** and `policyresources` holds no `microsoft.policyinsights/policystates`
   rows: role assignments, role definitions and compliance states are not modelled.
 - **`properties` of `resources` rows** are what the owning service's resource index publishes: the
