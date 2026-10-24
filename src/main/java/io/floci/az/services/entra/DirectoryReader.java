@@ -8,6 +8,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,7 +50,18 @@ public class DirectoryReader {
      * One client secret of an application: a PBKDF2 hash, or the plaintext a legacy flat entry
      * still holds until the application is next written.
      */
-    public record PasswordCredential(String keyId, String hint, SecretHash hash, String legacySecretText) {
+    public record PasswordCredential(String keyId, String hint, SecretHash hash, String legacySecretText,
+                                     Instant startDateTime, Instant endDateTime) {
+
+        /** Whether the credential is usable at {@code now}: on or after its start, before its end; an absent bound does not limit it. */
+        public boolean validAt(Instant now) {
+            return (startDateTime == null || !now.isBefore(startDateTime)) && (endDateTime == null || now.isBefore(endDateTime));
+        }
+
+        /** Whether {@code now} is past the credential's end. */
+        public boolean expired(Instant now) {
+            return endDateTime != null && !now.isBefore(endDateTime);
+        }
 
         /** Whether {@code candidate} is this credential's secret. */
         public boolean matches(String candidate) {
@@ -102,10 +115,21 @@ public class DirectoryReader {
         for (JsonNode credential : object.props().path(GraphDirectoryStore.PASSWORD_CREDENTIALS)) {
             credentials.add(new PasswordCredential(textOrNull(credential, "keyId"), textOrNull(credential, "hint"),
                     secretHash(object, credential.get(GraphDirectoryStore.SECRET_HASH)),
-                    textOrNull(credential, GraphDirectoryStore.SECRET_TEXT)));
+                    textOrNull(credential, GraphDirectoryStore.SECRET_TEXT),
+                    instantOrNull(credential, "startDateTime"), instantOrNull(credential, "endDateTime")));
         }
         return new DirectoryApplication(object.id(), object.tenantId(), object.text("appId"),
                 object.text("displayName"), List.copyOf(credentials));
+    }
+
+    /** A stored ISO 8601 date-time, or null when absent or unreadable (a legacy entry without bounds). */
+    private static Instant instantOrNull(JsonNode node, String property) {
+        String text = textOrNull(node, property);
+        try {
+            return text == null ? null : Instant.parse(text);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private static DirectoryServicePrincipal toServicePrincipal(DirectoryObject object) {

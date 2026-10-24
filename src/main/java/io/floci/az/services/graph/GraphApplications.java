@@ -69,6 +69,9 @@ final class GraphApplications {
                 return app.map(a -> method.equals("GET") ? json(application(a, true)) : methodNotAllowed())
                     .orElseGet(() -> notFound(byAppId.group(1)));
             }
+            if (segments.length > 2) {
+                return unknownSegment(segments[2]);
+            }
             return app.isEmpty() ? notFound(byAppId.group(1)) : action(request, method, app.get(), segments[1]);
         }
         if (!head.equalsIgnoreCase("applications")) {
@@ -93,7 +96,14 @@ final class GraphApplications {
                 default -> methodNotAllowed();
             };
         }
+        if (segments.length > 3) {
+            return unknownSegment(segments[3]);
+        }
         return action(request, method, app.get(), segments[2]);
+    }
+
+    private Response unknownSegment(String segment) {
+        return graphError(400, "Request_BadRequest", "Resource not found for the segment '" + segment + "'.");
     }
 
     private Response action(AzureRequest request, String method, DirectoryObject app, String action) {
@@ -175,8 +185,11 @@ final class GraphApplications {
         if (body == null) {
             return graphError(400, "Request_BadRequest", "The request body is not valid JSON.");
         }
+        if (body.containsKey("displayName") && !(body.get("displayName") instanceof String s && !s.isBlank())) {
+            return graphError(400, "Request_BadRequest", "displayName must be a non-empty string.");
+        }
         Optional<DirectoryObject> updated = update(app.id(), current -> {
-            if (body.get("displayName") instanceof String s && !s.isBlank()) {
+            if (body.get("displayName") instanceof String s) {
                 current.put("displayName", s);
             }
         });
@@ -188,15 +201,25 @@ final class GraphApplications {
         if (body == null) {
             return graphError(400, "Request_BadRequest", "The request body is not valid JSON.");
         }
-        Map<String, Object> given = body.get("passwordCredential") instanceof Map<?, ?> m ? castMap(m) : Map.of();
-        Instant start = given.get("startDateTime") instanceof String s && !s.isBlank() ? parseInstant(s) : Instant.now();
-        if (start == null) {
+        Object credentialNode = body.get("passwordCredential");
+        if (credentialNode != null && !(credentialNode instanceof Map<?, ?>)) {
+            return graphError(400, "Request_BadRequest", "passwordCredential must be an object.");
+        }
+        Map<String, Object> given = credentialNode instanceof Map<?, ?> m ? castMap(m) : Map.of();
+        // Defaults stand in for omitted values only; a value that is supplied must be valid.
+        if (given.containsKey("displayName") && given.get("displayName") != null && !(given.get("displayName") instanceof String)) {
+            return graphError(400, "Request_BadRequest", "displayName must be a string.");
+        }
+        Instant start;
+        Instant end;
+        try {
+            start = suppliedInstant(given, "startDateTime", Instant.now());
+            end = suppliedInstant(given, "endDateTime", start.plus(730, ChronoUnit.DAYS));
+        } catch (IllegalArgumentException e) {
             return graphError(400, "Request_BadRequest", "startDateTime and endDateTime must be ISO 8601 date-times.");
         }
-        Instant end = given.get("endDateTime") instanceof String s && !s.isBlank() ? parseInstant(s)
-            : start.plus(730, ChronoUnit.DAYS);
-        if (end == null) {
-            return graphError(400, "Request_BadRequest", "startDateTime and endDateTime must be ISO 8601 date-times.");
+        if (!end.isAfter(start)) {
+            return graphError(400, "Request_BadRequest", "endDateTime must be after startDateTime.");
         }
         String secret = randomSecret();
         ObjectNode credential = mapper.createObjectNode();
@@ -323,6 +346,19 @@ final class GraphApplications {
             sb.append(SECRET_ALPHABET.charAt(RANDOM.nextInt(SECRET_ALPHABET.length())));
         }
         return sb.toString();
+    }
+
+    /** The supplied date-time under {@code key}, {@code fallback} when absent or null; anything else is an error. */
+    private static Instant suppliedInstant(Map<String, Object> given, String key, Instant fallback) {
+        Object value = given.get(key);
+        if (value == null) {
+            return fallback;
+        }
+        Instant parsed = value instanceof String s ? parseInstant(s) : null;
+        if (parsed == null) {
+            throw new IllegalArgumentException(key);
+        }
+        return parsed;
     }
 
     private static Instant parseInstant(String text) {

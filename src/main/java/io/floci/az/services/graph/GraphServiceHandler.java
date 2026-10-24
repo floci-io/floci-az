@@ -8,6 +8,7 @@ import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
+import io.floci.az.services.entra.DirectoryReader.DirectoryServicePrincipal;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.GraphDirectoryStore;
 import io.floci.az.services.entra.TenantResolver;
@@ -112,13 +113,14 @@ public class GraphServiceHandler implements AzureServiceHandler {
     // ── Endpoints ────────────────────────────────────────────────────────────────
 
     /** azurerm calls {@code GET /v1.0/servicePrincipals?$filter=appId eq '{clientId}'} during provider init. */
+    /** The principal the directory holds for the appId, so its id is the {@code oid} the token endpoint issues; a fixed id for an unknown app. */
     private Response servicePrincipals(String filter) {
         String appId = extractAppId(filter);
+        String id = directory.servicePrincipalByAppId(config.services().entra().defaultTenantId(), appId)
+                .map(DirectoryServicePrincipal::id)
+                .orElse("00000000-0000-0000-0000-000000000010");
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("value", List.of(Map.of(
-                "id",    "00000000-0000-0000-0000-000000000010",
-                "appId", appId
-        )));
+        body.put("value", List.of(Map.of("id", id, "appId", appId)));
         return json(body);
     }
 

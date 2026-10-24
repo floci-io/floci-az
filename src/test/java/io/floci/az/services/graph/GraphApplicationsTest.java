@@ -83,13 +83,18 @@ class GraphApplicationsTest {
                 .body("passwordCredentials[0].secretText", nullValue())
                 .body("passwordCredentials[0].endDateTime", equalTo("2030-01-01T00:00:00Z"));
 
-        // The registration is a real principal: the token endpoint issues app tokens for it and
-        // service-principal discovery knows its appId.
-        given().contentType("application/x-www-form-urlencoded")
+        // The registration is a real principal: the token endpoint issues app tokens for it, and
+        // service-principal discovery answers the same object id the token carries as oid.
+        String token = given().contentType("application/x-www-form-urlencoded")
                 .formParam("grant_type", "client_credentials").formParam("client_id", appId)
                 .formParam("client_secret", "whatever").formParam("scope", "https://management.azure.com/.default")
                 .when().post("/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token")
-                .then().statusCode(200).body("access_token", notNullValue());
+                .then().statusCode(200).body("access_token", notNullValue())
+                .extract().path("access_token");
+        given().when().get("/v1.0/servicePrincipals?$filter=appId eq '" + appId + "'")
+                .then().statusCode(200)
+                .body("value[0].appId", equalTo(appId))
+                .body("value[0].id", equalTo(oidOf(token)));
 
         given().contentType("application/json").body("{\"displayName\": \"connector v2\"}")
                 .when().patch("/v1.0/applications/" + objectId).then().statusCode(204);
@@ -106,6 +111,12 @@ class GraphApplicationsTest {
         given().when().get("/v1.0/applications").then().statusCode(200).body("value.appId", not(hasItem(appId)));
     }
 
+    /** The {@code oid} claim of an unverified JWT. */
+    static String oidOf(String token) {
+        String payload = new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]), java.nio.charset.StandardCharsets.UTF_8);
+        return io.restassured.path.json.JsonPath.from(payload).getString("oid");
+    }
+
     @Test
     void rejectsBadRequests() {
         given().contentType("application/json").body("{}")
@@ -119,6 +130,33 @@ class GraphApplicationsTest {
                 .then().statusCode(400);
         given().contentType("application/json").body("not json")
                 .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        // Supplied values must be valid: defaults stand in for omitted ones only.
+        given().contentType("application/json").body("{\"passwordCredential\": {\"endDateTime\": 123}}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400).body("error.code", equalTo("Request_BadRequest"));
+        given().contentType("application/json").body("{\"passwordCredential\": \"soon\"}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        given().contentType("application/json").body("{\"passwordCredential\": {\"displayName\": 7}}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        given().contentType("application/json")
+                .body("{\"passwordCredential\": {\"startDateTime\": \"2030-01-01T00:00:00Z\", \"endDateTime\": \"2020-01-01T00:00:00Z\"}}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/addPassword")
+                .then().statusCode(400);
+        given().contentType("application/json").body("{\"displayName\": 5}")
+                .when().patch("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID).then().statusCode(400);
+        given().contentType("application/json").body("{\"displayName\": \" \"}")
+                .when().patch("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID).then().statusCode(400);
+        given().when().get("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID)
+                .then().statusCode(200).body("displayName", equalTo("floci-az dev app"));
+        // A segment after an action is not a route: nothing below it may touch credentials.
+        given().contentType("application/json").body("{\"keyId\": \"dev\"}")
+                .when().post("/v1.0/applications/" + EntraStore.DEV_APP_OBJECT_ID + "/removePassword/extra")
+                .then().statusCode(400).body("error.code", equalTo("Request_BadRequest"));
+        given().contentType("application/json").body("{}")
+                .when().post("/v1.0/applications(appId='" + EntraStore.DEV_CLIENT_ID + "')/addPassword/extra")
                 .then().statusCode(400);
         given().when().get("/v1.0/applications?$filter=displayName eq 'a' and appId eq 'b'")
                 .then().statusCode(400).body("error.code", equalTo("Request_BadRequest"));

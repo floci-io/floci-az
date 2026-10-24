@@ -92,7 +92,13 @@ curl -s "http://localhost:4577/v1.0/applications(appId='$(echo "$APP" | jq -r .a
 
 The seeded dev app (`11111111-1111-1111-1111-111111111111`) is listed with its seeded secret, whose
 `startDateTime` and `endDateTime` are null because the seed has no dates. The token endpoint issues
-tokens for any registered app id.
+tokens for any registered app id; with `validate-client-credentials: true` it checks the secret and its
+dates, refusing one past its `endDateTime` with `AADSTS7000222` and one before its `startDateTime` with
+`AADSTS7000215` (see [Entra](entra.md)). Service-principal discovery answers the stored principal's
+object id, the same value the app's tokens carry as `oid`. A supplied `passwordCredential` field must be
+valid (an object, string dates in order, a string `displayName`); defaults stand in for omitted fields
+only, and a `PATCH` `displayName` must be a non-empty string. A path segment after an action
+(`.../removePassword/extra`) answers `400` without touching credentials.
 
 ## Out of scope
 
