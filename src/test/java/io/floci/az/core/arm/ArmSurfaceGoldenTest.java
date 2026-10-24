@@ -65,8 +65,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.Insights/dataCollectionEndpoints                                     RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/dataCollectionRules                                         RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Insights/diagnosticSettings                                          EXTENSION       OPTIONAL  PROVIDER_SERVICE
-        Microsoft.KeyVault/managedHSMs                                                 RESOURCE_GROUP  REQUIRED  ARM_HANDLER
-        Microsoft.KeyVault/vaults                                                      RESOURCE_GROUP  REQUIRED  ARM_HANDLER
+        Microsoft.KeyVault/managedHSMs                                                 RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
+        Microsoft.KeyVault/vaults                                                      RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.ManagedIdentity/identities                                           EXTENSION       OPTIONAL  FILTER
         Microsoft.ManagedIdentity/userAssignedIdentities                               RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials  RESOURCE_GROUP  OPTIONAL  FILTER
@@ -152,6 +152,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.DBforPostgreSQL/flexibleServers    3-63    POSTGRES    409    ServerNameAlreadyExists
         Microsoft.EventGrid/eventSubscriptions    3-64    null    0    null
         Microsoft.EventGrid/topics    3-50    null    0    null
+        Microsoft.KeyVault/managedHSMs    3-24    MHSM    409    Conflict
+        Microsoft.KeyVault/vaults    3-24    KEYVAULT    409    VaultAlreadyExists
         Microsoft.ManagedIdentity/userAssignedIdentities    3-128    null    0    null
         Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials    3-120    null    0    null
         Microsoft.Network/networkInterfaces        1-80    null    0    null
