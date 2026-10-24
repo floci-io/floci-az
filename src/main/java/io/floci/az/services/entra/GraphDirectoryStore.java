@@ -26,6 +26,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -93,16 +94,23 @@ public class GraphDirectoryStore implements Resettable {
 
     private final StorageBackend<String, StoredObject> store;
     private final String defaultTenantId;
+    private final String seedFile;
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @Inject
     public GraphDirectoryStore(StorageFactory storageFactory, EmulatorConfig config) {
-        this(storageFactory.create("entra"), config.services().entra().defaultTenantId());
+        this(storageFactory.create("entra"), config.services().entra().defaultTenantId(),
+                config.services().entra().seedFile().orElse(null));
     }
 
     GraphDirectoryStore(StorageBackend<String, StoredObject> store, String defaultTenantId) {
+        this(store, defaultTenantId, null);
+    }
+
+    GraphDirectoryStore(StorageBackend<String, StoredObject> store, String defaultTenantId, String seedFile) {
         this.store = store;
         this.defaultTenantId = defaultTenantId;
+        this.seedFile = seedFile;
     }
 
     /** A located object and the key it was read from. */
@@ -137,6 +145,9 @@ public class GraphDirectoryStore implements Resettable {
             addLink(tenantId, EntraStore.DEV_GROUP_OBJECT_ID, MEMBERS, EntraStore.DEV_USER_OBJECT_ID);
             LOG.infov("Seeded Entra dev user/group (upn={0}, group={1})",
                     EntraStore.DEV_USER_UPN, EntraStore.DEV_GROUP_NAME);
+        }
+        if (seedFile != null) {
+            DirectorySeed.load(Path.of(seedFile), defaultTenantId, this);
         }
     }
 

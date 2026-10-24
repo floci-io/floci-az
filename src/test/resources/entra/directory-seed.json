@@ -1,0 +1,20 @@
+{
+  "applications": [{
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "appId": "aaaaaaaa-1111-1111-1111-111111111111",
+    "displayName": "Seeded local app",
+    "clientSecret": "synthetic-seed-test-secret"
+  }],
+  "users": [{
+    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+    "userPrincipalName": "seed-user@example.test",
+    "displayName": "Seed User",
+    "mail": "seed-user@example.test"
+  }],
+  "groups": [{
+    "id": "cccccccc-0000-0000-0000-000000000001",
+    "displayName": "Seed Role",
+    "securityEnabled": true,
+    "members": ["bbbbbbbb-0000-0000-0000-000000000001"]
+  }]
+}
