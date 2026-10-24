@@ -18,7 +18,7 @@ src/main/java/io/floci/az/services/apim/ApiManagementService.java	location-liter
 src/main/java/io/floci/az/services/apim/ApiManagementService.java	scope-parse	1
 src/main/java/io/floci/az/services/appconfig/AppConfigHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	cloud-literal	4
-src/main/java/io/floci/az/services/arm/ArmHandler.java	location-literal	3
+src/main/java/io/floci/az/services/arm/ArmHandler.java	location-literal	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	name-guard	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/blob/BlobServiceHandler.java	cloud-literal	3
@@ -59,3 +59,5 @@ src/main/java/io/floci/az/services/sql/SqlState.java	cloud-literal	1
 src/main/java/io/floci/az/services/table/TableServiceHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/vm/VmHandler.java	location-literal	2
 src/main/java/io/floci/az/services/vm/VmHandler.java	scope-parse	2
+src/main/java/io/floci/az/services/web/WebArmService.java	location-literal	1
+src/main/java/io/floci/az/services/web/WebArmService.java	scope-parse	1

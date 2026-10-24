@@ -14,6 +14,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("GlobalNameRule and ResourceNameRule: global names and name syntax in the gate")
@@ -24,6 +26,8 @@ class GlobalNameRuleTest {
     private static final GlobalName ACCOUNT = new GlobalName(CloudSuffix.BLOB, 409, "StorageAccountAlreadyTaken",
         "The storage account named %s is already taken.", "StorageAccountInAnotherResourceGroup",
         "The account %s is already in another resource group in this subscription.");
+    private static final GlobalName SITE = new GlobalName(CloudSuffix.WEB, 409, "Conflict", "%s exists.")
+        .answeredBy(name -> Response.status(409).entity(Map.of("Code", "Conflict", "Name", name)).build());
 
     private static final ArmTypeRegistry TYPES = new ArmTypeRegistry(Map.of(
         "microsoft.cache", new ArmSurface("Microsoft.Cache", ArmLane.FILTER, List.of(
@@ -31,7 +35,10 @@ class GlobalNameRuleTest {
                 .withName(NameRule.REDIS).withGlobalName(CACHE))),
         "microsoft.storage", new ArmSurface("Microsoft.Storage", ArmLane.ARM_HANDLER, List.of(
             ArmResourceType.resourceGroup("Microsoft.Storage", "storageAccounts", LocationPolicy.REQUIRED)
-                .withGlobalName(ACCOUNT)))));
+                .withGlobalName(ACCOUNT))),
+        "microsoft.web", new ArmSurface("Microsoft.Web", ArmLane.PROVIDER_SERVICE, List.of(
+            ArmResourceType.resourceGroup("Microsoft.Web", "sites", LocationPolicy.REQUIRED)
+                .withGlobalName(SITE)))));
 
     private final GlobalNameRegistry names = new GlobalNameRegistry(List::of,
         subscription -> CloudCatalog.forNameOrPublic("AzureCloud"), () -> Set.of(CloudSuffix.REDIS));
@@ -77,6 +84,19 @@ class GlobalNameRuleTest {
             rule.enter(call("PUT", account.replace("s1", "s2")))).response();
         assertEquals("StorageAccountAlreadyTaken",
             ((Map<?, ?>) ((Map<?, ?>) otherSubscription.getEntity()).get("error")).get("code"));
+    }
+
+    @Test
+    void aTypeWithAConflictResponderAnswersInItsOwnShape() {
+        String site = "subscriptions/s1/resourceGroups/rg/providers/Microsoft.Web/sites/site1";
+        created(call("PUT", site));
+
+        Response response = assertInstanceOf(ArmVerdict.Respond.class,
+            rule.enter(call("PUT", site.replace("s1", "s2").replace("site1", "Site1")))).response();
+        assertEquals(409, response.getStatus());
+        assertEquals(Map.of("Code", "Conflict", "Name", "Site1"), response.getEntity());
+        assertSame(SITE.conflictResponder(), SITE.ownedPerCloud().conflictResponder(), "per cloud keeps the responder");
+        assertNull(CACHE.conflictResponder(), "a type without one answers the ARM error");
     }
 
     @Test

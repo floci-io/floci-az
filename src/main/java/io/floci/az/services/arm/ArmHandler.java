@@ -22,8 +22,6 @@ import io.floci.az.core.directory.Subscription;
 import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.apim.ApiManagementHandler;
 import io.floci.az.services.blob.BlobServiceHandler;
-import io.floci.az.services.functions.FunctionRuntime;
-import io.floci.az.services.functions.FunctionsServiceHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.floci.az.services.network.NetworkHandler;
@@ -70,15 +68,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(ArmHandler.class);
 
-    private static final String DEFAULT_FUNCTIONS_ACCOUNT = "devstoreaccount1";
-
     // In-memory ARM resource state — no StorageBackend needed, these are ephemeral
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> webApps          = new ConcurrentHashMap<>();
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
     private final QueueServiceHandler queueHandler;
-    private final FunctionsServiceHandler functionsHandler;
     private final ApiManagementHandler apiManagementHandler;
     private final NetworkHandler networkHandler;
     private final ManagedIdentityHandler managedIdentityHandler;
@@ -104,7 +98,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     @Inject
     public ArmHandler(EmulatorConfig config, BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
-                      FunctionsServiceHandler functionsHandler, ApiManagementHandler apiManagementHandler,
+                      ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
                       Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate,
@@ -113,7 +107,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         this.config               = config;
         this.blobHandler          = blobHandler;
         this.queueHandler         = queueHandler;
-        this.functionsHandler     = functionsHandler;
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
         this.managedIdentityHandler = managedIdentityHandler;
@@ -242,9 +235,8 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── checkNameAvailability ──────────────────────────────────────────────
-        // az CLI probes this before creating storage accounts / key vaults / etc. ARM paths are
-        // case-insensitive and clients disagree on the casing: Storage and KeyVault send
-        // checkNameAvailability, the Web provider (azurerm web and function apps) checknameavailability.
+        // az CLI probes this before creating storage accounts. ARM paths are case-insensitive, so the
+        // operation matches in any casing.
         if (path.toLowerCase(Locale.ROOT)
                 .matches("subscriptions/[^/]+/providers/microsoft\\.[^/]+/checknameavailability([?].*)?")) {
             return checkNameAvailability(req, path);
@@ -348,8 +340,8 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      * resource group otherwise. Both ARM listings answer from this one assembly so they cannot
      * disagree about what the estate holds.
      *
-     * <p>ArmHandler's own Storage / Web state (and Key Vault's contributor) contributes the full stored body rather
-     * than the trimmed {@code ArmResources.indexEntry} shape: the azurerm provider reads this
+     * <p>ArmHandler's own Storage state (and the Key Vault and Web contributors) contributes the full stored
+     * body rather than the trimmed {@code ArmResources.indexEntry} shape: the azurerm provider reads this
      * listing to populate its Key Vault cache and looks vaults up by {@code properties.vaultUri},
      * which a properties-free entry would not carry. A deliberate deviation from Azure, whose
      * generic listing never carries {@code properties} — its {@code $expand} adds only
@@ -361,7 +353,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     public List<Map<String, Object>> indexedResources(String sub, String rg, boolean everyContributor) {
         List<Map<String, Object>> resources = new ArrayList<>();
         collectOwn(storageAccounts, sub, rg, resources);
-        collectOwn(webApps, sub, rg, resources);
         if (config.services().network().enabled()) {
             resources.addAll(rg == null
                     ? networkHandler.listResources(sub)
@@ -398,15 +389,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     // ── Provider-level routing ────────────────────────────────────────────────
 
     private Response handleProviders(AzureRequest req, String path, String method, String sub) {
-        // Inline ARM shells that bridge to data-plane handlers (Storage) or functions
-        // provisioning (Web) — coupled to those subsystems, so they stay here rather than in the lane.
+        // The inline ARM shell that bridges to the Storage data plane, coupled to it, so it stays here.
         if (ArmPaths.hasProvider(path, "Microsoft.Storage")) {
             return handleStorage(req, path, method, sub);
         }
-        if (ArmPaths.hasProvider(path, "Microsoft.Web")) {
-            return handleWeb(req, path, method, sub);
-        }
-        // Delegating providers (Key Vault/APIM/Monitor/EventGrid), via the ArmProviderService lane.
+        // Delegating providers (Key Vault/Web/APIM/Monitor/EventGrid), via the ArmProviderService lane.
         ArmProviderService provider = providerLane(providerNamespace(path));
         if (provider != null) {
             return provider.armEnabled() ? provider.handleArm(req, path, method, sub) : armNotFound(path);
@@ -451,124 +438,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         String rest = path.substring(marker + "/providers/".length());
         int slash = rest.indexOf('/');
         return slash < 0 ? rest : rest.substring(0, slash);
-    }
-
-    // ── Function Apps ────────────────────────────────────────────────────────
-
-    private Response handleWeb(AzureRequest req, String path, String method, String sub) {
-        String rg = extractRg(path);
-
-        if (path.matches(".*/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
-            List<Map<String, Object>> apps = webApps.values().stream()
-                    .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .toList();
-            return Response.ok(Map.of("value", apps)).build();
-        }
-
-        if (path.contains("/sites/")) {
-            String appName = extractResourceName(path, "sites");
-            if (path.contains("/config/web")) {
-                return handleWebConfig(req, path, method, sub, rg, appName);
-            }
-            return switch (method) {
-                case "PUT"    -> createOrUpdateWebApp(req, sub, rg, appName);
-                case "GET"    -> getWebApp(sub, rg, appName);
-                case "DELETE" -> { webApps.remove(webAppKey(sub, rg, appName)); yield Response.ok().build(); }
-                default       -> Response.status(405).build();
-            };
-        }
-
-        return armNotFound(path);
-    }
-
-    private synchronized Response createOrUpdateWebApp(AzureRequest req, String sub, String rg, String appName) {
-        if (ownedElsewhere(webApps, sub, rg, appName).isPresent()) {
-            return webAppNameTaken(appName);
-        }
-        Map<String, Object> body = parseBody(req);
-        Map<String, Object> properties = cast(body.get("properties"));
-        Map<String, Object> siteConfig = cast(properties.get("siteConfig"));
-        String linuxFxVersion = bodyString(siteConfig, "linuxFxVersion", null);
-        try {
-            Map<String, Object> resource = webAppResource(sub, rg, appName,
-                    bodyString(body, "location", "eastus"), linuxFxVersion);
-            syncFunctionApp(appName, linuxFxVersion);
-            webApps.put(webAppKey(sub, rg, appName), resource);
-            return Response.ok(stripInternal(resource)).build();
-        } catch (IllegalArgumentException e) {
-            return Response.status(400).entity(Map.of("error", Map.of(
-                    "code", "InvalidLinuxFxVersion", "message", e.getMessage()))).build();
-        }
-    }
-
-    private Response getWebApp(String sub, String rg, String appName) {
-        Map<String, Object> resource = webApps.get(webAppKey(sub, rg, appName));
-        return resource == null ? armNotFound("sites/" + appName)
-                : Response.ok(stripInternal(resource)).build();
-    }
-
-    private Response handleWebConfig(AzureRequest req, String path, String method, String sub,
-                                     String rg, String appName) {
-        Map<String, Object> resource = webApps.get(webAppKey(sub, rg, appName));
-        if (resource == null) {
-            return armNotFound("sites/" + appName);
-        }
-        if ("GET".equals(method)) {
-            return Response.ok(Map.of("id", path, "name", "web",
-                    "type", "Microsoft.Web/sites/config",
-                    "properties", cast(resource.get("properties")).get("siteConfig"))).build();
-        }
-        if (!"PUT".equals(method)) {
-            return Response.status(405).build();
-        }
-
-        Map<String, Object> body = parseBody(req);
-        Map<String, Object> config = body.containsKey("properties") ? cast(body.get("properties")) : body;
-        String linuxFxVersion = bodyString(config, "linuxFxVersion", null);
-        try {
-            Map<String, Object> updated = webAppResource(sub, rg, appName,
-                    bodyString(resource, "location", "eastus"), linuxFxVersion);
-            syncFunctionApp(appName, linuxFxVersion);
-            webApps.put(webAppKey(sub, rg, appName), updated);
-            return Response.ok(Map.of("id", path, "name", "web",
-                    "type", "Microsoft.Web/sites/config",
-                    "properties", cast(updated.get("properties")).get("siteConfig"))).build();
-        } catch (IllegalArgumentException e) {
-            return Response.status(400).entity(Map.of("error", Map.of(
-                    "code", "InvalidLinuxFxVersion", "message", e.getMessage()))).build();
-        }
-    }
-
-    private void syncFunctionApp(String appName, String linuxFxVersion) {
-        if (linuxFxVersion == null || linuxFxVersion.isBlank()) {
-            return;
-        }
-        String runtime = FunctionRuntime.runtimeFromLinuxFxVersion(linuxFxVersion);
-        functionsHandler.upsertApp(DEFAULT_FUNCTIONS_ACCOUNT, appName, runtime, linuxFxVersion, null);
-    }
-
-    private static Map<String, Object> webAppResource(String sub, String rg, String appName,
-                                                       String location, String linuxFxVersion) {
-        Map<String, Object> siteConfig = new LinkedHashMap<>();
-        if (linuxFxVersion != null) {
-            siteConfig.put("linuxFxVersion", linuxFxVersion);
-        }
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("state", "Running");
-        properties.put("siteConfig", siteConfig);
-
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("_sub", sub);
-        resource.put("_rg", rg);
-        resource.put("id", "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + "/providers/Microsoft.Web/sites/" + appName);
-        resource.put("name", appName);
-        resource.put("type", "Microsoft.Web/sites");
-        resource.put("location", location);
-        resource.put("kind", "functionapp,linux");
-        resource.put("properties", properties);
-        return resource;
     }
 
     // ── Storage Accounts ─────────────────────────────────────────────────────
@@ -848,9 +717,8 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     // ── Global resource names ────────────────────────────────────────────────
-    // Storage accounts and web apps are DNS names, unique across every
-    // subscription. A create under a second scope is a name conflict, never a second resource.
-    // Their create methods are synchronized so the ownership check and the write are one step.
+    // Storage accounts are DNS names, unique across every subscription. A create under a second scope is a name conflict, never a second resource.
+    // Its create method is synchronized so the ownership check and the write are one step.
 
     /** The resource named {@code name} in {@code store} when it belongs to a scope other than {@code sub}/{@code rg}. */
     private static Optional<Map<String, Object>> ownedElsewhere(Map<String, Map<String, Object>> store,
@@ -862,23 +730,11 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                 .findFirst();
     }
 
-    /** App Service answers a taken site name in its own error shape, not the ARM CloudError envelope. */
-    private static Response webAppNameTaken(String appName) {
-        Map<String, Object> errorEntity = new LinkedHashMap<>();
-        errorEntity.put("ExtendedCode", "54001");
-        errorEntity.put("MessageTemplate", "Website with given name {0} already exists.");
-        errorEntity.put("Parameters", List.of(appName));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("Code", "Conflict");
-        body.put("Message", "Website with given name " + appName + " already exists.");
-        body.put("ErrorEntity", errorEntity);
-        return Response.status(409).entity(body).build();
-    }
-
     /**
      * {@code POST .../providers/{namespace}/checkNameAvailability}. Storage accounts are answered from this
      * handler's own store; any other namespace routed here has no store to consult and reports the name as
-     * available. A provider-lane namespace that serves its subscription-level paths (Key Vault) answers its own.
+     * available. A provider-lane namespace that serves its subscription-level paths (Key Vault, Web) answers its
+     * own.
      */
     private Response checkNameAvailability(AzureRequest req, String path) {
         String name = bodyString(parseBody(req), "name", "");
@@ -962,7 +818,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     @Override
     public void clear() {
         storageAccounts.clear();
-        webApps.clear();
     }
 
     /**
@@ -1015,7 +870,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String saKey(String sub, String rg, String name)  { return sub + "/" + rg + "/" + name; }
-    private static String webAppKey(String sub, String rg, String name) { return sub + "/" + rg + "/web/" + name; }
 
     private static Map<String, Object> cast(Object o) {
         return ArmJson.cast(o);

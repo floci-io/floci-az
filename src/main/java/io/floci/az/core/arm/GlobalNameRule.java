@@ -103,6 +103,9 @@ public class GlobalNameRule implements ArmRequestRule {
     }
 
     private static Response conflict(GlobalName global, ArmCall call, ArmResourceId owner) {
+        if (global.conflictResponder() != null) {
+            return global.conflictResponder().conflict(call.id().name());
+        }
         boolean sameSubscription = owner.subscriptionId() != null
             && owner.subscriptionId().equalsIgnoreCase(call.id().subscriptionId());
         if (sameSubscription && global.sameSubscriptionCode() != null) {
