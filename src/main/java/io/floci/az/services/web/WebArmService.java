@@ -30,6 +30,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Microsoft.Web's management plane: sites and their {@code config/web}, ARM shells that provision a Function App in
@@ -58,6 +60,13 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
 
     /** The {@code CheckNameResourceTypes} values that name a site; the others name nothing floci-az stores. */
     private static final Set<String> SITE_NAME_TYPES = Set.of("site", "microsoft.web/sites");
+
+    /**
+     * A site's own path, or its {@code config/web}, namespace and segments in any case: group 1 the site name, group 2
+     * set for {@code config/web}.
+     */
+    private static final Pattern SITE_PATH = Pattern.compile(
+        ".*/providers/Microsoft\\.Web/sites/([^/?]+)(/config/web)?/?([?].*)?", Pattern.CASE_INSENSITIVE);
 
     private final ArmResourceStore<Map<String, Object>> sites;
     private final GlobalNameRegistry names;
@@ -132,27 +141,34 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
 
     // ── Resource group level ────────────────────────────────────────────────
 
+    /**
+     * Only a site's own path and its {@code config/web} reach the site handlers. Any other path under a site
+     * ({@code .../sites/{name}/slots/{slot}} and the like) is a child floci-az does not serve, so it answers ARM 404
+     * rather than writing, reading or deleting the parent: the gate owns names for the declared types only, so a child
+     * PUT treated as the site's create would write a site whose name another subscription owns, and provision its
+     * Function App over the owner's.
+     */
     private Response handleResourceGroupPath(AzureRequest req, String path, String method, String sub, String rg) {
         if (path.matches(".*/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
             return list(new ArmScope(sub, rg));
         }
-        if (path.contains("/sites/")) {
-            String siteName = ArmPaths.resourceName(path, "sites", "unknown");
-            ArmResourceId id = siteId(sub, rg, siteName);
-            if (path.contains("/config/web")) {
-                return handleConfig(req, path, method, id);
-            }
-            return switch (method) {
-                case "PUT"    -> createOrUpdateSite(req, id);
-                case "GET"    -> getSite(id);
-                case "DELETE" -> {
-                    sites.delete(id);
-                    yield Response.ok().build();
-                }
-                default       -> Response.status(405).build();
-            };
+        Matcher site = SITE_PATH.matcher(path);
+        if (!site.matches()) {
+            return armNotFound(path);
         }
-        return armNotFound(path);
+        ArmResourceId id = siteId(sub, rg, site.group(1));
+        if (site.group(2) != null) {
+            return handleConfig(req, path, method, id);
+        }
+        return switch (method) {
+            case "PUT"    -> createOrUpdateSite(req, id);
+            case "GET"    -> getSite(id);
+            case "DELETE" -> {
+                sites.delete(id);
+                yield Response.ok().build();
+            }
+            default       -> Response.status(405).build();
+        };
     }
 
     private static ArmResourceId siteId(String sub, String rg, String siteName) {

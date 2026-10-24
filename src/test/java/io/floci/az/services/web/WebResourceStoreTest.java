@@ -123,6 +123,36 @@ class WebResourceStoreTest {
         given().when().get(site("sub-site-b", "rg", "ownedsite") + API).then().statusCode(404);
     }
 
+    @Test
+    void aChildPutFromAnotherSubscriptionNeitherWritesNorTakesTheSite() {
+        put(site("sub-child-a", "rg", "takensite"), SITE_BODY, 200);
+        String nodeSite = "{\"location\":\"westus\",\"properties\":{\"siteConfig\":{\"linuxFxVersion\":\"Node|20\"}}}";
+
+        for (String child : List.of("/slots/staging", "/config/appsettings", "/config/web/extra")) {
+            given().contentType("application/json").body(nodeSite)
+                .when().put(site("sub-child-b", "rg", "takensite") + child + API)
+                .then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+        }
+        given().contentType("application/json").body("{\"properties\":{\"linuxFxVersion\":\"Node|20\"}}")
+            .when().put(site("sub-child-b", "rg", "takensite") + "/config/web" + API)
+            .then().statusCode(404);
+        given().when().get(site("sub-child-b", "rg", "takensite") + API).then().statusCode(404);
+        given().when().get("/subscriptions/sub-child-b/providers/Microsoft.Web/sites" + API)
+            .then().statusCode(200).body("value", hasSize(0));
+        // A child DELETE does not reach the parent either.
+        given().when().delete(site("sub-child-a", "rg", "takensite") + "/slots/staging" + API).then().statusCode(404);
+
+        given().when().get(site("sub-child-a", "rg", "takensite") + API).then().statusCode(200)
+            .body("id", equalTo(site("sub-child-a", "rg", "takensite")))
+            .body("location", equalTo("eastus"))
+            .body("properties.siteConfig.linuxFxVersion", equalTo("Python|3.12"));
+        given().when().get("/devstoreaccount1-functions/admin/apps/takensite").then().statusCode(200)
+            .body("linuxFxVersion", equalTo("Python|3.12"));
+        given().contentType("application/json").body("{\"name\":\"takensite\",\"type\":\"Microsoft.Web/sites\"}")
+            .when().post("/subscriptions/sub-child-b/providers/Microsoft.Web/checknameavailability" + API)
+            .then().statusCode(200).body("nameAvailable", equalTo(false));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"Microsoft.Web/checknameavailability", "Microsoft.Web/checkNameAvailability",
         "microsoft.web/CheckNameAvailability"})
