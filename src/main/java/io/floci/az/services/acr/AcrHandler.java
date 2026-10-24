@@ -764,4 +764,10 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .map(stored -> new Claim(CloudSuffix.ACR, stored.value().getName(), stored.id()))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.ACR
+            && store.get(owner).filter(stored -> name.equalsIgnoreCase(stored.value().getName())).isPresent();
+    }
 }

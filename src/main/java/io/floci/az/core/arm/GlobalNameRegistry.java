@@ -218,16 +218,18 @@ public class GlobalNameRegistry implements Resettable {
         built = true;
     }
 
-    /** Whether a source stores {@code owner} holding {@code name}. */
+    /**
+     * Whether a source stores {@code owner} holding {@code name}: one keyed {@link GlobalNameSource#holds} per source,
+     * as each source answers it, not a listing of every claim. The owner's subscription must also map to the cloud
+     * the name is keyed in.
+     */
     private boolean stored(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
+        if (!key(cloudOfSubscription.apply(owner.subscriptionId()), suffix, name).equals(key(cloud, suffix, name))) {
+            return false;
+        }
         for (GlobalNameSource source : sources.get()) {
-            for (GlobalNameSource.Claim claim : source.globalNames()) {
-                if (claim.suffix() == suffix && claim.name().equalsIgnoreCase(name)
-                        && sameResource(claim.owner(), owner)
-                        && key(cloudOfSubscription.apply(claim.owner().subscriptionId()), suffix, name)
-                            .equals(key(cloud, suffix, name))) {
-                    return true;
-                }
+            if (source.holds(suffix, name, owner)) {
+                return true;
             }
         }
         return false;

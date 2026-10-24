@@ -622,4 +622,10 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
                 .map(stored -> new Claim(CloudSuffix.REDIS, stored.value().getName(), stored.id()))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.REDIS
+            && store.get(owner).filter(stored -> name.equalsIgnoreCase(stored.value().getName())).isPresent();
+    }
 }
