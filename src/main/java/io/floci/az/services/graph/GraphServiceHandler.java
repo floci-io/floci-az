@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.services.entra.DirectoryEntitySet;
+import io.floci.az.services.entra.DirectoryObject;
 import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
@@ -16,10 +19,12 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Microsoft Graph emulation — a narrow slice at {@code /v1.0/...}, reached via
@@ -47,15 +52,17 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private final GraphDirectoryStore store;
     private final DirectoryReader directory;
     private final TenantResolver tenants;
+    private final AzureDirectory azureDirectory;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Inject
     public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory,
-                               TenantResolver tenants) {
+                               TenantResolver tenants, AzureDirectory azureDirectory) {
         this.config = config;
         this.store = store;
         this.directory = directory;
         this.tenants = tenants;
+        this.azureDirectory = azureDirectory;
     }
 
     @Override public String getServiceType() { return "graph"; }
@@ -76,6 +83,9 @@ public class GraphServiceHandler implements AzureServiceHandler {
         String sub = path.substring("v1.0/".length());
         String[] segments = sub.split("/");
 
+        if (segments.length == 1 && "groups".equals(segments[0])) {
+            return "GET".equals(request.method()) ? listGroups(request) : methodNotAllowed();
+        }
         if (segments.length == 1 && "servicePrincipals".equals(segments[0])) {
             return "GET".equals(request.method())
                     ? servicePrincipals(request.queryParams().get("$filter"))
@@ -102,6 +112,68 @@ public class GraphServiceHandler implements AzureServiceHandler {
     }
 
     // ── Endpoints ────────────────────────────────────────────────────────────────
+
+    private Response listGroups(AzureRequest request) {
+        Predicate<DirectoryObject> filter;
+        try {
+            filter = GroupFilter.compile(request.queryParams().get("$filter"));
+        } catch (IllegalArgumentException e) {
+            return graphError(400, "Request_BadRequest", e.getMessage());
+        }
+        String expand = request.queryParams().get("$expand");
+        boolean includeMembers = expand != null && !expand.isBlank();
+        if (includeMembers && !"members".equals(expand.trim())) {
+            return graphError(400, "Request_BadRequest", "Only $expand=members is supported for groups.");
+        }
+        String tenantId = tenantId();
+        List<Map<String, Object>> groups = store.list(tenantId, DirectoryEntitySet.GROUPS).stream()
+                .filter(filter)
+                .sorted(Comparator.comparing(DirectoryObject::id))
+                .map(group -> {
+                    Map<String, Object> result = publicDirectoryObject(group);
+                    if (includeMembers) {
+                        List<Map<String, Object>> members = store.links(tenantId, group.id(), GraphDirectoryStore.MEMBERS)
+                                .stream().sorted()
+                                .map(id -> member(tenantId, id))
+                                .flatMap(Optional::stream)
+                                .map(this::publicDirectoryObject)
+                                .toList();
+                        result.put("members", members);
+                    }
+                    return result;
+                }).toList();
+        return json(Map.of("@odata.context", azureDirectory.cloudOfTenant(tenantId).endpoints().microsoftGraph()
+                + "/v1.0/$metadata#groups"
+                + (includeMembers ? "(members())" : ""), "value", groups));
+    }
+
+    private Optional<DirectoryObject> member(String tenantId, String id) {
+        return store.get(tenantId, DirectoryEntitySet.USERS, id)
+                .or(() -> store.get(tenantId, DirectoryEntitySet.GROUPS, id))
+                .or(() -> store.get(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, id));
+    }
+
+    private Map<String, Object> publicDirectoryObject(DirectoryObject object) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String type = switch (object.entitySet()) {
+            case "users" -> "user";
+            case "groups" -> "group";
+            case "servicePrincipals" -> "servicePrincipal";
+            default -> throw new IllegalArgumentException("Unsupported group member type: " + object.entitySet());
+        };
+        result.put("@odata.type", "#microsoft.graph." + type);
+        result.put("id", object.id());
+        result.put("displayName", object.text("displayName"));
+        if ("user".equals(type)) {
+            result.put("mail", object.text("mail"));
+            result.put("userPrincipalName", object.text("userPrincipalName"));
+        } else if ("group".equals(type)) {
+            result.put("securityEnabled", object.props().path("securityEnabled").asBoolean(false));
+        } else {
+            result.put("appId", object.text("appId"));
+        }
+        return result;
+    }
 
     /** azurerm calls {@code GET /v1.0/servicePrincipals?$filter=appId eq '{clientId}'} during provider init. */
     private Response servicePrincipals(String filter) {
