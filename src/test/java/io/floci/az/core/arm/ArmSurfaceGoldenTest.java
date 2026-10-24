@@ -126,8 +126,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.Storage/storageAccounts/blobServices/containers                      RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Storage/storageAccounts/queueServices                                RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Storage/storageAccounts/queueServices/queues                         RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
-        Microsoft.Web/sites                                                            RESOURCE_GROUP  REQUIRED  ARM_HANDLER
-        Microsoft.Web/sites/config                                                     RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
+        Microsoft.Web/sites                                                            RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
+        Microsoft.Web/sites/config                                                     RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         """;
 
     /** The types that declare a name rule or a global DNS name: their bounds, suffix and conflict answer. */
@@ -165,6 +165,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null
+        Microsoft.Web/sites    2-60    WEB    409    Conflict
         """;
 
     @Inject

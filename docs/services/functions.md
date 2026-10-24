@@ -55,6 +55,15 @@ The ARM-compatible `Microsoft.Web/sites` and `Microsoft.Web/sites/{name}/config/
 paths accept the same setting under `properties.siteConfig.linuxFxVersion` and
 `properties.linuxFxVersion`, respectively.
 
+The sites persist under the global storage mode, in the `arm-web` store, and `GET
+/subscriptions/{sub}/providers/Microsoft.Web/sites` lists a subscription's sites. A site name is a global DNS name
+(`{name}.azurewebsites.net`): the first subscription to create it owns it, and a create from another subscription or
+resource group is refused with `409` in App Service's error shape (`Code: Conflict`, `ErrorEntity.ExtendedCode:
+54001`) until the owner deletes it. `POST /subscriptions/{sub}/providers/Microsoft.Web/checknameavailability`
+answers from the same ownership for a `Site` or `Microsoft.Web/sites` name. Paths that differ only in case address
+the same site. With `parity-overrides.strict-names` a name outside 2 to 60 letters, digits and hyphens, or starting
+or ending with a hyphen, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
+
 ### Functions
 
 | Method | Path | Description |
