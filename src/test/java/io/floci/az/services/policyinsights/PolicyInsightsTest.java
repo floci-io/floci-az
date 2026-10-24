@@ -184,6 +184,30 @@ class PolicyInsightsTest {
     }
 
     @Test
+    void aManagementGroupScopeCoversTheSubscriptionsPlacedUnderIt() {
+        String groups = "/providers/Microsoft.Management/managementGroups";
+        String mgApi = "?api-version=2023-04-01";
+        given().contentType("application/json").body("{\"properties\": {\"displayName\": \"Production\"}}")
+                .when().put(groups + "/prod" + mgApi).then().statusCode(200);
+        given().contentType("application/json").body("{\"properties\": {\"displayName\": \"Sandbox\", \"details\": {\"parent\": {\"id\": \"" + groups + "/prod\"}}}}")
+                .when().put(groups + "/sandbox" + mgApi).then().statusCode(200);
+        given().contentType("application/json").body("{\"properties\": {\"displayName\": \"Empty\"}}")
+                .when().put(groups + "/empty" + mgApi).then().statusCode(200);
+        given().when().put(groups + "/sandbox/subscriptions/" + SUB + mgApi).then().statusCode(200);
+        storageAccount("weaksa", "TLS1_0");
+
+        // The subscription sits under sandbox, which sits under prod: both cover its states, the tenant root does too.
+        query(groups + "/sandbox", "").statusCode(200).body("'@odata.count'", equalTo(1));
+        query(groups + "/prod", "").statusCode(200).body("'@odata.count'", equalTo(1))
+                .body("value[0].resourceId", equalTo(RG_SCOPE + "/providers/Microsoft.Storage/storageAccounts/weaksa"));
+        query(groups + "/00000000-0000-0000-0000-000000000002", "").statusCode(200).body("'@odata.count'", equalTo(1));
+        query(groups + "/empty", "").statusCode(200).body("'@odata.count'", equalTo(0));
+        query(groups + "/nosuchgroup", "").statusCode(200).body("'@odata.count'", equalTo(0));
+        given().when().post(groups + "/prod/providers/Microsoft.PolicyInsights/policyStates/latest/summarize" + INSIGHTS_API)
+                .then().statusCode(200).body("value[0].results.nonCompliantResources", equalTo(1));
+    }
+
+    @Test
     void queriesUnderAnyResourceReachTheHandler() {
         // The resource's own provider sorts ahead of Microsoft.PolicyInsights; the last provider segment decides.
         query(RG_SCOPE + "/providers/Microsoft.App/containerApps/app", "")

@@ -5,6 +5,8 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.services.managementgroups.ManagementGroupStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -38,6 +40,7 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
 
     private static final Logger LOG = Logger.getLogger(PolicyInsightsHandler.class);
     private static final String MARKER = "/providers/microsoft.policyinsights/";
+    private static final String MANAGEMENT_GROUP_SCOPE = "/providers/microsoft.management/managementgroups/";
     private static final Pattern FILTER_CLAUSE = Pattern.compile("(?i)^\\s*(\\w+)\\s+eq\\s+(?:'((?:[^']|'')*)'|(true|false))\\s*$");
     private static final Pattern ASSIGNMENT_SCOPE = Pattern.compile("(?i)/providers/microsoft\\.authorization/policyassignments/([^/]+)$");
     private static final Pattern DEFINITION_SCOPE = Pattern.compile("(?i)/providers/microsoft\\.authorization/(policydefinitions|policysetdefinitions)/([^/]+)$");
@@ -45,12 +48,17 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
     private final EmulatorConfig config;
     private final ComplianceStore store;
     private final ComplianceScanner scanner;
+    private final ManagementGroupStore managementGroups;
+    private final AzureDirectory directory;
 
     @Inject
-    public PolicyInsightsHandler(EmulatorConfig config, ComplianceStore store, ComplianceScanner scanner) {
+    public PolicyInsightsHandler(EmulatorConfig config, ComplianceStore store, ComplianceScanner scanner,
+                                 ManagementGroupStore managementGroups, AzureDirectory directory) {
         this.config = config;
         this.store = store;
         this.scanner = scanner;
+        this.managementGroups = managementGroups;
+        this.directory = directory;
     }
 
     @Override
@@ -285,8 +293,12 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
 
     // ── Scope and filter ────────────────────────────────────────────────────────
 
-    /** The states a scope covers: its subscription or group, a resource and its children, or an assignment or definition. */
-    private static Predicate<PolicyState> scopePredicate(String scope) {
+    /**
+     * The states a scope covers: a management group covers the subscriptions placed under it or one of its
+     * descendants, a subscription or resource group its resources, a resource itself and its children, and
+     * an assignment or definition the states it produced.
+     */
+    private Predicate<PolicyState> scopePredicate(String scope) {
         String lower = scope.toLowerCase(Locale.ROOT);
         Matcher assignment = ASSIGNMENT_SCOPE.matcher(scope);
         if (assignment.find()) {
@@ -297,8 +309,12 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
             boolean set = definition.group(1).equalsIgnoreCase("policysetdefinitions");
             return state -> set ? scope.equalsIgnoreCase(state.policySetDefinitionId()) : scope.equalsIgnoreCase(state.policyDefinitionId());
         }
-        if (lower.startsWith("/providers/microsoft.management/managementgroups/")) {
-            return state -> true;
+        if (lower.startsWith(MANAGEMENT_GROUP_SCOPE)) {
+            String groupName = scope.substring(MANAGEMENT_GROUP_SCOPE.length());
+            return state -> {
+                String tenant = directory.tenantOfSubscription(state.subscriptionId());
+                return managementGroups.isWithin(tenant, managementGroups.parentOf(tenant, state.subscriptionId()).name(), groupName);
+            };
         }
         return state -> {
             String id = state.resourceId().toLowerCase(Locale.ROOT);

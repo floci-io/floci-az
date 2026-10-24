@@ -253,8 +253,9 @@ records come first; `$orderby=timestamp asc` reverses that. `$filter` accepts `e
 `subscriptionId`; `$select` trims the records; `$top` pages with an `@odata.nextLink` carrying
 `$skiptoken`. An unsupported clause answers `400 InvalidQueryFilter`, a malformed or negative
 `$skiptoken` answers `400 InvalidQueryOption`. The scope narrows the result the way Azure's does: a
-subscription, resource group or resource covers itself and everything below, an assignment, definition
-or set definition covers the states it produced. The query and summary paths work under any resource,
+management group covers the subscriptions placed under it or one of its descendants, a subscription,
+resource group or resource covers itself and everything below, an assignment, definition or set
+definition covers the states it produced. The query and summary paths work under any resource,
 whatever provider serves it: the last `providers/` segment picks Policy Insights.
 
 A tags-only `PATCH` is evaluated against the definitions that inspect tags, so the verdicts of the
