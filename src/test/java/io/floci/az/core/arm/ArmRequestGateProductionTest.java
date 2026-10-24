@@ -23,12 +23,12 @@ class ArmRequestGateProductionTest {
 
     @Test
     void theProductionRulesRunInTheirDeclaredOrder() {
-        List<Class<?>> expected = List.of(SubscriptionRule.class, ProviderRule.class, ResourceGroupRule.class,
-            LocationRule.class, ResourceNameRule.class, GlobalNameRule.class, PolicyEvaluationRule.class,
-            AppendedLocationRule.class, UserAssignedIdentityRule.class, ActivityLogRule.class);
-        List<Integer> orders = List.of(SubscriptionRule.ORDER, ProviderRule.ORDER, ResourceGroupRule.ORDER,
-            LocationRule.ORDER, ResourceNameRule.ORDER, GlobalNameRule.ORDER, PolicyEvaluationRule.ORDER,
-            AppendedLocationRule.ORDER, UserAssignedIdentityRule.ORDER, ActivityLogRule.ORDER);
+        List<Class<?>> expected = List.of(SubscriptionRule.class, ActivityLogRule.class, ProviderRule.class,
+            ResourceGroupRule.class, LocationRule.class, ResourceNameRule.class, GlobalNameRule.class,
+            PolicyEvaluationRule.class, AppendedLocationRule.class, UserAssignedIdentityRule.class);
+        List<Integer> orders = List.of(SubscriptionRule.ORDER, ActivityLogRule.ORDER, ProviderRule.ORDER,
+            ResourceGroupRule.ORDER, LocationRule.ORDER, ResourceNameRule.ORDER, GlobalNameRule.ORDER,
+            PolicyEvaluationRule.ORDER, AppendedLocationRule.ORDER, UserAssignedIdentityRule.ORDER);
         List<ArmRequestRule> rules = gate.rules();
         assertEquals(expected.size(), rules.size(), "rules: " + rules);
         for (int i = 0; i < expected.size(); i++) {

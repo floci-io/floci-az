@@ -125,6 +125,37 @@ class ActivityLogTest {
     }
 
     @Test
+    void aWriteDeniedByPolicyBeforeItsHandlerIsLoggedAsFailed() {
+        String auth = "/providers/Microsoft.Authorization";
+        String policyApi = "?api-version=2025-03-01";
+        given().contentType("application/json")
+                .body("{\"properties\": {\"mode\": \"All\", \"policyRule\": {\"if\": {\"field\": \"type\","
+                        + " \"equals\": \"Microsoft.Storage/storageAccounts\"}, \"then\": {\"effect\": \"deny\"}}}}")
+                .when().put(SUB_SCOPE + auth + "/policyDefinitions/no-storage" + policyApi)
+                .then().statusCode(201);
+        given().contentType("application/json")
+                .body("{\"properties\": {\"policyDefinitionId\": \"" + SUB_SCOPE + auth + "/policyDefinitions/no-storage\"}}")
+                .when().put(RG_SCOPE + auth + "/policyAssignments/no-storage" + policyApi)
+                .then().statusCode(201);
+
+        given().header("x-ms-correlation-request-id", "corr-denied")
+                .contentType("application/json")
+                .body("{\"location\": \"eastus\", \"kind\": \"StorageV2\", \"sku\": {\"name\": \"Standard_LRS\"}}")
+                .when().put(SA + "?api-version=2023-01-01")
+                .then().statusCode(403);
+        list("eventTimestamp ge '" + since + "' and correlationId eq 'corr-denied'")
+                .statusCode(200)
+                .body("value", hasSize(2))
+                .body("value[0].eventName.value", equalTo("EndRequest"))
+                .body("value[0].operationName.value", equalTo("Microsoft.Storage/storageAccounts/write"))
+                .body("value[0].status.value", equalTo("Failed"))
+                .body("value[0].level", equalTo("Error"))
+                .body("value[0].subStatus.value", equalTo("Forbidden"))
+                .body("value[0].properties.statusMessage", containsString("RequestDisallowedByPolicy"))
+                .body("value[1].eventName.value", equalTo("BeginRequest"));
+    }
+
+    @Test
     void resourceGroupWritesAndActionsAreLogged() {
         list("eventTimestamp ge '" + since + "' and resourceUri eq '" + RG_SCOPE + "'")
                 .statusCode(200)

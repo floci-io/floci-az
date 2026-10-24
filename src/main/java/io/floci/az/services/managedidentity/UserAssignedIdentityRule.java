@@ -21,8 +21,8 @@ import java.util.Map;
 public class UserAssignedIdentityRule implements ArmRequestRule {
 
     /**
-     * Position in the gate: after policy evaluation (order 40) and its appended-location pass (order 45), before the
-     * activity log (order 90).
+     * Position in the gate: after policy evaluation (order 40) and its appended-location pass (order 45), and inside
+     * the activity log (order 2), which logs a refusal from this rule as a failed write.
      */
     public static final int ORDER = 50;
 
