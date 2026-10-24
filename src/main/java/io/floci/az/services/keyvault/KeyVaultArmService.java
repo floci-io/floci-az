@@ -413,6 +413,17 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             .toList();
     }
 
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        ArmResourceStore<Map<String, Object>> store = switch (suffix) {
+            case KEYVAULT -> vaults;
+            case MHSM -> hsms;
+            default -> null;
+        };
+        return store != null
+            && store.get(owner).filter(stored -> name.equalsIgnoreCase(String.valueOf(stored.value().get("name")))).isPresent();
+    }
+
     private static Claim claim(CloudSuffix suffix, Stored<Map<String, Object>> stored) {
         return new Claim(suffix, String.valueOf(stored.value().get("name")), stored.id());
     }

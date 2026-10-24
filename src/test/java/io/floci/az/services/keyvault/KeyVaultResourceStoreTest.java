@@ -1,6 +1,8 @@
 package io.floci.az.services.keyvault;
 
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -19,6 +21,8 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 @DisplayName("Key Vault ARM: vaults and managed HSMs in the ARM resource store, names owned by the registry")
@@ -32,6 +36,9 @@ class KeyVaultResourceStoreTest {
 
     @Inject
     StorageFactory storageFactory;
+
+    @Inject
+    KeyVaultArmService keyVaultArmService;
 
     @BeforeEach
     void reset() {
@@ -48,6 +55,24 @@ class KeyVaultResourceStoreTest {
 
     private static void put(String path, String body, int status) {
         given().contentType("application/json").body(body).when().put(path + API).then().statusCode(status);
+    }
+
+    @Test
+    void holdsAnswersFromTheStoredVaultOrHsmAlone() {
+        put(vault("sub-kvholds", "RG", "HeldVault"), VAULT_BODY, 200);
+        put(hsm("sub-kvholds", "RG", "HeldHsm"), HSM_BODY, 200);
+        ArmResourceId vaultId = ArmResourceId.parse(vault("sub-kvholds", "RG", "HeldVault")).orElseThrow();
+        ArmResourceId hsmId = ArmResourceId.parse(hsm("sub-kvholds", "RG", "HeldHsm")).orElseThrow();
+
+        assertTrue(keyVaultArmService.holds(CloudSuffix.KEYVAULT, "heldvault", vaultId));
+        assertTrue(keyVaultArmService.holds(CloudSuffix.MHSM, "heldhsm", hsmId));
+        assertFalse(keyVaultArmService.holds(CloudSuffix.MHSM, "HeldVault", vaultId));
+        assertFalse(keyVaultArmService.holds(CloudSuffix.WEB, "HeldVault", vaultId));
+        assertFalse(keyVaultArmService.holds(CloudSuffix.KEYVAULT, "HeldVault",
+            ArmResourceId.parse(vault("sub-elsewhere", "RG", "HeldVault")).orElseThrow()));
+
+        given().when().delete(vault("sub-kvholds", "RG", "HeldVault") + API).then().statusCode(200);
+        assertFalse(keyVaultArmService.holds(CloudSuffix.KEYVAULT, "HeldVault", vaultId));
     }
 
     @Test
