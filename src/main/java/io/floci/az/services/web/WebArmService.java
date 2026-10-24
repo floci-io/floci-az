@@ -72,7 +72,8 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
     /**
      * Held across a site write and its Function App sync, so concurrent PUTs to one site cannot leave the site's
      * {@code linuxFxVersion} and its Function App's runtime from different requests. The store locks each call on its
-     * own, and the sync runs outside it.
+     * own, and the sync runs outside it. A site DELETE takes it too, so it cannot remove a site, and let the gate
+     * release its name, while a PUT to it is between its name check and its write.
      */
     private final Object siteWrites = new Object();
     private final GlobalNameRegistry names;
@@ -170,7 +171,9 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
             case "PUT"    -> createOrUpdateSite(req, id);
             case "GET"    -> getSite(id);
             case "DELETE" -> {
-                sites.delete(id);
+                synchronized (siteWrites) {
+                    sites.delete(id);
+                }
                 yield Response.ok().build();
             }
             default       -> Response.status(405).build();
@@ -209,15 +212,26 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
         String linuxFxVersion = ArmJson.string(siteConfig, "linuxFxVersion", null);
         String location = ArmJson.string(body, "location", "eastus");
         synchronized (siteWrites) {
-            return writeSite(id, location, linuxFxVersion);
+            return writeSite(req, id, location, linuxFxVersion);
         }
     }
 
-    private Response writeSite(ArmResourceId id, String location, String linuxFxVersion) {
+    /**
+     * Holds the name again, inside {@link #siteWrites}, before the Function App sync and the write. The gate reserved
+     * it before the lock, so a DELETE of this site may have released it since and another subscription's PUT may
+     * hold it now: that PUT is then the one that owns the name and this one answers the gate's conflict, writing
+     * nothing. A reservation made here is freed again when the sync refuses the {@code linuxFxVersion}.
+     */
+    private Response writeSite(AzureRequest req, ArmResourceId id, String location, String linuxFxVersion) {
         String siteName = sites.get(id).map(stored -> nameOf(stored.value())).orElse(id.name());
+        GlobalNameRegistry.Reservation reservation = names.reserve(cloud(req), CloudSuffix.WEB, siteName, id);
+        if (reservation.outcome() == GlobalNameRegistry.Outcome.TAKEN) {
+            return WebArmSurface.siteNameTaken(siteName);
+        }
         try {
             syncFunctionApp(siteName, linuxFxVersion);
         } catch (IllegalArgumentException e) {
+            names.releasePending(cloud(req), CloudSuffix.WEB, siteName, reservation.token());
             return invalidLinuxFxVersion(e);
         }
         Map<String, Object> written = sites.createOrUpdate(id, existing -> siteDocument(
