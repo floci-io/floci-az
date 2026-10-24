@@ -202,7 +202,10 @@ public class AksClusterManager {
         }
     }
 
-    /** Stops and removes the k3s container for the given cluster. */
+    /**
+     * Stops and removes the k3s container for the given cluster at emulator shutdown, unless
+     * {@code keepRunningOnShutdown} asks to leave it running. An explicit delete uses {@link #removeCluster}.
+     */
     public void stopCluster(ManagedCluster cluster) {
         if (cluster.getContainerId() == null) {
             return;

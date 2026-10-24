@@ -241,7 +241,7 @@ floci-az:
 | `FLOCI_AZ_SERVICES_AKS_DEFAULT_IMAGE` | `rancher/k3s:latest` | k3s Docker image |
 | `FLOCI_AZ_SERVICES_AKS_API_SERVER_BASE_PORT` | `6443` | Start of host port range for k3s API servers |
 | `FLOCI_AZ_SERVICES_AKS_API_SERVER_MAX_PORT` | `7443` | End of host port range for k3s API servers |
-| `FLOCI_AZ_SERVICES_AKS_KEEP_RUNNING_ON_SHUTDOWN` | `false` | Leave k3s containers running when floci-az stops |
+| `FLOCI_AZ_SERVICES_AKS_KEEP_RUNNING_ON_SHUTDOWN` | `false` | Leave k3s containers running when floci-az stops. Deleting a cluster always removes its container and volume |
 
 ---
 

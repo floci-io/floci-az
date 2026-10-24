@@ -344,9 +344,9 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
         cluster.setProvisioningState("Deleting");
         if (!config.services().aks().mocked()) {
             try {
-                clusterManager.stopCluster(cluster);
+                clusterManager.removeCluster(cluster);
             } catch (Exception e) {
-                LOG.warnv("Error stopping k3s container for cluster {0}: {1}", clusterName, e.getMessage());
+                LOG.warnv("Error removing k3s container for cluster {0}: {1}", clusterName, e.getMessage());
             }
         }
         store.delete(id);
