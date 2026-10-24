@@ -100,7 +100,7 @@ API_VERSIONS = ["2018-01-01", "2019-05-01", "2022-09-01"]
 # Must stay in step with io.floci.az.core.cloud.CloudSuffix (CloudCatalogTest checks the Java side).
 SUFFIX_KEYS = ["BLOB", "DFS", "QUEUE", "TABLE", "KEYVAULT", "MHSM", "ACR", "SERVICEBUS", "SIGNALR", "APPCONFIG",
                "SQL", "POSTGRES", "MYSQL", "MARIADB", "REDIS", "EVENTGRID", "CONTAINERAPPS", "COMMUNICATION", "AKS",
-               "ACI", "APIM"]
+               "ACI", "APIM", "WEB"]
 STORAGE_SERVICES = {"BLOB": "blob", "DFS": "dfs", "QUEUE": "queue", "TABLE": "table"}
 # CloudSuffix -> (cloud.py CloudSuffixes attribute, go-azure-sdk environment field). Either may be None.
 SDK_SUFFIXES = {
@@ -117,8 +117,14 @@ SDK_SUFFIXES = {
 }
 # CloudSuffix -> compare-azure-government-global-azure.md endpoint row that must agree with the SDK value
 # in the public and US Gov clouds (the doc has no China column).
-GOV_COMPARE_SUFFIXES = {
+GOV_CROSSCHECK_SUFFIXES = {
     "APIM": "API Management Gateway",
+}
+# Suffixes no SDK table carries, read from compare-azure-government-global-azure.md: CloudSuffix -> endpoint row.
+# The doc has no China column, so AzureChinaCloud stays unsettled for each.
+GOV_DOC_ONLY_SUFFIXES = {
+    "REDIS": "Azure Cache for Redis",
+    "WEB": "App Service",
 }
 # Public-cloud-only suffixes read from one REST spec or test file each: (file, literal that must appear).
 PUBLIC_EVIDENCE = {
@@ -443,7 +449,7 @@ def build_suffixes(cloud: str, cli: dict, go_env: dict, gov_compare: dict[str, t
             result[key] = unsettled(f"{key} suffix in {cloud}: neither cloud.py nor go-azure-sdk names one")
             continue
         result[key] = cell(agree(f"{cloud} {key} suffix", cli_value, go_value), "; ".join(witnesses))
-    for key, row in GOV_COMPARE_SUFFIXES.items():
+    for key, row in GOV_CROSSCHECK_SUFFIXES.items():
         if cloud not in ("AzureCloud", "AzureUSGovernment"):
             continue
         pair = gov_compare.get(row)
@@ -455,15 +461,16 @@ def build_suffixes(cloud: str, cli: dict, go_env: dict, gov_compare: dict[str, t
         sources = [result[key]["source"]] if sdk_value is not None else []
         sources.append(f"{GOV_COMPARE} ({row}, {column})")
         result[key] = cell(agree(f"{cloud} {key} suffix", sdk_value, doc_value), "; ".join(sources))
-    redis = gov_compare.get("Azure Cache for Redis")
-    if redis is None:
-        raise SourceError(f"{GOV_COMPARE}: no Azure Cache for Redis row")
-    if cloud == "AzureCloud":
-        result["REDIS"] = cell(norm_suffix(redis[0]), f"{GOV_COMPARE} (Azure Cache for Redis, Azure Public)")
-    elif cloud == "AzureUSGovernment":
-        result["REDIS"] = cell(norm_suffix(redis[1]), f"{GOV_COMPARE} (Azure Cache for Redis, Azure Government)")
-    else:
-        result["REDIS"] = unsettled("Azure Cache for Redis host suffix in AzureChinaCloud; no local source")
+    for key, row in GOV_DOC_ONLY_SUFFIXES.items():
+        pair = gov_compare.get(row)
+        if pair is None:
+            raise SourceError(f"{GOV_COMPARE}: no {row} row")
+        if cloud == "AzureCloud":
+            result[key] = cell(norm_suffix(pair[0]), f"{GOV_COMPARE} ({row}, Azure Public)")
+        elif cloud == "AzureUSGovernment":
+            result[key] = cell(norm_suffix(pair[1]), f"{GOV_COMPARE} ({row}, Azure Government)")
+        else:
+            result[key] = unsettled(f"{row} host suffix in AzureChinaCloud; no local source")
     for key, (path, literal, shape) in PUBLIC_EVIDENCE.items():
         if cloud == "AzureCloud":
             result[key] = cell(literal, f"{path} ({shape})")
