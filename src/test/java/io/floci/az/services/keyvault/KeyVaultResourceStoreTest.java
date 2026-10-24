@@ -16,6 +16,7 @@ import java.util.Locale;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -184,18 +185,28 @@ class KeyVaultResourceStoreTest {
     }
 
     @Test
-    void replaceReplacesTheVaultsList() {
+    void replaceReplacesOneEntrysPermissionsAndLeavesTheOthers() {
         String vault = vault("sub-policy", "rg", "replacevault");
         put(vault, VAULT_BODY, 200);
-        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get"), policy("obj-b", "keys", "get"))
+        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get", "list"), policy("obj-b", "keys", "get"))
             .statusCode(200);
 
-        updateAccessPolicy(vault, "replace", policy("obj-c", "storage", "get")).statusCode(200)
+        updateAccessPolicy(vault, "replace", policy("obj-a", "certificates", "get")).statusCode(200)
             .body("properties.accessPolicies", hasSize(1));
         given().when().get(vault + API).then().statusCode(200)
-            .body("properties.accessPolicies", hasSize(1))
-            .body("properties.accessPolicies[0].objectId", equalTo("obj-c"))
-            .body("properties.accessPolicies[0].permissions.storage", equalTo(List.of("get")));
+            .body("properties.accessPolicies", hasSize(2))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"))
+            .body("properties.accessPolicies[0].permissions.certificates", equalTo(List.of("get")))
+            .body("properties.accessPolicies[0].permissions.secrets", nullValue())
+            .body("properties.accessPolicies[1].objectId", equalTo("obj-b"))
+            .body("properties.accessPolicies[1].permissions.keys", equalTo(List.of("get")));
+
+        // An identity the vault does not list is appended.
+        updateAccessPolicy(vault, "replace", policy("obj-c", "storage", "get")).statusCode(200);
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(3))
+            .body("properties.accessPolicies[2].objectId", equalTo("obj-c"))
+            .body("properties.accessPolicies[2].permissions.storage", equalTo(List.of("get")));
     }
 
     @Test

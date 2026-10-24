@@ -106,7 +106,8 @@ letter, ending with a letter or digit and with no consecutive hyphens is refused
 `PUT .../vaults/{name}/accessPolicies/{add|replace|remove}` (`Vaults_UpdateAccessPolicy`, used by azurerm's
 `azurerm_key_vault_access_policy`) updates the vault's `properties.accessPolicies`, which a GET of the vault returns:
 `add` merges each entry's permissions into the entry with the same tenant, object and application ID or appends it,
-`replace` replaces the list, and `remove` takes the listed permissions away and drops an entry left with none. The
+`replace` replaces the permissions of the entry with the same IDs or appends it, leaving the vault's other entries
+as they are, and `remove` takes the listed permissions away and drops an entry left with none. The
 vault must exist in the request's own subscription and resource group. Access policies are recorded, not enforced:
 the data plane does not check them. Any other path under a vault or managed HSM answers `404`.
 
