@@ -7,7 +7,8 @@ import jakarta.inject.Inject;
 /**
  * The gate rule for resource name syntax ({@link NameRule}): under {@link EmulatorConfig#strictNames()} a PUT of a
  * resource whose type declares a rule, with a name outside it, is refused with the rule's {@code 400} before its
- * handler runs. Without the switch every name passes, as floci-az has always accepted them.
+ * handler runs. Without the switch every name passes, as floci-az has always accepted them, except under a rule
+ * {@link NameRule#everyMode() checked in every mode}.
  */
 @ApplicationScoped
 public class ResourceNameRule implements ArmRequestRule {
@@ -35,14 +36,14 @@ public class ResourceNameRule implements ArmRequestRule {
 
     @Override
     public ArmVerdict enter(ArmCall call) {
-        if (!strict || !"PUT".equals(call.method()) || call.type() == null || call.id() == null
+        if (!"PUT".equals(call.method()) || call.type() == null || call.id() == null
                 || call.id().name() == null || call.id().isCollection()) {
             return ArmVerdict.proceed();
         }
         return types.type(call.type())
             .filter(type -> type.typePath().equalsIgnoreCase(String.join("/", call.id().types())))
             .map(ArmResourceType::name)
-            .filter(rule -> rule != NameRule.NONE && !rule.accepts(call.id().name()))
+            .filter(rule -> rule != NameRule.NONE && (strict || rule.everyMode()) && !rule.accepts(call.id().name()))
             .map(rule -> ArmVerdict.respond(ArmErrors.error(400, rule.code(), rule.message(call.id().name()))))
             .orElse(ArmVerdict.proceed());
     }

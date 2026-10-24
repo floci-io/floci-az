@@ -22,13 +22,20 @@ import java.util.UUID;
  * The gate rule that writes the {@code Administrative} Activity Log: every PUT, PATCH, DELETE and POST
  * action on a provider resource or a resource group gets a {@code BeginRequest} entry on entry and an
  * {@code EndRequest} entry on exit carrying the outcome, the way Resource Manager logs them. Reads are
- * not logged, as in Azure. Entries name the caller from the request's bearer token.
+ * not logged, as in Azure. Entries name the caller from the request's bearer token. A write a later gate rule
+ * refuses is logged as {@code Failed} at {@code Error} level with that rule's error.
  */
 @ApplicationScoped
 public class ActivityLogRule implements ArmRequestRule {
 
-    /** Position in the gate: last, so an entry reflects what every other rule decided. */
-    public static final int ORDER = 90;
+    /**
+     * Position in the gate: right after {@code SubscriptionRule} and ahead of every other rule, so a write refused
+     * by a later rule (an unregistered provider, a missing resource group, an invalid or taken name, a policy deny)
+     * is still logged: the gate hands every entered rule's exit the final response, whichever rule gave it. Azure
+     * shows validation, preflight and policy refusals in the Activity Log. A request refused by the subscription
+     * rule is not logged, since there is no subscription whose log would hold it.
+     */
+    public static final int ORDER = 2;
 
     private final ActivityLog log;
     private final boolean enabled;

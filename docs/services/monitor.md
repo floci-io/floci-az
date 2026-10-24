@@ -136,10 +136,14 @@ name is matched with or without the `Custom-` prefix and the `_CL` suffix used b
 
 `GET /subscriptions/{sub}/providers/Microsoft.Insights/eventtypes/management/values` serves the
 subscription Activity Log the way the Activity Logs list operation does. Every management-plane PUT,
-PATCH, DELETE and POST action that passes the ARM request gate is recorded as an `Administrative`
+PATCH, DELETE and POST action on an existing subscription is recorded as an `Administrative`
 entry: a `BeginRequest` entry with status `Started` when the request enters, and an `EndRequest`
 entry with `Succeeded` or `Failed`, the HTTP status word as `subStatus` and `properties.statusCode`,
-when its handler answers. Reads and listings are not logged, as in Azure. Entries carry the caller and
+when the request is answered. A write the ARM request gate refuses before its handler runs (an
+invalid or taken name, a missing resource group, a policy deny) is logged as `Failed` at `Error`
+level with the refusal's error, as Azure shows validation and policy refusals in the Activity Log; a
+request refused because its subscription is unknown or read-only is not. Reads and listings are not
+logged, as in Azure. Entries carry the caller and
 claims of the request's bearer token, the `x-ms-correlation-request-id` and `x-ms-client-request-id`
 headers, the `authorization` action and scope, the `httpRequest` method, uri and client address, and
 the resource's id, type, provider, group and subscription. Operation names follow ARM:

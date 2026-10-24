@@ -87,15 +87,15 @@ class ArmRequestGateCoverageTest {
         assertEquals(11, gate.rules().size(), "rules: " + gate.rules());
         assertInstanceOf(RecordingArmRequestRule.class, gate.rules().getFirst());
         assertInstanceOf(SubscriptionRule.class, gate.rules().get(1));
-        assertInstanceOf(ProviderRule.class, gate.rules().get(2));
-        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(3));
-        assertInstanceOf(LocationRule.class, gate.rules().get(4));
-        assertInstanceOf(ResourceNameRule.class, gate.rules().get(5));
-        assertInstanceOf(GlobalNameRule.class, gate.rules().get(6));
-        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(7));
-        assertInstanceOf(AppendedLocationRule.class, gate.rules().get(8));
-        assertInstanceOf(UserAssignedIdentityRule.class, gate.rules().get(9));
-        assertInstanceOf(ActivityLogRule.class, gate.rules().get(10));
+        assertInstanceOf(ActivityLogRule.class, gate.rules().get(2));
+        assertInstanceOf(ProviderRule.class, gate.rules().get(3));
+        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(4));
+        assertInstanceOf(LocationRule.class, gate.rules().get(5));
+        assertInstanceOf(ResourceNameRule.class, gate.rules().get(6));
+        assertInstanceOf(GlobalNameRule.class, gate.rules().get(7));
+        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(8));
+        assertInstanceOf(AppendedLocationRule.class, gate.rules().get(9));
+        assertInstanceOf(UserAssignedIdentityRule.class, gate.rules().get(10));
     }
 
     // ── Requests floci-az makes to itself ───────────────────────────────────────
