@@ -234,9 +234,12 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
      */
     private Response createOrUpdateVault(AzureRequest req, ArmResourceId id) {
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Optional<List<Map<String, Object>>> listed = VaultAccessPolicies.listed(body);
         Map<String, Object> written = vaults.createOrUpdate(id, existing -> vaultDocument(body,
             existing.map(KeyVaultArmService::idOf).orElse(id.id()),
-            existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()))).stored().value();
+            existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()),
+            listed.orElseGet(() -> existing.map(document -> accessPolicies(ArmJson.cast(document.get("properties"))))
+                .orElse(List.of())))).stored().value();
         LOG.infov("ARM: created key vault {0} (vaultUri={1})", written.get("name"),
             ArmJson.cast(written.get("properties")).get("vaultUri"));
         return Response.ok(written).build();
@@ -283,7 +286,14 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         return result;
     }
 
-    private Map<String, Object> vaultDocument(Map<String, Object> body, String id, String vaultName) {
+    /**
+     * The vault document a PUT writes. {@code accessPolicies} is the body's list when it carries one, the stored
+     * vault's when a re-PUT omits it, and empty for a new vault without one: the 2026-02-01 schema does not mark it
+     * required, though its description says it is unless {@code createMode} is {@code recover}, so an omitted list is
+     * accepted rather than refused.
+     */
+    private Map<String, Object> vaultDocument(Map<String, Object> body, String id, String vaultName,
+                                              List<Map<String, Object>> accessPolicies) {
         String location = ArmJson.string(body, "location", "eastus");
         Map<String, Object> bodyProps = body.containsKey("properties")
             ? ArmJson.cast(body.get("properties")) : Map.of();
@@ -300,7 +310,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             "sku", Map.of("family", "A", "name", "standard"),
             "provisioningState", "Succeeded",
             "enableSoftDelete", false,
-            "accessPolicies", List.of()));
+            "accessPolicies", accessPolicies));
         return resource;
     }
 
