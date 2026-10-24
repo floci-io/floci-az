@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -32,7 +33,10 @@ import java.util.stream.Collectors;
  * reservation can release it, by its {@link Reservation#token() token}: a concurrent PUT to the same resource
  * finds it {@link Outcome#OWNED} and holds no token, so its failure cannot free a name the first request is still
  * creating. A {@link #release delete} frees a name only once its owner is no longer stored, so a PUT that recreated
- * the resource while the delete was finishing keeps it.
+ * the resource while the delete was finishing keeps it. The gate's PUTs are counted per resource while they run
+ * ({@link #reserveForPut}, {@link #endPut}), and a gate DELETE that finishes while one is in flight leaves its
+ * release to the last of them ({@link #releaseAfterPuts}), so a PUT that has found the name owned but not yet
+ * stored the resource cannot lose it to another resource.
  *
  * <p>Nothing is persisted: the registry rebuilds from every {@link GlobalNameSource} on first use, and again after
  * {@code POST /_admin/reset}, so it cannot drift from the stores it mirrors.
@@ -64,6 +68,9 @@ public class GlobalNameRegistry implements Resettable {
     private final Supplier<Set<CloudSuffix>> perCloudSuffixes;
     private Set<CloudSuffix> perCloud;
     private final Map<String, Entry> names = new HashMap<>();
+    /** The gate PUTs in flight per resource ({@link ArmResourceId#canonicalKey()}), and the deletes waiting on them. */
+    private final Map<String, Integer> putsInFlight = new HashMap<>();
+    private final Set<String> deferredReleases = new HashSet<>();
     private boolean built;
     private long lastToken;
 
@@ -101,6 +108,45 @@ public class GlobalNameRegistry implements Resettable {
         }
         return sameResource(existing.owner(), owner) ? new Reservation(Outcome.OWNED, existing.owner(), 0)
             : new Reservation(Outcome.TAKEN, existing.owner(), 0);
+    }
+
+    /**
+     * {@link #reserve}, and counts a PUT to {@code owner} in flight unless the name is {@link Outcome#TAKEN}, under
+     * the same lock: a reservation this returns that is not taken must be ended with {@link #endPut}.
+     */
+    public synchronized Reservation reserveForPut(CloudProfile cloud, CloudSuffix suffix, String name,
+                                                  ArmResourceId owner) {
+        Reservation reservation = reserve(cloud, suffix, name, owner);
+        if (reservation.outcome() != Outcome.TAKEN) {
+            putsInFlight.merge(owner.canonicalKey(), 1, Integer::sum);
+        }
+        return reservation;
+    }
+
+    /**
+     * Ends a PUT {@link #reserveForPut} counted, after its {@link #commit} or {@link #releasePending}. The last PUT to
+     * a resource whose DELETE finished meanwhile runs that delete's {@link #release}: it keeps the name when this
+     * PUT stored the resource again, and frees it otherwise.
+     */
+    public synchronized void endPut(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
+        String resource = owner.canonicalKey();
+        Integer remaining = putsInFlight.computeIfPresent(resource, (key, count) -> count == 1 ? null : count - 1);
+        if (remaining == null && deferredReleases.remove(resource)) {
+            release(cloud, suffix, name, owner);
+        }
+    }
+
+    /**
+     * {@link #release} for a DELETE the gate saw succeed, deferred to the last PUT to the same resource still in
+     * flight: such a PUT may have found the name owned before the delete removed the resource, and not yet stored it.
+     */
+    public synchronized void releaseAfterPuts(CloudProfile cloud, CloudSuffix suffix, String name,
+                                              ArmResourceId owner) {
+        if (putsInFlight.containsKey(owner.canonicalKey())) {
+            deferredReleases.add(owner.canonicalKey());
+        } else {
+            release(cloud, suffix, name, owner);
+        }
     }
 
     /**

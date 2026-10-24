@@ -108,11 +108,24 @@ public class ArmRequestGate {
 
     /**
      * Runs the exit hook of each entered rule with the call it was entered with; {@code response} is null when
-     * something threw.
+     * something threw. A hook that throws does not skip the later ones, which may hold state for the call; the first
+     * failure is rethrown once every hook has run.
      */
     private void exit(List<ArmCall> entered, Response response) {
+        RuntimeException failure = null;
         for (int i = 0; i < entered.size(); i++) {
-            rules.get(i).exit(entered.get(i), response);
+            try {
+                rules.get(i).exit(entered.get(i), response);
+            } catch (RuntimeException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 

@@ -15,11 +15,14 @@ import java.util.Optional;
  * The gate rule for global DNS names ({@link GlobalName}): a PUT of a resource whose type declares one reserves the
  * name in the {@link GlobalNameRegistry} before its handler runs, and is answered with the type's own conflict when
  * another resource owns it. The reservation is committed when the handler answers 2xx and released otherwise; a
- * 2xx DELETE releases the name, unless a concurrent PUT to the same resource stored it again. Every other request passes: a read or delete through another resource's scope
- * misses that resource's key and is the handler's 404, as before.
+ * 2xx DELETE releases the name, unless a concurrent PUT to the same resource stored it again. Every other request
+ * passes: a read or delete through another resource's scope misses that resource's key and is the handler's 404, as
+ * before.
  *
  * <p>Only the request that made a reservation releases it on failure: the gate hands each exit hook the call
- * its entry saw, so the reservation's token is kept per call between the two.
+ * its entry saw, so the reservation is kept per call between the two. Each PUT the rule lets through is counted in
+ * flight from its reservation to its exit, whatever its outcome, and a DELETE that succeeds while a PUT to the same
+ * resource is in flight leaves the release to that PUT's exit.
  *
  * <p>A path that names no resource group is never a create of a resource-group type, so it passes too, and its
  * handler answers it.
@@ -32,8 +35,8 @@ public class GlobalNameRule implements ArmRequestRule {
 
     private final ArmTypeRegistry types;
     private final GlobalNameRegistry names;
-    /** The token of each call in flight that reserved a name, by identity: two calls can be equal records. */
-    private final Map<ArmCall, Long> reservations = Collections.synchronizedMap(new IdentityHashMap<>());
+    /** The reservation of each PUT in flight the registry counts, by identity: two calls can be equal records. */
+    private final Map<ArmCall, GlobalNameRegistry.Reservation> reservations = Collections.synchronizedMap(new IdentityHashMap<>());
 
     @Inject
     public GlobalNameRule(ArmTypeRegistry types, GlobalNameRegistry names) {
@@ -53,11 +56,9 @@ public class GlobalNameRule implements ArmRequestRule {
             return ArmVerdict.proceed();
         }
         GlobalNameRegistry.Reservation reservation =
-            names.reserve(cloud(call), global.get().suffix(), call.id().name(), call.id());
-        if (reservation.outcome() == GlobalNameRegistry.Outcome.RESERVED) {
-            reservations.put(call, reservation.token());
-        }
+            names.reserveForPut(cloud(call), global.get().suffix(), call.id().name(), call.id());
         if (reservation.outcome() != GlobalNameRegistry.Outcome.TAKEN) {
+            reservations.put(call, reservation);
             return ArmVerdict.proceed();
         }
         return ArmVerdict.respond(conflict(global.get(), call, reservation.owner()));
@@ -66,17 +67,23 @@ public class GlobalNameRule implements ArmRequestRule {
     @Override
     public void exit(ArmCall call, Response response) {
         boolean succeeded = response != null && response.getStatus() / 100 == 2;
-        Long token = reservations.remove(call);
+        GlobalNameRegistry.Reservation reservation = reservations.remove(call);
         globalName(call, "PUT").ifPresent(global -> {
-            if (succeeded) {
-                names.commit(cloud(call), global.suffix(), call.id().name(), call.id());
-            } else if (token != null) {
-                names.releasePending(cloud(call), global.suffix(), call.id().name(), token);
+            try {
+                if (succeeded) {
+                    names.commit(cloud(call), global.suffix(), call.id().name(), call.id());
+                } else if (reservation != null) {
+                    names.releasePending(cloud(call), global.suffix(), call.id().name(), reservation.token());
+                }
+            } finally {
+                if (reservation != null) {
+                    names.endPut(cloud(call), global.suffix(), call.id().name(), call.id());
+                }
             }
         });
         if (succeeded) {
             globalName(call, "DELETE").ifPresent(global ->
-                names.release(cloud(call), global.suffix(), call.id().name(), call.id()));
+                names.releaseAfterPuts(cloud(call), global.suffix(), call.id().name(), call.id()));
         }
     }
 
