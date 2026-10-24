@@ -14,7 +14,8 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>{@code add} merges each listed entry's permissions into the matching entry, or appends the entry</li>
- *   <li>{@code replace} replaces the vault's list with the listed entries</li>
+ *   <li>{@code replace} replaces each listed entry's permissions on the matching entry, or appends the entry, and
+ *       leaves every other entry as it is</li>
  *   <li>{@code remove} removes each listed entry's permissions from the matching entry, and drops an entry left
  *       with no permissions</li>
  * </ul>
@@ -56,16 +57,19 @@ final class VaultAccessPolicies {
     /** The vault's list after applying {@code requested} as {@code kind} to {@code current}. */
     static List<Map<String, Object>> apply(Kind kind, List<Map<String, Object>> current,
                                            List<Map<String, Object>> requested) {
-        if (kind == Kind.REPLACE) {
-            return List.copyOf(requested);
-        }
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> entry : current) {
             result.add(normalized(entry));
         }
         for (Map<String, Object> change : requested) {
             int index = indexOf(result, change);
-            if (kind == Kind.ADD) {
+            if (kind == Kind.REPLACE) {
+                if (index < 0) {
+                    result.add(change);
+                } else {
+                    result.set(index, withPermissions(result.get(index), permissions(change)));
+                }
+            } else if (kind == Kind.ADD) {
                 if (index < 0) {
                     result.add(change);
                 } else {
