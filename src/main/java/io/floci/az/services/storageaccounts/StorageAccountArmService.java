@@ -503,6 +503,12 @@ public class StorageAccountArmService
     }
 
     @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.BLOB
+                && accounts.get(owner).filter(stored -> name.equalsIgnoreCase(stored.id().name())).isPresent();
+    }
+
+    @Override
     public void clear() {
         accounts.clear();
     }

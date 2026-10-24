@@ -1,6 +1,8 @@
 package io.floci.az.services.storageaccounts;
 
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -13,6 +15,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -25,6 +28,9 @@ class StorageAccountResourceStoreTest {
     @Inject
     StorageFactory storageFactory;
 
+    @Inject
+    StorageAccountArmService storageAccountArmService;
+
     @BeforeEach
     void reset() {
         given().post("/_admin/reset").then().statusCode(204);
@@ -33,6 +39,22 @@ class StorageAccountResourceStoreTest {
     private static String account(String sub, String rg, String name) {
         return "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Storage/storageAccounts/"
             + name;
+    }
+
+    @Test
+    void holdsAnswersFromTheStoredAccountAlone() {
+        given().contentType("application/json").body(BODY).when().put(account("sub-holds", "rg", "heldsa") + API)
+            .then().statusCode(200);
+        ArmResourceId owner = ArmResourceId.parse(account("sub-holds", "rg", "heldsa")).orElseThrow();
+
+        assertTrue(storageAccountArmService.holds(CloudSuffix.BLOB, "HELDSA", owner));
+        assertFalse(storageAccountArmService.holds(CloudSuffix.WEB, "heldsa", owner));
+        assertFalse(storageAccountArmService.holds(CloudSuffix.BLOB, "othersa", owner));
+        assertFalse(storageAccountArmService.holds(CloudSuffix.BLOB, "heldsa",
+            ArmResourceId.parse(account("sub-elsewhere", "rg", "heldsa")).orElseThrow()));
+
+        given().when().delete(account("sub-holds", "rg", "heldsa") + API).then().statusCode(200);
+        assertFalse(storageAccountArmService.holds(CloudSuffix.BLOB, "heldsa", owner));
     }
 
     @Test
