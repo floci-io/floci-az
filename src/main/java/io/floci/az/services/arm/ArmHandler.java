@@ -63,7 +63,6 @@ import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCO
  *       {@link ResourceGroupService}</li>
  *   <li>Storage Accounts — ARM shell that bridges container/queue creation to the
  *       existing Blob and Queue storage backends</li>
- *   <li>Key Vaults — ARM shell whose vault URI points at the existing Key Vault handler</li>
  * </ul>
  */
 @ApplicationScoped
@@ -75,8 +74,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
 
     // In-memory ARM resource state — no StorageBackend needed, these are ephemeral
     private final Map<String, Map<String, Object>> storageAccounts  = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> keyVaults        = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Object>> managedHsms      = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> webApps          = new ConcurrentHashMap<>();
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
@@ -234,6 +231,16 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             return Response.ok(Map.of("value", AzureLocations.forSubscription(cloud(req), extractSub(path)))).build();
         }
 
+        // ── Subscription-level paths of a provider-lane namespace that serves them ──
+        // Its subscription-wide lists and provider actions (Key Vault's checkNameAvailability among them), before
+        // the generic checkNameAvailability below answers for the namespaces nothing serves.
+        ArmProviderService subscriptionLevel = subscriptionLevelProvider(path);
+        if (subscriptionLevel != null) {
+            return subscriptionLevel.armEnabled()
+                    ? subscriptionLevel.handleArm(req, path, method, extractSub(path))
+                    : armNotFound(path);
+        }
+
         // ── checkNameAvailability ──────────────────────────────────────────────
         // az CLI probes this before creating storage accounts / key vaults / etc. ARM paths are
         // case-insensitive and clients disagree on the casing: Storage and KeyVault send
@@ -253,26 +260,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                     .map(ArmHandler::stripInternal)
                     .toList();
             return Response.ok(Map.of("value", accounts)).build();
-        }
-
-        // ── Cross-subscription key vault listing ───────────────────────────────
-        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
-            String sub = extractSub(path);
-            List<Map<String, Object>> vaults = keyVaults.values().stream()
-                    .filter(v -> sub.equals(v.get("_sub")))
-                    .map(ArmHandler::stripInternal)
-                    .toList();
-            return Response.ok(Map.of("value", vaults)).build();
-        }
-
-        // ── Cross-subscription managed HSM listing ─────────────────────────────
-        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
-            String sub = extractSub(path);
-            List<Map<String, Object>> hsms = managedHsms.values().stream()
-                    .filter(h -> sub.equals(h.get("_sub")))
-                    .map(ArmHandler::stripInternal)
-                    .toList();
-            return Response.ok(Map.of("value", hsms)).build();
         }
 
         // ── Subscription Activity Log (Microsoft.Insights/eventtypes/management/values) ──
@@ -361,7 +348,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
      * resource group otherwise. Both ARM listings answer from this one assembly so they cannot
      * disagree about what the estate holds.
      *
-     * <p>ArmHandler's own Storage / Key Vault / Web state contributes the full stored body rather
+     * <p>ArmHandler's own Storage / Web state (and Key Vault's contributor) contributes the full stored body rather
      * than the trimmed {@code ArmResources.indexEntry} shape: the azurerm provider reads this
      * listing to populate its Key Vault cache and looks vaults up by {@code properties.vaultUri},
      * which a properties-free entry would not carry. A deliberate deviation from Azure, whose
@@ -374,8 +361,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     public List<Map<String, Object>> indexedResources(String sub, String rg, boolean everyContributor) {
         List<Map<String, Object>> resources = new ArrayList<>();
         collectOwn(storageAccounts, sub, rg, resources);
-        collectOwn(keyVaults, sub, rg, resources);
-        collectOwn(managedHsms, sub, rg, resources);
         collectOwn(webApps, sub, rg, resources);
         if (config.services().network().enabled()) {
             resources.addAll(rg == null
@@ -413,18 +398,15 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     // ── Provider-level routing ────────────────────────────────────────────────
 
     private Response handleProviders(AzureRequest req, String path, String method, String sub) {
-        // Inline ARM shells that bridge to data-plane handlers (Storage/KeyVault) or functions
+        // Inline ARM shells that bridge to data-plane handlers (Storage) or functions
         // provisioning (Web) — coupled to those subsystems, so they stay here rather than in the lane.
         if (ArmPaths.hasProvider(path, "Microsoft.Storage")) {
             return handleStorage(req, path, method, sub);
         }
-        if (ArmPaths.hasProvider(path, "Microsoft.KeyVault")) {
-            return handleKeyVault(req, path, method, sub);
-        }
         if (ArmPaths.hasProvider(path, "Microsoft.Web")) {
             return handleWeb(req, path, method, sub);
         }
-        // Delegating providers (Network/APIM/Monitor/EventGrid), via the ArmProviderService lane.
+        // Delegating providers (Key Vault/APIM/Monitor/EventGrid), via the ArmProviderService lane.
         ArmProviderService provider = providerLane(providerNamespace(path));
         if (provider != null) {
             return provider.armEnabled() ? provider.handleArm(req, path, method, sub) : armNotFound(path);
@@ -444,6 +426,20 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
             }
         }
         return null;
+    }
+
+    /**
+     * The provider-lane service that serves {@code path} when it is a subscription-level path of its namespace
+     * ({@code subscriptions/{sub}/providers/Microsoft.X/...}, no resource group) and it serves those
+     * ({@link ArmProviderService#servesSubscriptionPaths()}); null otherwise. The namespace compares
+     * case-insensitively, as ARM's provider actions are sent in either casing.
+     */
+    private ArmProviderService subscriptionLevelProvider(String path) {
+        if (!path.matches("subscriptions/[^/?]+/providers/[^/?]+/.+")) {
+            return null;
+        }
+        ArmProviderService provider = providerLane(providerNamespace(path));
+        return provider != null && provider.servesSubscriptionPaths() ? provider : null;
     }
 
     /** The {@code Microsoft.X} namespace segment immediately after {@code /providers/}, or "" if none. */
@@ -851,154 +847,8 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         };
     }
 
-    // ── Key Vault ─────────────────────────────────────────────────────────────
-
-    private Response handleKeyVault(AzureRequest req, String path, String method, String sub) {
-        String rg = extractRg(path);
-
-        // GET list
-        if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
-            List<Map<String, Object>> vaults = keyVaults.values().stream()
-                    .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .toList();
-            return Response.ok(Map.of("value", vaults)).build();
-        }
-
-        // Single vault
-        if (path.contains("/vaults/")) {
-            String vaultName = extractResourceName(path, "vaults");
-            return switch (method) {
-                case "PUT"    -> createOrUpdateKeyVault(req, sub, rg, vaultName);
-                case "GET"    -> getKeyVault(sub, rg, vaultName);
-                case "DELETE" -> { keyVaults.remove(kvKey(sub, rg, vaultName)); yield Response.ok().build(); }
-                default       -> Response.status(405).build();
-            };
-        }
-
-        // Managed HSM list
-        if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
-            List<Map<String, Object>> hsms = managedHsms.values().stream()
-                    .filter(h -> sub.equals(h.get("_sub")) && rg.equals(h.get("_rg")))
-                    .map(ArmHandler::stripInternal)
-                    .toList();
-            return Response.ok(Map.of("value", hsms)).build();
-        }
-
-        // Single managed HSM
-        if (path.contains("/managedHSMs/")) {
-            String hsmName = extractResourceName(path, "managedHSMs");
-            return switch (method) {
-                case "PUT"    -> createOrUpdateManagedHsm(req, sub, rg, hsmName);
-                case "GET"    -> getManagedHsm(sub, rg, hsmName);
-                case "DELETE" -> { managedHsms.remove(hsmKey(sub, rg, hsmName)); yield Response.ok().build(); }
-                default       -> Response.status(405).build();
-            };
-        }
-
-        return armNotFound(path);
-    }
-
-    private synchronized Response createOrUpdateKeyVault(AzureRequest req, String sub, String rg, String vaultName) {
-        if (ownedElsewhere(keyVaults, sub, rg, vaultName).isPresent()) {
-            return ArmErrors.error(409, "VaultAlreadyExists", "The vault name '" + vaultName
-                    + "' is already in use. Vault names are globally unique so it is possible that the name is already taken.");
-        }
-        Map<String, Object> body     = parseBody(req);
-        String location              = bodyString(body, "location", "eastus");
-        // Use vault.azure.net domain format so the azurerm provider accepts the URI.
-        // Port is derived from the configured base URL so data-plane calls reach our emulator.
-        String vaultUri              = vaultUri(vaultName);
-        Map<String, Object> bodyProps = body.containsKey("properties")
-                ? cast(body.get("properties")) : Map.of();
-        String tenantId = bodyString(bodyProps, "tenantId", tenantId());
-
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("_sub",  sub);
-        resource.put("_rg",   rg);
-        resource.put("id",    "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + "/providers/Microsoft.KeyVault/vaults/" + vaultName);
-        resource.put("name",     vaultName);
-        resource.put("type",     "Microsoft.KeyVault/vaults");
-        resource.put("location", location);
-        resource.put("properties", Map.of(
-                "vaultUri",          vaultUri,
-                "tenantId",          tenantId,
-                "sku",               Map.of("family", "A", "name", "standard"),
-                "provisioningState", "Succeeded",
-                "enableSoftDelete",  false,
-                "accessPolicies",    List.of()
-        ));
-
-        keyVaults.put(kvKey(sub, rg, vaultName), resource);
-        LOG.infof("ARM: created key vault %s (vaultUri=%s)", vaultName, vaultUri);
-        return Response.ok(stripInternal(resource)).build();
-    }
-
-    private Response getKeyVault(String sub, String rg, String vaultName) {
-        Map<String, Object> resource = keyVaults.get(kvKey(sub, rg, vaultName));
-        if (resource == null) {
-            return armNotFound("vaults/" + vaultName);
-        }
-        return Response.ok(stripInternal(resource)).build();
-    }
-
-    private synchronized Response createOrUpdateManagedHsm(AzureRequest req, String sub, String rg, String hsmName) {
-        if (ownedElsewhere(managedHsms, sub, rg, hsmName).isPresent()) {
-            // No public source gives the Managed HSM create-conflict code; ARM's generic Conflict stands in.
-            return ArmErrors.error(409, "Conflict", "The managed HSM name '" + hsmName + "' is already in use.");
-        }
-        Map<String, Object> body     = parseBody(req);
-        String location              = bodyString(body, "location", "eastus");
-        String hsmUri                = "https://" + hsmName + ".managedhsm.azure.net/";
-        Map<String, Object> bodyProps = body.containsKey("properties")
-                ? cast(body.get("properties")) : Map.of();
-        String tenantId = bodyString(bodyProps, "tenantId", tenantId());
-        @SuppressWarnings("unchecked")
-        List<String> initialAdminObjectIds = bodyProps.get("initialAdminObjectIds") instanceof List<?> l
-                ? (List<String>) l : List.of();
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("tenantId", tenantId);
-        properties.put("initialAdminObjectIds", initialAdminObjectIds);
-        properties.put("enableSoftDelete", true);
-        properties.put("softDeleteRetentionInDays", 90);
-        properties.put("enablePurgeProtection", true);
-        properties.put("hsmUri", hsmUri);
-        properties.put("provisioningState", "Succeeded");
-
-        Map<String, Object> sku = body.get("sku") instanceof Map<?, ?> m
-                ? cast(m) : Map.of();
-        Map<String, Object> skuOut = Map.of(
-                "family", bodyString(sku, "family", "B"),
-                "name",   bodyString(sku, "name", "Standard_B1"));
-
-        Map<String, Object> resource = new LinkedHashMap<>();
-        resource.put("_sub",  sub);
-        resource.put("_rg",   rg);
-        resource.put("id",    "/subscriptions/" + sub + "/resourceGroups/" + rg
-                + "/providers/Microsoft.KeyVault/managedHSMs/" + hsmName);
-        resource.put("name",     hsmName);
-        resource.put("type",     "Microsoft.KeyVault/managedHSMs");
-        resource.put("location", location);
-        resource.put("sku",       skuOut);
-        resource.put("properties", properties);
-
-        managedHsms.put(hsmKey(sub, rg, hsmName), resource);
-        LOG.infof("ARM: created managed HSM %s (hsmUri=%s)", hsmName, hsmUri);
-        return Response.ok(stripInternal(resource)).build();
-    }
-
-    private Response getManagedHsm(String sub, String rg, String hsmName) {
-        Map<String, Object> resource = managedHsms.get(hsmKey(sub, rg, hsmName));
-        if (resource == null) {
-            return armNotFound("managedHSMs/" + hsmName);
-        }
-        return Response.ok(stripInternal(resource)).build();
-    }
-
     // ── Global resource names ────────────────────────────────────────────────
-    // Storage accounts, vaults, managed HSMs and web apps are DNS names, unique across every
+    // Storage accounts and web apps are DNS names, unique across every
     // subscription. A create under a second scope is a name conflict, never a second resource.
     // Their create methods are synchronized so the ownership check and the write are one step.
 
@@ -1026,9 +876,9 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
-     * {@code POST .../providers/{namespace}/checkNameAvailability}. Storage accounts and vaults are answered
-     * from this handler's own stores; any other namespace routed here has no store to consult and reports
-     * the name as available.
+     * {@code POST .../providers/{namespace}/checkNameAvailability}. Storage accounts are answered from this
+     * handler's own store; any other namespace routed here has no store to consult and reports the name as
+     * available. A provider-lane namespace that serves its subscription-level paths (Key Vault) answers its own.
      */
     private Response checkNameAvailability(AzureRequest req, String path) {
         String name = bodyString(parseBody(req), "name", "");
@@ -1041,18 +891,14 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
                     "message", name + " is not a valid storage account name. Storage account name must be between "
                             + "3 and 24 characters in length and use numbers and lower-case letters only.")).build();
         }
-        Map<String, Map<String, Object>> store = storage ? storageAccounts
-                : "Microsoft.KeyVault".equalsIgnoreCase(namespace) ? keyVaults
-                : null;
+        Map<String, Map<String, Object>> store = storage ? storageAccounts : null;
         boolean taken = store != null && store.values().stream()
                 .anyMatch(r -> name.equalsIgnoreCase((String) r.get("name")));
         if (!taken) {
             return Response.ok(Map.of("nameAvailable", true)).build();
         }
-        String message = store == storageAccounts
-                ? "The storage account named " + name + " is already taken."
-                : "The vault name '" + name + "' is already in use.";
-        return Response.ok(Map.of("nameAvailable", false, "reason", "AlreadyExists", "message", message)).build();
+        return Response.ok(Map.of("nameAvailable", false, "reason", "AlreadyExists",
+                "message", "The storage account named " + name + " is already taken.")).build();
     }
 
     // ── Subscription ─────────────────────────────────────────────────────────
@@ -1090,10 +936,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         );
     }
 
-    private String tenantId() {
-        return directory.defaultTenantId();
-    }
-
     /**
      * The subscriptions {@code GET /subscriptions} lists: the caller's tenant's, first-use ones only under
      * subscription-listing. Under tenant-scoping a caller whose tenant owns none sees the default subscription, so a
@@ -1120,8 +962,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     @Override
     public void clear() {
         storageAccounts.clear();
-        keyVaults.clear();
-        managedHsms.clear();
         webApps.clear();
     }
 
@@ -1175,8 +1015,6 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     }
 
     private static String saKey(String sub, String rg, String name)  { return sub + "/" + rg + "/" + name; }
-    private static String kvKey(String sub, String rg, String name)  { return sub + "/" + rg + "/kv/" + name; }
-    private static String hsmKey(String sub, String rg, String name) { return sub + "/" + rg + "/hsm/" + name; }
     private static String webAppKey(String sub, String rg, String name) { return sub + "/" + rg + "/web/" + name; }
 
     private static Map<String, Object> cast(Object o) {
@@ -1195,32 +1033,10 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         return ArmResources.stripInternal(resource);
     }
 
-    /**
-     * Returns the account name to use for ARM-base-URL key vault data-plane fallback.
-     * When there is exactly one vault registered, returns its name so that KV data-plane
-     * responses carry the correct vault.azure.net URI and the provider's vault cache lookup
-     * succeeds. Falls back to "kv-default" when zero or multiple vaults are present.
-     */
-    public String getDefaultKvAccount() {
-        if (keyVaults.size() == 1) {
-            Object name = keyVaults.values().iterator().next().get("name");
-            if (name instanceof String s) return s;
-        }
-        return "kv-default";
-    }
-
     private String storagePortString() {
         // Return no port so storage URLs use standard HTTP port 80.
         // Test containers forward port 80 → emulator via socat.
         return "";
-    }
-
-    private String vaultUri(String vaultName) {
-        // Use vault.azure.net domain format on standard port 443 (no explicit port).
-        // azurerm validates the URI matches *.vault.* pattern. In the test container a
-        // socat listener on 443 forwards to the emulator so the azurerm provider can
-        // reach the vault; host-based routing then dispatches to KeyVaultHandler.
-        return "https://" + vaultName + ".vault.azure.net/";
     }
 
     private Response armNotFound(String path) {

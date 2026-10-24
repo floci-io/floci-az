@@ -86,6 +86,23 @@ self-signed certificate already carries the `*.vault.azure.net` and `*.managedhs
 SANs, so clients only need to trust the generated CA at
 `{persistent-path}/tls/floci-az-selfsigned-ca.crt`.
 
+## Management plane
+
+`Microsoft.KeyVault/vaults` and `Microsoft.KeyVault/managedHSMs` are ARM resources whose `vaultUri` and
+`hsmUri` point at this data plane (see [ARM](arm.md)). They persist under the global storage mode, in the
+`arm-keyvault` store, so a vault created through ARM survives a restart under `persistent` or `hybrid` as its
+secrets and keys do. The data plane does not consult them: it serves any vault name it is addressed by.
+
+A vault or managed HSM name is a global DNS name: the first subscription to create it owns it, and another
+subscription's create is refused (`409 VaultAlreadyExists` for a vault, `409 Conflict` for a managed HSM) until the
+owner deletes it. floci-az serves every vault on `{name}.vault.azure.net` and every HSM on
+`{name}.managedhsm.azure.net`, keyed by name, so a name is unique across every configured cloud, not per cloud.
+`POST /subscriptions/{sub}/providers/Microsoft.KeyVault/checkNameAvailability` and
+`.../checkMhsmNameAvailability` answer from the same ownership. Paths that differ only in case address the same
+resource. With `parity-overrides.strict-names` a name outside 3 to 24 letters, digits and hyphens, starting with a
+letter, ending with a letter or digit and with no consecutive hyphens is refused with `400 InvalidResourceName` (see
+[ARM name syntax](arm.md#name-syntax)).
+
 ## Connection String
 
 The Key Vault SDK enforces HTTPS and uses a challenge-based auth flow. Use the patterns below to connect to the local emulator:

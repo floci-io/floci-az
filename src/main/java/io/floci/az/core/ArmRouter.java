@@ -7,6 +7,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmRequestGate;
 import io.floci.az.core.cloud.ScopeResolver;
 import io.floci.az.services.arm.ArmHandler;
+import io.floci.az.services.keyvault.KeyVaultArmService;
 import io.floci.az.services.monitor.MonitorHandler;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -78,6 +79,7 @@ public class ArmRouter {
     private final AzureServiceRegistry serviceRegistry;
     private final RouteDispatcher dispatcher;
     private final ArmHandler armHandler;
+    private final KeyVaultArmService keyVaultArm;
     private final ArmRequestGate gate;
     private final ScopeResolver scopeResolver;
     private final RouteDispatcher.Invocation gated;
@@ -99,10 +101,11 @@ public class ArmRouter {
 
     @Inject
     public ArmRouter(AzureServiceRegistry serviceRegistry, RouteDispatcher dispatcher, ArmHandler armHandler,
-                     ArmRequestGate gate, ScopeResolver scopeResolver) {
+                     KeyVaultArmService keyVaultArm, ArmRequestGate gate, ScopeResolver scopeResolver) {
         this.serviceRegistry = serviceRegistry;
         this.dispatcher = dispatcher;
         this.armHandler = armHandler;
+        this.keyVaultArm = keyVaultArm;
         this.gate = gate;
         this.scopeResolver = scopeResolver;
         this.gated = (handler, request) -> this.gate.serve(request, handler::handle);
@@ -254,7 +257,7 @@ public class ArmRouter {
         if (!KEY_VAULT_COLLECTIONS.contains(ctx.firstSegment())) {
             return Fallthrough.TO_NEXT_STAGE;
         }
-        return dispatcher.dispatchOrServiceDisabled(ctx, armHandler.getDefaultKvAccount(), "keyvault", ctx.path());
+        return dispatcher.dispatchOrServiceDisabled(ctx, keyVaultArm.defaultDataPlaneAccount(), "keyvault", ctx.path());
     }
 
     /**
