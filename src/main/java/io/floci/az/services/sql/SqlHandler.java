@@ -1062,4 +1062,10 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .map(server -> new Claim(CloudSuffix.SQL, server.serverName(), serverId(server)))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.SQL
+            && state.getServer(owner).filter(server -> name.equalsIgnoreCase(server.serverName())).isPresent();
+    }
 }

@@ -845,4 +845,10 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 .map(server -> new Claim(CloudSuffix.POSTGRES, server.serverName(), PostgresState.serverId(server)))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.POSTGRES
+            && state.getServer(owner).filter(server -> name.equalsIgnoreCase(server.serverName())).isPresent();
+    }
 }

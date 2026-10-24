@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -31,7 +32,11 @@ import java.util.stream.Collectors;
  * a concurrent PUT from another resource, so concurrent creates leave one owner. Only the request that made a
  * reservation can release it, by its {@link Reservation#token() token}: a concurrent PUT to the same resource
  * finds it {@link Outcome#OWNED} and holds no token, so its failure cannot free a name the first request is still
- * creating.
+ * creating. A {@link #release delete} frees a name only once its owner is no longer stored, so a PUT that recreated
+ * the resource while the delete was finishing keeps it. The gate's PUTs are counted per resource while they run
+ * ({@link #reserveForPut}, {@link #endPut}), and a gate DELETE that finishes while one is in flight leaves its
+ * release to the last of them ({@link #releaseAfterPuts}), so a PUT that has found the name owned but not yet
+ * stored the resource cannot lose it to another resource.
  *
  * <p>Nothing is persisted: the registry rebuilds from every {@link GlobalNameSource} on first use, and again after
  * {@code POST /_admin/reset}, so it cannot drift from the stores it mirrors.
@@ -63,6 +68,9 @@ public class GlobalNameRegistry implements Resettable {
     private final Supplier<Set<CloudSuffix>> perCloudSuffixes;
     private Set<CloudSuffix> perCloud;
     private final Map<String, Entry> names = new HashMap<>();
+    /** The gate PUTs in flight per resource ({@link ArmResourceId#canonicalKey()}), and the deletes waiting on them. */
+    private final Map<String, Integer> putsInFlight = new HashMap<>();
+    private final Set<String> deferredReleases = new HashSet<>();
     private boolean built;
     private long lastToken;
 
@@ -103,6 +111,45 @@ public class GlobalNameRegistry implements Resettable {
     }
 
     /**
+     * {@link #reserve}, and counts a PUT to {@code owner} in flight unless the name is {@link Outcome#TAKEN}, under
+     * the same lock: a reservation this returns that is not taken must be ended with {@link #endPut}.
+     */
+    public synchronized Reservation reserveForPut(CloudProfile cloud, CloudSuffix suffix, String name,
+                                                  ArmResourceId owner) {
+        Reservation reservation = reserve(cloud, suffix, name, owner);
+        if (reservation.outcome() != Outcome.TAKEN) {
+            putsInFlight.merge(owner.canonicalKey(), 1, Integer::sum);
+        }
+        return reservation;
+    }
+
+    /**
+     * Ends a PUT {@link #reserveForPut} counted, after its {@link #commit} or {@link #releasePending}. The last PUT to
+     * a resource whose DELETE finished meanwhile runs that delete's {@link #release}: it keeps the name when this
+     * PUT stored the resource again, and frees it otherwise.
+     */
+    public synchronized void endPut(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
+        String resource = owner.canonicalKey();
+        Integer remaining = putsInFlight.computeIfPresent(resource, (key, count) -> count == 1 ? null : count - 1);
+        if (remaining == null && deferredReleases.remove(resource)) {
+            release(cloud, suffix, name, owner);
+        }
+    }
+
+    /**
+     * {@link #release} for a DELETE the gate saw succeed, deferred to the last PUT to the same resource still in
+     * flight: such a PUT may have found the name owned before the delete removed the resource, and not yet stored it.
+     */
+    public synchronized void releaseAfterPuts(CloudProfile cloud, CloudSuffix suffix, String name,
+                                              ArmResourceId owner) {
+        if (putsInFlight.containsKey(owner.canonicalKey())) {
+            deferredReleases.add(owner.canonicalKey());
+        } else {
+            release(cloud, suffix, name, owner);
+        }
+    }
+
+    /**
      * Keeps the name for {@code owner}: a PUT to it succeeded. When the name is no longer held, because a DELETE
      * released it while the PUT ran, it is held again only if the resource is still stored: the PUT may have
      * created it after the delete, or found it deleted and stored nothing.
@@ -126,11 +173,15 @@ public class GlobalNameRegistry implements Resettable {
         }
     }
 
-    /** Frees the name {@code owner} holds: it was deleted. */
+    /**
+     * Frees the name {@code owner} holds: it was deleted. A name whose owner is still stored stays held: a PUT to the
+     * same resource that ran between the delete's store removal and this release found the name owned, created the
+     * resource again and committed, so freeing the name would let another resource take a name a stored one uses.
+     */
     public synchronized void release(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
         String key = key(cloud, suffix, name);
         Entry existing = names.get(key);
-        if (existing != null && sameResource(existing.owner(), owner)) {
+        if (existing != null && sameResource(existing.owner(), owner) && !stored(cloud, suffix, name, owner)) {
             names.remove(key);
         }
     }
@@ -167,16 +218,18 @@ public class GlobalNameRegistry implements Resettable {
         built = true;
     }
 
-    /** Whether a source stores {@code owner} holding {@code name}. */
+    /**
+     * Whether a source stores {@code owner} holding {@code name}: one keyed {@link GlobalNameSource#holds} per source,
+     * as each source answers it, not a listing of every claim. The owner's subscription must also map to the cloud
+     * the name is keyed in.
+     */
     private boolean stored(CloudProfile cloud, CloudSuffix suffix, String name, ArmResourceId owner) {
+        if (!key(cloudOfSubscription.apply(owner.subscriptionId()), suffix, name).equals(key(cloud, suffix, name))) {
+            return false;
+        }
         for (GlobalNameSource source : sources.get()) {
-            for (GlobalNameSource.Claim claim : source.globalNames()) {
-                if (claim.suffix() == suffix && claim.name().equalsIgnoreCase(name)
-                        && sameResource(claim.owner(), owner)
-                        && key(cloudOfSubscription.apply(claim.owner().subscriptionId()), suffix, name)
-                            .equals(key(cloud, suffix, name))) {
-                    return true;
-                }
+            if (source.holds(suffix, name, owner)) {
+                return true;
             }
         }
         return false;

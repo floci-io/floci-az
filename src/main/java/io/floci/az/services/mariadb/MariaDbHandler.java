@@ -838,4 +838,10 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                 .map(server -> new Claim(CloudSuffix.MARIADB, server.serverName(), MariaDbState.serverId(server)))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.MARIADB
+            && state.getServer(owner).filter(server -> name.equalsIgnoreCase(server.serverName())).isPresent();
+    }
 }
