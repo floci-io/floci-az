@@ -65,7 +65,7 @@ public class ApiManagementService implements GlobalNameSource {
 
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
         String rg = extractRg(path);
-        String tail = extractAfter(path, "/providers/Microsoft.ApiManagement/");
+        String tail = ArmPaths.afterProvider(path, "Microsoft.ApiManagement", "unknown");
         String[] parts = split(tail);
 
         if (parts.length == 1 && "service".equals(parts[0])) {
@@ -686,10 +686,6 @@ public class ApiManagementService implements GlobalNameSource {
 
     private static String extractRg(String path) {
         return ArmPaths.resourceGroup(path, "unknown");
-    }
-
-    private static String extractAfter(String path, String marker) {
-        return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
     private static Map<String, Object> cast(Object value) {

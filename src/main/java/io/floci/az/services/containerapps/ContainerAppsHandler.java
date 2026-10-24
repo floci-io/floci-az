@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ContainerAppsHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
 
     private static final Logger LOG = Logger.getLogger(ContainerAppsHandler.class);
-    private static final String PROVIDER = "/providers/Microsoft.App/";
+    private static final String NAMESPACE = "Microsoft.App";
     private static final String ENV_PREFIX = "environment/";
     private static final String APP_PREFIX = "app/";
     private static final ObjectMapper MAPPER = new ObjectMapper()
@@ -102,7 +102,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     @Override
     public Response handle(AzureRequest request) {
         try {
-            if (request.resourcePath().contains(PROVIDER)) {
+            if (ArmPaths.hasProvider(request.resourcePath(), NAMESPACE)) {
                 return handleArm(request);
             }
             return handleIngress(request);
@@ -912,7 +912,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     }
 
     private static String providerTail(String path) {
-        String tail = ArmPaths.afterSegment(path, PROVIDER, "");
+        String tail = ArmPaths.afterProvider(path, NAMESPACE, "");
         return tail.replaceAll("/+$", "");
     }
 

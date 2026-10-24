@@ -536,11 +536,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     private static String extractRedisPath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf("/providers/Microsoft.Cache/");
-        if (idx >= 0) {
-            return fullPath.substring(idx + "/providers/Microsoft.Cache/".length());
-        }
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, "Microsoft.Cache", fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

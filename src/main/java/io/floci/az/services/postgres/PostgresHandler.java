@@ -86,7 +86,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     private static final Logger LOG = Logger.getLogger(PostgresHandler.class);
     private static final String TYPE = "Microsoft.DBforPostgreSQL/flexibleServers";
 
-    private static final String NS = "/providers/Microsoft.DBforPostgreSQL/";
+    private static final String NAMESPACE = "Microsoft.DBforPostgreSQL";
 
     private final EmulatorConfig config;
     private final PostgresState state;
@@ -694,9 +694,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     private static String extractPgPath(String fullPath) {
         if (fullPath == null) return "";
-        int idx = fullPath.indexOf(NS);
-        if (idx >= 0) return fullPath.substring(idx + NS.length());
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

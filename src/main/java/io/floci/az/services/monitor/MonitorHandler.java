@@ -9,6 +9,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
@@ -184,11 +185,11 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 ? listCollection(collection.group(3), new ArmScope(collection.group(1), collection.group(2)))
                 : Response.status(405).build();
         }
-        if (path.contains("/providers/Microsoft.OperationalInsights/workspaces/")) {
+        if (ArmPaths.hasProviderType(path, "Microsoft.OperationalInsights", "workspaces")) {
             return handleWorkspaceArm(req, path, method);
-        } else if (path.contains("/providers/Microsoft.Insights/dataCollectionEndpoints/")) {
+        } else if (ArmPaths.hasProviderType(path, "Microsoft.Insights", "dataCollectionEndpoints")) {
             return handleDceArm(req, path, method);
-        } else if (path.contains("/providers/Microsoft.Insights/dataCollectionRules/")) {
+        } else if (ArmPaths.hasProviderType(path, "Microsoft.Insights", "dataCollectionRules")) {
             return handleDcrArm(req, path, method);
         } else if (isDiagnosticSettingsPath(path)) {
             return handleDiagnosticSettingsArm(req, path, method.toUpperCase());

@@ -93,7 +93,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     }
 
     private static boolean isLeafProviderSegment(String path) {
-        int marker = path.indexOf(PROVIDER_MARKER);
+        int marker = ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER);
         return marker >= 0 && path.indexOf("/providers/", marker + 1) < 0;
     }
 
@@ -119,19 +119,19 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
 
         // Children of another provider scoped to an identity (role assignments, locks, ...)
         // are not ManagedIdentity resources — 404 like ArmHandler would.
-        int marker = path.indexOf(PROVIDER_MARKER);
+        int marker = ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER);
         if (marker >= 0 && path.indexOf("/providers/", marker + 1) >= 0) {
             return ArmErrors.error(404, "ResourceNotFound", "Unsupported Managed Identity path: " + path);
         }
 
         try {
-            if (path.contains(PROVIDER_MARKER + "identities/default")) {
+            if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "identities/default") >= 0) {
                 return getSystemAssignedIdentity(req, path, method);
             }
             if (path.contains("/federatedIdentityCredentials")) {
                 return handleFederatedCredential(req, path, method);
             }
-            if (path.contains(PROVIDER_MARKER + "userAssignedIdentities")) {
+            if (ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER + "userAssignedIdentities") >= 0) {
                 return handleIdentity(req, path, method);
             }
         } catch (ArmJson.InvalidBodyException e) {
@@ -287,7 +287,7 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         if (!"GET".equals(method)) {
             return ArmErrors.error(405, "MethodNotAllowed", "Method not allowed: " + method);
         }
-        String scope = path.substring(0, path.indexOf(PROVIDER_MARKER));
+        String scope = path.substring(0, ArmPaths.indexOfIgnoreCase(path, PROVIDER_MARKER));
         String id = "/" + scope + PROVIDER_MARKER + "identities/default";
 
         Map<String, Object> properties = new LinkedHashMap<>();

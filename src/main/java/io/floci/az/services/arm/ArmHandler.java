@@ -193,7 +193,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // Network is dispatched here, NOT via the providerLane map: subscription-scoped Network list
         // paths (no /resourceGroups/) must be caught before the resource-group branch below, and the
         // map lane is reached only from inside that branch. This block owns Network's enabled-guard.
-        if (path.contains("/providers/Microsoft.Network/")) {
+        if (ArmPaths.hasProvider(path, "Microsoft.Network")) {
             if (!config.services().network().enabled()) {
                 return armNotFound(path);
             }
@@ -246,7 +246,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         // ── Cross-subscription storage account listing ─────────────────────────
         // azurerm provider calls this during state refresh/destroy to verify that
         // storage accounts still exist. Return real data so destroy plans correctly.
-        if (path.matches("subscriptions/[^/?]+/providers/Microsoft\\.Storage/storageAccounts([?].*)?")) {
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.Storage)/storageAccounts([?].*)?")) {
             String sub = extractSub(path);
             List<Map<String, Object>> accounts = storageAccounts.values().stream()
                     .filter(a -> sub.equals(a.get("_sub")))
@@ -256,7 +256,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── Cross-subscription key vault listing ───────────────────────────────
-        if (path.matches("subscriptions/[^/?]+/providers/Microsoft\\.KeyVault/vaults([?].*)?")) {
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
             String sub = extractSub(path);
             List<Map<String, Object>> vaults = keyVaults.values().stream()
                     .filter(v -> sub.equals(v.get("_sub")))
@@ -266,7 +266,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // ── Cross-subscription managed HSM listing ─────────────────────────────
-        if (path.matches("subscriptions/[^/?]+/providers/Microsoft\\.KeyVault/managedHSMs([?].*)?")) {
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
             String sub = extractSub(path);
             List<Map<String, Object>> hsms = managedHsms.values().stream()
                     .filter(h -> sub.equals(h.get("_sub")))
@@ -415,13 +415,13 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     private Response handleProviders(AzureRequest req, String path, String method, String sub) {
         // Inline ARM shells that bridge to data-plane handlers (Storage/KeyVault) or functions
         // provisioning (Web) — coupled to those subsystems, so they stay here rather than in the lane.
-        if (path.contains("/providers/Microsoft.Storage/")) {
+        if (ArmPaths.hasProvider(path, "Microsoft.Storage")) {
             return handleStorage(req, path, method, sub);
         }
-        if (path.contains("/providers/Microsoft.KeyVault/")) {
+        if (ArmPaths.hasProvider(path, "Microsoft.KeyVault")) {
             return handleKeyVault(req, path, method, sub);
         }
-        if (path.contains("/providers/Microsoft.Web/")) {
+        if (ArmPaths.hasProvider(path, "Microsoft.Web")) {
             return handleWeb(req, path, method, sub);
         }
         // Delegating providers (Network/APIM/Monitor/EventGrid), via the ArmProviderService lane.
@@ -462,7 +462,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
     private Response handleWeb(AzureRequest req, String path, String method, String sub) {
         String rg = extractRg(path);
 
-        if (path.matches(".*/providers/Microsoft\\.Web/sites([?].*)?")) {
+        if (path.matches(".*/providers/(?i:Microsoft\\.Web)/sites([?].*)?")) {
             List<Map<String, Object>> apps = webApps.values().stream()
                     .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")))
                     .map(ArmHandler::stripInternal)
@@ -620,7 +620,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // GET .../storageAccounts  (list in RG)
-        if (path.matches(".*/providers/Microsoft\\.Storage/storageAccounts([?].*)?")) {
+        if (path.matches(".*/providers/(?i:Microsoft\\.Storage)/storageAccounts([?].*)?")) {
             List<Map<String, Object>> accounts = storageAccounts.values().stream()
                     .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")))
                     .map(ArmHandler::stripInternal)
@@ -857,7 +857,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         String rg = extractRg(path);
 
         // GET list
-        if (path.matches(".*/providers/Microsoft\\.KeyVault/vaults([?].*)?")) {
+        if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
             List<Map<String, Object>> vaults = keyVaults.values().stream()
                     .filter(v -> sub.equals(v.get("_sub")) && rg.equals(v.get("_rg")))
                     .map(ArmHandler::stripInternal)
@@ -877,7 +877,7 @@ public class ArmHandler implements AzureServiceHandler, Resettable {
         }
 
         // Managed HSM list
-        if (path.matches(".*/providers/Microsoft\\.KeyVault/managedHSMs([?].*)?")) {
+        if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
             List<Map<String, Object>> hsms = managedHsms.values().stream()
                     .filter(h -> sub.equals(h.get("_sub")) && rg.equals(h.get("_rg")))
                     .map(ArmHandler::stripInternal)

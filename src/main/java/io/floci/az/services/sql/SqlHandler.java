@@ -881,10 +881,8 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
      */
     private static String extractSqlPath(String fullPath) {
         if (fullPath == null) return "";
-        int idx = fullPath.indexOf("/providers/Microsoft.Sql/");
-        if (idx >= 0) return fullPath.substring(idx + "/providers/Microsoft.Sql/".length());
         // Convenience path: already relative (e.g. "servers/myserver/databases/mydb")
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, "Microsoft.Sql", fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

@@ -4,6 +4,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResourceStore.Stored;
@@ -73,14 +74,14 @@ public class EventGridService {
     // ── ARM dispatch ──────────────────────────────────────────────────────────
 
     public Response handleArm(AzureRequest req, String path, String method, String sub) {
-        int esIdx = path.indexOf(ES_MARKER);
+        int esIdx = ArmPaths.indexOfIgnoreCase(path, ES_MARKER);
         if (esIdx >= 0) {
             String scope = normalizeId(path.substring(0, esIdx));
             String rest = stripQuery(path.substring(esIdx + ES_MARKER.length()));
             return handleEventSubscriptions(req, method, scope, rest);
         }
 
-        int idx = path.indexOf(EG_MARKER);
+        int idx = ArmPaths.indexOfIgnoreCase(path, EG_MARKER);
         if (idx < 0) {
             return notFound(path);
         }

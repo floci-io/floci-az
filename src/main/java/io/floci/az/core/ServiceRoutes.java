@@ -55,7 +55,7 @@ public record ServiceRoutes(
             this(namespace, ALWAYS);
         }
 
-        /** The pre-built {@code /providers/<namespace>/} path fragment, matched against request paths. */
+        /** The pre-built {@code /providers/<namespace>/} path fragment, matched against request paths ignoring case. */
         public String marker() {
             return "/providers/" + namespace + "/";
         }

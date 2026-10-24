@@ -665,11 +665,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static String extractAksPath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf(PROVIDER_PREFIX);
-        if (idx >= 0) {
-            return fullPath.substring(idx + PROVIDER_PREFIX.length());
-        }
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, "Microsoft.ContainerService", fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

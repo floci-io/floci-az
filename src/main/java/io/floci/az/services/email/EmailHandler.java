@@ -11,6 +11,7 @@ import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
@@ -72,7 +73,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-    private static final String PROVIDER_COMMUNICATION = "/providers/Microsoft.Communication/";
+    private static final String NAMESPACE = "Microsoft.Communication";
 
     private static final String OPERATION_ID_HEADER = "Operation-Id";
     private static final String RETRY_AFTER_SECONDS = "3";
@@ -160,7 +161,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
         }
 
         // ── ARM: Microsoft.Communication provider ──────────────────────────
-        if (path.contains(PROVIDER_COMMUNICATION)) {
+        if (ArmPaths.hasProvider(path, NAMESPACE)) {
             return handleArmCommunication(req, path, method);
         }
 
@@ -433,11 +434,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     // ── Path parsing helpers ─────────────────────────────────────────────────
 
     private static String extractCommunicationPath(String fullPath) {
-        int idx = fullPath.indexOf(PROVIDER_COMMUNICATION);
-        if (idx >= 0) {
-            return fullPath.substring(idx + PROVIDER_COMMUNICATION.length());
-        }
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSegment(String path, String segmentName) {

@@ -83,6 +83,52 @@ public final class ArmPaths {
         return q >= 0 ? rest.substring(0, q) : rest;
     }
 
+    /** The {@code /providers/{namespace}/} marker of a provider namespace, in the namespace's own spelling. */
+    public static String providerMarker(String namespace) {
+        return "/providers/" + namespace + "/";
+    }
+
+    /**
+     * Index of the first occurrence of {@code marker} in {@code path}, compared ignoring case, or -1. ARM resolves
+     * provider namespaces and resource types case-insensitively, so a client may spell
+     * {@code /providers/microsoft.network/} where floci-az declares {@code /providers/Microsoft.Network/}.
+     */
+    public static int indexOfIgnoreCase(String path, String marker) {
+        if (path == null || marker == null) {
+            return -1;
+        }
+        int last = path.length() - marker.length();
+        for (int i = 0; i <= last; i++) {
+            if (path.regionMatches(true, i, marker, 0, marker.length())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** True when {@code path} carries a {@code /providers/{namespace}/} segment, the namespace in any case. */
+    public static boolean hasProvider(String path, String namespace) {
+        return indexOfIgnoreCase(path, providerMarker(namespace)) >= 0;
+    }
+
+    /**
+     * True when {@code path} carries {@code /providers/{namespace}/{type}/}, namespace and type in any case: the
+     * path addresses a resource of that type or something under one.
+     */
+    public static boolean hasProviderType(String path, String namespace, String type) {
+        return indexOfIgnoreCase(path, providerMarker(namespace) + type + "/") >= 0;
+    }
+
+    /**
+     * The remainder of {@code path} after its first {@code /providers/{namespace}/} segment, the namespace matched
+     * in any case, or {@code fallback} when the path carries none. The remainder keeps the request's spelling.
+     */
+    public static String afterProvider(String path, String namespace, String fallback) {
+        String marker = providerMarker(namespace);
+        int idx = indexOfIgnoreCase(path, marker);
+        return idx < 0 ? fallback : path.substring(idx + marker.length());
+    }
+
     private static Optional<String> segmentAfter(String path, String segment, boolean ignoreCase) {
         if (path == null) {
             return Optional.empty();

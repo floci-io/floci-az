@@ -8,6 +8,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
@@ -52,7 +53,7 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
     private static final Logger LOG = Logger.getLogger(MySqlHandler.class);
     private static final String TYPE = "Microsoft.DBforMySQL/flexibleServers";
 
-    private static final String NS = "/providers/Microsoft.DBforMySQL/";
+    private static final String NAMESPACE = "Microsoft.DBforMySQL";
 
     private final EmulatorConfig config;
     private final MySqlState state;
@@ -676,9 +677,7 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     private static String extractMysqlPath(String fullPath) {
         if (fullPath == null) return "";
-        int idx = fullPath.indexOf(NS);
-        if (idx >= 0) return fullPath.substring(idx + NS.length());
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

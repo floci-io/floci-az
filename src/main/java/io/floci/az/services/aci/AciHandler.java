@@ -85,7 +85,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-    private static final String ACI_MARKER = "/providers/Microsoft.ContainerInstance/";
+    private static final String NAMESPACE = "Microsoft.ContainerInstance";
     private static final String API_VERSION = "2023-05-01";
     private static final String TYPE = "Microsoft.ContainerInstance/containerGroups";
 
@@ -854,8 +854,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static String extractAciPath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf(ACI_MARKER);
-        return idx >= 0 ? fullPath.substring(idx + ACI_MARKER.length()) : fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

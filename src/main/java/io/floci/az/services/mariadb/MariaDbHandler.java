@@ -8,6 +8,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
+import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
@@ -53,7 +54,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
     private static final Logger LOG = Logger.getLogger(MariaDbHandler.class);
     private static final String TYPE = "Microsoft.DBforMariaDB/servers";
 
-    private static final String NS = "/providers/Microsoft.DBforMariaDB/";
+    private static final String NAMESPACE = "Microsoft.DBforMariaDB";
 
     private final EmulatorConfig config;
     private final MariaDbState state;
@@ -670,9 +671,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
 
     private static String extractMariaDbPath(String fullPath) {
         if (fullPath == null) return "";
-        int idx = fullPath.indexOf(NS);
-        if (idx >= 0) return fullPath.substring(idx + NS.length());
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

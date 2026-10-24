@@ -72,7 +72,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-    private static final String COMPUTE_MARKER = "/providers/Microsoft.Compute/";
+    private static final String NAMESPACE = "Microsoft.Compute";
     private static final String API_VERSION = "2024-11-01";
     private static final String TYPE = "Microsoft.Compute/virtualMachines";
     private static final String FAILED = "Failed";
@@ -559,8 +559,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
 
     private static String extractComputePath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf(COMPUTE_MARKER);
-        return idx >= 0 ? fullPath.substring(idx + COMPUTE_MARKER.length()) : fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {

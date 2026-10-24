@@ -60,7 +60,16 @@ public class ArmRouter {
      * A resolved ARM provider route: the pre-built {@code /providers/<namespace>/} marker, the service
      * type of the handler that claimed it, and the handler's guard.
      */
-    record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {}
+    record ResolvedProvider(String marker, String serviceType, Predicate<String> guard) {
+
+        /**
+         * True when {@code markerPath} carries this route's {@code /providers/<namespace>/} marker and passes its
+         * guard. The marker is compared ignoring case, because ARM resolves a namespace however a client spells it.
+         */
+        boolean claims(String markerPath) {
+            return ArmPaths.indexOfIgnoreCase(markerPath, marker) >= 0 && guard.test(markerPath);
+        }
+    }
 
     private static final Comparator<ResolvedProvider> GUARDED_FIRST_THEN_MARKER =
         Comparator.comparing((ResolvedProvider route) -> route.guard() == ServiceRoutes.ProviderRoute.ALWAYS)
@@ -136,6 +145,14 @@ public class ArmRouter {
     List<Map.Entry<String, String>> providerRoutesInMatchOrder() {
         return providerRoutes.stream()
                 .map(route -> Map.entry(route.marker(), route.serviceType()))
+                .toList();
+    }
+
+    /** The service types whose provider route claims a slash-prefixed ARM path, in match order. */
+    List<String> claimingServiceTypes(String markerPath) {
+        return providerRoutes.stream()
+                .filter(route -> route.claims(markerPath))
+                .map(ResolvedProvider::serviceType)
                 .toList();
     }
 
@@ -273,7 +290,7 @@ public class ArmRouter {
         // matched against the slash-prefixed path; guards see the same form.
         String markerPath = tenantRooted ? "/" + path : path;
         for (ResolvedProvider route : providerRoutes) {
-            if (!markerPath.contains(route.marker()) || !route.guard().test(markerPath)) {
+            if (!route.claims(markerPath)) {
                 continue;
             }
             // A disabled provider service declines, letting a later provider (or generic ARM) claim it.

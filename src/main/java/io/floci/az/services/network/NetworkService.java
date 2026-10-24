@@ -70,7 +70,7 @@ public class NetworkService {
 
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
         String rg = ArmPaths.resourceGroup(path).orElse(null);
-        String tail = extractAfter(path, PROVIDER);
+        String tail = ArmPaths.afterProvider(path, "Microsoft.Network", "unknown");
 
         // Every Network resource lives in a resource group: a path that names none only lists.
         if (rg == null && !tail.matches("[^/]+")) {
@@ -667,10 +667,6 @@ public class NetworkService {
 
     private static Response ok(Map<String, Object> resource) {
         return Response.ok(stripInternal(resource)).build();
-    }
-
-    private static String extractAfter(String path, String marker) {
-        return ArmPaths.afterSegment(path, marker, "unknown");
     }
 
     private Map<String, Object> parseBody(AzureRequest request) {

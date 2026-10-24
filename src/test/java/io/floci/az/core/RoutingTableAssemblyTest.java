@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -123,6 +124,30 @@ class RoutingTableAssemblyTest {
     @Test
     void providerRoutesMatchA4() {
         assertEquals(GOLDEN_PROVIDER_ROUTES, Set.copyOf(armRouter.providerRoutesInMatchOrder()));
+    }
+
+    /**
+     * ARM resolves a provider namespace however a client spells it, so every provider route must claim the
+     * lowercased and uppercased spellings of its namespace exactly as it claims the declared one. The type
+     * segment is a policy type for Microsoft.Authorization, whose guard claims only those.
+     */
+    @Test
+    void aProviderNamespaceInAnyCaseReachesTheSameHandler() {
+        for (Map.Entry<String, String> route : armRouter.providerRoutesInMatchOrder()) {
+            String marker = route.getKey();
+            String namespace = marker.substring("/providers/".length(), marker.length() - 1);
+            String type = "Microsoft.Authorization".equals(namespace) ? "policyAssignments" : "widgets";
+            List<String> declared = armRouter.claimingServiceTypes(resourcePath(namespace, type));
+            assertTrue(declared.contains(route.getValue()), marker + " must claim its own spelling, got " + declared);
+            for (String spelling : List.of(namespace.toLowerCase(Locale.ROOT), namespace.toUpperCase(Locale.ROOT))) {
+                assertEquals(declared, armRouter.claimingServiceTypes(resourcePath(spelling, type)),
+                    "the " + spelling + " spelling of " + namespace + " must reach the same handler");
+            }
+        }
+    }
+
+    private static String resourcePath(String namespace, String type) {
+        return "/subscriptions/sub/resourceGroups/rg/providers/" + namespace + "/" + type + "/name";
     }
 
     /**

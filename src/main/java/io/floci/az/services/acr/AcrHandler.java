@@ -101,7 +101,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String ALNUM =
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private static final String PROVIDER = "/providers/Microsoft.ContainerRegistry/";
+    private static final String NAMESPACE = "Microsoft.ContainerRegistry";
 
     /** The Azure host suffix the registry data plane is served on. */
     public static final String REGISTRY_HOST_SUFFIX = ".azurecr.io";
@@ -679,11 +679,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static String extractAcrPath(String fullPath) {
         if (fullPath == null) { return ""; }
-        int idx = fullPath.indexOf(PROVIDER);
-        if (idx >= 0) {
-            return fullPath.substring(idx + PROVIDER.length());
-        }
-        return fullPath;
+        return ArmPaths.afterProvider(fullPath, NAMESPACE, fullPath);
     }
 
     private static String extractSubscriptionId(String fullPath) {
