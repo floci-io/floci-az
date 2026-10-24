@@ -209,6 +209,50 @@ class KeyVaultResourceStoreTest {
             .body("properties.accessPolicies[2].permissions.storage", equalTo(List.of("get")));
     }
 
+    private static String vaultBody(String... entries) {
+        return "{\"location\":\"eastus\",\"properties\":{\"tenantId\":\"" + TENANT + "\","
+            + "\"sku\":{\"family\":\"A\",\"name\":\"standard\"},\"accessPolicies\":[" + String.join(",", entries)
+            + "]}}";
+    }
+
+    @Test
+    void aVaultPutStoresTheAccessPoliciesItCarries() {
+        String vault = vault("sub-policy", "rg", "putvault");
+        given().contentType("application/json")
+            .body(vaultBody(policy("obj-a", "secrets", "get"), policy("obj-b", "keys", "get", "list")))
+            .when().put(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(2));
+
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(2))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"))
+            .body("properties.accessPolicies[0].tenantId", equalTo(TENANT))
+            .body("properties.accessPolicies[0].permissions.secrets", equalTo(List.of("get")))
+            .body("properties.accessPolicies[1].objectId", equalTo("obj-b"))
+            .body("properties.accessPolicies[1].permissions.keys", equalTo(List.of("get", "list")));
+    }
+
+    @Test
+    void aVaultRePutWithoutAccessPoliciesKeepsTheSavedOnesAndAListReplacesThem() {
+        String vault = vault("sub-policy", "rg", "reputvault");
+        put(vault, VAULT_BODY, 200);
+        updateAccessPolicy(vault, "add", policy("obj-a", "secrets", "get")).statusCode(200);
+
+        put(vault, VAULT_BODY, 200);
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(1))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-a"));
+
+        given().contentType("application/json").body(vaultBody(policy("obj-c", "storage", "get")))
+            .when().put(vault + API).then().statusCode(200);
+        given().when().get(vault + API).then().statusCode(200)
+            .body("properties.accessPolicies", hasSize(1))
+            .body("properties.accessPolicies[0].objectId", equalTo("obj-c"));
+
+        given().contentType("application/json").body(vaultBody()).when().put(vault + API).then().statusCode(200);
+        given().when().get(vault + API).then().statusCode(200).body("properties.accessPolicies", hasSize(0));
+    }
+
     @Test
     void anUnknownOperationKindOrAMissingVaultIsNotFoundAndWritesNothing() {
         String vault = vault("sub-policy", "rg", "kindvault");

@@ -41,9 +41,18 @@ final class VaultAccessPolicies {
 
     /** The entries a request body lists under {@code properties.accessPolicies}; none when it lists nothing. */
     static List<Map<String, Object>> requested(Map<String, Object> body) {
+        return listed(body).orElse(List.of());
+    }
+
+    /**
+     * The entries a request body lists under {@code properties.accessPolicies}, each in the entry model
+     * {@link #apply} keeps; empty when the body carries no {@code accessPolicies} array at all, as opposed to an empty
+     * one.
+     */
+    static Optional<List<Map<String, Object>>> listed(Map<String, Object> body) {
         if (!(body.get("properties") instanceof Map<?, ?> properties)
                 || !(properties.get("accessPolicies") instanceof List<?> entries)) {
-            return List.of();
+            return Optional.empty();
         }
         List<Map<String, Object>> result = new ArrayList<>();
         for (Object entry : entries) {
@@ -51,7 +60,7 @@ final class VaultAccessPolicies {
                 result.add(normalized(ArmJson.cast(map)));
             }
         }
-        return result;
+        return Optional.of(List.copyOf(result));
     }
 
     /** The vault's list after applying {@code requested} as {@code kind} to {@code current}. */
