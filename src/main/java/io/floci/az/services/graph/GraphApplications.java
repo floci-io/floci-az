@@ -43,17 +43,19 @@ final class GraphApplications {
     static final Pattern BY_APP_ID = Pattern.compile("(?i)^applications\\(appId='([^']+)'\\)$");
     private static final Pattern FILTER_EQ = Pattern.compile("(?i)^\\s*(appId|displayName|id)\\s+eq\\s+'((?:[^']|'')*)'\\s*$");
     private static final Pattern FILTER_STARTS = Pattern.compile("(?i)^\\s*startswith\\((displayName|appId),\\s*'((?:[^']|'')*)'\\)\\s*$");
-    private static final SecureRandom RANDOM = new SecureRandom();
     private static final String SECRET_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~._-";
 
     private final GraphDirectoryStore store;
     private final ObjectMapper mapper;
+    private final SecureRandom random;
     private final String baseContext;
     private final String tenantId;
 
-    GraphApplications(GraphDirectoryStore store, ObjectMapper mapper, String baseContext, String tenantId) {
+    /** {@code random} is the handler's, created at runtime: a native image must not carry a seeded generator in its heap. */
+    GraphApplications(GraphDirectoryStore store, ObjectMapper mapper, SecureRandom random, String baseContext, String tenantId) {
         this.store = store;
         this.mapper = mapper;
+        this.random = random;
         this.baseContext = baseContext;
         this.tenantId = tenantId;
     }
@@ -340,10 +342,10 @@ final class GraphApplications {
         return node != null && node.hasNonNull(property) ? node.get(property).asText() : null;
     }
 
-    private static String randomSecret() {
+    private String randomSecret() {
         StringBuilder sb = new StringBuilder(40);
         for (int i = 0; i < 40; i++) {
-            sb.append(SECRET_ALPHABET.charAt(RANDOM.nextInt(SECRET_ALPHABET.length())));
+            sb.append(SECRET_ALPHABET.charAt(random.nextInt(SECRET_ALPHABET.length())));
         }
         return sb.toString();
     }

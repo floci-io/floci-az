@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private final DirectoryReader directory;
     private final TenantResolver tenants;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SecureRandom random = new SecureRandom();
 
     @Inject
     public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory,
@@ -79,7 +81,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
         String sub = path.substring("v1.0/".length());
         String[] segments = sub.split("/");
 
-        Response applications = new GraphApplications(store, mapper, graphBase(request),
+        Response applications = new GraphApplications(store, mapper, random, graphBase(request),
                 config.services().entra().defaultTenantId()).handle(request, segments);
         if (applications != null) {
             return applications;
