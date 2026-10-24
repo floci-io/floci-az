@@ -34,7 +34,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
@@ -306,7 +307,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                     Optional<SqlProvisioningService.SqlProvisioningOperation> active =
                         provisioningService.activeOperation(serverName);
                     if (active.isPresent()) {
-                        if (!equivalent(current.get(), sub, rg, location, login, password, tags)) {
+                        if (!equivalent(current.get(), sub, rg, location, login, password, tags, access)) {
                             return ArmErrors.error(409, "ConflictingServerOperation",
                                 "A conflicting create or update operation is in progress for SQL server '"
                                     + serverName + "'.");
@@ -426,13 +427,21 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static boolean equivalent(SqlState.SqlServerEntry current, String subscriptionId,
                                       String resourceGroup, String location, String login,
-                                      String password, Map<String, String> tags) {
+                                      String password, Map<String, String> tags,
+                                      SqlState.SqlServerAccess access) {
         return current.subscriptionId().equalsIgnoreCase(subscriptionId)
             && current.resourceGroupName().equalsIgnoreCase(resourceGroup)
             && current.location().equalsIgnoreCase(location)
             && current.administratorLogin().equals(login)
             && current.administratorLoginPassword().equals(password)
-            && current.tags().equals(tags);
+            && current.tags().equals(tags)
+            && sameText(current.access().minimalTlsVersion(), access.minimalTlsVersion())
+            && sameText(current.access().publicNetworkAccess(), access.publicNetworkAccess())
+            && sameText(current.access().restrictOutboundNetworkAccess(), access.restrictOutboundNetworkAccess());
+    }
+
+    private static boolean sameText(String stored, String requested) {
+        return stored == null ? requested == null : stored.equalsIgnoreCase(requested);
     }
 
     private static boolean hasDataPlaneRuntime(SqlState.SqlServerEntry server) {
@@ -493,19 +502,19 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         try {
             SqlState.SqlDatabaseRequest requested = databaseRequest(readBody(request.bodyStream()));
-            Optional<SqlState.SqlDatabaseEntry> existing = state.getDatabase(serverName, dbName);
-
             // The emulator tracks the database in state only.
             // Actual CREATE DATABASE is the responsibility of the application
             // (Flyway, Liquibase, EF Core, etc.) using the JDBC URL from /connect.
-            // An update keeps the database's id, creation date and settings.
-            SqlState.SqlDatabaseEntry db = existing
-                .map(current -> current.updatedWith(requested, true))
-                .orElseGet(() -> SqlState.SqlDatabaseEntry.create(dbName, serverName, requested));
-            state.putDatabase(serverName, db);
+            // An update keeps the database's id, creation date and settings, read in the same step as the write.
+            Optional<SqlState.DatabaseWrite> written = state.createOrUpdateDatabase(serverName, dbName, existing ->
+                existing.map(current -> current.updatedWith(requested, true))
+                    .orElseGet(() -> SqlState.SqlDatabaseEntry.create(dbName, serverName, requested)));
+            if (written.isEmpty()) {
+                return notFound("Server '" + serverName + "' not found");
+            }
 
-            return Response.status(existing.isEmpty() ? 201 : 200)
-                .entity(databaseResponse(db, serverOpt.get()))
+            return Response.status(written.get().created() ? 201 : 200)
+                .entity(databaseResponse(written.get().database(), serverOpt.get()))
                 .build();
 
         } catch (IllegalArgumentException e) {
@@ -643,7 +652,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         SqlState.SqlServerEntry entry = server.get();
         return handleSetting(method, request, type, name, entry.armId(), entry.location(),
             entry.settings().get(type.key()),
-            setting -> state.putServerSetting(serverName, type, setting));
+            change -> state.updateServerSetting(serverName, type, change));
     }
 
     private Response handleDatabaseSetting(String method, AzureRequest request, String serverName, String dbName,
@@ -660,17 +669,20 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         return handleSetting(method, request, type, name,
             server.get().armId() + "/databases/" + database.get().databaseName(), server.get().location(),
             stored == null ? null : stored.get(type.key()),
-            setting -> state.updateDatabase(serverName, dbName, db -> db.withSetting(type, setting)));
+            change -> state.updateDatabase(serverName, dbName, db -> db.withSetting(type,
+                    change.apply(db.settings() == null ? null : db.settings().get(type.key()))))
+                .map(db -> db.settings().get(type.key())));
     }
 
     /**
      * One setting of a server or a database: GET answers it (its defaults when never written), PUT replaces it,
      * PATCH merges into it where the spec declares one. {@code name} is null for the list of the parent's settings
-     * of this type, which holds the one.
+     * of this type, which holds the one. {@code update} applies a change to the setting as stored at that moment and
+     * writes it in one step, so concurrent writes of different fields both land; empty when the parent is gone.
      */
     private Response handleSetting(String method, AzureRequest request, SqlSettingType type, String name,
                                    String parentId, String location, SqlState.SqlSetting stored,
-                                   Consumer<SqlState.SqlSetting> store) {
+                                   Function<UnaryOperator<SqlState.SqlSetting>, Optional<SqlState.SqlSetting>> update) {
         Map<String, Object> current = type.properties(stored);
         if (name == null) {
             if (!"GET".equals(method)) {
@@ -689,9 +701,14 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 if (!replace && !type.patchable()) {
                     yield methodNotAllowed(method);
                 }
-                SqlState.SqlSetting written = type.write(current, settingProperties(request), replace);
-                store.accept(written);
-                yield Response.ok(settingResponse(type, parentId, location, type.properties(written))).build();
+                Map<String, Object> requested = settingProperties(request);
+                Optional<SqlState.SqlSetting> written =
+                    update.apply(latest -> type.write(type.properties(latest), requested, replace));
+                if (written.isEmpty()) {
+                    yield notFound("The parent of '" + type.armType() + "/" + name + "' under '" + parentId
+                        + "' was not found.");
+                }
+                yield Response.ok(settingResponse(type, parentId, location, type.properties(written.get()))).build();
             }
             default -> methodNotAllowed(method);
         };

@@ -324,6 +324,44 @@ class SqlStateTest {
     }
 
     @Test
+    @DisplayName("a database create-or-update builds on the stored database in one step and keeps its settings")
+    void createOrUpdateDatabaseBuildsOnTheStoredDatabase() {
+        state.putServer(server("cou-srv"));
+        SqlState.DatabaseWrite created = state.createOrUpdateDatabase("cou-srv", "db", existing -> existing
+            .orElseGet(() -> SqlState.SqlDatabaseEntry.create("db", "cou-srv", "c", "Standard", "S0"))).orElseThrow();
+        assertTrue(created.created());
+        state.updateDatabase("cou-srv", "db", db -> db.withSetting(SqlSettingType.BACKUP_SHORT_TERM_RETENTION,
+            new SqlState.SqlSetting(Map.of("retentionDays", 14))));
+
+        SqlState.DatabaseWrite updated = state.createOrUpdateDatabase("cou-srv", "DB", existing -> existing
+            .map(db -> db.updatedWith(new SqlState.SqlDatabaseRequest(null, null, "S1", null, null, null, Map.of()),
+                true))
+            .orElseThrow()).orElseThrow();
+
+        assertFalse(updated.created());
+        assertEquals(created.database().databaseId(), updated.database().databaseId());
+        assertEquals(Map.of("retentionDays", 14), updated.database().settings()
+            .get(SqlSettingType.BACKUP_SHORT_TERM_RETENTION.key()).properties());
+        assertTrue(state.createOrUpdateDatabase("missing-srv", "db", existing -> existing.orElseThrow()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a server setting update applies its change to the setting as stored")
+    void updateServerSettingAppliesTheChangeToTheStoredSetting() {
+        state.putServer(server("set-srv"));
+        state.updateServerSetting("set-srv", SqlSettingType.CONNECTION_POLICY,
+            stored -> new SqlState.SqlSetting(Map.of("connectionType", "Proxy")));
+
+        SqlState.SqlSetting written = state.updateServerSetting("set-srv", SqlSettingType.CONNECTION_POLICY,
+            stored -> new SqlState.SqlSetting(Map.of("previous", stored.properties().get("connectionType"))))
+            .orElseThrow();
+
+        assertEquals(Map.of("previous", "Proxy"), written.properties());
+        assertTrue(state.updateServerSetting("missing-srv", SqlSettingType.CONNECTION_POLICY, stored -> stored)
+            .isEmpty());
+    }
+
+    @Test
     @DisplayName("mutations after reload are write-through — visible in a subsequent reload")
     void mutationsAfterReloadArePersisted() {
         InMemoryStorage<String, StoredObject> sharedBackend = new InMemoryStorage<>();

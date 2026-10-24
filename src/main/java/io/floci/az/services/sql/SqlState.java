@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * State store for the Azure SQL Database emulator.
@@ -167,6 +168,26 @@ public class SqlState {
         });
     }
 
+    /** What a create-or-update of a database wrote, and whether the database was new. */
+    public record DatabaseWrite(SqlDatabaseEntry database, boolean created) {
+    }
+
+    /**
+     * Writes {@code change} applied to the stored database {@code dbName} of server {@code serverName}, or to empty
+     * when there is none, in one step, so a setting written in between is not overwritten from a stale read; empty,
+     * and nothing written, when the server is not stored.
+     */
+    public synchronized Optional<DatabaseWrite> createOrUpdateDatabase(String serverName, String dbName,
+            Function<Optional<SqlDatabaseEntry>, SqlDatabaseEntry> change) {
+        return getServer(serverName).map(s -> {
+            Optional<SqlDatabaseEntry> existing = Optional.ofNullable(s.databases().get(key(dbName)));
+            SqlDatabaseEntry written = change.apply(existing);
+            s.databases().put(key(dbName), written);
+            putServer(s);
+            return new DatabaseWrite(written, existing.isEmpty());
+        });
+    }
+
     public synchronized Optional<SqlDatabaseEntry> getDatabase(String serverName, String dbName) {
         return getServer(serverName)
             .map(s -> s.databases().get(key(dbName)));
@@ -207,6 +228,21 @@ public class SqlState {
     /** The stored server setting of {@code type}; empty when it was never written (it then has its defaults). */
     public synchronized Optional<SqlSetting> getServerSetting(String serverName, SqlSettingType type) {
         return getServer(serverName).map(s -> s.settings().get(type.key()));
+    }
+
+    /**
+     * Writes {@code change} applied to the stored server setting of {@code type} (null when never written) in one
+     * step, so two concurrent writes each build on the other's result; empty, and nothing written, when the server
+     * is not stored.
+     */
+    public synchronized Optional<SqlSetting> updateServerSetting(String serverName, SqlSettingType type,
+                                                                 UnaryOperator<SqlSetting> change) {
+        return getServer(serverName).map(s -> {
+            SqlSetting written = change.apply(s.settings().get(type.key()));
+            s.settings().put(type.key(), written);
+            putServer(s);
+            return written;
+        });
     }
 
     public synchronized void putServerSetting(String serverName, SqlSettingType type, SqlSetting setting) {

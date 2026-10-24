@@ -102,6 +102,72 @@ class SqlHandlerConcurrencyTest {
         assertEquals("StrongPass1!", desired.getValue().administratorLoginPassword());
     }
 
+    @Test
+    void anAccessOnlyChangeWhileTheServerIsCreatingConflictsInsteadOfBeingDropped() {
+        EmulatorConfig config = managedConfig();
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
+        state.putServer(new SqlState.SqlServerEntry(
+            "concurrentserver", "test-sub", "test-rg", "eastus", "sa", "StrongPass1!",
+            null, 0, "localhost", "Creating", null, null, Map.of(),
+            new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
+        SqlProvisioningService provisioningService = mock(SqlProvisioningService.class);
+        when(provisioningService.activeOperation("concurrentserver")).thenReturn(Optional.of(
+            SqlProvisioningService.SqlProvisioningOperation.inProgress("operation-id", "concurrentserver", "eastus",
+                state.getServer("concurrentserver").orElseThrow().armId())));
+        SqlHandler handler = new SqlHandler(config, state, mock(SqlServerManager.class), provisioningService,
+            names());
+
+        assertEquals(202, handler.handle(request("PUT", BODY)).getStatus());
+        Response changed = handler.handle(request("PUT", "{\"location\":\"eastus\",\"properties\":{"
+            + "\"administratorLogin\":\"sa\",\"administratorLoginPassword\":\"StrongPass1!\","
+            + "\"minimalTlsVersion\":\"1.2\"}}"));
+
+        assertEquals(409, changed.getStatus());
+        assertEquals("None", state.getServer("concurrentserver").orElseThrow().access().minimalTlsVersion());
+    }
+
+    @Test
+    void concurrentPatchesOfDifferentFieldsOfOneSettingBothLand() throws Exception {
+        SqlState state = new SqlState(SqlStateTest.over(new InMemoryStorage<>()));
+        state.putServer(new SqlState.SqlServerEntry(
+            "concurrentserver", "test-sub", "test-rg", "eastus", "sa", "StrongPass1!",
+            null, 0, "localhost", "Ready", null, null, Map.of(),
+            new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), Instant.now()));
+        state.putDatabase("concurrentserver",
+            SqlState.SqlDatabaseEntry.create("appdb", "concurrentserver", "c", "Standard", "S0"));
+        SqlHandler handler = new SqlHandler(managedConfig(), state, mock(SqlServerManager.class),
+            mock(SqlProvisioningService.class), names());
+        String policy = SERVER_PATH + "/databases/appdb/backupShortTermRetentionPolicies/default";
+
+        ExecutorService requests = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 50; round++) {
+                state.updateDatabase("concurrentserver", "appdb", db -> db.withSetting(
+                    SqlSettingType.BACKUP_SHORT_TERM_RETENTION, new SqlState.SqlSetting(Map.of())));
+                CountDownLatch start = new CountDownLatch(1);
+                Future<Response> days = requests.submit(() -> {
+                    start.await();
+                    return handler.handle(requestAt("PATCH", policy, "{\"properties\":{\"retentionDays\":14}}"));
+                });
+                Future<Response> interval = requests.submit(() -> {
+                    start.await();
+                    return handler.handle(requestAt("PATCH", policy,
+                        "{\"properties\":{\"diffBackupIntervalInHours\":24}}"));
+                });
+                start.countDown();
+                assertEquals(200, days.get(2, TimeUnit.SECONDS).getStatus());
+                assertEquals(200, interval.get(2, TimeUnit.SECONDS).getStatus());
+
+                Map<String, Object> stored = state.getDatabase("concurrentserver", "appdb").orElseThrow().settings()
+                    .get(SqlSettingType.BACKUP_SHORT_TERM_RETENTION.key()).properties();
+                assertEquals(14, ((Number) stored.get("retentionDays")).intValue(), "round " + round);
+                assertEquals(24, ((Number) stored.get("diffBackupIntervalInHours")).intValue(), "round " + round);
+            }
+        } finally {
+            requests.shutdownNow();
+        }
+    }
+
     /** A registry that reserves every name, as an empty one does. */
     private static GlobalNameRegistry names() {
         GlobalNameRegistry names = mock(GlobalNameRegistry.class);
@@ -123,8 +189,12 @@ class SqlHandlerConcurrencyTest {
     }
 
     private static AzureRequest request(String method, String body) {
+        return requestAt(method, SERVER_PATH, body);
+    }
+
+    private static AzureRequest requestAt(String method, String path, String body) {
         HttpHeaders headers = mock(HttpHeaders.class);
-        return new AzureRequest(method, "devstoreaccount1", "sql", SERVER_PATH, headers,
+        return new AzureRequest(method, "devstoreaccount1", "sql", path, headers,
             body == null ? null : new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)),
             Map.of("api-version", "2021-11-01"), null, false);
     }
