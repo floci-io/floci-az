@@ -183,8 +183,9 @@ resource "azurerm_resource_group_policy_assignment" "enforce" {
 Every PUT and PATCH of a provider resource or a resource group passes through the ARM request gate,
 where the assigned policies are evaluated before the handler runs, the way Azure evaluates them before
 a request reaches its resource provider. A PATCH is judged on the resource it produces: the stored
-resource (read through its own GET) with the patch applied the way Resource Manager applies one,
-`properties` merged and `tags` replaced as a whole. A tag update on a compliant resource therefore
+resource (read through its own GET, and only once an assignment's scope reaches the resource) with
+the patch applied the way Resource Manager applies one, `properties` merged and `tags` replaced as a
+whole. A tag update on a compliant resource therefore
 passes, and a PATCH that drops a required tag or sets a forbidden property is refused. As in Azure, a
 PATCH that changes only `tags` is evaluated only against the definitions whose condition inspects a
 tags field (`tags`, `tags.name`, `tags['name']`, a parameterised field resolving to one, or

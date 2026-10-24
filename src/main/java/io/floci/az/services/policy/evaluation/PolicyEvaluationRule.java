@@ -8,6 +8,7 @@ import io.floci.az.core.arm.ArmCall;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmRequestRule;
 import io.floci.az.core.arm.ArmVerdict;
+import io.floci.az.core.auth.BearerClaims;
 import io.floci.az.services.policy.evaluation.PolicyEngine.Match;
 import io.floci.az.services.policy.evaluation.PolicyEngine.Outcome;
 import io.floci.az.services.policyinsights.ComplianceStore;
@@ -19,7 +20,6 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -107,12 +107,15 @@ public class PolicyEvaluationRule implements ArmRequestRule {
             content = Map.of(); // an empty body is evaluated as the empty content a lenient handler accepts
         }
         AzureRequest request = call.request();
-        // A PATCH is judged on the resource it produces: the stored resource with the patch applied.
-        Map<String, Object> stored = "PATCH".equals(call.method()) ? storedResource(call) : null;
+        // A PATCH is judged on the resource it produces: the stored resource with the patch applied, read only
+        // once an assignment's scope reaches the resource, so unassigned scopes cost no extra read.
+        Map<String, Object> stored = "PATCH".equals(call.method()) && engine.anyAssignmentCovers(call.id())
+            ? storedResource(call) : null;
         Map<String, Object> evaluated = stored == null ? PatchMerge.copy(content) : PatchMerge.apply(stored, content);
         Map<String, Object> beforePolicies = stored == null ? null : PatchMerge.copy(evaluated);
-        Map<String, Object> identity = identity(request);
-        String caller = caller(identity);
+        BearerClaims claims = BearerClaims.of(request);
+        Map<String, Object> identity = identity(claims);
+        String caller = caller(claims);
         String correlationId = header(request, "x-ms-correlation-request-id");
         PolicyEngine.Request evaluation = new PolicyEngine.Request(call, evaluated,
             request == null ? null : request.queryParams().get("api-version"), identity,
@@ -228,59 +231,43 @@ public class PolicyEvaluationRule implements ArmRequestRule {
     // ── Caller identity ─────────────────────────────────────────────────────────
 
     /**
-     * The identity claims {@code requestContext().identity} exposes, read from the bearer token without
-     * verifying it: {@code idtyp}, {@code appid}, {@code oid} and the object-identifier claim Azure adds.
+     * The identity claims {@code requestContext().identity} exposes, from the request's {@link BearerClaims}:
+     * the claims Azure's policy context carries, {@code appid} and {@code idtyp} filled in the way the token
+     * implies them, and the object-identifier claim Azure adds.
      */
-    static Map<String, Object> identity(AzureRequest request) {
+    static Map<String, Object> identity(BearerClaims claims) {
         Map<String, Object> identity = new LinkedHashMap<>();
-        String authorization = header(request, "Authorization");
-        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+        if (claims == BearerClaims.NONE) {
             return identity;
         }
-        String[] parts = authorization.substring(7).trim().split("\\.");
-        if (parts.length < 2) {
-            return identity;
+        for (Map.Entry<String, String> entry : claims.claims().entrySet()) {
+            if (KEPT_CLAIMS.contains(entry.getKey())) {
+                identity.put(entry.getKey(), entry.getValue());
+            }
         }
-        try {
-            byte[] payload = Base64.getUrlDecoder().decode(padded(parts[1]));
-            Map<?, ?> claims = MAPPER.readValue(payload, Map.class);
-            for (Map.Entry<?, ?> entry : claims.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                if (KEPT_CLAIMS.contains(key) && entry.getValue() != null) {
-                    identity.put(key, entry.getValue());
-                }
-            }
-            if (!identity.containsKey("appid") && identity.get("azp") != null) {
-                identity.put("appid", identity.get("azp"));
-            }
-            if (!identity.containsKey("idtyp")) {
-                identity.put("idtyp", identity.containsKey("upn") || identity.containsKey("preferred_username") ? "user" : "app");
-            }
-            if (identity.get("oid") != null) {
-                identity.put("http://schemas.microsoft.com/identity/claims/objectidentifier", identity.get("oid"));
-            }
-        } catch (IOException | IllegalArgumentException e) {
-            LOG.debugf("Policy: bearer token payload is not readable: %s", e.getMessage());
+        if (claims.appId() != null) {
+            identity.put("appid", claims.appId());
+        }
+        if (claims.idtyp() != null) {
+            identity.put("idtyp", claims.idtyp());
+        }
+        if (claims.oid() != null) {
+            identity.put("http://schemas.microsoft.com/identity/claims/objectidentifier", claims.oid());
         }
         return identity;
     }
 
-    private static String caller(Map<String, Object> identity) {
-        for (String claim : List.of("upn", "preferred_username", "oid", "appid")) {
-            if (identity.get(claim) instanceof String value && !value.isBlank()) {
-                return value;
-            }
+    /** The caller the evaluation log names: the user principal name, else the object id, else the client id. */
+    private static String caller(BearerClaims claims) {
+        if (claims.upn() != null) {
+            return claims.upn();
         }
-        return null;
+        return claims.oid() != null ? claims.oid() : claims.appId();
     }
 
     private static String header(AzureRequest request, String name) {
         return request == null || request.headers() == null ? null : request.headers().getHeaderString(name);
     }
 
-    private static String padded(String base64url) {
-        int remainder = base64url.length() % 4;
-        return remainder == 0 ? base64url : base64url + "=".repeat(4 - remainder);
-    }
 
 }

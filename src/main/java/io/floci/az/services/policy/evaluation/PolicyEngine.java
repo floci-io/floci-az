@@ -134,6 +134,33 @@ public class PolicyEngine {
         return id.providerNamespace() != null ? id.name() : id.resourceGroup();
     }
 
+    /**
+     * Whether any assignment's scope reaches the resource, before its content is known: what decides whether a
+     * PATCH needs the stored resource to be evaluated at all. Selectors, which need the content, are not applied.
+     */
+    public boolean anyAssignmentCovers(ArmResourceId id) {
+        String resourceKey = key(id.id());
+        for (Map<String, Object> assignment : store.listAssignments()) {
+            Map<String, Object> assignmentProperties = properties(assignment);
+            if (!scopeCovers(key(String.valueOf(assignmentProperties.getOrDefault("scope", ""))), resourceKey)) {
+                continue;
+            }
+            boolean excluded = false;
+            if (assignmentProperties.get("notScopes") instanceof List<?> notScopes) {
+                for (Object notScope : notScopes) {
+                    if (notScope instanceof String s && scopeCovers(key(s), resourceKey)) {
+                        excluded = true;
+                        break;
+                    }
+                }
+            }
+            if (!excluded) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public Outcome evaluate(Request request) {
         ArmCall call = request.call();
         ArmResourceId id = call.id();
