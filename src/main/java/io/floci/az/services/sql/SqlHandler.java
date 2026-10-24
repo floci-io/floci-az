@@ -1,5 +1,6 @@
 package io.floci.az.services.sql;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
@@ -33,6 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.EXTERNAL;
 import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
@@ -52,10 +54,14 @@ import static io.floci.az.config.EmulatorConfig.SqlDataPlaneProvider.NONE;
  * <h2>Implemented operations</h2>
  * <ul>
  *   <li>Servers: create (PUT), get, list, delete, checkNameAvailability</li>
- *   <li>Databases: create (PUT), get, list, delete</li>
+ *   <li>Databases: create (PUT), update (PATCH), get, list, delete</li>
  *   <li>Firewall rules: create, get, list, delete</li>
- *   <li>Connection policy: get/put (always returns "Default")</li>
- *   <li>Convenience: {@code /connect} — returns all connection string formats</li>
+ *   <li>Settings ({@link SqlSettingType}): the connection policy and Express vulnerability assessment of a server;
+ *       the transparent data encryption, security alert policy, short and long term retention policies and geo
+ *       backup policy of a database. Each is stored on its parent's record and read with its defaults until
+ *       written</li>
+ *   <li>Restorable dropped databases: always an empty list</li>
+ *   <li>Convenience: {@code /connect}, which returns all connection string formats</li>
  * </ul>
  */
 @ApplicationScoped
@@ -63,6 +69,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private static final Logger LOG = Logger.getLogger(SqlHandler.class);
     private static final String TYPE = "Microsoft.Sql/servers";
+    private static final TypeReference<Map<String, Object>> PROPERTIES = new TypeReference<>() { };
 
     private final EmulatorConfig config;
     private final SqlState state;
@@ -136,10 +143,26 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             return handleDatabaseConnect(serverName, dbName);
         }
 
-        // ── connectionPolicies/default ────────────────────────────────────
-        if (tail.matches("servers/[^/]+/connectionPolicies/default")) {
-            String serverName = segment(tail, 1);
-            return handleConnectionPolicy(method, request, serverName);
+        // ── Database settings: transparentDataEncryption/current, securityAlertPolicies/default, ... ──
+        if (tail.matches("servers/[^/]+/databases/[^/]+/[^/]+(/[^/]+)?")) {
+            Optional<SqlSettingType> type = SqlSettingType.of(SqlSettingType.Parent.DATABASE, segment(tail, 4));
+            if (type.isPresent()) {
+                return handleDatabaseSetting(method, request, segment(tail, 1), segment(tail, 3), type.get(),
+                    optionalSegment(tail, 5));
+            }
+        }
+
+        // ── Server settings: connectionPolicies/default, sqlVulnerabilityAssessments/default ──
+        if (tail.matches("servers/[^/]+/[^/]+(/[^/]+)?")) {
+            Optional<SqlSettingType> type = SqlSettingType.of(SqlSettingType.Parent.SERVER, segment(tail, 2));
+            if (type.isPresent()) {
+                return handleServerSetting(method, request, segment(tail, 1), type.get(), optionalSegment(tail, 3));
+            }
+        }
+
+        // ── Restorable dropped databases: dropped databases are not kept, so there are none ──
+        if (tail.matches("servers/[^/]+/restorableDroppedDatabases(/[^/]+)?")) {
+            return handleRestorableDroppedDatabases(method, segment(tail, 1), optionalSegment(tail, 3));
         }
 
         // ── Firewall rules ────────────────────────────────────────────────
@@ -173,9 +196,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             return handleServerList(request);
         }
 
-        return Response.status(Response.Status.NOT_FOUND)
-            .entity(Map.of("error", "Unknown SQL path: " + tail))
-            .build();
+        return notFound("The resource 'Microsoft.Sql/" + tail + "' was not found.");
     }
 
     // ── checkNameAvailability ─────────────────────────────────────────────────
@@ -203,7 +224,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             case "PUT"    -> createOrUpdateServer(request, serverName);
             case "GET"    -> getServer(serverName);
             case "DELETE" -> deleteServer(request, serverName);
-            default       -> methodNotAllowed();
+            default       -> methodNotAllowed(method);
         };
     }
 
@@ -219,8 +240,13 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             JsonNode body = readBody(request.bodyStream());
             String location  = body.path("location").asText("eastus");
             JsonNode props   = body.path("properties");
-            String login     = props.path("administratorLogin").asText();
-            String password  = props.path("administratorLoginPassword").asText();
+            Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
+            // The login and password are required to create a server only ("required for server creation"): an
+            // update, such as azurerm's PUT of the server it read back, which carries no password, keeps them.
+            String login     = props.path("administratorLogin").asText(
+                current.map(SqlState.SqlServerEntry::administratorLogin).orElse(""));
+            String password  = props.path("administratorLoginPassword").asText(
+                current.map(SqlState.SqlServerEntry::administratorLoginPassword).orElse(""));
 
             if (login.isBlank()) {
                 return badRequest("administratorLogin is required");
@@ -230,7 +256,13 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
             }
 
             Map<String, String> tags = parseTags(body.path("tags"));
-            Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
+            // A field the PUT leaves out keeps its stored value; azurerm reads minimalTlsVersion as "cannot be
+            // removed once set".
+            SqlState.SqlServerAccess access = new SqlState.SqlServerAccess(
+                    textOrNull(props.path("minimalTlsVersion")),
+                    textOrNull(props.path("publicNetworkAccess")),
+                    textOrNull(props.path("restrictOutboundNetworkAccess")))
+                .orElse(current.map(SqlState.SqlServerEntry::access).orElse(SqlState.SqlServerAccess.DEFAULT));
             // The account path names no scope: it updates the server of this name where it is stored, so the name
             // keeps its owner. A create there goes to the default scope.
             boolean accountPath = scope(request).isEmpty();
@@ -259,7 +291,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                     Optional<SqlState.SqlServerEntry> named = current;
                     boolean created = state.createOrUpdateServer(id, existing -> {
                         SqlState.SqlServerEntry ready = desiredEntry(existing.or(() -> named), serverName, sub, rg,
-                            location, login, password, tags, "Ready");
+                            location, login, password, tags, access, "Ready");
                         ready.databases().putIfAbsent("master", SqlState.SqlDatabaseEntry.master(serverName));
                         return ready;
                     });
@@ -288,14 +320,14 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                         && "Ready".equals(current.get().provisioningState())
                         && hasDataPlaneRuntime(current.get())) {
                     SqlState.SqlServerEntry updated = desiredEntry(current, serverName, sub, rg,
-                        location, login, password, tags, "Ready");
+                        location, login, password, tags, access, "Ready");
                     state.updateServer(updated);
                     holdName(request, id);
                     return Response.ok(serverResponse(updated)).build();
                 }
 
                 SqlState.SqlServerEntry desired = desiredEntry(current, serverName, sub, rg,
-                    location, login, password, tags, "Creating");
+                    location, login, password, tags, access, "Creating");
                 state.updateServer(desired);
                 holdName(request, id);
                 SqlProvisioningService.SqlProvisioningOperation operation =
@@ -373,12 +405,15 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static SqlState.SqlServerEntry desiredEntry(
             Optional<SqlState.SqlServerEntry> current, String serverName, String subscriptionId,
             String resourceGroup, String location, String login, String password,
-            Map<String, String> tags, String provisioningState) {
+            Map<String, String> tags, SqlState.SqlServerAccess access, String provisioningState) {
         Map<String, SqlState.SqlDatabaseEntry> databases = current
             .map(SqlState.SqlServerEntry::databases)
             .orElseGet(ConcurrentHashMap::new);
         Map<String, SqlState.SqlFirewallRule> firewallRules = current
             .map(SqlState.SqlServerEntry::firewallRules)
+            .orElseGet(ConcurrentHashMap::new);
+        Map<String, SqlState.SqlSetting> settings = current
+            .map(SqlState.SqlServerEntry::settings)
             .orElseGet(ConcurrentHashMap::new);
         Instant createdAt = current.map(SqlState.SqlServerEntry::createdAt).orElseGet(Instant::now);
         String containerId = current.map(SqlState.SqlServerEntry::containerId).orElse(null);
@@ -386,7 +421,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         String host = current.map(SqlState.SqlServerEntry::host).orElse("localhost");
         return new SqlState.SqlServerEntry(serverName, subscriptionId, resourceGroup, location,
             login, password, containerId, hostPort, host, provisioningState, null, null,
-            tags, databases, firewallRules, createdAt);
+            tags, databases, firewallRules, createdAt, access, settings);
     }
 
     private static boolean equivalent(SqlState.SqlServerEntry current, String subscriptionId,
@@ -445,9 +480,10 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                                      String serverName, String dbName) {
         return switch (method) {
             case "PUT"    -> createOrUpdateDatabase(request, serverName, dbName);
+            case "PATCH"  -> updateDatabase(request, serverName, dbName);
             case "GET"    -> getDatabase(serverName, dbName);
             case "DELETE" -> deleteDatabase(serverName, dbName);
-            default       -> methodNotAllowed();
+            default       -> methodNotAllowed(method);
         };
     }
 
@@ -456,31 +492,68 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
 
         try {
-            JsonNode body    = readBody(request.bodyStream());
-            JsonNode props   = body.path("properties");
-            String collation = props.path("collation").asText("");
-            String edition   = props.path("edition").asText("");
-            String sku       = body.path("sku").path("name").asText("");
-
-            boolean isNew = !state.databaseExists(serverName, dbName);
+            SqlState.SqlDatabaseRequest requested = databaseRequest(readBody(request.bodyStream()));
+            Optional<SqlState.SqlDatabaseEntry> existing = state.getDatabase(serverName, dbName);
 
             // The emulator tracks the database in state only.
             // Actual CREATE DATABASE is the responsibility of the application
             // (Flyway, Liquibase, EF Core, etc.) using the JDBC URL from /connect.
-            SqlState.SqlDatabaseEntry db = SqlState.SqlDatabaseEntry.create(
-                dbName, serverName, collation, edition, sku);
+            // An update keeps the database's id, creation date and settings.
+            SqlState.SqlDatabaseEntry db = existing
+                .map(current -> current.updatedWith(requested, true))
+                .orElseGet(() -> SqlState.SqlDatabaseEntry.create(dbName, serverName, requested));
             state.putDatabase(serverName, db);
 
-            return Response.status(isNew ? 201 : 200)
+            return Response.status(existing.isEmpty() ? 201 : 200)
                 .entity(databaseResponse(db, serverOpt.get()))
                 .build();
 
         } catch (IllegalArgumentException e) {
             return badRequest(e.getMessage());
         } catch (Exception e) {
-            LOG.errorf(e, "Error creating database %s on server %s", dbName, serverName);
-            return Response.status(500).entity(Map.of("error", e.getMessage())).build();
+            LOG.errorv(e, "Error creating database {0} on server {1}", dbName, serverName);
+            return ArmErrors.error(500, "InternalServerError", e.getMessage());
         }
+    }
+
+    /** {@code Databases_Update}: the fields the body names over the stored database; 200 with the result. */
+    private Response updateDatabase(AzureRequest request, String serverName, String dbName) {
+        Optional<SqlState.SqlServerEntry> serverOpt = state.getServer(serverName);
+        if (serverOpt.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        SqlState.SqlDatabaseRequest requested = databaseRequest(readBody(request.bodyStream()));
+        return state.updateDatabase(serverName, dbName, current -> current.updatedWith(requested, false))
+            .map(db -> Response.ok(databaseResponse(db, serverOpt.get())).build())
+            .orElseGet(() -> notFound("Database '" + dbName + "' not found on server '" + serverName + "'"));
+    }
+
+    /** The database fields of a PUT or PATCH body; one the body leaves out is null. */
+    private static SqlState.SqlDatabaseRequest databaseRequest(JsonNode body) {
+        JsonNode props = body.path("properties");
+        return new SqlState.SqlDatabaseRequest(
+            textOrNull(props.path("collation")),
+            textOrNull(props.path("edition")),
+            textOrNull(body.path("sku").path("name")),
+            longOrNull(props.path("maxSizeBytes")),
+            textOrNull(props.path("requestedBackupStorageRedundancy")),
+            props.path("zoneRedundant").isBoolean() ? props.path("zoneRedundant").asBoolean() : null,
+            body.path("tags").isObject() ? parseTags(body.path("tags")) : null);
+    }
+
+    private static String textOrNull(JsonNode node) {
+        return node.isTextual() && !node.asText().isBlank() ? node.asText() : null;
+    }
+
+    /** An integer, or its decimal string (the shape this emulator once answered). */
+    private static Long longOrNull(JsonNode node) {
+        if (node.canConvertToLong() && node.isIntegralNumber()) {
+            return node.asLong();
+        }
+        if (node.isTextual() && node.asText().matches("\\d{1,18}")) {
+            return Long.parseLong(node.asText());
+        }
+        return null;
     }
 
     private Response getDatabase(String serverName, String dbName) {
@@ -497,7 +570,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (serverOpt.isEmpty()) return notFound("Server '" + serverName + "' not found");
         if (!state.databaseExists(serverName, dbName))
             return notFound("Database '" + dbName + "' not found");
-        // Remove from state only — actual DROP DATABASE is the application's responsibility.
+        // Remove from state only: actual DROP DATABASE is the application's responsibility.
         state.removeDatabase(serverName, dbName);
         return Response.status(204).build();
     }
@@ -527,7 +600,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 state.removeFirewallRule(serverName, ruleName);
                 yield Response.status(204).build();
             }
-            default -> methodNotAllowed();
+            default -> methodNotAllowed(method);
         };
     }
 
@@ -556,22 +629,111 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .toList();
             return Response.ok(Map.of("value", value)).build();
         }
-        return methodNotAllowed();
+        return methodNotAllowed(method);
     }
 
-    // ── Connection policy ─────────────────────────────────────────────────────
+    // ── Settings ──────────────────────────────────────────────────────────────
 
-    private Response handleConnectionPolicy(String method, AzureRequest request, String serverName) {
-        if (!state.serverExists(serverName))
+    private Response handleServerSetting(String method, AzureRequest request, String serverName,
+                                         SqlSettingType type, String name) {
+        Optional<SqlState.SqlServerEntry> server = state.getServer(serverName);
+        if (server.isEmpty()) {
             return notFound("Server '" + serverName + "' not found");
-        // We always return Default, regardless of what is PUT
+        }
+        SqlState.SqlServerEntry entry = server.get();
+        return handleSetting(method, request, type, name, entry.armId(), entry.location(),
+            entry.settings().get(type.key()),
+            setting -> state.putServerSetting(serverName, type, setting));
+    }
+
+    private Response handleDatabaseSetting(String method, AzureRequest request, String serverName, String dbName,
+                                           SqlSettingType type, String name) {
+        Optional<SqlState.SqlServerEntry> server = state.getServer(serverName);
+        if (server.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        Optional<SqlState.SqlDatabaseEntry> database = state.getDatabase(serverName, dbName);
+        if (database.isEmpty()) {
+            return notFound("Database '" + dbName + "' not found on server '" + serverName + "'");
+        }
+        Map<String, SqlState.SqlSetting> stored = database.get().settings();
+        return handleSetting(method, request, type, name,
+            server.get().armId() + "/databases/" + database.get().databaseName(), server.get().location(),
+            stored == null ? null : stored.get(type.key()),
+            setting -> state.updateDatabase(serverName, dbName, db -> db.withSetting(type, setting)));
+    }
+
+    /**
+     * One setting of a server or a database: GET answers it (its defaults when never written), PUT replaces it,
+     * PATCH merges into it where the spec declares one. {@code name} is null for the list of the parent's settings
+     * of this type, which holds the one.
+     */
+    private Response handleSetting(String method, AzureRequest request, SqlSettingType type, String name,
+                                   String parentId, String location, SqlState.SqlSetting stored,
+                                   Consumer<SqlState.SqlSetting> store) {
+        Map<String, Object> current = type.properties(stored);
+        if (name == null) {
+            if (!"GET".equals(method)) {
+                return methodNotAllowed(method);
+            }
+            return Response.ok(Map.of("value", List.of(settingResponse(type, parentId, location, current)))).build();
+        }
+        if (!type.isNamed(name)) {
+            return notFound("The resource '" + type.armType() + "/" + name + "' under '" + parentId
+                + "' was not found; its only name is '" + type.fixedName() + "'.");
+        }
+        boolean replace = "PUT".equals(method);
+        return switch (method) {
+            case "GET" -> Response.ok(settingResponse(type, parentId, location, current)).build();
+            case "PUT", "PATCH" -> {
+                if (!replace && !type.patchable()) {
+                    yield methodNotAllowed(method);
+                }
+                SqlState.SqlSetting written = type.write(current, settingProperties(request), replace);
+                store.accept(written);
+                yield Response.ok(settingResponse(type, parentId, location, type.properties(written))).build();
+            }
+            default -> methodNotAllowed(method);
+        };
+    }
+
+    private Map<String, Object> settingProperties(AzureRequest request) {
+        JsonNode props = readBody(request.bodyStream()).path("properties");
+        if (!props.isObject()) {
+            return Map.of();
+        }
+        return mapper.convertValue(props, PROPERTIES);
+    }
+
+    private static Map<String, Object> settingResponse(SqlSettingType type, String parentId, String location,
+                                                       Map<String, Object> properties) {
         Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("id", serverArmId(request.resourcePath(), serverName) + "/connectionPolicies/default");
-        resp.put("name", "default");
-        resp.put("type", "Microsoft.Sql/servers/connectionPolicies");
-        resp.put("kind", "v12.0");
-        resp.put("properties", Map.of("connectionType", "Default"));
-        return Response.ok(resp).build();
+        resp.put("id", parentId + "/" + type.segment() + "/" + type.fixedName());
+        resp.put("name", type.fixedName());
+        resp.put("type", type.armType());
+        // ServerConnectionPolicy is the one setting whose spec model carries a (read-only) location.
+        if (type == SqlSettingType.CONNECTION_POLICY) {
+            resp.put("location", location);
+        }
+        resp.put("properties", properties);
+        return resp;
+    }
+
+    /**
+     * {@code RestorableDroppedDatabases_ListByServer} and {@code _Get}: a deleted database is not kept, so the list
+     * is empty and any one is not found. azurerm reads the list on every server refresh.
+     */
+    private Response handleRestorableDroppedDatabases(String method, String serverName, String id) {
+        if (!state.serverExists(serverName)) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        if (!"GET".equals(method)) {
+            return methodNotAllowed(method);
+        }
+        if (id == null) {
+            return Response.ok(Map.of("value", List.of())).build();
+        }
+        return notFound("Restorable dropped database '" + id + "' not found on server '" + serverName + "'");
     }
 
     // ── Convenience /connect ──────────────────────────────────────────────────
@@ -605,8 +767,9 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         props.put("version", "12.0");
         props.put("state", s.provisioningState());
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
-        props.put("minimalTlsVersion", "None");
-        props.put("publicNetworkAccess", "Enabled");
+        props.put("minimalTlsVersion", s.access().minimalTlsVersion());
+        props.put("publicNetworkAccess", s.access().publicNetworkAccess());
+        props.put("restrictOutboundNetworkAccess", s.access().restrictOutboundNetworkAccess());
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("id", s.armId());
@@ -628,8 +791,12 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         props.put("databaseId", db.databaseId());
         props.put("creationDate", db.createdAt().toString());
         props.put("serviceLevelObjective", db.sku());
+        props.put("currentServiceObjectiveName", db.sku());
         props.put("requestedServiceObjectiveName", db.sku());
-        props.put("maxSizeBytes", "1073741824");
+        props.put("maxSizeBytes", db.effectiveMaxSizeBytes());
+        props.put("currentBackupStorageRedundancy", db.effectiveBackupStorageRedundancy());
+        props.put("requestedBackupStorageRedundancy", db.effectiveBackupStorageRedundancy());
+        props.put("zoneRedundant", db.zoneRedundant());
 
         String dbArmId = server.armId() + "/databases/" + db.databaseName();
         Map<String, Object> resp = new LinkedHashMap<>();
@@ -638,6 +805,9 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         resp.put("type", "Microsoft.Sql/servers/databases");
         resp.put("location", server.location());
         resp.put("kind", "v12.0,user");
+        if (db.tags() != null && !db.tags().isEmpty()) {
+            resp.put("tags", db.tags());
+        }
         resp.put("sku", Map.of("name", db.sku(), "tier", db.edition()));
         resp.put("properties", props);
         return resp;
@@ -708,11 +878,10 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         return ArmPaths.resourceGroup(fullPath, "default");
     }
 
-    private static String serverArmId(String fullPath, String serverName) {
-        String sub = extractSubscriptionId(fullPath);
-        String rg  = extractResourceGroup(fullPath);
-        return String.format("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Sql/servers/%s",
-            sub, rg, serverName);
+    /** The n-th slash-separated segment of a path (0-based), or null when the path is shorter. */
+    private static String optionalSegment(String path, int index) {
+        String[] parts = path.split("/");
+        return index < parts.length ? parts[index] : null;
     }
 
     /** Returns the n-th slash-separated segment of a path (0-based). */
@@ -812,14 +981,13 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
         return ArmErrors.error(400, "InvalidRequest", message);
     }
 
-    private static Response methodNotAllowed() {
-        return Response.status(405).entity(Map.of("error", "Method not allowed")).build();
+    private static Response methodNotAllowed(String method) {
+        return ArmErrors.error(405, "MethodNotAllowed",
+            "The requested resource does not support http method '" + method + "'.");
     }
 
     private static Response serviceDisabled() {
-        return Response.status(503).entity(Map.of(
-            "error", Map.of("code", "ServiceDisabled",
-                "message", "Azure SQL Database service is disabled on this emulator."))).build();
+        return ArmErrors.error(503, "ServiceDisabled", "Azure SQL Database service is disabled on this emulator.");
     }
 
     private static Response dataPlaneNotEnabled() {

@@ -8,10 +8,17 @@ against a real SQL Server 2025 container.
 
 ## Features
 
-- **Servers**: create, get, list, delete; immediate ARM state by default
-- **Databases**: create (with optional collation), get, list, delete; guarded against dropping `master`
+- **Servers**: create, get, list, delete; immediate ARM state by default; `minimalTlsVersion`,
+  `publicNetworkAccess` and `restrictOutboundNetworkAccess` are stored and read back
+- **Databases**: create, update (`PUT` and `PATCH`), get, list, delete; guarded against dropping `master`;
+  the SKU, `maxSizeBytes`, `requestedBackupStorageRedundancy`, `zoneRedundant` and tags are stored and read back
 - **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
-- **Connection policy**: GET returns `Default` (read-only)
+- **Settings**: the connection policy and Express vulnerability assessment of a server, and the transparent data
+  encryption, security alert policy, short and long term backup retention and geo backup policies of a database.
+  Each reads Azure's defaults until it is written, is stored on its server or database, and goes with it on delete.
+  None of them changes how the data plane behaves
+- **Restorable dropped databases**: always an empty list, since a deleted database is not kept
+- **Terraform**: `azurerm_mssql_server` and `azurerm_mssql_database` apply, refresh with no changes, and destroy
 - **Name availability check**: `POST .../checkNameAvailability`
 - **Data-plane providers**: `none` (default), `managed`, and reserved `external`
 - **Asynchronous managed provisioning**: server `PUT` returns `202` with Azure `Location` polling
@@ -308,11 +315,31 @@ details in data-plane modes.
 | `DELETE` | `.../servers/{name}/firewallRules/{rule}` | Delete a firewall rule |
 | `GET` | `.../servers/{name}/firewallRules` | List all firewall rules |
 
-### Connection Policy
+`PATCH .../servers/{name}/databases/{db}` changes only the fields its body names.
+
+### Settings
+
+Each setting has one name. `GET` before any write answers the default shown; `PUT` replaces the writable
+properties and answers `200`; `GET` on the collection lists the one setting.
+
+| Path | Default | PATCH |
+|---|---|---|
+| `.../servers/{name}/connectionPolicies/default` | `connectionType: Default` | no |
+| `.../servers/{name}/sqlVulnerabilityAssessments/default` | `state: Disabled` | no |
+| `.../databases/{db}/transparentDataEncryption/current` | `state: Enabled` | no |
+| `.../databases/{db}/securityAlertPolicies/default` | `state: Disabled`, no alert recipients | no |
+| `.../databases/{db}/backupShortTermRetentionPolicies/default` | 7 days, differential every 12 hours | yes |
+| `.../databases/{db}/backupLongTermRetentionPolicies/default` | `PT0S` weekly, monthly and yearly, week 0 | no |
+| `.../databases/{db}/geoBackupPolicies/Default` | `state: Enabled` | no |
+
+A security alert policy's `storageAccountAccessKey` is accepted and never read back, as in Azure.
+
+### Restorable Dropped Databases
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `.../servers/{name}/connectionPolicies/default` | Get connection policy (always returns `Default`) |
+| `GET` | `.../servers/{name}/restorableDroppedDatabases` | Always `{"value":[]}` |
+| `GET` | `.../servers/{name}/restorableDroppedDatabases/{id}` | Always `404 ResourceNotFound` |
 
 ### Convenience (floci-az only)
 

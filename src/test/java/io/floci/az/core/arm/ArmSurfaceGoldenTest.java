@@ -110,7 +110,14 @@ class ArmSurfaceGoldenTest {
         Microsoft.Sql/servers                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers/connectionPolicies                                       RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/databases                                                RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/databases/backupLongTermRetentionPolicies                RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/databases/backupShortTermRetentionPolicies               RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/databases/geoBackupPolicies                              RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/databases/securityAlertPolicies                          RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/databases/transparentDataEncryption                      RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/firewallRules                                            RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/restorableDroppedDatabases                               RESOURCE_GROUP  OPTIONAL  FILTER
+        Microsoft.Sql/servers/sqlVulnerabilityAssessments                              RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Storage/storageAccounts                                              RESOURCE_GROUP  REQUIRED  ARM_HANDLER
         Microsoft.Storage/storageAccounts/blobServices                                 RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Storage/storageAccounts/blobServices/containers                      RESOURCE_GROUP  OPTIONAL  ARM_HANDLER

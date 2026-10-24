@@ -24,7 +24,7 @@ import java.util.function.Function;
 /**
  * State store for the Azure SQL Database emulator.
  *
- * <p>Tracks logical servers and their child resources (databases, firewall rules), which live inside their
+ * <p>Tracks logical servers and their child resources (databases, firewall rules, settings), which live inside their
  * server's record. Servers are kept in an {@link ArmResourceStore} over the {@code sql} backend, keyed by their
  * canonical ARM id, so persistence follows {@code FLOCI_AZ_STORAGE_SERVICES_SQL_MODE}. Before the store, servers
  * were kept under their lowercased name alone; those entries are read as they are and move to their canonical key
@@ -188,6 +188,34 @@ public class SqlState {
             .orElse(List.of());
     }
 
+    /**
+     * Writes {@code change} applied to the database {@code dbName} of server {@code serverName}; empty, and nothing
+     * written, when either is not stored.
+     */
+    public synchronized Optional<SqlDatabaseEntry> updateDatabase(String serverName, String dbName,
+                                                                  Function<SqlDatabaseEntry, SqlDatabaseEntry> change) {
+        return getServer(serverName).flatMap(s -> Optional.ofNullable(s.databases().get(key(dbName))).map(db -> {
+            SqlDatabaseEntry updated = change.apply(db);
+            s.databases().put(key(dbName), updated);
+            putServer(s);
+            return updated;
+        }));
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+
+    /** The stored server setting of {@code type}; empty when it was never written (it then has its defaults). */
+    public synchronized Optional<SqlSetting> getServerSetting(String serverName, SqlSettingType type) {
+        return getServer(serverName).map(s -> s.settings().get(type.key()));
+    }
+
+    public synchronized void putServerSetting(String serverName, SqlSettingType type, SqlSetting setting) {
+        getServer(serverName).ifPresent(s -> {
+            s.settings().put(type.key(), setting);
+            putServer(s);
+        });
+    }
+
     // ── Firewall rules ────────────────────────────────────────────────────────
 
     public synchronized void putFirewallRule(String serverName, SqlFirewallRule rule) {
@@ -286,7 +314,9 @@ public class SqlState {
             new ConcurrentHashMap<>(e.tags() != null ? e.tags() : Map.of()),
             new ConcurrentHashMap<>(e.databases() != null ? e.databases() : Map.of()),
             new ConcurrentHashMap<>(e.firewallRules() != null ? e.firewallRules() : Map.of()),
-            e.createdAt());
+            e.createdAt(),
+            e.access() != null ? e.access().orElse(SqlServerAccess.DEFAULT) : SqlServerAccess.DEFAULT,
+            new ConcurrentHashMap<>(e.settings() != null ? e.settings() : Map.of()));
     }
 
     private static ArmResourceId idOf(SqlServerEntry entry) {
@@ -324,8 +354,23 @@ public class SqlState {
             Map<String, String> tags,
             Map<String, SqlDatabaseEntry> databases,
             Map<String, SqlFirewallRule> firewallRules,
-            Instant createdAt
+            Instant createdAt,
+            SqlServerAccess access,
+            Map<String, SqlSetting> settings
     ) {
+        public SqlServerEntry(String serverName, String subscriptionId, String resourceGroupName,
+                              String location, String administratorLogin,
+                              String administratorLoginPassword, String containerId, int hostPort,
+                              String host, String provisioningState, String failureCode,
+                              String failureMessage, Map<String, String> tags,
+                              Map<String, SqlDatabaseEntry> databases,
+                              Map<String, SqlFirewallRule> firewallRules, Instant createdAt) {
+            this(serverName, subscriptionId, resourceGroupName, location, administratorLogin,
+                administratorLoginPassword, containerId, hostPort, host, provisioningState, failureCode,
+                failureMessage, tags, databases, firewallRules, createdAt, SqlServerAccess.DEFAULT,
+                new ConcurrentHashMap<>());
+        }
+
         public SqlServerEntry(String serverName, String subscriptionId, String resourceGroupName,
                               String location, String administratorLogin,
                               String administratorLoginPassword, String containerId, int hostPort,
@@ -348,22 +393,22 @@ public class SqlState {
             return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, administratorLogin, administratorLoginPassword,
                 id, port, reachableHost, "Ready", null, null,
-                tags, databases, firewallRules, createdAt);
+                tags, databases, firewallRules, createdAt, access, settings);
         }
 
-        /** This server's own fields over the databases and firewall rules of {@code stored}. */
+        /** This server's own fields over the databases, firewall rules and settings of {@code stored}. */
         public SqlServerEntry withChildrenOf(SqlServerEntry stored) {
             return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, administratorLogin, administratorLoginPassword,
                 containerId, hostPort, host, provisioningState, failureCode, failureMessage,
-                tags, stored.databases(), stored.firewallRules(), createdAt);
+                tags, stored.databases(), stored.firewallRules(), createdAt, access, stored.settings());
         }
 
         public SqlServerEntry withProvisioningState(String newState, String code, String message) {
             return new SqlServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, administratorLogin, administratorLoginPassword,
                 containerId, hostPort, host, newState, code, message,
-                tags, databases, firewallRules, createdAt);
+                tags, databases, firewallRules, createdAt, access, settings);
         }
 
         /** Azure-shaped public hostname returned by ARM resource responses. */
@@ -377,7 +422,36 @@ public class SqlState {
         }
     }
 
-    /** Represents a SQL Database inside a logical server. */
+    /**
+     * The network settings of a server's PUT body, echoed back on every read.
+     *
+     * <p>{@code minimalTlsVersion} is {@code None} when a create names none: azurerm reads a missing value and
+     * {@code None} alike, as "Disabled" ({@code mssql_server_resource.go}, which cites Azure/azure-rest-api-specs#24348
+     * for Azure answering {@code None}). {@code publicNetworkAccess} is {@code Enabled} and
+     * {@code restrictOutboundNetworkAccess} {@code Disabled} unless the request says otherwise, the values azurerm
+     * sends for its defaults.
+     */
+    @RegisterForReflection
+    public record SqlServerAccess(String minimalTlsVersion, String publicNetworkAccess,
+                                  String restrictOutboundNetworkAccess) {
+
+        public static final SqlServerAccess DEFAULT = new SqlServerAccess("None", "Enabled", "Disabled");
+
+        /** Each field of {@code this} that is null replaced by the one of {@code fallback}. */
+        public SqlServerAccess orElse(SqlServerAccess fallback) {
+            return new SqlServerAccess(
+                minimalTlsVersion != null ? minimalTlsVersion : fallback.minimalTlsVersion(),
+                publicNetworkAccess != null ? publicNetworkAccess : fallback.publicNetworkAccess(),
+                restrictOutboundNetworkAccess != null ? restrictOutboundNetworkAccess
+                    : fallback.restrictOutboundNetworkAccess());
+        }
+    }
+
+    /**
+     * Represents a SQL Database inside a logical server.
+     *
+     * <p>{@code maxSizeBytes} is 0 for a database stored before it was kept; it reads as the default.
+     */
     @RegisterForReflection
     public record SqlDatabaseEntry(
             String databaseName,
@@ -387,31 +461,113 @@ public class SqlState {
             String sku,
             String status,
             String databaseId,
-            Instant createdAt
+            Instant createdAt,
+            long maxSizeBytes,
+            String requestedBackupStorageRedundancy,
+            boolean zoneRedundant,
+            Map<String, String> tags,
+            Map<String, SqlSetting> settings
     ) {
+        /** 1 GiB: the size the spec's default-mode create example asks for and reads back. */
+        public static final long DEFAULT_MAX_SIZE_BYTES = 1073741824L;
+
+        /** The backup storage redundancy of a create that names none, as the spec's create example reads back. */
+        public static final String DEFAULT_BACKUP_STORAGE_REDUNDANCY = "Geo";
+
         public static SqlDatabaseEntry create(String dbName, String serverName,
                                                String collation, String edition, String sku) {
+            return create(dbName, serverName, new SqlDatabaseRequest(collation, edition, sku, null, null, null,
+                Map.of()));
+        }
+
+        public static SqlDatabaseEntry create(String dbName, String serverName, SqlDatabaseRequest request) {
             return new SqlDatabaseEntry(
                 dbName, serverName,
-                collation != null && !collation.isBlank() ? collation : "SQL_Latin1_General_CP1_CI_AS",
-                edition   != null && !edition.isBlank()   ? edition   : "Standard",
-                sku       != null && !sku.isBlank()       ? sku       : "S0",
+                nonBlank(request.collation(), "SQL_Latin1_General_CP1_CI_AS"),
+                nonBlank(request.edition(), "Standard"),
+                nonBlank(request.sku(), "S0"),
                 "Online",
                 UUID.randomUUID().toString(),
-                Instant.now());
+                Instant.now(),
+                request.maxSizeBytes() != null ? request.maxSizeBytes() : DEFAULT_MAX_SIZE_BYTES,
+                nonBlank(request.requestedBackupStorageRedundancy(), DEFAULT_BACKUP_STORAGE_REDUNDANCY),
+                Boolean.TRUE.equals(request.zoneRedundant()),
+                new ConcurrentHashMap<>(request.tags() != null ? request.tags() : Map.of()),
+                new ConcurrentHashMap<>());
         }
 
         /** The master database is auto-created when a server is provisioned. */
         public static SqlDatabaseEntry master(String serverName) {
             return new SqlDatabaseEntry("master", serverName,
                 "SQL_Latin1_General_CP1_CI_AS", "System", "System",
-                "Online", UUID.randomUUID().toString(), Instant.now());
+                "Online", UUID.randomUUID().toString(), Instant.now(), DEFAULT_MAX_SIZE_BYTES,
+                DEFAULT_BACKUP_STORAGE_REDUNDANCY, false, new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
+        }
+
+        /**
+         * This database with the fields {@code request} names replaced; its id, creation date and settings are
+         * kept. A PUT passes every field, so a field it leaves out takes its default; a PATCH keeps it.
+         */
+        public SqlDatabaseEntry updatedWith(SqlDatabaseRequest request, boolean replace) {
+            return new SqlDatabaseEntry(databaseName, serverName,
+                pick(request.collation(), replace ? "SQL_Latin1_General_CP1_CI_AS" : collation),
+                pick(request.edition(), replace ? "Standard" : edition),
+                pick(request.sku(), replace ? "S0" : sku),
+                status, databaseId, createdAt,
+                request.maxSizeBytes() != null ? request.maxSizeBytes()
+                    : replace ? DEFAULT_MAX_SIZE_BYTES : effectiveMaxSizeBytes(),
+                pick(request.requestedBackupStorageRedundancy(),
+                    replace ? DEFAULT_BACKUP_STORAGE_REDUNDANCY : effectiveBackupStorageRedundancy()),
+                request.zoneRedundant() != null ? request.zoneRedundant() : !replace && zoneRedundant,
+                request.tags() != null ? new ConcurrentHashMap<>(request.tags())
+                    : new ConcurrentHashMap<>(tags != null ? tags : Map.of()),
+                settings != null ? settings : new ConcurrentHashMap<>());
+        }
+
+        /** This database with {@code setting} stored as its setting of {@code type}. */
+        public SqlDatabaseEntry withSetting(SqlSettingType type, SqlSetting setting) {
+            Map<String, SqlSetting> updated = new ConcurrentHashMap<>(settings != null ? settings : Map.of());
+            updated.put(type.key(), setting);
+            return new SqlDatabaseEntry(databaseName, serverName, collation, edition, sku, status, databaseId,
+                createdAt, maxSizeBytes, requestedBackupStorageRedundancy, zoneRedundant, tags, updated);
+        }
+
+        public long effectiveMaxSizeBytes() {
+            return maxSizeBytes > 0 ? maxSizeBytes : DEFAULT_MAX_SIZE_BYTES;
+        }
+
+        public String effectiveBackupStorageRedundancy() {
+            return nonBlank(requestedBackupStorageRedundancy, DEFAULT_BACKUP_STORAGE_REDUNDANCY);
+        }
+
+        private static String pick(String requested, String otherwise) {
+            return requested != null && !requested.isBlank() ? requested : otherwise;
+        }
+
+        private static String nonBlank(String value, String otherwise) {
+            return pick(value, otherwise);
         }
     }
 
     /**
+     * The database fields a PUT or PATCH body names; a field the body leaves out is null ({@code tags} included).
+     */
+    public record SqlDatabaseRequest(String collation, String edition, String sku, Long maxSizeBytes,
+                                     String requestedBackupStorageRedundancy, Boolean zoneRedundant,
+                                     Map<String, String> tags) {
+    }
+
+    /**
+     * The properties of one singleton setting of a server or a database ({@link SqlSettingType}), as last written;
+     * a setting never written is served with its type's defaults.
+     */
+    @RegisterForReflection
+    public record SqlSetting(Map<String, Object> properties) {
+    }
+
+    /**
      * Represents a server-level firewall rule.
-     * Rules are stored for API compliance but not enforced — all IPs are allowed in dev mode.
+     * Rules are stored for API compliance but not enforced: all IPs are allowed in dev mode.
      */
     @RegisterForReflection
     public record SqlFirewallRule(

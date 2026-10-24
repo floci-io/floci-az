@@ -1775,10 +1775,45 @@
           "locations" : [ ],
           "resourceType" : "servers/databases"
         }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2017-03-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases/backupLongTermRetentionPolicies"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2017-10-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases/backupShortTermRetentionPolicies"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases/geoBackupPolicies"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2018-06-01-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases/securityAlertPolicies"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/databases/transparentDataEncryption"
+        }, {
           "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2015-05-01-preview", "2014-04-01" ],
           "capabilities" : "None",
           "locations" : [ ],
           "resourceType" : "servers/firewallRules"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview", "2021-11-01", "2021-11-01-preview", "2021-08-01-preview", "2021-05-01-preview", "2021-02-01-preview", "2020-11-01-preview", "2020-08-01-preview", "2020-02-02-preview", "2014-04-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/restorableDroppedDatabases"
+        }, {
+          "apiVersions" : [ "2025-02-01-preview", "2025-01-01", "2024-11-01-preview", "2024-05-01-preview", "2023-08-01", "2023-08-01-preview", "2023-05-01-preview", "2023-02-01-preview", "2022-11-01-preview", "2022-08-01-preview", "2022-05-01-preview", "2022-02-01-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "servers/sqlVulnerabilityAssessments"
         } ]
       }, {
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Storage",

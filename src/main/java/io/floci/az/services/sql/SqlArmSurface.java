@@ -59,8 +59,15 @@ public class SqlArmSurface implements ArmSurfaceProvider {
             ArmResourceType.child(NAMESPACE, "servers/connectionPolicies"),
             ArmResourceType.child(NAMESPACE, "servers/databases")
                 .withName(DATABASE_NAME),
+            ArmResourceType.child(NAMESPACE, "servers/databases/backupLongTermRetentionPolicies"),
+            ArmResourceType.child(NAMESPACE, "servers/databases/backupShortTermRetentionPolicies"),
+            ArmResourceType.child(NAMESPACE, "servers/databases/geoBackupPolicies"),
+            ArmResourceType.child(NAMESPACE, "servers/databases/securityAlertPolicies"),
+            ArmResourceType.child(NAMESPACE, "servers/databases/transparentDataEncryption"),
             ArmResourceType.child(NAMESPACE, "servers/firewallRules")
-                .withName(FIREWALL_RULE_NAME))));
+                .withName(FIREWALL_RULE_NAME),
+            ArmResourceType.child(NAMESPACE, "servers/restorableDroppedDatabases"),
+            ArmResourceType.child(NAMESPACE, "servers/sqlVulnerabilityAssessments"))));
 
     @Override
     public List<ArmSurface> armSurfaces() {
