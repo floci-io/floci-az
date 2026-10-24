@@ -69,6 +69,12 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
         ".*/providers/Microsoft\\.Web/sites/([^/?]+)(/config/web)?/?([?].*)?", Pattern.CASE_INSENSITIVE);
 
     private final ArmResourceStore<Map<String, Object>> sites;
+    /**
+     * Held across a site write and its Function App sync, so concurrent PUTs to one site cannot leave the site's
+     * {@code linuxFxVersion} and its Function App's runtime from different requests. The store locks each call on its
+     * own, and the sync runs outside it.
+     */
+    private final Object siteWrites = new Object();
     private final GlobalNameRegistry names;
     private final FunctionsServiceHandler functionsHandler;
 
@@ -202,6 +208,12 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
         Map<String, Object> siteConfig = ArmJson.cast(properties.get("siteConfig"));
         String linuxFxVersion = ArmJson.string(siteConfig, "linuxFxVersion", null);
         String location = ArmJson.string(body, "location", "eastus");
+        synchronized (siteWrites) {
+            return writeSite(id, location, linuxFxVersion);
+        }
+    }
+
+    private Response writeSite(ArmResourceId id, String location, String linuxFxVersion) {
         String siteName = sites.get(id).map(stored -> nameOf(stored.value())).orElse(id.name());
         try {
             syncFunctionApp(siteName, linuxFxVersion);
@@ -217,20 +229,27 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
 
     /** {@code sites/{name}/config/web}: the site's {@code siteConfig}, read or replaced. */
     private Response handleConfig(AzureRequest req, String path, String method, ArmResourceId id) {
+        if ("GET".equals(method)) {
+            return sites.get(id)
+                .map(site -> configResponse(path, site.value()))
+                .orElseGet(() -> armNotFound("sites/" + id.name()));
+        }
+        if (!"PUT".equals(method)) {
+            return sites.get(id).isPresent() ? Response.status(405).build() : armNotFound("sites/" + id.name());
+        }
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> config = body.containsKey("properties") ? ArmJson.cast(body.get("properties")) : body;
+        String linuxFxVersion = ArmJson.string(config, "linuxFxVersion", null);
+        synchronized (siteWrites) {
+            return writeConfig(path, id, linuxFxVersion);
+        }
+    }
+
+    private Response writeConfig(String path, ArmResourceId id, String linuxFxVersion) {
         Optional<Stored<Map<String, Object>>> site = sites.get(id);
         if (site.isEmpty()) {
             return armNotFound("sites/" + id.name());
         }
-        if ("GET".equals(method)) {
-            return configResponse(path, site.get().value());
-        }
-        if (!"PUT".equals(method)) {
-            return Response.status(405).build();
-        }
-
-        Map<String, Object> body = ArmJson.parseBodyLenient(req);
-        Map<String, Object> config = body.containsKey("properties") ? ArmJson.cast(body.get("properties")) : body;
-        String linuxFxVersion = ArmJson.string(config, "linuxFxVersion", null);
         try {
             syncFunctionApp(nameOf(site.get().value()), linuxFxVersion);
         } catch (IllegalArgumentException e) {
