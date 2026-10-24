@@ -431,6 +431,12 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
                 .toList();
     }
 
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.COMMUNICATION
+            && communicationServices.get(owner).filter(stored -> name.equalsIgnoreCase(stored.id().name())).isPresent();
+    }
+
     // ── Path parsing helpers ─────────────────────────────────────────────────
 
     private static String extractCommunicationPath(String fullPath) {

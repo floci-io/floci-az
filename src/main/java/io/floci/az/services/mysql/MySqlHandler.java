@@ -844,4 +844,10 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
                 .map(server -> new Claim(CloudSuffix.MYSQL, server.serverName(), MySqlState.serverId(server)))
                 .toList();
     }
+
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.MYSQL
+            && state.getServer(owner).filter(server -> name.equalsIgnoreCase(server.serverName())).isPresent();
+    }
 }
