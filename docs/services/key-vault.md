@@ -103,6 +103,13 @@ resource. With `parity-overrides.strict-names` a name outside 3 to 24 letters, d
 letter, ending with a letter or digit and with no consecutive hyphens is refused with `400 InvalidResourceName` (see
 [ARM name syntax](arm.md#name-syntax)).
 
+`PUT .../vaults/{name}/accessPolicies/{add|replace|remove}` (`Vaults_UpdateAccessPolicy`, used by azurerm's
+`azurerm_key_vault_access_policy`) updates the vault's `properties.accessPolicies`, which a GET of the vault returns:
+`add` merges each entry's permissions into the entry with the same tenant, object and application ID or appends it,
+`replace` replaces the list, and `remove` takes the listed permissions away and drops an entry left with none. The
+vault must exist in the request's own subscription and resource group. Access policies are recorded, not enforced:
+the data plane does not check them. Any other path under a vault or managed HSM answers `404`.
+
 ## Connection String
 
 The Key Vault SDK enforces HTTPS and uses a challenge-based auth flow. Use the patterns below to connect to the local emulator:

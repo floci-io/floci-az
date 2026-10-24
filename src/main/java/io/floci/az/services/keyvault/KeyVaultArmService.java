@@ -66,6 +66,13 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     private static final Pattern RESOURCE_PATH = Pattern.compile(
         ".*/providers/Microsoft\\.KeyVault/(vaults|managedHSMs)/([^/?]+)/?([?].*)?", Pattern.CASE_INSENSITIVE);
 
+    /** {@code Vaults_UpdateAccessPolicy}'s path, in any case: group 1 the vault name, group 2 the operation kind. */
+    private static final Pattern ACCESS_POLICY_PATH = Pattern.compile(
+        ".*/providers/Microsoft\\.KeyVault/vaults/([^/?]+)/accessPolicies/([^/?]+)/?([?].*)?",
+        Pattern.CASE_INSENSITIVE);
+
+    private static final String ACCESS_POLICY_TYPE = VAULT_TYPE + "/accessPolicies";
+
     private final ArmResourceStore<Map<String, Object>> vaults;
     private final ArmResourceStore<Map<String, Object>> hsms;
     private final GlobalNameRegistry names;
@@ -144,10 +151,11 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     // ── Resource group level ────────────────────────────────────────────────
 
     /**
-     * Only a vault's or managed HSM's own path reaches the resource handlers. A path under one
-     * ({@code .../vaults/{name}/accessPolicies/add} and the like) is a child operation floci-az does not serve, so it
-     * answers ARM 404 rather than writing, reading or deleting the parent: the gate owns names for the declared types
-     * only, so a child PUT treated as the parent's create would write a vault whose name another subscription owns.
+     * Only a vault's or managed HSM's own path reaches the resource handlers, plus a vault's
+     * {@code accessPolicies/{operationKind}}, which updates a vault that exists in the request's own scope. Any other
+     * path under one is a child operation floci-az does not serve, so it answers ARM 404 rather than writing, reading
+     * or deleting the parent: the gate owns names for the declared types only, so a child PUT treated as the parent's
+     * create would write a vault whose name another subscription owns.
      */
     private Response handleResourceGroupPath(AzureRequest req, String path, String method, String sub, String rg) {
         if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
@@ -155,6 +163,16 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         }
         if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
             return list(hsms, new ArmScope(sub, rg));
+        }
+        Matcher accessPolicy = ACCESS_POLICY_PATH.matcher(path);
+        if (accessPolicy.matches()) {
+            Optional<VaultAccessPolicies.Kind> kind = VaultAccessPolicies.Kind.of(accessPolicy.group(2));
+            if (kind.isEmpty()) {
+                return armNotFound(path);
+            }
+            return "PUT".equals(method)
+                ? updateAccessPolicy(req, resourceId(sub, rg, "vaults", accessPolicy.group(1)), kind.get())
+                : Response.status(405).build();
         }
         Matcher resource = RESOURCE_PATH.matcher(path);
         if (!resource.matches()) {
@@ -222,6 +240,47 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         LOG.infov("ARM: created key vault {0} (vaultUri={1})", written.get("name"),
             ArmJson.cast(written.get("properties")).get("vaultUri"));
         return Response.ok(written).build();
+    }
+
+    /**
+     * {@code Vaults_UpdateAccessPolicy}: applies the listed entries to the vault's {@code properties.accessPolicies}
+     * as {@code kind} says ({@link VaultAccessPolicies}), in one store update, and answers 200 with the
+     * {@code VaultAccessPolicyParameters} the spec's example returns: the request's entries under
+     * {@code .../accessPolicies/}. The vault must exist in the request's own scope; the name another subscription owns
+     * is not found here and nothing is written.
+     */
+    private Response updateAccessPolicy(AzureRequest req, ArmResourceId vaultId, VaultAccessPolicies.Kind kind) {
+        List<Map<String, Object>> requested = VaultAccessPolicies.requested(ArmJson.parseBodyLenient(req));
+        Optional<Stored<Map<String, Object>>> updated = vaults.update(vaultId, vault -> {
+            Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(vault.get("properties")));
+            properties.put("accessPolicies",
+                VaultAccessPolicies.apply(kind, accessPolicies(properties), requested));
+            Map<String, Object> document = new LinkedHashMap<>(vault);
+            document.put("properties", properties);
+            return document;
+        });
+        if (updated.isEmpty()) {
+            return armNotFound("vaults/" + vaultId.name());
+        }
+        LOG.infov("ARM: {0} access policies on key vault {1}", kind, updated.get().value().get("name"));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("type", ACCESS_POLICY_TYPE);
+        response.put("id", idOf(updated.get().value()) + "/accessPolicies/");
+        response.put("properties", Map.of("accessPolicies", requested));
+        return Response.ok(response).build();
+    }
+
+    private static List<Map<String, Object>> accessPolicies(Map<String, Object> properties) {
+        if (!(properties.get("accessPolicies") instanceof List<?> entries)) {
+            return List.of();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object entry : entries) {
+            if (entry instanceof Map<?, ?> map) {
+                result.add(ArmJson.cast(map));
+            }
+        }
+        return result;
     }
 
     private Map<String, Object> vaultDocument(Map<String, Object> body, String id, String vaultName) {
