@@ -183,7 +183,8 @@ both get a token, and the first unregistered `client_id` is logged once at `WARN
 | Request | Response |
 |---|---|
 | a `client_id` not registered in the tenant | `400` `unauthorized_client`, `AADSTS700016` |
-| a secret that matches none of the app's secrets | `401` `invalid_client`, `AADSTS7000215` |
+| a secret that matches none of the app's secrets, or one before its `startDateTime` | `401` `invalid_client`, `AADSTS7000215` |
+| a secret that matches but is past its `endDateTime` | `401` `invalid_client`, `AADSTS7000222` |
 | `client_credentials` with neither a secret nor a `client_assertion` | `401` `invalid_client`, `AADSTS7000218` |
 | no `client_id` at all | `400` `invalid_request`, `AADSTS900144` |
 

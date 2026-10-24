@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.entra.DirectoryReader.DirectoryGroup;
+import io.floci.az.services.entra.DirectoryReader.DirectoryServicePrincipal;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.GraphDirectoryStore;
 import io.floci.az.services.entra.TenantResolver;
@@ -16,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +52,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private final DirectoryReader directory;
     private final TenantResolver tenants;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SecureRandom random = new SecureRandom();
 
     @Inject
     public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory,
@@ -75,6 +80,12 @@ public class GraphServiceHandler implements AzureServiceHandler {
         }
         String sub = path.substring("v1.0/".length());
         String[] segments = sub.split("/");
+
+        Response applications = new GraphApplications(store, mapper, random, graphBase(request),
+                config.services().entra().defaultTenantId()).handle(request, segments);
+        if (applications != null) {
+            return applications;
+        }
 
         if (segments.length == 1 && "servicePrincipals".equals(segments[0])) {
             return "GET".equals(request.method())
@@ -104,13 +115,14 @@ public class GraphServiceHandler implements AzureServiceHandler {
     // ── Endpoints ────────────────────────────────────────────────────────────────
 
     /** azurerm calls {@code GET /v1.0/servicePrincipals?$filter=appId eq '{clientId}'} during provider init. */
+    /** The principal the directory holds for the appId, so its id is the {@code oid} the token endpoint issues; a fixed id for an unknown app. */
     private Response servicePrincipals(String filter) {
         String appId = extractAppId(filter);
+        String id = directory.servicePrincipalByAppId(config.services().entra().defaultTenantId(), appId)
+                .map(DirectoryServicePrincipal::id)
+                .orElse("00000000-0000-0000-0000-000000000010");
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("value", List.of(Map.of(
-                "id",    "00000000-0000-0000-0000-000000000010",
-                "appId", appId
-        )));
+        body.put("value", List.of(Map.of("id", id, "appId", appId)));
         return json(body);
     }
 
@@ -142,7 +154,7 @@ public class GraphServiceHandler implements AzureServiceHandler {
                 .toList();
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("@odata.context", "https://graph.microsoft.com/v1.0/$metadata#Collection(Edm.String)");
+        body.put("@odata.context", graphBase(request) + "$metadata#Collection(Edm.String)");
         body.put("value", value);
         return json(body);
     }
@@ -200,6 +212,13 @@ public class GraphServiceHandler implements AzureServiceHandler {
         } catch (IOException e) {
             return Map.of();
         }
+    }
+
+    /** The {@code v1.0} base of the Graph endpoint of the request's cloud, for {@code @odata.context} values. */
+    private static String graphBase(AzureRequest request) {
+        CloudProfile cloud = request.scope() == null
+            ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : request.scope().cloud();
+        return cloud.endpoints().microsoftGraph() + "/v1.0/";
     }
 
     private static String stripSlashes(String path) {

@@ -36,6 +36,9 @@ public enum AadstsError {
     INVALID_CLIENT_SECRET(7000215, "invalid_client", 401,
             "Invalid client secret provided. Ensure the secret being sent in the request is the client secret "
                     + "value, not the client secret ID, for a secret added to app '%s'."),
+    EXPIRED_CLIENT_SECRET(7000222, "invalid_client", 401,
+            "The provided client secret keys for app '%s' are expired. Visit the Azure portal to create new keys "
+                    + "for your app or consider using certificate credentials for added security."),
     MISSING_CLIENT_CREDENTIAL(7000218, "invalid_client", 401,
             "The request body must contain the following parameter: 'client_assertion' or 'client_secret'."),
     SERIALISATION_FAILED(50000, "server_error", 500, "serialisation failed");

@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,7 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <ul>
  *   <li>no {@code client_id}: AADSTS900144</li>
  *   <li>a {@code client_id} not registered in the tenant's directory: AADSTS700016</li>
- *   <li>a secret that matches none of the application's secrets: AADSTS7000215</li>
+ *   <li>a secret that matches none of the application's secrets, or one not yet valid: AADSTS7000215</li>
+ *   <li>a secret that matches but is past its end date: AADSTS7000222</li>
  *   <li>a grant that needs a confidential client (client_credentials) with neither a secret nor
  *       an assertion: AADSTS7000218</li>
  * </ul>
@@ -82,12 +84,18 @@ public class ClientAuthenticator {
         }
         String secret = credentials.clientSecret();
         if (secret != null) {
+            Instant now = Instant.now();
+            boolean expired = false;
             for (PasswordCredential credential : app.get().passwordCredentials()) {
-                if (credential.matches(secret)) {
+                if (!credential.matches(secret)) {
+                    continue;
+                }
+                if (credential.validAt(now)) {
                     return Optional.empty();
                 }
+                expired |= credential.expired(now);
             }
-            return reject(AadstsError.INVALID_CLIENT_SECRET, clientId);
+            return expired ? reject(AadstsError.EXPIRED_CLIENT_SECRET, clientId) : reject(AadstsError.INVALID_CLIENT_SECRET, clientId);
         }
         if (credentials.assertion()) {
             LOG.debugv("Entra: accepting an unverified client_assertion for {0}", clientId);
