@@ -30,6 +30,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -59,6 +61,10 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
 
     /** The data-plane account the ARM-base fallback uses when no single vault names one. */
     private static final String DEFAULT_DATA_PLANE_ACCOUNT = "kv-default";
+
+    /** A vault's or managed HSM's own path, namespace and type in any case: group 1 the type, group 2 the name. */
+    private static final Pattern RESOURCE_PATH = Pattern.compile(
+        ".*/providers/Microsoft\\.KeyVault/(vaults|managedHSMs)/([^/?]+)/?([?].*)?", Pattern.CASE_INSENSITIVE);
 
     private final ArmResourceStore<Map<String, Object>> vaults;
     private final ArmResourceStore<Map<String, Object>> hsms;
@@ -137,40 +143,51 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
 
     // ── Resource group level ────────────────────────────────────────────────
 
+    /**
+     * Only a vault's or managed HSM's own path reaches the resource handlers. A path under one
+     * ({@code .../vaults/{name}/accessPolicies/add} and the like) is a child operation floci-az does not serve, so it
+     * answers ARM 404 rather than writing, reading or deleting the parent: the gate owns names for the declared types
+     * only, so a child PUT treated as the parent's create would write a vault whose name another subscription owns.
+     */
     private Response handleResourceGroupPath(AzureRequest req, String path, String method, String sub, String rg) {
         if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
             return list(vaults, new ArmScope(sub, rg));
         }
-        if (path.contains("/vaults/")) {
-            String vaultName = ArmPaths.resourceName(path, "vaults", "unknown");
-            ArmResourceId id = resourceId(sub, rg, "vaults", vaultName);
-            return switch (method) {
-                case "PUT"    -> createOrUpdateVault(req, id);
-                case "GET"    -> get(vaults, id, "vaults/" + vaultName);
-                case "DELETE" -> {
-                    vaults.delete(id);
-                    yield Response.ok().build();
-                }
-                default       -> Response.status(405).build();
-            };
-        }
         if (path.matches(".*/providers/(?i:Microsoft\\.KeyVault)/managedHSMs([?].*)?")) {
             return list(hsms, new ArmScope(sub, rg));
         }
-        if (path.contains("/managedHSMs/")) {
-            String hsmName = ArmPaths.resourceName(path, "managedHSMs", "unknown");
-            ArmResourceId id = resourceId(sub, rg, "managedHSMs", hsmName);
-            return switch (method) {
-                case "PUT"    -> createOrUpdateManagedHsm(req, id);
-                case "GET"    -> get(hsms, id, "managedHSMs/" + hsmName);
-                case "DELETE" -> {
-                    hsms.delete(id);
-                    yield Response.ok().build();
-                }
-                default       -> Response.status(405).build();
-            };
+        Matcher resource = RESOURCE_PATH.matcher(path);
+        if (!resource.matches()) {
+            return armNotFound(path);
         }
-        return armNotFound(path);
+        String name = resource.group(2);
+        return resource.group(1).equalsIgnoreCase("vaults")
+            ? vault(req, method, resourceId(sub, rg, "vaults", name), name)
+            : managedHsm(req, method, resourceId(sub, rg, "managedHSMs", name), name);
+    }
+
+    private Response vault(AzureRequest req, String method, ArmResourceId id, String vaultName) {
+        return switch (method) {
+            case "PUT"    -> createOrUpdateVault(req, id);
+            case "GET"    -> get(vaults, id, "vaults/" + vaultName);
+            case "DELETE" -> {
+                vaults.delete(id);
+                yield Response.ok().build();
+            }
+            default       -> Response.status(405).build();
+        };
+    }
+
+    private Response managedHsm(AzureRequest req, String method, ArmResourceId id, String hsmName) {
+        return switch (method) {
+            case "PUT"    -> createOrUpdateManagedHsm(req, id);
+            case "GET"    -> get(hsms, id, "managedHSMs/" + hsmName);
+            case "DELETE" -> {
+                hsms.delete(id);
+                yield Response.ok().build();
+            }
+            default       -> Response.status(405).build();
+        };
     }
 
     private static ArmResourceId resourceId(String sub, String rg, String type, String name) {

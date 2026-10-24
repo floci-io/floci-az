@@ -121,6 +121,51 @@ class KeyVaultResourceStoreTest {
     }
 
     @Test
+    void aChildPutFromAnotherSubscriptionNeitherWritesNorTakesTheVault() {
+        put(vault("sub-child-a", "rg", "takenvault"), VAULT_BODY, 200);
+        String policy = "{\"properties\":{\"accessPolicies\":[{\"tenantId\":\"00000000-0000-0000-0000-000000000002\","
+            + "\"objectId\":\"o\",\"permissions\":{\"secrets\":[\"get\"]}}]}}";
+
+        given().contentType("application/json").body(policy)
+            .when().put(vault("sub-child-b", "rg", "takenvault") + "/accessPolicies/add" + API)
+            .then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+        given().when().get(vault("sub-child-b", "rg", "takenvault") + API).then().statusCode(404);
+        given().when().get("/subscriptions/sub-child-b/providers/Microsoft.KeyVault/vaults" + API)
+            .then().statusCode(200).body("value", hasSize(0));
+        // A child DELETE or GET does not reach the parent either.
+        given().when().delete(vault("sub-child-a", "rg", "takenvault") + "/accessPolicies/add" + API)
+            .then().statusCode(404);
+
+        given().when().get(vault("sub-child-a", "rg", "takenvault") + API).then().statusCode(200)
+            .body("id", equalTo(vault("sub-child-a", "rg", "takenvault")))
+            .body("location", equalTo("eastus"))
+            .body("properties.accessPolicies", hasSize(0));
+        given().contentType("application/json").body("{\"name\":\"takenvault\",\"type\":\"Microsoft.KeyVault/vaults\"}")
+            .when().post("/subscriptions/sub-child-b/providers/Microsoft.KeyVault/checkNameAvailability" + API)
+            .then().statusCode(200).body("nameAvailable", equalTo(false));
+        given().contentType("application/json").body(VAULT_BODY)
+            .when().put(vault("sub-child-b", "rg", "takenvault") + API)
+            .then().statusCode(409).body("error.code", equalTo("VaultAlreadyExists"));
+    }
+
+    @Test
+    void aChildPutFromAnotherSubscriptionNeitherWritesNorTakesTheHsm() {
+        put(hsm("sub-child-a", "rg", "takenhsm"), HSM_BODY, 200);
+
+        given().contentType("application/json").body("{\"location\":\"westus\"}")
+            .when().put(hsm("sub-child-b", "rg", "takenhsm") + "/privateEndpointConnections/pe" + API)
+            .then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
+        given().when().get(hsm("sub-child-b", "rg", "takenhsm") + API).then().statusCode(404);
+
+        given().when().get(hsm("sub-child-a", "rg", "takenhsm") + API).then().statusCode(200)
+            .body("id", equalTo(hsm("sub-child-a", "rg", "takenhsm")))
+            .body("location", equalTo("eastus"));
+        given().contentType("application/json").body("{\"name\":\"takenhsm\"}")
+            .when().post("/subscriptions/sub-child-b/providers/Microsoft.KeyVault/checkMhsmNameAvailability" + API)
+            .then().statusCode(200).body("nameAvailable", equalTo(false));
+    }
+
+    @Test
     void checkNameAvailabilityAnswersFromTheRegistry() {
         String check = "/subscriptions/sub-check/providers/Microsoft.KeyVault/checkNameAvailability" + API;
         String request = "{\"name\":\"checkvault\",\"type\":\"Microsoft.KeyVault/vaults\"}";
