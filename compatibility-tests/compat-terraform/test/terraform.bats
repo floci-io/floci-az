@@ -247,3 +247,52 @@ setup() {
     assert_output --partial "\"protocol\":\"TCP\""
     assert_output --partial "memoryInGB"
 }
+
+@test "Terraform: mssql server created with its TLS version and connection policy" {
+    local server="subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Sql/servers/${SQL_NAME}"
+    run arm_get "${server}?api-version=2023-08-01-preview"
+    assert_success
+    assert_output --partial '"fullyQualifiedDomainName":"floci-test-sql.database.windows.net"'
+    assert_output --partial '"minimalTlsVersion":"1.2"'
+
+    run arm_get "${server}/connectionPolicies/default?api-version=2023-08-01-preview"
+    assert_success
+    assert_output --partial '"connectionType":"Default"'
+}
+
+@test "Terraform: mssql database online with an integer size and its settings readable" {
+    local db="subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Sql/servers/${SQL_NAME}/databases/${SQL_DB_NAME}"
+    run arm_get "${db}?api-version=2023-08-01-preview"
+    assert_success
+    assert_output --partial '"status":"Online"'
+    assert_output --partial '"maxSizeBytes":1073741824'
+    assert_output --partial '"currentServiceObjectiveName":"S0"'
+
+    run arm_get "${db}/transparentDataEncryption/current?api-version=2023-08-01-preview"
+    assert_success
+    assert_output --partial '"state":"Enabled"'
+
+    run arm_get "${db}/securityAlertPolicies/default?api-version=2023-08-01-preview"
+    assert_success
+    assert_output --partial '"state":"Disabled"'
+}
+
+@test "Terraform: a plan after apply leaves the mssql server and database unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_mssql_server.sql -target=azurerm_mssql_database.sqldb
+    assert_success
+    assert_output --partial "No changes"
+}
+
+# Runs last: the destroy in teardown_file ignores failures, so the mssql destroy is checked here.
+@test "Terraform: destroying the mssql server removes it and its database" {
+    cd "$TF_DIR"
+    run terraform destroy -input=false -auto-approve -no-color -target=azurerm_mssql_server.sql
+    assert_success
+    assert_output --partial "azurerm_mssql_database.sqldb: Destruction complete"
+    assert_output --partial "azurerm_mssql_server.sql: Destruction complete"
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Sql/servers/${SQL_NAME}"
+    assert_failure
+}
