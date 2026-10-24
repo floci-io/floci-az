@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -34,15 +35,21 @@ import java.util.regex.Pattern;
  * {@code $filter=appId eq '...'}, {@code displayName eq '...'} or {@code startswith(...)}),
  * {@code GET /v1.0/applications(appId='...')}, {@code GET} / {@code PATCH} / {@code DELETE}
  * {@code /v1.0/applications/{id}}, {@code POST /v1.0/applications}, and the {@code addPassword} /
- * {@code removePassword} actions. A created registration gets a service principal too, so the
- * emulator's token endpoint and service-principal discovery know it. A secret is returned once, by
- * {@code addPassword}; the store keeps only its hash.
+ * {@code removePassword} actions. A registration is the full Graph {@code application} object: a create
+ * stores every writable property it is sent and an update replaces the properties it names and keeps
+ * the rest, so clients that write {@code api}, {@code web}, {@code identifierUris} and the like read
+ * them back as sent. A created registration gets a service principal too, so the emulator's token
+ * endpoint and service-principal discovery know it. A secret is returned once, by {@code addPassword};
+ * the store keeps only its hash.
  */
 final class GraphApplications {
 
     static final Pattern BY_APP_ID = Pattern.compile("(?i)^applications\\(appId='([^']+)'\\)$");
     private static final Pattern FILTER_EQ = Pattern.compile("(?i)^\\s*(appId|displayName|id)\\s+eq\\s+'((?:[^']|'')*)'\\s*$");
     private static final Pattern FILTER_STARTS = Pattern.compile("(?i)^\\s*startswith\\((displayName|appId),\\s*'((?:[^']|'')*)'\\)\\s*$");
+    /** Properties Graph computes; a request that writes one is refused. */
+    private static final Set<String> READ_ONLY = Set.of("id", "appId", "createdDateTime", "deletedDateTime",
+        "passwordCredentials", "publisherDomain", "applicationTemplateId", "disabledByMicrosoftStatus");
     private static final String SECRET_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~._-";
 
     private final GraphDirectoryStore store;
@@ -172,9 +179,14 @@ final class GraphApplications {
         if (!(displayName instanceof String name) || name.isBlank()) {
             return graphError(400, "Request_BadRequest", "A displayName is required to create an application.");
         }
+        Optional<String> readOnly = readOnlyProperty(body);
+        if (readOnly.isPresent()) {
+            return graphError(400, "Request_BadRequest", "Property '" + readOnly.get() + "' is read-only and cannot be set.");
+        }
         String appId = UUID.randomUUID().toString();
         String objectId = UUID.randomUUID().toString();
         DirectoryObject app = GraphDirectoryStore.application(tenantId, objectId, appId, name, List.of());
+        writeProperties(app.props(), body);
         synchronized (store) {
             store.put(app);
             store.put(GraphDirectoryStore.servicePrincipal(tenantId, TokenIssuer.deterministicGuid("sp:" + appId), appId, name));
@@ -190,11 +202,12 @@ final class GraphApplications {
         if (body.containsKey("displayName") && !(body.get("displayName") instanceof String s && !s.isBlank())) {
             return graphError(400, "Request_BadRequest", "displayName must be a non-empty string.");
         }
-        Optional<DirectoryObject> updated = update(app.id(), current -> {
-            if (body.get("displayName") instanceof String s) {
-                current.put("displayName", s);
-            }
-        });
+        Optional<String> readOnly = readOnlyProperty(body);
+        if (readOnly.isPresent()) {
+            return graphError(400, "Request_BadRequest", "Property '" + readOnly.get() + "' is read-only and cannot be set.");
+        }
+        // Graph semantics: the properties named are replaced, the rest of the object is kept.
+        Optional<DirectoryObject> updated = update(app.id(), current -> writeProperties(current, body));
         return updated.isEmpty() ? notFound(app.id()) : Response.status(204).build();
     }
 
@@ -293,6 +306,25 @@ final class GraphApplications {
         }
     }
 
+    private static Optional<String> readOnlyProperty(Map<String, Object> body) {
+        return body.keySet().stream().filter(READ_ONLY::contains).findFirst();
+    }
+
+    /** Writes every property of {@code body} onto {@code props}, a null clearing it; OData annotations are not properties. */
+    private void writeProperties(ObjectNode props, Map<String, Object> body) {
+        for (Map.Entry<String, Object> entry : body.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("@") || READ_ONLY.contains(key)) {
+                continue;
+            }
+            if (entry.getValue() == null) {
+                props.remove(key);
+            } else {
+                props.set(key, mapper.valueToTree(entry.getValue()));
+            }
+        }
+    }
+
     private static ArrayNode credentials(ObjectNode props) {
         JsonNode existing = props.get(GraphDirectoryStore.PASSWORD_CREDENTIALS);
         if (existing instanceof ArrayNode array) {
@@ -303,26 +335,51 @@ final class GraphApplications {
 
     // ── Shapes ──────────────────────────────────────────────────────────────────
 
-    /** The Graph {@code application} resource; {@code secretText} is never returned here. */
+    /**
+     * The Graph {@code application} resource: Graph's defaults for a new registration, overlaid with every
+     * property the registration was written with; {@code secretText} is never returned here.
+     */
     Map<String, Object> application(DirectoryObject app, boolean withContext) {
         Map<String, Object> body = new LinkedHashMap<>();
         if (withContext) {
             body.put("@odata.context", baseContext + "$metadata#applications/$entity");
         }
         body.put("id", app.id());
+        body.put("deletedDateTime", null);
         body.put("appId", app.text("appId"));
         body.put("displayName", app.text("displayName"));
         body.put("createdDateTime", app.created() == null ? null : app.created().toString());
         body.put("signInAudience", "AzureADMyOrg");
         body.put("identifierUris", List.of());
+        Map<String, Object> api = new LinkedHashMap<>();
+        api.put("acceptMappedClaims", null);
+        api.put("knownClientApplications", List.of());
+        api.put("requestedAccessTokenVersion", null);
+        api.put("oauth2PermissionScopes", List.of());
+        api.put("preAuthorizedApplications", List.of());
+        body.put("api", api);
+        Map<String, Object> web = new LinkedHashMap<>();
+        web.put("homePageUrl", null);
+        web.put("logoutUrl", null);
+        web.put("redirectUris", List.of());
+        web.put("implicitGrantSettings", Map.of("enableAccessTokenIssuance", false, "enableIdTokenIssuance", false));
+        body.put("web", web);
+        body.put("spa", Map.of("redirectUris", List.of()));
+        body.put("publicClient", Map.of("redirectUris", List.of()));
+        body.put("requiredResourceAccess", List.of());
+        body.put("keyCredentials", List.of());
+        body.put("tags", List.of());
+        body.put("notes", null);
+        app.props().fields().forEachRemaining(field -> {
+            if (!field.getKey().equals(GraphDirectoryStore.PASSWORD_CREDENTIALS)) {
+                body.put(field.getKey(), mapper.convertValue(field.getValue(), Object.class));
+            }
+        });
         List<Map<String, Object>> credentials = new ArrayList<>();
         for (JsonNode credential : app.props().path(GraphDirectoryStore.PASSWORD_CREDENTIALS)) {
             credentials.add(passwordCredential(credential));
         }
         body.put("passwordCredentials", credentials);
-        body.put("keyCredentials", List.of());
-        body.put("web", Map.of("redirectUris", List.of()));
-        body.put("tags", List.of());
         return body;
     }
 

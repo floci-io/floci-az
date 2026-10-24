@@ -118,6 +118,55 @@ class GraphApplicationsTest {
     }
 
     @Test
+    void storesTheWritablePropertiesItIsSentAndKeepsThemOnUpdate() {
+        // What azuread_application_registration writes and reads back, so a plan after apply shows no diff.
+        String objectId = given().contentType("application/json").body("""
+                {"displayName": "registered", "signInAudience": "AzureADMultipleOrgs",
+                 "api": {"requestedAccessTokenVersion": 2},
+                 "identifierUris": ["api://registered"],
+                 "web": {"redirectUris": ["https://registered.example/callback"]},
+                 "tags": ["managed"]}""")
+                .when().post("/v1.0/applications")
+                .then().statusCode(201)
+                .body("signInAudience", equalTo("AzureADMultipleOrgs"))
+                .body("api.requestedAccessTokenVersion", equalTo(2))
+                .body("identifierUris", equalTo(java.util.List.of("api://registered")))
+                .body("web.redirectUris", equalTo(java.util.List.of("https://registered.example/callback")))
+                .body("tags", equalTo(java.util.List.of("managed")))
+                .extract().path("id");
+        given().when().get("/v1.0/applications/" + objectId)
+                .then().statusCode(200)
+                .body("api.requestedAccessTokenVersion", equalTo(2))
+                .body("web.redirectUris", equalTo(java.util.List.of("https://registered.example/callback")))
+                .body("spa.redirectUris", hasSize(0))
+                .body("requiredResourceAccess", hasSize(0));
+
+        // An update replaces the properties it names and keeps the rest.
+        given().contentType("application/json")
+                .body("{\"web\": {\"homePageUrl\": \"https://registered.example\"}, \"tags\": [], \"notes\": \"ci\"}")
+                .when().patch("/v1.0/applications/" + objectId).then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId)
+                .then().statusCode(200)
+                .body("displayName", equalTo("registered"))
+                .body("api.requestedAccessTokenVersion", equalTo(2))
+                .body("identifierUris", equalTo(java.util.List.of("api://registered")))
+                .body("web.homePageUrl", equalTo("https://registered.example"))
+                .body("web.redirectUris", nullValue())
+                .body("tags", hasSize(0))
+                .body("notes", equalTo("ci"));
+        given().contentType("application/json").body("{\"notes\": null}")
+                .when().patch("/v1.0/applications/" + objectId).then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId).then().statusCode(200).body("notes", nullValue());
+
+        // Computed properties cannot be written.
+        given().contentType("application/json").body("{\"appId\": \"00000000-0000-0000-0000-00000000beef\"}")
+                .when().patch("/v1.0/applications/" + objectId).then().statusCode(400)
+                .body("error.code", equalTo("Request_BadRequest"));
+        given().contentType("application/json").body("{\"displayName\": \"x\", \"id\": \"00000000-0000-0000-0000-00000000beef\"}")
+                .when().post("/v1.0/applications").then().statusCode(400);
+    }
+
+    @Test
     void rejectsBadRequests() {
         given().contentType("application/json").body("{}")
                 .when().post("/v1.0/applications").then().statusCode(400)

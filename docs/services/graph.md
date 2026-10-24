@@ -18,8 +18,8 @@ group) is available here too.
 | `DELETE /v1.0/groups/{id}/members/{id}/$ref` | Remove a member from a group |
 | `GET /v1.0/applications` | App registrations, with `$filter=appId eq '{id}'`, `displayName eq '{name}'` or `startswith(displayName,'{prefix}')` |
 | `GET /v1.0/applications(appId='{id}')` | One registration by application (client) id |
-| `GET` / `PATCH` / `DELETE /v1.0/applications/{id}` | One registration by object id (`PATCH` updates `displayName`) |
-| `POST /v1.0/applications` | Create a registration from `{"displayName": ...}`; a service principal is created with it |
+| `GET` / `PATCH` / `DELETE /v1.0/applications/{id}` | One registration by object id (`PATCH` replaces the properties it names and keeps the rest, a `null` clearing one) |
+| `POST /v1.0/applications` | Create a registration from the `application` object sent (`displayName` required; every writable property is stored and read back); a service principal is created with it |
 | `POST /v1.0/applications/{id}/addPassword` | Add a client secret: answers the `passwordCredential` with its `secretText` once |
 | `POST /v1.0/applications/{id}/removePassword` | Remove a client secret by `keyId` |
 

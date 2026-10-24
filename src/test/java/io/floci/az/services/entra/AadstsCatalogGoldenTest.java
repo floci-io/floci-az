@@ -63,6 +63,10 @@ class AadstsCatalogGoldenTest {
                 new Entry(7000215, "invalid_client", 401,
                         "Invalid client secret provided. Ensure the secret being sent in the request is the client "
                                 + "secret value, not the client secret ID, for a secret added to app '%s'."));
+        GOLDEN.put(AadstsError.EXPIRED_CLIENT_SECRET,
+                new Entry(7000222, "invalid_client", 401,
+                        "The provided client secret keys for app '%s' are expired. Visit the Azure portal to create "
+                                + "new keys for your app or consider using certificate credentials for added security."));
         GOLDEN.put(AadstsError.MISSING_CLIENT_CREDENTIAL,
                 new Entry(7000218, "invalid_client", 401,
                         "The request body must contain the following parameter: 'client_assertion' or "
