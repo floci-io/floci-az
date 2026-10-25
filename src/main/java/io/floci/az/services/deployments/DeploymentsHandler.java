@@ -93,6 +93,11 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
 
     /** The deployments marker, matched in any case: ARM resolves namespaces and types case-insensitively. */
     private static final String MARKER = ArmPaths.providerMarker(NAMESPACE) + "deployments";
+    private static final String TEMPLATE_HASH_MARKER = ArmPaths.providerMarker(NAMESPACE) + "calculateTemplateHash";
+
+    /** {@code providers/Microsoft.Resources/calculateTemplateHash}, at tenant level. */
+    private static final Pattern TEMPLATE_HASH = Pattern.compile(
+        "providers/microsoft\\.resources/calculatetemplatehash/?", Pattern.CASE_INSENSITIVE);
 
     /** {@code subscriptions/{sub}/resourcegroups/{rg}/providers/Microsoft.Resources/deployments[/{name}[/{action}]]}. */
     private static final Pattern PATH = Pattern.compile(
@@ -192,9 +197,13 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         return NO_PROVIDER_SEGMENT.matcher(query < 0 ? path : path.substring(0, query)).matches();
     }
 
-    /** A path under {@code /providers/Microsoft.Resources/deployments}, at any scope. */
+    /**
+     * A path under {@code /providers/Microsoft.Resources/deployments}, at any scope, or the tenant-level
+     * {@code /providers/Microsoft.Resources/calculateTemplateHash}.
+     */
     static boolean isDeploymentPath(String path) {
-        return ArmPaths.indexOfIgnoreCase(path, MARKER) >= 0;
+        return ArmPaths.indexOfIgnoreCase(path, MARKER) >= 0
+            || ArmPaths.indexOfIgnoreCase(path, TEMPLATE_HASH_MARKER) >= 0;
     }
 
     @Override
@@ -202,6 +211,10 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         String path = req.resourcePath();
         int query = path.indexOf('?');
         String bare = query < 0 ? path : path.substring(0, query);
+        if (TEMPLATE_HASH.matcher(bare).matches()) {
+            return "POST".equals(req.method().toUpperCase(Locale.ROOT)) ? calculateTemplateHash(req)
+                : Response.status(405).build();
+        }
         Matcher operationsPath = OPERATIONS.matcher(bare);
         if (operationsPath.matches()) {
             if (!"GET".equals(req.method().toUpperCase(Locale.ROOT))) {
@@ -348,6 +361,21 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         body.withObjectProperty("properties").put("provisioningState", state);
         return new StoredDeployment(body, stored.template(), stored.operationId(), stored.canceled(),
             stored.operations());
+    }
+
+    /**
+     * {@code Deployments_CalculateTemplateHash}: the body is the template itself, and the answer its minified form and
+     * its hash, the same {@link TemplateHash} a deployment of that template reports as {@code templateHash}.
+     */
+    private Response calculateTemplateHash(AzureRequest req) {
+        JsonNode template = body(req);
+        if (template == null) {
+            return invalidContent();
+        }
+        ObjectNode answer = JsonNodeFactory.instance.objectNode();
+        answer.put("minifiedTemplate", TemplateHash.minified(template));
+        answer.put("templateHash", TemplateHash.of(template));
+        return json(200, answer);
     }
 
     /** {@code DeploymentOperations_List} and {@code DeploymentOperations_Get}. */

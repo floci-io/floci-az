@@ -879,13 +879,9 @@ public class DeploymentEngine {
 
     // ── Helpers ────────────────────────────────────────────────────────────────────
 
-    /** A stable decimal hash of the template, in the form Azure gives {@code templateHash}. */
+    /** The template's {@link TemplateHash}, the one {@code calculateTemplateHash} also answers. */
     static String templateHash(DeploymentTemplate template) {
-        long hash = 1125899906842597L;
-        for (byte b : template.template().toString().getBytes(StandardCharsets.UTF_8)) {
-            hash = 31 * hash + b;
-        }
-        return Long.toUnsignedString(hash);
+        return TemplateHash.of(template.template());
     }
 
     private static JsonNode evaluate(JsonNode value, TemplateScope scope) {

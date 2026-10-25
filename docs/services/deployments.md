@@ -41,6 +41,7 @@ GET    .../deployments/{name}/operations[/{operationId}]           # also withou
 POST   .../deployments/{name}/validate           # 200, or 400 with the template error
 POST   .../deployments/{name}/exportTemplate     # {"template": ...}
 POST   .../deployments/{name}/cancel             # 204 while it runs
+POST   /providers/Microsoft.Resources/calculateTemplateHash   # {"minifiedTemplate", "templateHash"}
 ```
 
 The resource group must exist, or the answer is `404 ResourceGroupNotFound`. Every endpoint is served at
@@ -179,6 +180,10 @@ Deployments at management-group and tenant scope and `whatIf` answer `404`.
 - **Delete** answers `204` at once; Azure answers `202` and lets the client poll.
 - **The first failing resource stops the deployment.** Azure goes on with the resources that do not depend
   on it.
+- **`templateHash`** is a 64-bit hash of the minified, uppercased template, so it is the same for a deployment
+  and for `calculateTemplateHash` of the same template whatever its whitespace or casing, which is what azd
+  compares to skip an unchanged deployment. Azure does not publish its algorithm, so the value differs from
+  Azure's.
 - **`uniqueString` and `guid`** have Azure's length and form but not its values: `uniqueString` is 13
   lowercase base32 characters from a SHA-256 hash, `guid` a name-based UUID. A template that only needs
   stable unique names works; one that compares against a value computed in Azure does not.

@@ -432,6 +432,19 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void calculateTemplateHashAgreesWithTheDeploymentsOwnHash() throws Exception {
+        String template = DEPLOYMENT.substring(DEPLOYMENT.indexOf("\"template\": ") + "\"template\": ".length(),
+            DEPLOYMENT.lastIndexOf("}}"));
+        Response hashed = json(template).when().post("/providers/Microsoft.Resources/calculateTemplateHash" + API);
+        hashed.then().statusCode(200)
+            .body("minifiedTemplate", startsWith("{\"$SCHEMA\":"));
+
+        assertEquals("Succeeded", awaitTerminal(put("hashed", DEPLOYMENT)));
+        given().when().get(DEPLOYMENTS + "/hashed" + API).then().statusCode(200)
+            .body("properties.templateHash", equalTo(hashed.path("templateHash")));
+    }
+
+    @Test
     void aMissingResourceGroupIsResourceGroupNotFound() {
         json(DEPLOYMENT).when()
             .put("/subscriptions/" + SUB + "/resourceGroups/no-such-rg/providers/Microsoft.Resources/deployments/d"
