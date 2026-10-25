@@ -96,6 +96,18 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void theAzCliBodyWithItsUnquotedTemplateKeyIsAccepted() {
+        // What JsonCTemplatePolicy sends: the JSON of the other properties, then ", template:" and the raw file.
+        String body = "{\"properties\": {\"mode\": \"Incremental\", \"parameters\": {\"accountName\": "
+            + "{\"value\": \"deploysa0001\"}}, template:{\r\n  // raw file text\r\n  \"contentVersion\": \"1.0.0.0\",\r\n"
+            + "  \"parameters\": {\"accountName\": {\"type\": \"string\"}},\r\n  \"resources\": []\r\n}}}";
+
+        json(body).when().post(DEPLOYMENTS + "/azcli/validate" + API).then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Succeeded"))
+            .body("properties.parameters.accountName.value", equalTo("deploysa0001"));
+    }
+
+    @Test
     void validateChecksWithoutCreatingAnything() {
         json(DEPLOYMENT).when().post(DEPLOYMENTS + "/dep2/validate" + API).then().statusCode(200)
             .body("properties.provisioningState", equalTo("Succeeded"))

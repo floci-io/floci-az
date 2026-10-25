@@ -51,6 +51,8 @@ import java.util.regex.Pattern;
  *       {@code POST exportTemplate} ({@code {"template": ...}})</li>
  * </ul>
  *
+ * <p>The body is read as JSONC, the way the az CLI sends it (see {@link #LENIENT}).
+ *
  * <p>{@code whatIf}, {@code cancel}, {@code operations} and {@code operationStatuses}, and deployments at any other
  * scope, answer {@code 404} in Phase 1. Deployments live in memory, as the rest of ARM state does.
  */
@@ -59,8 +61,13 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOG = Logger.getLogger(DeploymentsHandler.class);
 
-    /** The az CLI splices the template file's raw text into the body, so it may hold comments. */
+    /**
+     * The az CLI's {@code JsonCTemplatePolicy} splices the template file's raw text into the body behind an
+     * unquoted key ({@code ..., template:{...}}}), so the body is JSONC: unquoted field names, comments and
+     * trailing commas.
+     */
     private static final JsonMapper LENIENT = JsonMapper.builder()
+        .enable(JsonReadFeature.ALLOW_UNQUOTED_FIELD_NAMES)
         .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
         .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
         .build();
