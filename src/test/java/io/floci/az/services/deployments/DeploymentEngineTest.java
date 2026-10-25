@@ -1,0 +1,274 @@
+package io.floci.az.services.deployments;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.floci.az.core.ArmRouter;
+import io.floci.az.core.AzureRequest;
+import io.floci.az.core.arm.ArmTypeRegistry;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.core.directory.ResourceGroups;
+import jakarta.enterprise.inject.Instance;
+import jakarta.ws.rs.core.Response;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+@DisplayName("DeploymentEngine: ordering, dispatch, outputs and failures through the internal dispatch seam")
+class DeploymentEngineTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String SUB = "00000000-0000-0000-0000-0000000000e1";
+    private static final String TENANT = "00000000-0000-0000-0000-000000000002";
+    private static final String RG_ID = "/subscriptions/" + SUB + "/resourceGroups/rg1";
+    private static final String SA_ID = RG_ID + "/providers/Microsoft.Storage/storageAccounts/sa1";
+    private static final String CONTAINER_ID = SA_ID + "/blobServices/default/containers/c1";
+
+    /** One request the engine sent: method, path, api-version and body. */
+    private record Sent(String method, String path, String apiVersion, JsonNode body) {
+    }
+
+    private final List<Sent> sent = new ArrayList<>();
+    private Function<Sent, Response> answer;
+    private DeploymentEngine engine;
+
+    @BeforeEach
+    @SuppressWarnings("unchecked")
+    void engine() {
+        ArmRouter router = mock(ArmRouter.class);
+        when(router.dispatchInternal(anyString(), anyString(), anyMap(), anyMap(), any(), any()))
+            .thenAnswer(invocation -> record(invocation.getArgument(0), invocation.getArgument(1),
+                invocation.getArgument(2), invocation.getArgument(4)));
+        when(router.dispatchInternal(anyString(), anyString(), anyMap(), (AzureRequest) any()))
+            .thenAnswer(invocation -> record(invocation.getArgument(0), invocation.getArgument(1),
+                invocation.getArgument(2), null));
+        Instance<ArmRouter> instance = mock(Instance.class);
+        when(instance.get()).thenReturn(router);
+        AzureDirectory directory = mock(AzureDirectory.class);
+        when(directory.tenantOfSubscription(SUB)).thenReturn(TENANT);
+        when(directory.cloudOfTenant(TENANT)).thenReturn(CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD));
+        when(directory.subscription(SUB)).thenReturn(Optional.empty());
+        when(directory.tenant(TENANT)).thenReturn(Optional.empty());
+        engine = new DeploymentEngine(instance, new ResourceGroups(null), directory, ArmTypeRegistry.empty(), MAPPER);
+        answer = request -> Response.ok(echo(request)).build();
+    }
+
+    private Response record(String method, String path, Map<String, String> query, byte[] body) throws Exception {
+        Sent request = new Sent(method, path.startsWith("/") ? path : "/" + path, query.get("api-version"),
+            body == null ? null : MAPPER.readTree(new String(body, StandardCharsets.UTF_8)));
+        sent.add(request);
+        return answer.apply(request);
+    }
+
+    /** A handler that answers a PUT with its body plus an id and Succeeded, and a GET likewise. */
+    private static JsonNode echo(Sent request) {
+        ObjectNode body = request.body() == null
+            ? MAPPER.createObjectNode() : request.body().deepCopy();
+        body.put("id", request.path());
+        body.withObjectProperty("properties").put("provisioningState", "Succeeded");
+        if (request.path().endsWith("/sa1")) {
+            body.withObjectProperty("properties").withObjectProperty("primaryEndpoints").put("blob", "https://sa1.blob.example/");
+        }
+        return body;
+    }
+
+    private DeploymentEngine.Request request(String properties) throws Exception {
+        return new DeploymentEngine.Request(SUB, "rg1", "dep1", MAPPER.readTree(properties), null);
+    }
+
+    private static final String STORAGE_TEMPLATE = """
+        {"mode": "Incremental", "parameters": {"name": {"value": "sa1"}}, "template": {
+          "parameters": {"name": {"type": "string"}, "secret": {"type": "securestring", "defaultValue": "s3"}},
+          "variables": {"container": "c1"},
+          "resources": [
+            {"type": "Microsoft.Storage/storageAccounts/blobServices/containers", "apiVersion": "2023-01-01",
+             "name": "[concat(parameters('name'), '/default/', variables('container'))]",
+             "dependsOn": ["[resourceId('Microsoft.Storage/storageAccounts', parameters('name'))]"],
+             "properties": {"publicAccess": "None"}},
+            {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+             "name": "[parameters('name')]", "location": "eastus", "kind": "StorageV2",
+             "sku": {"name": "Standard_LRS"}, "comments": "the account"}],
+          "outputs": {
+            "blob": {"type": "string", "value": "[reference(parameters('name')).primaryEndpoints.blob]"},
+            "id": {"type": "string", "value": "[resourceId('Microsoft.Storage/storageAccounts', 'sa1')]"}}}}
+        """;
+
+    @Test
+    void resourcesAreSentInDependencyOrderWithTheirApiVersionAndWithoutTemplateKeys() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        assertEquals("Succeeded", result.provisioningState());
+        assertEquals("PUT", sent.get(0).method());
+        assertEquals(SA_ID, sent.get(0).path());
+        assertEquals("2023-01-01", sent.get(0).apiVersion());
+        assertEquals("{\"location\":\"eastus\",\"kind\":\"StorageV2\",\"sku\":{\"name\":\"Standard_LRS\"}}",
+            sent.get(0).body().toString());
+        assertEquals(CONTAINER_ID, sent.get(1).path());
+        assertEquals("{\"properties\":{\"publicAccess\":\"None\"}}", sent.get(1).body().toString());
+        assertEquals(List.of(SA_ID, CONTAINER_ID), result.outputResources());
+    }
+
+    @Test
+    void outputsAreEvaluatedAfterTheResourcesExistAndReadThemLive() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        assertEquals("https://sa1.blob.example/", result.outputs().path("blob").path("value").asText());
+        assertEquals("string", result.outputs().path("blob").path("type").asText());
+        assertEquals(SA_ID, result.outputs().path("id").path("value").asText());
+        Sent read = sent.get(sent.size() - 1);
+        assertEquals("GET", read.method());
+        assertEquals(SA_ID, read.path());
+        assertEquals("2023-01-01", read.apiVersion(), "a reference by name uses the template's api-version");
+    }
+
+    @Test
+    void parametersAreEchoedWithAzuresTypeNamesAndSecureValuesLeftOut() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        assertEquals("String", result.parameters().path("name").path("type").asText());
+        assertEquals("sa1", result.parameters().path("name").path("value").asText());
+        assertEquals("SecureString", result.parameters().path("secret").path("type").asText());
+        assertFalse(result.parameters().path("secret").has("value"));
+        assertNull(result.error());
+        assertEquals("Microsoft.Storage", result.providers().get(0).path("namespace").asText());
+        assertEquals(CONTAINER_ID, result.dependencies().get(0).path("id").asText());
+        assertEquals(SA_ID, result.dependencies().get(0).path("dependsOn").get(0).path("id").asText());
+    }
+
+    @Test
+    void aHandlerErrorFailsTheDeploymentWithAzuresErrorAndStopsIt() throws Exception {
+        answer = request -> Response.status(400).entity(Map.of("error",
+            Map.of("code", "AccountNameInvalid", "message", "bad name"))).build();
+
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        assertEquals("Failed", result.provisioningState());
+        assertEquals(1, sent.size(), "nothing after the failed resource is sent");
+        assertEquals("DeploymentFailed", result.error().path("code").asText());
+        assertEquals(RG_ID + "/providers/Microsoft.Resources/deployments/dep1", result.error().path("target").asText());
+        assertEquals(DeploymentEngine.DEPLOYMENT_FAILED_MESSAGE, result.error().path("message").asText());
+        JsonNode detail = result.error().path("details").get(0);
+        assertEquals("AccountNameInvalid", detail.path("code").asText());
+        assertEquals(SA_ID, detail.path("target").asText());
+        assertTrue(result.outputs().isEmpty());
+    }
+
+    @Test
+    void anAcceptedResourceIsPolledToItsTerminalState() throws Exception {
+        answer = request -> {
+            if (request.method().equals("PUT") && request.path().equals(SA_ID)) {
+                return Response.status(202).build();
+            }
+            return Response.ok(echo(request)).build();
+        };
+
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        assertEquals("Succeeded", result.provisioningState());
+        assertEquals("GET", sent.get(1).method());
+        assertEquals(SA_ID, sent.get(1).path());
+    }
+
+    @Test
+    void aFailedTerminalStateIsAResourceDeploymentFailure() throws Exception {
+        answer = request -> {
+            ObjectNode body = (ObjectNode)
+                echo(request);
+            body.withObjectProperty("properties").put("provisioningState", "Failed");
+            return Response.ok(body).build();
+        };
+
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        JsonNode detail = result.error().path("details").get(0);
+        assertEquals("ResourceDeploymentFailure", detail.path("code").asText());
+        assertEquals("The resource write operation failed to complete successfully, because it reached terminal "
+            + "provisioning state 'Failed'.", detail.path("message").asText());
+    }
+
+    @Test
+    void aFalseConditionSkipsTheResource() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "skipped",
+               "condition": "[equals('a', 'b')]", "location": "eastus"},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "kept",
+               "condition": true, "location": "eastus"}]}}
+            """));
+
+        assertEquals(1, sent.size());
+        assertTrue(sent.getFirst().path().endsWith("/kept"));
+        assertEquals(1, result.outputResources().size());
+    }
+
+    @Test
+    void aReferenceByNameIsAnImplicitDependency() throws Exception {
+        engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Web/sites", "apiVersion": "2022-03-01", "name": "app", "location": "eastus",
+               "properties": {"blob": "[reference('sa1').primaryEndpoints.blob]"}},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus"}]}}
+            """));
+
+        assertEquals(SA_ID, sent.get(0).path());
+        assertEquals("GET", sent.get(1).method());
+        assertTrue(sent.get(2).path().endsWith("/Microsoft.Web/sites/app"));
+        assertEquals("https://sa1.blob.example/", sent.get(2).body().path("properties").path("blob").asText());
+    }
+
+    @Test
+    void validateChecksEverythingAndSendsNothing() throws Exception {
+        List<String> ids = engine.validate(request(STORAGE_TEMPLATE));
+
+        assertEquals(List.of(SA_ID, CONTAINER_ID), ids);
+        assertTrue(sent.isEmpty());
+    }
+
+    @Test
+    void completeModeAndLinkedTemplatesAreRefused() {
+        assertEquals("DeploymentModeNotSupported", assertThrows(TemplateException.class,
+            () -> engine.validate(request("{\"mode\": \"Complete\", \"template\": {}}"))).code());
+        assertEquals("InvalidTemplate", assertThrows(TemplateException.class,
+            () -> engine.validate(request("{\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"x\"}}"))).code());
+        assertEquals("InvalidTemplate", assertThrows(TemplateException.class,
+            () -> engine.validate(request("{\"template\": {}}"))).code());
+    }
+
+    @Test
+    void parameterValuesAreChecked() {
+        String template = "\"template\": {\"parameters\": {\"sku\": {\"type\": \"string\", "
+            + "\"allowedValues\": [\"Standard_LRS\", \"Premium_LRS\"]}}}";
+        TemplateException missing = assertThrows(TemplateException.class,
+            () -> engine.validate(request("{\"mode\": \"Incremental\", " + template + "}")));
+        assertTrue(missing.getMessage().contains("The value for the template parameter 'sku' is not provided"),
+            missing.getMessage());
+        TemplateException notAllowed = assertThrows(TemplateException.class, () -> engine.validate(request(
+            "{\"mode\": \"Incremental\", \"parameters\": {\"sku\": {\"value\": \"Basic\"}}, " + template + "}")));
+        assertTrue(notAllowed.getMessage().contains("The parameter value is not part of the allowed values"),
+            notAllowed.getMessage());
+        assertThrows(TemplateException.class, () -> engine.validate(request(
+            "{\"mode\": \"Incremental\", \"parameters\": {\"sku\": {\"value\": 3}}, " + template + "}")));
+        assertThrows(TemplateException.class, () -> engine.validate(request(
+            "{\"mode\": \"Incremental\", \"parameters\": {\"other\": {\"value\": \"x\"}}, " + template + "}")));
+    }
+}
