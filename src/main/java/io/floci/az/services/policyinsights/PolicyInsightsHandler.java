@@ -6,6 +6,7 @@ import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.managementgroups.ManagementGroupStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -148,7 +149,7 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
     // ── Query results ───────────────────────────────────────────────────────────
 
     private Response queryResults(AzureRequest req, String scope) {
-        Predicate<PolicyState> inScope = scopePredicate(scope);
+        Predicate<PolicyState> inScope = scopePredicate(scope, callerTenantId(req));
         Predicate<PolicyState> filter;
         try {
             filter = parseFilter(req.queryParams().get("$filter"));
@@ -197,7 +198,7 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
     }
 
     private Response summarize(AzureRequest req, String scope) {
-        Predicate<PolicyState> inScope = scopePredicate(scope);
+        Predicate<PolicyState> inScope = scopePredicate(scope, callerTenantId(req));
         Predicate<PolicyState> filter;
         try {
             filter = parseFilter(req.queryParams().get("$filter"));
@@ -294,11 +295,12 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
     // ── Scope and filter ────────────────────────────────────────────────────────
 
     /**
-     * The states a scope covers: a management group covers the subscriptions placed under it or one of its
-     * descendants, a subscription or resource group its resources, a resource itself and its children, and
-     * an assignment or definition the states it produced.
+     * The states a scope covers: a management group covers the subscriptions of the caller's tenant placed
+     * under it or one of its descendants in that tenant's hierarchy (another tenant's group of the same name
+     * is a different group), a subscription or resource group its resources, a resource itself and its
+     * children, and an assignment or definition the states it produced.
      */
-    private Predicate<PolicyState> scopePredicate(String scope) {
+    private Predicate<PolicyState> scopePredicate(String scope, String tenant) {
         String lower = scope.toLowerCase(Locale.ROOT);
         Matcher assignment = ASSIGNMENT_SCOPE.matcher(scope);
         if (assignment.find()) {
@@ -311,15 +313,19 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
         }
         if (lower.startsWith(MANAGEMENT_GROUP_SCOPE)) {
             String groupName = scope.substring(MANAGEMENT_GROUP_SCOPE.length());
-            return state -> {
-                String tenant = directory.tenantOfSubscription(state.subscriptionId());
-                return managementGroups.isWithin(tenant, managementGroups.parentOf(tenant, state.subscriptionId()).name(), groupName);
-            };
+            return state -> tenant.equalsIgnoreCase(directory.tenantOfSubscription(state.subscriptionId()))
+                && managementGroups.isWithin(tenant, managementGroups.parentOf(tenant, state.subscriptionId()).name(), groupName);
         }
         return state -> {
             String id = state.resourceId().toLowerCase(Locale.ROOT);
             return id.equals(lower) || id.startsWith(lower + "/");
         };
+    }
+
+    /** The tenant whose hierarchy a management-group scope names: the token's tenant when the directory holds it, else the default. */
+    private String callerTenantId(AzureRequest req) {
+        String tokenTenantId = req.scope() == null ? null : req.scope().tokenTenantId();
+        return directory.tenant(tokenTenantId).map(Tenant::id).orElse(directory.defaultTenantId());
     }
 
     private static Predicate<PolicyState> parseFilter(String filter) {
