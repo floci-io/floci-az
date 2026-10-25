@@ -454,7 +454,7 @@ public class DeploymentEngine {
 
             @Override
             public JsonNode list(String resourceId, String action, String apiVersion, JsonNode body) {
-                return DeploymentEngine.this.list(request, resourceId, action, apiVersion, body);
+                return DeploymentEngine.this.list(request, nodes, resourceId, action, apiVersion, body);
             }
         };
         return new DeploymentScope(template, supplied,
@@ -575,15 +575,7 @@ public class DeploymentEngine {
 
     private JsonNode reference(Request request, DeploymentTemplate template, List<DependencyGraph.Node> nodes,
                                String nameOrId, String apiVersion, boolean full) {
-        DependencyGraph.Node declared = nodes.stream()
-            .filter(node -> DependencyGraph.isName(nameOrId) ? node.name().equalsIgnoreCase(nameOrId)
-                : ArmResourcePath.canonical(node.id()).equalsIgnoreCase(ArmResourcePath.canonical(nameOrId)))
-            .findFirst()
-            .orElse(null);
-        if (declared == null && DependencyGraph.isName(nameOrId)) {
-            throw DeploymentTemplate.invalid("The template reference '" + nameOrId
-                + "' is not valid: no resource in the template has this name.");
-        }
+        DependencyGraph.Node declared = declared(nodes, nameOrId);
         String id = declared == null ? ArmResourcePath.canonical(nameOrId) : declared.id();
         String version = apiVersion;
         if (version == null && declared != null) {
@@ -611,9 +603,30 @@ public class DeploymentEngine {
         return whole;
     }
 
-    private JsonNode list(Request request, String resourceId, String action, String apiVersion, JsonNode body) {
+    /**
+     * The template resource {@code nameOrId} names: by name, the way {@code reference()} and the {@code list*}
+     * functions name a resource of the same template, else by id. Null for an id the template does not declare; a
+     * name it does not declare is an {@code InvalidTemplate}.
+     */
+    private static DependencyGraph.Node declared(List<DependencyGraph.Node> nodes, String nameOrId) {
+        DependencyGraph.Node declared = nodes.stream()
+            .filter(node -> DependencyGraph.isName(nameOrId) ? node.name().equalsIgnoreCase(nameOrId)
+                : ArmResourcePath.canonical(node.id()).equalsIgnoreCase(ArmResourcePath.canonical(nameOrId)))
+            .findFirst()
+            .orElse(null);
+        if (declared == null && DependencyGraph.isName(nameOrId)) {
+            throw DeploymentTemplate.invalid("The template reference '" + nameOrId
+                + "' is not valid: no resource in the template has this name.");
+        }
+        return declared;
+    }
+
+    private JsonNode list(Request request, List<DependencyGraph.Node> nodes, String nameOrId, String action,
+                          String apiVersion, JsonNode body) {
+        DependencyGraph.Node declared = declared(nodes, nameOrId);
+        String resourceId = declared == null ? ArmResourcePath.canonical(nameOrId) : declared.id();
         String version = apiVersion != null ? apiVersion : newestApiVersion(resourceId);
-        Response response = router.get().dispatchInternal("POST", ArmResourcePath.canonical(resourceId) + "/" + action,
+        Response response = router.get().dispatchInternal("POST", resourceId + "/" + action,
             Map.of("api-version", version), Map.of(), body == null ? null : bytes(body), request.origin());
         JsonNode answer = entity(response);
         if (response.getStatus() / 100 != 2) {

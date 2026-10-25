@@ -467,4 +467,20 @@ class DeploymentEngineTest {
                "scope": "Microsoft.Storage/storageAccounts"}]}}
             """))).code());
     }
+
+    @Test
+    void aListFunctionNamingATemplateResourcePostsToItsId() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus"}],
+              "outputs": {"keys": {"type": "string", "value": "[listKeys('sa1', '2023-01-01').id]"}}}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        Sent post = sent.get(sent.size() - 1);
+        assertEquals("POST", post.method());
+        assertEquals(SA_ID + "/listKeys", post.path());
+        assertEquals("2023-01-01", post.apiVersion());
+    }
 }
