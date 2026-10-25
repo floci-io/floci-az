@@ -368,15 +368,52 @@ public class DeploymentEngine {
                 dependsOn.add(entry);
             }
         }
-        for (Expression argument : DependencyGraph.implicitReferences(
-                template.resources().get(node.index()).definition())) {
-            JsonNode value = ExpressionEvaluator.evaluate(argument, scope);
-            if (value.isTextual() && DependencyGraph.isName(value.asText())) {
-                dependsOn.add(value.asText());
-            }
-        }
+        collectReferences(template.resources().get(node.index()).definition(), scope, dependsOn);
         return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn),
             node.loop());
+    }
+
+    /**
+     * Adds to {@code dependsOn} the resources {@code value}'s {@code reference()} and {@code list*()} calls name.
+     * A property copy loop's input is read once per iteration, in that iteration's scope, so a reference that
+     * reads {@code copyIndex('loop')} evaluates as the run will evaluate it.
+     */
+    private static void collectReferences(JsonNode value, TemplateScope scope, Set<String> dependsOn) {
+        if (value instanceof ObjectNode object) {
+            for (Map.Entry<String, JsonNode> field : object.properties()) {
+                if (field.getKey().equals("copy") && field.getValue().isArray()) {
+                    for (JsonNode loop : field.getValue()) {
+                        collectLoopReferences(loop, scope, dependsOn);
+                    }
+                } else {
+                    collectReferences(field.getValue(), scope, dependsOn);
+                }
+            }
+            return;
+        }
+        if (value instanceof ArrayNode array) {
+            array.forEach(item -> collectReferences(item, scope, dependsOn));
+            return;
+        }
+        for (Expression argument : DependencyGraph.implicitReferences(value)) {
+            JsonNode evaluated = ExpressionEvaluator.evaluate(argument, scope);
+            if (evaluated.isTextual() && DependencyGraph.isName(evaluated.asText())) {
+                dependsOn.add(evaluated.asText());
+            }
+        }
+    }
+
+    private static void collectLoopReferences(JsonNode loop, TemplateScope scope, Set<String> dependsOn) {
+        String name = CopyLoops.name(loop);
+        JsonNode input = loop.get("input");
+        if (DependencyGraph.implicitReferences(input).isEmpty()) {
+            return;
+        }
+        int count = CopyLoops.count(loop.get("count"), scope, name);
+        scope.expand(count);
+        for (int i = 0; i < count; i++) {
+            collectReferences(input, new CopyScope(scope, name, i, false), dependsOn);
+        }
     }
 
     private DeploymentScope scope(Request request, DeploymentTemplate template, Map<String, JsonNode> supplied,

@@ -417,4 +417,29 @@ class DeploymentEngineTest {
         assertEquals("InvalidTemplate", refused.code());
         assertTrue(refused.getMessage().contains("expand to more than 640000 values"), refused.getMessage());
     }
+
+    @Test
+    void aReferenceInsideAPropertyLoopIsADependencyOfEveryIteration() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {
+              "variables": {"names": ["sa1", "sa2"]},
+              "resources": [
+                {"type": "Microsoft.Web/sites", "apiVersion": "2022-03-01", "name": "app", "location": "eastus",
+                 "properties": {"copy": [{"name": "slots", "count": 2, "input": {
+                   "state": "[reference(variables('names')[copyIndex('slots')]).provisioningState]"}}]}},
+                {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+                 "location": "eastus"},
+                {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa2",
+                 "location": "eastus"}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        List<String> puts = sent.stream().filter(request -> request.method().equals("PUT")).map(Sent::path).toList();
+        assertEquals(List.of(SA_ID, RG_ID + "/providers/Microsoft.Storage/storageAccounts/sa2",
+            RG_ID + "/providers/Microsoft.Web/sites/app"), puts);
+        JsonNode app = sent.stream().filter(request -> request.path().endsWith("/sites/app")).findFirst()
+            .orElseThrow().body();
+        assertEquals("[{\"state\":\"Succeeded\"},{\"state\":\"Succeeded\"}]",
+            app.path("properties").path("slots").toString());
+    }
 }
