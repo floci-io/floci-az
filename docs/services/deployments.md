@@ -88,7 +88,8 @@ the parent waits for it: `reference('module').outputs.name.value` reads its outp
   the parent's parameters declared as its own (defaulting to the parent's values) and the parent's variable values
   as its variables. A `securestring` or `secureObject` parameter is passed as a parameter value instead of a
   default, so the child's `exportTemplate` never shows it. A `reference()` or `list*()` call there that names a
-  parent resource is sent naming it by id, since the child does not declare it. `resourceGroup()` and `subscription()` there answer for the nested deployment's own target,
+  parent resource is sent naming it by id, since the child does not declare it; an `inner`-scope deployment nested
+  inside it keeps its own template, whose names are its own. `resourceGroup()` and `subscription()` there answer for the nested deployment's own target,
   where Azure answers the parent's; they differ only when an outer-scope nested deployment targets another scope.
 
 A nested deployment's template is inline or linked (see Linked templates).

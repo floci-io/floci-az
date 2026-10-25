@@ -815,12 +815,18 @@ public class DeploymentEngine {
      * parent ({@code linked-templates.md}, "Expression evaluation scope in nested templates"), so its names are the
      * parent's, which the child, running as a deployment of its own, does not declare. A {@code reference()} that
      * names no api-version gets the parent resource's own. A call whose argument reads the nested template's own
-     * loops cannot be evaluated in the parent and is left as written.
+     * loops cannot be evaluated in the parent and is left as written. An {@code inner}-scope nested deployment's
+     * template is evaluated in its own scope, so its names are its own and it is left as written; the rest of that
+     * deployment, its parameter values included, is evaluated in the parent and rewritten.
      */
     private static JsonNode withParentReferences(JsonNode value, Plan plan) {
         if (value instanceof ObjectNode object) {
+            boolean innerChild = isInnerScope(object) && object.path("properties").has("template");
             ObjectNode copy = JsonNodeFactory.instance.objectNode();
-            object.properties().forEach(field -> copy.set(field.getKey(), withParentReferences(field.getValue(), plan)));
+            object.properties().forEach(field -> copy.set(field.getKey(),
+                innerChild && field.getKey().equals("properties")
+                    ? withParentReferencesAroundTemplate((ObjectNode) field.getValue(), plan)
+                    : withParentReferences(field.getValue(), plan)));
             return copy;
         }
         if (value instanceof ArrayNode array) {
@@ -835,6 +841,13 @@ public class DeploymentEngine {
         Expression rewritten = withParentReferences(parsed, plan);
         return rewritten.equals(parsed) ? value
             : JsonNodeFactory.instance.textNode("[" + ExpressionParser.format(rewritten) + "]");
+    }
+
+    private static ObjectNode withParentReferencesAroundTemplate(ObjectNode properties, Plan plan) {
+        ObjectNode copy = JsonNodeFactory.instance.objectNode();
+        properties.properties().forEach(field -> copy.set(field.getKey(), field.getKey().equals("template")
+            ? field.getValue().deepCopy() : withParentReferences(field.getValue(), plan)));
+        return copy;
     }
 
     private static Expression withParentReferences(Expression expression, Plan plan) {

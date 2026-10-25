@@ -833,4 +833,33 @@ class DeploymentsHandlerTest {
         given().when().get(DEPLOYMENTS + "/outerref" + API).then().statusCode(200)
             .body("properties.outputs.blob.value", equalTo(blob));
     }
+
+    @Test
+    void anInnerGrandchildOfAnOuterChildReadsItsOwnResource() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("grandref", """
+            {"properties": {"mode": "Incremental", "template": {
+              "resources": [
+                {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                 "name": "deploysa0001", "location": "westeurope"},
+                {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "outerchild",
+                 "properties": {"mode": "Incremental", "template": {"resources": [
+                   {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "innergrandchild",
+                    "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"},
+                     "template": {"resources": [
+                       {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                        "name": "deploysa0001", "location": "westeurope", "kind": "StorageV2",
+                        "sku": {"name": "Standard_LRS"}}],
+                      "outputs": {"blob": {"type": "string",
+                                           "value": "[reference('deploysa0001').primaryEndpoints.blob]"}}}}}],
+                   "outputs": {"blob": {"type": "string",
+                                        "value": "[reference('innergrandchild').outputs.blob.value]"}}}}}],
+              "outputs": {"blob": {"type": "string",
+                                   "value": "[reference('outerchild').outputs.blob.value]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/innergrandchild" + API).asString());
+
+        String blob = given().when().get(ACCOUNT + "?api-version=2023-01-01").then().statusCode(200)
+            .extract().path("properties.primaryEndpoints.blob");
+        given().when().get(DEPLOYMENTS + "/grandref" + API).then().statusCode(200)
+            .body("properties.outputs.blob.value", equalTo(blob));
+    }
 }
