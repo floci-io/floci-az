@@ -101,7 +101,8 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
         Map.entry("/providers/Microsoft.Communication/", "email"),
-        Map.entry("/providers/Microsoft.App/", "containerapps")
+        Map.entry("/providers/Microsoft.App/", "containerapps"),
+        Map.entry("/providers/Microsoft.Resources/", "deployments")
     );
 
     private static Set<Map.Entry<String, String>> asEntries(List<SuffixRoute> routes) {
@@ -130,14 +131,19 @@ class RoutingTableAssemblyTest {
     /**
      * ARM resolves a provider namespace however a client spells it, so every provider route must claim the
      * lowercased and uppercased spellings of its namespace exactly as it claims the declared one. The type
-     * segment is a policy type for Microsoft.Authorization, whose guard claims only those.
+     * segment is a policy type for Microsoft.Authorization and deployments for Microsoft.Resources, whose guards
+     * claim only those.
      */
     @Test
     void aProviderNamespaceInAnyCaseReachesTheSameHandler() {
         for (Map.Entry<String, String> route : armRouter.providerRoutesInMatchOrder()) {
             String marker = route.getKey();
             String namespace = marker.substring("/providers/".length(), marker.length() - 1);
-            String type = "Microsoft.Authorization".equals(namespace) ? "policyAssignments" : "widgets";
+            String type = switch (namespace) {
+                case "Microsoft.Authorization" -> "policyAssignments";
+                case "Microsoft.Resources" -> "deployments";
+                default -> "widgets";
+            };
             List<String> declared = armRouter.claimingServiceTypes(resourcePath(namespace, type));
             assertTrue(declared.contains(route.getValue()), marker + " must claim its own spelling, got " + declared);
             for (String spelling : List.of(namespace.toLowerCase(Locale.ROOT), namespace.toUpperCase(Locale.ROOT))) {

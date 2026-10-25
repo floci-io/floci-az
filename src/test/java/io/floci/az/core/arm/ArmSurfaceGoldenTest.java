@@ -109,6 +109,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.OperationalInsights/workspaces                                       RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.PolicyInsights/policyMetadata                                        TENANT          NONE      FILTER
         Microsoft.ResourceGraph/queries                                                RESOURCE_GROUP  GLOBAL    FILTER
+        Microsoft.Resources/deployments                                                RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Resources/resourceGroups                                             SUBSCRIPTION    REQUIRED  ARM_HANDLER
         Microsoft.Sql/servers                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers/connectionPolicies                                       RESOURCE_GROUP  OPTIONAL  FILTER

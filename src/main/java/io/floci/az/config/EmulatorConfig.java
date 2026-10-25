@@ -336,6 +336,7 @@ public interface EmulatorConfig {
         NetworkConfig          network();
         EventGridConfig        eventGrid();
         ManagedIdentityConfig  managedIdentity();
+        DeploymentsConfig      deployments();
         ContainerAppsConfig    containerApps();
         PolicyConfig           policy();
         ResourceGraphConfig    resourceGraph();
@@ -421,6 +422,12 @@ public interface EmulatorConfig {
     }
 
     /** Microsoft.ManagedIdentity — user-assigned identities + IMDS/App Service token endpoints. */
+    /** {@code floci-az.services.deployments}: ARM template deployments ({@code Microsoft.Resources/deployments}). */
+    interface DeploymentsConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ManagedIdentityConfig {
         @WithDefault("true")
         boolean enabled();
