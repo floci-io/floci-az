@@ -74,7 +74,23 @@ the parent waits for it: `reference('module').outputs.name.value` reads its outp
   as its variables. `resourceGroup()` and `subscription()` there answer for the nested deployment's own target,
   where Azure answers the parent's; they differ only when an outer-scope nested deployment targets another scope.
 
-A nested deployment's template is inline; a nested `templateLink` is refused, as at the top level.
+A nested deployment's template is inline or linked (see Linked templates).
+
+## Linked templates
+
+A deployment's `templateLink.uri` and `parametersLink.uri` are downloaded over HTTP or HTTPS when the request
+arrives, and the deployment runs the downloaded template as if it had been sent inline; the links are echoed in
+the deployment's properties and in `deployment().properties.templateLink`. A template staged in floci-az's own blob
+storage works, the local counterpart of a storage account with a SAS token.
+
+- A nested deployment's `templateLink.relativePath` resolves against the link its parent's template came from,
+  keeping the parent link's query string, as Azure does; a parent sent inline has no base, so it is refused.
+- A link that cannot be downloaded (no `uri`, not HTTP or HTTPS, a non-`200` answer, a timeout after 30 seconds,
+  more than 4 MB), whose content is not a JSON object, or whose content carries a different `contentVersion` than
+  the link names is `400 InvalidContentLink`.
+- `parameters` and `parametersLink` together are `400 InvalidTemplate`, as Azure documents; a parameters link may
+  point at a parameter file (`{"parameters": {...}}`) or at the parameters object itself.
+- A template spec (`templateLink.id`) is `400 InvalidTemplate`: floci-az does not serve template specs.
 
 ## How a deployment runs
 
@@ -177,8 +193,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR
   functions, `pickZones`, `providers`, `references`, `managementGroup`, `deployer`, `roleDefinitions`
-- linked templates and parameter files (`templateLink`, `parametersLink`) and Key Vault parameter
-  references
+- Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
 Deployments at management-group and tenant scope answer `404`.

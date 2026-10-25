@@ -163,3 +163,23 @@ JSON
     run az_json storage account show -n flocitestazmodulesa -g floci-test-sub-deploy-rg
     assert_success
 }
+
+@test "az deployment group create --template-uri: deploys a template staged in blob storage" {
+    local conn
+    conn="$(storage_conn devstoreaccount1)"
+    run az storage container create -n floci-test-templates --connection-string "$conn" -o none
+    assert_success
+    run az storage blob upload -c floci-test-templates -f "$TEMPLATE_FILE" -n storage.json \
+        --connection-string "$conn" --overwrite -o none
+    assert_success
+
+    local uri="${FLOCI_AZ_ENDPOINT}/devstoreaccount1/floci-test-templates/storage.json"
+    run az_json deployment group create -g "$DEPLOY_RG" -n floci-test-linked --template-uri "$uri" \
+        --parameters accountName=flocitestazlinkedsa
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.templateLink.uri')" "$uri"
+
+    run az_json storage account show -n flocitestazlinkedsa -g "$DEPLOY_RG"
+    assert_success
+}

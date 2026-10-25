@@ -1,6 +1,7 @@
 package io.floci.az.services.deployments;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeEach;
@@ -491,6 +492,81 @@ class DeploymentsHandlerTest {
             .body("properties.changes[0].changeType", equalTo("Create"))
             .body("properties.changes[1].changeType", equalTo("Unsupported"))
             .body("properties.changes[1].unsupportedReason", containsString("nested deployment"));
+    }
+
+    /** Puts {@code content} in floci's own blob storage and answers its URL, the way a linked template is staged. */
+    private static String staged(String name, String content) {
+        given().put("/devstoreaccount1/templates?restype=container");
+        given().contentType("application/json").header("x-ms-blob-type", "BlockBlob").body(content)
+            .when().put("/devstoreaccount1/templates/" + name).then().statusCode(201);
+        return "http://localhost:" + RestAssured.port + "/devstoreaccount1/templates/" + name;
+    }
+
+    private static final String LINKED_TEMPLATE = """
+        {"contentVersion": "1.0.0.0",
+         "parameters": {"accountName": {"type": "string"}},
+         "resources": [
+           {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+            "name": "[parameters('accountName')]", "location": "westeurope", "kind": "StorageV2",
+            "sku": {"name": "Standard_LRS"}},
+           {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "child",
+            "properties": {"mode": "Incremental", "templateLink": {"relativePath": "children/child.json"}}}],
+         "outputs": {"name": {"type": "string", "value": "[parameters('accountName')]"}}}
+        """;
+
+    @Test
+    void aLinkedTemplateAndParameterFileAreDownloadedAndEchoed() throws Exception {
+        String template = staged("main.json", LINKED_TEMPLATE);
+        staged("children/child.json", """
+            {"contentVersion": "1.0.0.0", "resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "linkedchild01",
+               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}]}
+            """);
+        String parameters = staged("main.parameters.json", """
+            {"$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+             "contentVersion": "1.0.0.0", "parameters": {"accountName": {"value": "linkedmain01"}}}
+            """);
+
+        Response accepted = json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \""
+            + template + "\", \"contentVersion\": \"1.0.0.0\"}, \"parametersLink\": {\"uri\": \"" + parameters + "\"}}}")
+            .when().put(DEPLOYMENTS + "/linked" + API);
+        accepted.then().statusCode(201).body("properties.templateLink.uri", equalTo(template));
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(DEPLOYMENTS + "/linked" + API).asString());
+
+        given().when().get(DEPLOYMENTS + "/linked" + API).then().statusCode(200)
+            .body("properties.outputs.name.value", equalTo("linkedmain01"))
+            .body("properties.parametersLink.uri", equalTo(parameters));
+        given().when().get(RG + "/providers/Microsoft.Storage/storageAccounts/linkedmain01?api-version=2023-01-01")
+            .then().statusCode(200);
+        given().when().get(RG + "/providers/Microsoft.Storage/storageAccounts/linkedchild01?api-version=2023-01-01")
+            .then().statusCode(200);
+        given().when().get(DEPLOYMENTS + "/child" + API).then().statusCode(200)
+            .body("properties.templateLink.uri", equalTo(template.replace("main.json", "children/child.json")));
+        given().when().post(DEPLOYMENTS + "/linked/exportTemplate" + API).then().statusCode(200)
+            .body("template.outputs.name.type", equalTo("string"));
+    }
+
+    @Test
+    void aLinkThatCannotBeUsedIsInvalidContentLink() {
+        String template = staged("versioned.json", "{\"contentVersion\": \"1.0.0.0\", \"resources\": []}");
+        String missing = "http://localhost:" + RestAssured.port + "/devstoreaccount1/templates/missing.json";
+        json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"" + missing + "\"}}}")
+            .when().put(DEPLOYMENTS + "/broken" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidContentLink"))
+            .body("error.message", startsWith("Unable to download deployment content from '" + missing + "'"));
+        json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"" + template
+            + "\", \"contentVersion\": \"2.0.0.0\"}}}")
+            .when().post(DEPLOYMENTS + "/versioned/validate" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidContentLink"));
+        json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"" + template
+            + "\"}, \"parameters\": {}, \"parametersLink\": {\"uri\": \"" + template + "\"}}}")
+            .when().put(DEPLOYMENTS + "/both" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidTemplate"));
+        json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"id\": \"/subscriptions/x/"
+            + "resourceGroups/y/providers/Microsoft.Resources/templateSpecs/z/versions/1\"}}}")
+            .when().put(DEPLOYMENTS + "/spec" + API).then().statusCode(400)
+            .body("error.message", containsString("template spec"));
     }
 
     @Test

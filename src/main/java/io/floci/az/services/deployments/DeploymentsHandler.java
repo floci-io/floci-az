@@ -133,6 +133,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     private final EmulatorConfig config;
     private final DeploymentEngine engine;
     private final ResourceGroups groups;
+    private final LinkedTemplates links;
 
     /** Runs each deployment after its {@code PUT} has been answered; virtual threads, as runs mostly wait. */
     private final ExecutorService runner = Executors.newVirtualThreadPerTaskExecutor();
@@ -165,10 +166,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     @Inject
-    public DeploymentsHandler(EmulatorConfig config, DeploymentEngine engine, ResourceGroups groups) {
+    public DeploymentsHandler(EmulatorConfig config, DeploymentEngine engine, ResourceGroups groups,
+                              LinkedTemplates links) {
         this.config = config;
         this.engine = engine;
         this.groups = groups;
+        this.links = links;
     }
 
     @Override
@@ -261,7 +264,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     private Response createOrUpdate(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
-        JsonNode body = body(req);
+        JsonNode body;
+        try {
+            body = deploymentRequest(req);
+        } catch (TemplateException e) {
+            return templateError(e);
+        }
         if (body == null) {
             return invalidContent();
         }
@@ -496,7 +504,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
      * cannot run is {@code 400} with the template error.
      */
     private Response whatIf(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
-        JsonNode body = body(req);
+        JsonNode body;
+        try {
+            body = deploymentRequest(req);
+        } catch (TemplateException e) {
+            return templateError(e);
+        }
         if (body == null) {
             return invalidContent();
         }
@@ -570,7 +583,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     private Response validate(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
-        JsonNode body = body(req);
+        JsonNode body;
+        try {
+            body = deploymentRequest(req);
+        } catch (TemplateException e) {
+            return templateError(e);
+        }
         if (body == null) {
             return invalidContent();
         }
@@ -608,6 +626,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         properties.put("templateHash", result.templateHash());
         properties.set("parameters", result.parameters());
         properties.put("mode", body.path("properties").path("mode").asText());
+        echoLinks(body, properties);
         properties.put("provisioningState", result.provisioningState());
         properties.put("timestamp", result.finished().toString());
         properties.put("duration", Duration.between(result.started(), result.finished()).toString());
@@ -656,6 +675,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         ObjectNode properties = answer.putObject("properties");
         properties.put("templateHash", prepared.templateHash());
         properties.put("mode", body.path("properties").path("mode").asText());
+        echoLinks(body, properties);
         properties.put("provisioningState", "Accepted");
         properties.put("timestamp", Instant.now().toString());
         properties.put("duration", "PT0S");
@@ -663,6 +683,15 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         properties.putArray("providers");
         properties.putArray("dependencies");
         return answer;
+    }
+
+    /** The {@code templateLink} and {@code parametersLink} a deployment was sent with, echoed as Azure does. */
+    private static void echoLinks(JsonNode body, ObjectNode properties) {
+        for (String link : new String[] {"templateLink", "parametersLink"}) {
+            if (body.path("properties").path(link).isObject()) {
+                properties.set(link, body.path("properties").get(link));
+            }
+        }
     }
 
     /** An {@code operationStatuses} answer: {@code {"status": ...}}, with the error when the run failed. */
@@ -704,6 +733,20 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
             answer.set("tags", body.get("tags"));
         }
         return answer;
+    }
+
+    /**
+     * A deployment request body with a linked template and parameter file inlined ({@link LinkedTemplates}); null when
+     * the body is not a JSON object. A link it cannot use throws {@link TemplateException}.
+     */
+    private JsonNode deploymentRequest(AzureRequest req) {
+        JsonNode body = body(req);
+        if (body == null || !body.has("properties")) {
+            return body;
+        }
+        ObjectNode inlined = body.deepCopy();
+        inlined.set("properties", links.inline(body.get("properties")));
+        return inlined;
     }
 
     /** The request body, parsed leniently; null when it is not a JSON object. */

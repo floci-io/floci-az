@@ -64,8 +64,6 @@ class DeploymentTemplateTest {
     @ValueSource(strings = {
         "{\"functions\": [{\"namespace\": \"n\"}]}",
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
-        "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\","
-            + " \"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"https://x\"}}}]}",
     })
     void whatPhaseOneDoesNotServeIsRefusedNotSkipped(String template) {
         TemplateException refused = assertThrows(TemplateException.class,

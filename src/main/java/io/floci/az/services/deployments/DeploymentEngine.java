@@ -25,6 +25,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -381,10 +382,6 @@ public class DeploymentEngine {
             throw new TemplateException("DeploymentModeNotSupported", "The deployment mode 'Complete' is not "
                 + "supported by floci-az; use 'Incremental'.");
         }
-        if (properties.has("templateLink") || properties.has("parametersLink")) {
-            throw DeploymentTemplate.invalid("Linked templates and parameter files (templateLink, parametersLink) "
-                + "are not supported by floci-az; send the template and parameters inline.");
-        }
         if (!properties.has("template")) {
             throw DeploymentTemplate.invalid("The deployment 'template' is missing.");
         }
@@ -630,6 +627,9 @@ public class DeploymentEngine {
         JsonNode nestedTemplate = DeploymentTemplate.isNestedDeployment(definition)
             ? ((ObjectNode) withoutLoop.get("properties")).remove("template") : null;
         ObjectNode evaluated = (ObjectNode) CopyLoops.evaluate(withoutLoop, plan.scopeOf(node));
+        if (DeploymentTemplate.isNestedDeployment(definition)) {
+            resolveRelativePath((ObjectNode) evaluated.get("properties"), plan);
+        }
         if (nestedTemplate != null) {
             ((ObjectNode) evaluated.get("properties")).set("template",
                 nestedTemplate(definition, (ObjectNode) nestedTemplate, plan));
@@ -643,6 +643,31 @@ public class DeploymentEngine {
             }
         }
         return new ResourceRequest(body, apiVersion);
+    }
+
+    /**
+     * A nested {@code templateLink.relativePath} as the {@code uri} it names: resolved against the link the parent
+     * deployment's own template came from ({@code linked-templates.md}, "Use relative path for linked templates"),
+     * keeping the parent link's query string (a SAS token, say). It needs a parent deployed from a link.
+     */
+    private static void resolveRelativePath(ObjectNode properties, Plan plan) {
+        JsonNode link = properties.path("templateLink");
+        if (!link.isObject() || !link.has("relativePath")) {
+            return;
+        }
+        String parent = plan.scope().deployment().path("properties").path("templateLink").path("uri").asText("");
+        if (parent.isEmpty()) {
+            throw DeploymentTemplate.invalid("The template link's 'relativePath' needs a parent deployment whose "
+                + "template is itself linked.");
+        }
+        URI base = URI.create(parent);
+        URI resolved = base.resolve(link.get("relativePath").asText());
+        String uri = base.getRawQuery() == null ? resolved.toString()
+            : resolved.toString().split("\\?")[0] + "?" + base.getRawQuery();
+        ObjectNode absolute = ((ObjectNode) link).deepCopy();
+        absolute.remove("relativePath");
+        absolute.put("uri", uri);
+        properties.set("templateLink", absolute);
     }
 
     /**
@@ -967,6 +992,10 @@ public class DeploymentEngine {
         ObjectNode deployment = JsonNodeFactory.instance.objectNode();
         deployment.put("name", request.name());
         ObjectNode properties = deployment.putObject("properties");
+        if (request.properties().path("templateLink").isObject()) {
+            // deployment() of a linked template carries its link (template-functions-deployment.md).
+            properties.set("templateLink", request.properties().get("templateLink").deepCopy());
+        }
         properties.set("template", template.template().deepCopy());
         properties.put("templateHash", templateHash(template));
         JsonNode parameters = request.properties().get("parameters");
