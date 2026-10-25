@@ -14,6 +14,7 @@ import io.floci.az.core.RequestUrls;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
+import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -73,7 +74,7 @@ import java.util.regex.Pattern;
  * live in memory, as the rest of ARM state does.
  */
 @ApplicationScoped
-public class DeploymentsHandler implements AzureServiceHandler, Resettable {
+public class DeploymentsHandler implements AzureServiceHandler, Resettable, ResourceGroupCleanup {
 
     private static final Logger LOG = Logger.getLogger(DeploymentsHandler.class);
 
@@ -686,6 +687,22 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
 
     private static Response json(int status, JsonNode body) {
         return Response.status(status).entity(body).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * A group's deployment history lives in the group, so it goes with it: a group recreated under the same name
+     * starts with none. A run still going is canceled; it finds its record gone and records nothing.
+     */
+    @Override
+    public void resourceGroupDeleted(String subscriptionId, String resourceGroup) {
+        String prefix = key(subscriptionId, resourceGroup, "");
+        deployments.entrySet().removeIf(entry -> {
+            if (!entry.getKey().startsWith(prefix)) {
+                return false;
+            }
+            entry.getValue().canceled().set(true);
+            return true;
+        });
     }
 
     @Override

@@ -399,25 +399,6 @@ class DeploymentsHandlerTest {
     }
 
     @Test
-    void anExtensionResourceIsCreatedAtTheResourceItsScopeNames() throws Exception {
-        String assignment = ACCOUNT + "/providers/Microsoft.Authorization/policyAssignments/onAccount";
-        assertEquals("Succeeded", awaitTerminal(put("extension", """
-            {"properties": {"mode": "Incremental", "template": {"resources": [
-              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "deploysa0001",
-               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}},
-              {"type": "Microsoft.Authorization/policyAssignments", "apiVersion": "2025-03-01", "name": "onAccount",
-               "scope": "Microsoft.Storage/storageAccounts/deploysa0001", "dependsOn": ["deploysa0001"],
-               "properties": {"policyDefinitionId":
-                 "/providers/Microsoft.Authorization/policyDefinitions/0a914e76-4921-4c19-b460-a2d36003525a"}}]}}}
-            """)), () -> given().when().get(DEPLOYMENTS + "/extension" + API).asString());
-
-        given().when().get(assignment + "?api-version=2025-03-01").then().statusCode(200)
-            .body("properties.scope", equalTo(ACCOUNT));
-        given().when().get(RG + "/providers/Microsoft.Authorization/policyAssignments/onAccount?api-version=2025-03-01")
-            .then().statusCode(404);
-    }
-
-    @Test
     void laterPagesKeepTheFilterOfTheFirst() throws Exception {
         String failing = """
             {"properties": {"mode": "Incremental", "template": {"resources": [
@@ -437,5 +418,38 @@ class DeploymentsHandlerTest {
             .then().statusCode(200)
             .body("value.name", contains("c"))
             .body("nextLink", nullValue());
+    }
+
+    @Test
+    void deletingTheGroupDeletesItsDeploymentHistory() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("history",
+            "{\"properties\": {\"mode\": \"Incremental\", \"template\": {\"resources\": []}}}")));
+
+        int deleted = given().when().delete(RG + "?api-version=2021-04-01").then().extract().statusCode();
+        assertTrue(deleted == 200 || deleted == 202, "the group delete answers " + deleted);
+        json("{\"location\":\"westeurope\"}").when().put(RG + "?api-version=2021-04-01").then().statusCode(201);
+
+        given().when().get(DEPLOYMENTS + "/history" + API).then().statusCode(404)
+            .body("error.code", equalTo("DeploymentNotFound"));
+        given().when().get(DEPLOYMENTS + API).then().statusCode(200).body("value", hasSize(0));
+    }
+
+    @Test
+    void anExtensionResourceIsCreatedAtTheResourceItsScopeNames() throws Exception {
+        String assignment = ACCOUNT + "/providers/Microsoft.Authorization/policyAssignments/onAccount";
+        assertEquals("Succeeded", awaitTerminal(put("extension", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "deploysa0001",
+               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}},
+              {"type": "Microsoft.Authorization/policyAssignments", "apiVersion": "2025-03-01", "name": "onAccount",
+               "scope": "Microsoft.Storage/storageAccounts/deploysa0001", "dependsOn": ["deploysa0001"],
+               "properties": {"policyDefinitionId":
+                 "/providers/Microsoft.Authorization/policyDefinitions/0a914e76-4921-4c19-b460-a2d36003525a"}}]}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/extension" + API).asString());
+
+        given().when().get(assignment + "?api-version=2025-03-01").then().statusCode(200)
+            .body("properties.scope", equalTo(ACCOUNT));
+        given().when().get(RG + "/providers/Microsoft.Authorization/policyAssignments/onAccount?api-version=2025-03-01")
+            .then().statusCode(404);
     }
 }

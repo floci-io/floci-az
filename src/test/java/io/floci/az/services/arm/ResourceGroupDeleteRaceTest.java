@@ -6,6 +6,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmCall;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmVerdict;
+import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.arm.ResourceGroupRule;
 import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
@@ -71,7 +72,9 @@ class ResourceGroupDeleteRaceTest {
         groups = new ResourceGroups(null);
         groups.put(new ResourceGroup(SUB, GROUP, "westus", null, null, ResourceGroup.SUCCEEDED));
         rule = new ResourceGroupRule(groups, config);
-        service = new ResourceGroupService(config, groups, routers);
+        Instance<ResourceGroupCleanup> cleanups = mock(Instance.class);
+        when(cleanups.iterator()).thenAnswer(invocation -> List.<ResourceGroupCleanup>of().iterator());
+        service = new ResourceGroupService(config, groups, routers, cleanups);
         index.add(EXISTING);
     }
 

@@ -7,6 +7,7 @@ import io.floci.az.core.RequestUrls;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmResourceId;
+import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.directory.ResourceGroup;
@@ -67,6 +68,7 @@ public class ResourceGroupService {
     private final EmulatorConfig config;
     private final ResourceGroups groups;
     private final Instance<ArmRouter> router;
+    private final Instance<ResourceGroupCleanup> cleanups;
     private final boolean semantics;
     private final boolean azureDelete;
 
@@ -74,10 +76,12 @@ public class ResourceGroupService {
     private final Map<String, String> completedDeletes = new LinkedHashMap<>();
 
     @Inject
-    public ResourceGroupService(EmulatorConfig config, ResourceGroups groups, Instance<ArmRouter> router) {
+    public ResourceGroupService(EmulatorConfig config, ResourceGroups groups, Instance<ArmRouter> router,
+                                Instance<ResourceGroupCleanup> cleanups) {
         this.config = config;
         this.groups = groups;
         this.router = router;
+        this.cleanups = cleanups;
         this.semantics = config.resourceGroupSemantics();
         this.azureDelete = config.resourceGroupDelete();
     }
@@ -159,6 +163,7 @@ public class ResourceGroupService {
     private Response delete(AzureRequest req, String subscriptionId, String name, Supplier<List<String>> resources) {
         if (!azureDelete) {
             groups.remove(subscriptionId, name);
+            cleanUp(subscriptionId, name);
             return Response.ok().build();
         }
         // Marked before the resources are listed: a write that would otherwise land between the listing and
@@ -169,6 +174,7 @@ public class ResourceGroupService {
         try {
             cascade(req, subscriptionId, name, resources.get());
             groups.remove(subscriptionId, name);
+            cleanUp(subscriptionId, name);
         } finally {
             groups.endDelete(subscriptionId, name);
         }
@@ -180,6 +186,13 @@ public class ResourceGroupService {
             .header("Location", location)
             .header("Retry-After", RETRY_AFTER_SECONDS)
             .build();
+    }
+
+    /** Tells every {@link ResourceGroupCleanup} the group is gone. */
+    private void cleanUp(String subscriptionId, String name) {
+        for (ResourceGroupCleanup cleanup : cleanups) {
+            cleanup.resourceGroupDeleted(subscriptionId, name);
+        }
     }
 
     /**
