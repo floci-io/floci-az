@@ -105,13 +105,26 @@ public class DeploymentEngine {
             return scopeId() + "/providers/" + DEPLOYMENTS_TYPE + "/" + name;
         }
 
-        /** True for a deployment at subscription scope. */
-        public boolean atSubscription() {
-            return resourceGroup == null;
+        /** True for a deployment at tenant scope, which names no subscription. */
+        public boolean atTenant() {
+            return subscriptionId == null;
         }
 
-        /** What the deployment's resources sit under: the resource group, or the subscription. */
+        /** True for a deployment at subscription scope. */
+        public boolean atSubscription() {
+            return subscriptionId != null && resourceGroup == null;
+        }
+
+        /** True for a deployment in a resource group. */
+        public boolean inResourceGroup() {
+            return resourceGroup != null;
+        }
+
+        /** What the deployment's resources sit under: the resource group, the subscription, or the tenant (empty). */
         String scopeId() {
+            if (atTenant()) {
+                return "";
+            }
             String subscription = "/subscriptions/" + subscriptionId;
             return atSubscription() ? subscription : subscription + "/resourceGroups/" + resourceGroup;
         }
@@ -432,13 +445,15 @@ public class DeploymentEngine {
             }
         }
         boolean nested = DeploymentTemplate.isNestedDeployment(definition);
-        if (request.atSubscription() && !nested) {
+        if (!request.inResourceGroup() && !nested) {
             types.type(ArmResourcePath.normalizedType(type))
-                .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP)
+                .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP
+                    || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION))
                 .ifPresent(served -> {
+                    String home = served.scope() == ArmScopeKind.RESOURCE_GROUP ? "resource group" : "subscription";
                     throw DeploymentTemplate.invalid("The resource '" + name + "' of type '" + type + "' belongs "
-                        + "in a resource group and cannot be deployed at subscription scope; deploy it through a "
-                        + "nested deployment that names the resource group.");
+                        + "in a " + home + " and cannot be deployed at " + (request.atTenant() ? "tenant" : "subscription")
+                        + " scope; deploy it through a nested deployment that names the " + home + ".");
                 });
         }
         String scopeId;
@@ -454,13 +469,23 @@ public class DeploymentEngine {
     }
 
     /**
-     * Where a nested deployment runs ({@code deploy-to-subscription.md}, "Deployment scopes"): the resource group its
-     * {@code resourceGroup} names, in the subscription its {@code subscriptionId} names or the parent's; a
-     * subscription it names without a group; else the parent deployment's own scope.
+     * Where a nested deployment runs ({@code deploy-to-subscription.md} and {@code deploy-to-tenant.md}, "Deployment
+     * scopes"): the resource group its {@code resourceGroup} names, in the subscription its {@code subscriptionId}
+     * names or the parent's; a subscription it names without a group; else the parent deployment's own scope. A
+     * tenant has no subscription to default to, so a group there needs its subscription named. A management group,
+     * which the {@code scope} property names, is not served yet.
      */
     private static String nestedTarget(Request request, ObjectNode definition, TemplateScope scope) {
+        if (definition.has("scope")) {
+            throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
+                + "' targets a management group through 'scope', which floci-az does not support yet.");
+        }
         String subscription = definition.has("subscriptionId")
             ? text(evaluate(definition.get("subscriptionId"), scope), "subscriptionId") : request.subscriptionId();
+        if (definition.has("resourceGroup") && subscription == null) {
+            throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
+                + "' names a resourceGroup at tenant scope, where it must also name its subscriptionId.");
+        }
         if (definition.has("resourceGroup")) {
             return "/subscriptions/" + subscription + "/resourceGroups/"
                 + text(evaluate(definition.get("resourceGroup"), scope), "resourceGroup");
@@ -552,7 +577,7 @@ public class DeploymentEngine {
 
     private DeploymentScope scope(Request request, DeploymentTemplate template, Map<String, JsonNode> supplied,
                                   List<DependencyGraph.Node> nodes) {
-        String tenantId = directory.tenantOfSubscription(request.subscriptionId());
+        String tenantId = tenantOf(request);
         CloudProfile cloud = request.origin() != null && request.origin().scope() != null
             ? request.origin().scope().cloud() : directory.cloudOfTenant(tenantId);
         DeploymentScope.LiveCalls live = new DeploymentScope.LiveCalls() {
@@ -567,8 +592,9 @@ public class DeploymentEngine {
             }
         };
         return new DeploymentScope(template, supplied,
-            request.atSubscription() ? null : resourceGroupObject(request, cloud),
-            subscriptionObject(request, tenantId), tenantObject(tenantId), environmentObject(cloud),
+            request.inResourceGroup() ? resourceGroupObject(request, cloud) : null,
+            request.atTenant() ? null : subscriptionObject(request, tenantId), tenantObject(tenantId),
+            environmentObject(cloud),
             self -> deploymentObject(request, template), live);
     }
 
@@ -962,6 +988,19 @@ public class DeploymentEngine {
                 group.putObject("properties").put("provisioningState", "Succeeded");
                 return group;
             });
+    }
+
+    /**
+     * The deployment's tenant: its subscription's, or at tenant scope the caller's when the directory holds it (the
+     * request scope's token tenant), else the default tenant.
+     */
+    private String tenantOf(Request request) {
+        if (!request.atTenant()) {
+            return directory.tenantOfSubscription(request.subscriptionId());
+        }
+        String caller = request.origin() == null || request.origin().scope() == null ? null
+            : request.origin().scope().tokenTenantId();
+        return caller != null && directory.tenant(caller).isPresent() ? caller : directory.defaultTenantId();
     }
 
     private ObjectNode subscriptionObject(Request request, String tenantId) {

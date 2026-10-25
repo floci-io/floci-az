@@ -184,6 +184,11 @@ final class UserFunctions {
             throw restricted("can't call other user-defined functions");
         }
 
+        @Override
+        public Level level() {
+            return outer.level();
+        }
+
         private TemplateException restricted(String what) {
             return TemplateException.invalid("The template function '" + function.name() + "' " + what
                 + ": a user-defined function may only use its own parameters and the scope functions.");

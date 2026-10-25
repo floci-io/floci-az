@@ -46,7 +46,8 @@ POST   /providers/Microsoft.Resources/calculateTemplateHash   # {"minifiedTempla
 ```
 
 The resource group must exist, or the answer is `404 ResourceGroupNotFound`. Every endpoint is served at
-subscription scope too, under `/subscriptions/{sub}/providers/Microsoft.Resources/deployments`.
+subscription scope too, under `/subscriptions/{sub}/providers/Microsoft.Resources/deployments`, and at tenant
+scope, under `/providers/Microsoft.Resources/deployments`.
 
 ## Subscription-scope deployments
 
@@ -58,6 +59,20 @@ As Azure requires, the body carries a `location` where the deployment's data is 
 `InvalidTemplate` at this scope, and `resourceGroup()` is an error here. Deploying into a resource group from a
 subscription-scope template takes a nested deployment (see below), which is what `azd provision` and a Bicep file
 with `targetScope = 'subscription'` and modules send.
+
+## Tenant-scope deployments
+
+A tenant-scope deployment (`az deployment tenant create`) carries a `location` on the same terms as a
+subscription-scope one, and its tenant is the caller's (the tenant of the request's token when the emulator holds
+it, otherwise the default tenant). Its own resources are tenant-level ones; a resource that lives in a
+subscription or a resource group is `InvalidTemplate` here, and `subscription()` and `resourceGroup()` are errors.
+It reaches a subscription through a nested deployment that names `subscriptionId` (and `location`), and a
+resource group through one that names both `subscriptionId` and `resourceGroup`, as Azure requires at this scope.
+A nested deployment that targets a management group through `scope` is refused with `InvalidTemplate`.
+
+`resourceId()` without a subscription or a resource group takes the deployment's level, as Azure documents: a
+resource-group id in a resource-group deployment, `/subscriptions/{sub}/providers/...` at subscription scope, and
+`/providers/...` at tenant scope.
 
 ## Nested deployments
 
@@ -206,7 +221,8 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
 - Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
-Deployments at management-group and tenant scope answer `404`.
+Deployments at management-group scope answer `404`, and a nested deployment that targets a management group is
+`400 InvalidTemplate`.
 
 ## Intentional deviations
 

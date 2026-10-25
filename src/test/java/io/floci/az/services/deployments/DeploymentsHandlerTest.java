@@ -9,13 +9,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -616,6 +620,89 @@ class DeploymentsHandlerTest {
             .when().post(DEPLOYMENTS + "/udf-bad/validate" + API).then().statusCode(400)
             .body("error.code", equalTo("InvalidTemplate"))
             .body("error.message", containsString("can't access variables"));
+    }
+
+    private static final String TENANT_DEPLOYMENTS = "/providers/Microsoft.Resources/deployments";
+
+    /** A tenant template that creates a resource group in a subscription through a nested deployment. */
+    private static final String TENANT_DEPLOYMENT = """
+        {"location": "westeurope", "properties": {"mode": "Incremental",
+          "parameters": {"subscriptionId": {"value": "SUBSCRIPTION"}}, "template": {
+          "parameters": {"subscriptionId": {"type": "string"}},
+          "resources": [
+            {"type": "Microsoft.Resources/deployments", "apiVersion": "2025-04-01", "name": "into-sub",
+             "location": "westeurope", "subscriptionId": "[parameters('subscriptionId')]",
+             "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"}, "template": {
+               "resources": [{"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+                              "name": "rg-from-tenant", "location": "northeurope"}]}}}],
+          "outputs": {
+            "tenantId": {"type": "string", "value": "[tenant().tenantId]"},
+            "groupId": {"type": "string",
+                        "value": "[resourceId('Microsoft.Management/managementGroups', 'mg1')]"}}}}}
+        """;
+
+    private static String tenantDeployment() {
+        return TENANT_DEPLOYMENT.replace("SUBSCRIPTION", SUB);
+    }
+
+    @Test
+    void aTenantDeploymentRunsANestedDeploymentIntoASubscription() throws Exception {
+        Response accepted = json(tenantDeployment()).when().put(TENANT_DEPLOYMENTS + "/tenant1" + API);
+        accepted.then().statusCode(201)
+            .body("id", equalTo(TENANT_DEPLOYMENTS + "/tenant1"))
+            .body("location", equalTo("westeurope"));
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(TENANT_DEPLOYMENTS + "/tenant1" + API).asString());
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-from-tenant?api-version=2021-04-01")
+            .then().statusCode(200).body("location", equalTo("northeurope"));
+        given().when().get(TENANT_DEPLOYMENTS + "/tenant1" + API).then().statusCode(200)
+            .body("properties.outputs.tenantId.value", not(emptyOrNullString()))
+            .body("properties.outputs.groupId.value", equalTo("/providers/Microsoft.Management/managementGroups/mg1"));
+        given().when().get(TENANT_DEPLOYMENTS + API).then().statusCode(200).body("value.name", contains("tenant1"));
+        given().when().get(TENANT_DEPLOYMENTS + "/tenant1/operations" + API).then().statusCode(200)
+            .body("value[0].properties.targetResource.resourceType", equalTo("Microsoft.Resources/deployments"));
+        given().when().get(SUB_DEPLOYMENTS + API).then().statusCode(200)
+            .body("value.name", not(hasItem("tenant1")));
+        given().when().head(TENANT_DEPLOYMENTS + "/tenant1" + API).then().statusCode(204);
+    }
+
+    @Test
+    void aTenantDeploymentNeedsALocationAndRefusesWhatATenantCannotHold() {
+        json(tenantDeployment().replace("{\"location\": \"westeurope\", ", "{"))
+            .when().post(TENANT_DEPLOYMENTS + "/t-noloc/validate" + API).then().statusCode(400)
+            .body("error.code", equalTo("LocationRequired"))
+            .body("error.message", containsString("tenant-scope deployment"));
+        for (String template : List.of(
+                "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2025-04-01\","
+                    + " \"name\": \"[subscription().subscriptionId]\", \"location\": \"westeurope\","
+                    + " \"properties\": {\"mode\": \"Incremental\", \"template\": {}}}]}",
+                "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"2023-01-01\","
+                    + " \"name\": \"sa\", \"location\": \"westeurope\"}]}",
+                "{\"resources\": [{\"type\": \"Microsoft.Resources/resourceGroups\", \"apiVersion\": \"2021-04-01\","
+                    + " \"name\": \"rg\", \"location\": \"westeurope\"}]}",
+                "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2025-04-01\","
+                    + " \"name\": \"n\", \"resourceGroup\": \"rg\", \"properties\": {\"mode\": \"Incremental\","
+                    + " \"template\": {}}}]}",
+                "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2025-04-01\","
+                    + " \"name\": \"n\", \"scope\": \"/providers/Microsoft.Management/managementGroups/mg\","
+                    + " \"location\": \"westeurope\", \"properties\": {\"mode\": \"Incremental\", \"template\": {}}}]}")) {
+            json("{\"location\": \"westeurope\", \"properties\": {\"mode\": \"Incremental\", \"template\": "
+                    + template + "}}")
+                .when().post(TENANT_DEPLOYMENTS + "/t-bad/validate" + API).then().statusCode(400)
+                .body("error.code", equalTo("InvalidTemplate"));
+        }
+    }
+
+    @Test
+    void resourceIdWithoutAGroupTakesTheSubscriptionLevelAtSubscriptionScope() throws Exception {
+        String body = "{\"location\": \"westeurope\", \"properties\": {\"mode\": \"Incremental\", \"template\": "
+            + "{\"resources\": [], \"outputs\": {\"id\": {\"type\": \"string\", "
+            + "\"value\": \"[resourceId('Microsoft.Authorization/policyDefinitions', 'p')]\"}}}}}";
+        assertEquals("Succeeded", awaitTerminal(json(body).when().put(SUB_DEPLOYMENTS + "/rid" + API)));
+        given().when().get(SUB_DEPLOYMENTS + "/rid" + API).then().statusCode(200)
+            .body("properties.outputs.id.value",
+                equalTo("/subscriptions/" + SUB + "/providers/Microsoft.Authorization/policyDefinitions/p"));
     }
 
     @Test

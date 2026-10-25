@@ -99,9 +99,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     private static final Pattern TEMPLATE_HASH = Pattern.compile(
         "providers/microsoft\\.resources/calculatetemplatehash/?", Pattern.CASE_INSENSITIVE);
 
-    /** {@code subscriptions/{sub}/resourcegroups/{rg}/providers/Microsoft.Resources/deployments[/{name}[/{action}]]}. */
+    /**
+     * {@code [subscriptions/{sub}[/resourcegroups/{rg}]/]providers/Microsoft.Resources/deployments[/{name}[/{action}]]}:
+     * resource-group, subscription or tenant scope.
+     */
     private static final Pattern PATH = Pattern.compile(
-        "subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/providers/microsoft\\.resources/deployments"
+        "(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?providers/microsoft\\.resources/deployments"
             + "(?:/([^/?]+)(?:/([^/?]+))?)?/?",
         Pattern.CASE_INSENSITIVE);
 
@@ -110,8 +113,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
      * segment: the spec's {@code DeploymentOperations_List} path has none, and the az CLI sends that form.
      */
     private static final Pattern OPERATIONS = Pattern.compile(
-        "subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/(?:providers/microsoft\\.resources/)?deployments/([^/?]+)"
-            + "/operations(?:/([^/?]+))?/?", Pattern.CASE_INSENSITIVE);
+        "(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?(?:providers/microsoft\\.resources/)?deployments/"
+            + "([^/?]+)/operations(?:/([^/?]+))?/?", Pattern.CASE_INSENSITIVE);
 
     /** {@code subscriptions/{sub}/resourcegroups/{rg}/deployments/...}: the form with no provider segment. */
     private static final Pattern NO_PROVIDER_SEGMENT = Pattern.compile(
@@ -119,7 +122,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
 
     /** {@code .../deployments/{name}/operationStatuses/{id}}. */
     private static final Pattern OPERATION_STATUS = Pattern.compile(
-        "subscriptions/[^/]+(?:/resourcegroups/[^/]+)?/providers/microsoft\\.resources/deployments/[^/?]+"
+        "(?:subscriptions/[^/]+(?:/resourcegroups/[^/]+)?/)?providers/microsoft\\.resources/deployments/[^/?]+"
             + "/operationstatuses/([^/?]+)/?", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern STATE_FILTER =
@@ -235,8 +238,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         }
         Matcher matcher = PATH.matcher(query < 0 ? path : path.substring(0, query));
         if (!matcher.matches()) {
-            return ArmErrors.notFound("floci-az serves deployments at resource-group and subscription scope only: "
-                + path);
+            return ArmErrors.notFound("floci-az serves deployments at resource-group, subscription and tenant scope "
+                + "only: " + path);
         }
         String subscriptionId = matcher.group(1);
         String resourceGroup = matcher.group(2);
@@ -278,7 +281,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (current != null && current.active()) {
             return deploymentActive(name, current);
         }
-        Response location = checkLocation(resourceGroup, name, body, current);
+        Response location = checkLocation(subscriptionId, resourceGroup, name, body, current);
         if (location != null) {
             return location;
         }
@@ -513,7 +516,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (body == null) {
             return invalidContent();
         }
-        Response location = checkLocation(resourceGroup, name, body, null);
+        Response location = checkLocation(subscriptionId, resourceGroup, name, body, null);
         if (location != null) {
             return location;
         }
@@ -592,7 +595,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (body == null) {
             return invalidContent();
         }
-        Response location = checkLocation(resourceGroup, name, body, null);
+        Response location = checkLocation(subscriptionId, resourceGroup, name, body, null);
         if (location != null) {
             return location;
         }
@@ -643,18 +646,20 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     /**
-     * A subscription-scope deployment's {@code location}, where its data is stored ({@code deploy-to-subscription.md},
+     * A subscription- or tenant-scope deployment's {@code location}, where its data is stored
+     * ({@code deploy-to-subscription.md} and {@code deploy-to-tenant.md},
      * "Deployment location and name"): required, and fixed for a name once used. Null when it is acceptable; a
      * resource-group deployment takes its group's location and needs none.
      */
-    private static Response checkLocation(String resourceGroup, String name, JsonNode body, StoredDeployment existing) {
+    private static Response checkLocation(String subscriptionId, String resourceGroup, String name, JsonNode body,
+                                          StoredDeployment existing) {
         if (resourceGroup != null) {
             return null;
         }
         String location = body.path("location").asText("");
         if (location.isBlank()) {
             return ArmErrors.error(400, "LocationRequired", "The location property is required for the "
-                + "subscription-scope deployment '" + name + "'.");
+                + (subscriptionId == null ? "tenant" : "subscription") + "-scope deployment '" + name + "'.");
         }
         String previous = existing == null ? null : existing.body().path("location").asText(null);
         if (previous != null && !squash(previous).equals(squash(location))) {
@@ -726,7 +731,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         answer.put("id", request.id());
         answer.put("name", request.name());
         answer.put("type", DeploymentEngine.DEPLOYMENTS_TYPE);
-        if (request.atSubscription() && body.path("location").isTextual()) {
+        if (!request.inResourceGroup() && body.path("location").isTextual()) {
             answer.put("location", body.get("location").asText());
         }
         if (body.path("tags").isObject()) {
@@ -760,10 +765,14 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         }
     }
 
-    /** A deployment's key; a subscription-scope deployment has an empty resource-group part. */
+    /**
+     * A deployment's key; a subscription-scope deployment has an empty resource-group part, and a tenant-scope one an
+     * empty subscription part too.
+     */
     private static String key(String subscriptionId, String resourceGroup, String name) {
-        return (subscriptionId + "/" + (resourceGroup == null ? "" : resourceGroup) + "/" + name)
-            .toLowerCase(Locale.ROOT);
+        String subscription = subscriptionId == null ? "" : subscriptionId;
+        String group = resourceGroup == null ? "" : resourceGroup;
+        return (subscription + "/" + group + "/" + name).toLowerCase(Locale.ROOT);
     }
 
     private static Response templateError(TemplateException e) {

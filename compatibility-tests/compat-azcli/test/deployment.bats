@@ -47,6 +47,7 @@ setup() {
 teardown_file() {
     az group delete -n "$DEPLOY_RG" --yes -o none 2>/dev/null || true
     az group delete -n floci-test-sub-deploy-rg --yes -o none 2>/dev/null || true
+    az group delete -n floci-test-tenant-deploy-rg --yes -o none 2>/dev/null || true
     rm -f "$TEMPLATE_FILE"
 }
 
@@ -182,4 +183,50 @@ JSON
 
     run az_json storage account show -n flocitestazlinkedsa -g "$DEPLOY_RG"
     assert_success
+}
+
+@test "az deployment tenant create: a tenant template creates a resource group through a nested deployment" {
+    local tenant_template
+    tenant_template="$(mktemp --suffix .json)"
+    cat > "$tenant_template" <<JSON
+{
+  "\$schema": "https://schema.management.azure.com/schemas/2019-08-01/tenantDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "into-subscription",
+      "location": "westeurope",
+      "subscriptionId": "${SUB_ID}",
+      "properties": {
+        "mode": "Incremental",
+        "expressionEvaluationOptions": {"scope": "inner"},
+        "template": {
+          "\$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "resources": [
+            {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+             "name": "floci-test-tenant-deploy-rg", "location": "westeurope"}
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": {"tenantId": {"type": "string", "value": "[tenant().tenantId]"}}
+}
+JSON
+    run az_json deployment tenant create -n floci-test-tenant-deployment -l "$LOCATION" --template-file "$tenant_template"
+    rm -f "$tenant_template"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.outputs.tenantId.value')" "$TENANT_ID"
+
+    run az_json group show -n floci-test-tenant-deploy-rg
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.location')" "westeurope"
+
+    run az_json deployment tenant show -n floci-test-tenant-deployment
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.id')" "/providers/Microsoft.Resources/deployments/floci-test-tenant-deployment"
 }

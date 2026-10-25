@@ -60,6 +60,11 @@ final class CopyScope implements TemplateScope {
     }
 
     @Override
+    public Level level() {
+        return parent.level();
+    }
+
+    @Override
     public JsonNode resourceGroup() {
         return parent.resourceGroup();
     }

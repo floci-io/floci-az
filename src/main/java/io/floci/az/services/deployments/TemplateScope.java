@@ -48,6 +48,14 @@ public interface TemplateScope {
      */
     JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
 
+    /** The scope a deployment runs at, which decides the form of the ids {@code resourceId()} builds. */
+    enum Level { RESOURCE_GROUP, SUBSCRIPTION, TENANT }
+
+    /** The level of the deployment this scope evaluates for. */
+    default Level level() {
+        return Level.RESOURCE_GROUP;
+    }
+
     /**
      * Charges {@code iterations} copy-loop iterations to the evaluation of one template, before they are built;
      * throws {@link TemplateException} once the template expands past what it may (see {@link CopyLoops}). A scope
