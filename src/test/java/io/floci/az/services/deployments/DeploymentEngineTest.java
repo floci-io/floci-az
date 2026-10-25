@@ -530,4 +530,34 @@ class DeploymentEngineTest {
         assertEquals(SA_ID + "/listKeys", post.path());
         assertEquals("2023-01-01", post.apiVersion());
     }
+
+    private static String linkedParent(String relativePath) {
+        return """
+            {"mode": "Incremental", "templateLink": {"uri": "https://store.example/t/main.json?sv=1&sig=SECRET"},
+             "template": {"resources": [{"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01",
+               "name": "child", "properties": {"mode": "Incremental", "templateLink": {"relativePath": "%s"}}}]}}
+            """.formatted(relativePath);
+    }
+
+    @Test
+    void aRelativePathKeepsTheParentsQueryOnTheParentsHost() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(linkedParent("children/child.json")));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        assertEquals("https://store.example/t/children/child.json?sv=1&sig=SECRET",
+            sent.getFirst().body().path("properties").path("templateLink").path("uri").asText());
+    }
+
+    @Test
+    void aRelativePathThatLeavesTheParentsHostIsRefusedAndSendsNoToken() throws Exception {
+        for (String escape : new String[] {"//attacker.example/child.json", "https://attacker.example/child.json",
+                "http://store.example/t/child.json"}) {
+            sent.clear();
+            DeploymentEngine.Result result = engine.deploy(request(linkedParent(escape)));
+
+            assertEquals("Failed", result.provisioningState(), escape);
+            assertEquals("InvalidTemplate", result.error().path("details").get(0).path("code").asText(), escape);
+            assertTrue(sent.isEmpty(), escape + " sent " + sent);
+        }
+    }
 }

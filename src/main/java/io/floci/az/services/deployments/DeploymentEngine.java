@@ -674,7 +674,9 @@ public class DeploymentEngine {
     /**
      * A nested {@code templateLink.relativePath} as the {@code uri} it names: resolved against the link the parent
      * deployment's own template came from ({@code linked-templates.md}, "Use relative path for linked templates"),
-     * keeping the parent link's query string (a SAS token, say). It needs a parent deployed from a link.
+     * keeping the parent link's query string (a SAS token, say). It needs a parent deployed from a link, and is a
+     * path relative to it: an absolute URI, or a network path ({@code //host/...}) that would leave the parent's
+     * host, is an {@code InvalidTemplate}, so the parent's query string only ever goes back where it came from.
      */
     private static void resolveRelativePath(ObjectNode properties, Plan plan) {
         JsonNode link = properties.path("templateLink");
@@ -687,13 +689,32 @@ public class DeploymentEngine {
                 + "template is itself linked.");
         }
         URI base = URI.create(parent);
-        URI resolved = base.resolve(link.get("relativePath").asText());
+        String relativePath = link.get("relativePath").asText();
+        URI relative;
+        try {
+            relative = URI.create(relativePath);
+        } catch (IllegalArgumentException e) {
+            throw DeploymentTemplate.invalid("The template link's 'relativePath' '" + relativePath
+                + "' is not a valid relative path.");
+        }
+        URI resolved = base.resolve(relative);
+        if (relative.isAbsolute() || relative.getRawAuthority() != null || !sameOrigin(base, resolved)) {
+            throw DeploymentTemplate.invalid("The template link's 'relativePath' '" + relativePath
+                + "' must be a path relative to the parent template's link, on the same host.");
+        }
         String uri = base.getRawQuery() == null ? resolved.toString()
             : resolved.toString().split("\\?")[0] + "?" + base.getRawQuery();
         ObjectNode absolute = ((ObjectNode) link).deepCopy();
         absolute.remove("relativePath");
         absolute.put("uri", uri);
         properties.set("templateLink", absolute);
+    }
+
+    /** True when {@code resolved} has {@code base}'s scheme, host and port. */
+    private static boolean sameOrigin(URI base, URI resolved) {
+        return base.getScheme() != null && base.getScheme().equalsIgnoreCase(resolved.getScheme())
+            && base.getHost() != null && base.getHost().equalsIgnoreCase(resolved.getHost())
+            && base.getPort() == resolved.getPort();
     }
 
     /**
