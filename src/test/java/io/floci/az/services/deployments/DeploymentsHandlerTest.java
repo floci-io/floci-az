@@ -569,6 +569,55 @@ class DeploymentsHandlerTest {
             .body("error.message", containsString("template spec"));
     }
 
+    /** The documented contoso.uniqueName template, with an outer-scope nested deployment calling it too. */
+    private static final String USER_FUNCTION_DEPLOYMENT = """
+        {"properties": {"mode": "Incremental", "template": {
+          "contentVersion": "1.0.0.0",
+          "parameters": {"storageNamePrefix": {"type": "string", "maxLength": 11}},
+          "functions": [{"namespace": "contoso", "members": {"uniqueName": {
+            "parameters": [{"name": "namePrefix", "type": "string"}],
+            "output": {"type": "string",
+                       "value": "[format('{0}{1}', toLower(parameters('namePrefix')), uniqueString(resourceGroup().id))]"}
+          }}}],
+          "resources": [
+            {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+             "name": "[contoso.uniqueName(parameters('storageNamePrefix'))]", "location": "westeurope",
+             "kind": "StorageV2", "sku": {"name": "Standard_LRS"}},
+            {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "outer-module",
+             "properties": {"mode": "Incremental", "template": {
+               "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                 "name": "[contoso.uniqueName('Outer')]", "location": "westeurope", "kind": "StorageV2",
+                 "sku": {"name": "Standard_LRS"}}]}}}],
+          "outputs": {"accountName": {"type": "string",
+                                      "value": "[contoso.uniqueName(parameters('storageNamePrefix'))]"},
+                      "outerName": {"type": "string", "value": "[contoso.uniqueName('Outer')]"}}},
+          "parameters": {"storageNamePrefix": {"value": "Udf"}}}}
+        """;
+
+    @Test
+    void userDefinedFunctionsNameResourcesAndOutputsAndReachAnOuterNestedDeployment() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("udf", USER_FUNCTION_DEPLOYMENT)));
+
+        String accountName = given().when().get(DEPLOYMENTS + "/udf" + API).then().statusCode(200)
+            .extract().path("properties.outputs.accountName.value");
+        String outerName = given().when().get(DEPLOYMENTS + "/udf" + API)
+            .then().extract().path("properties.outputs.outerName.value");
+        assertTrue(accountName.startsWith("udf") && accountName.length() == 16, accountName);
+        assertEquals(accountName.substring(3), outerName.substring(5), "the same uniqueString(resourceGroup().id)");
+        given().when().get(RG + "/providers/Microsoft.Storage/storageAccounts/" + accountName + "?api-version=2023-01-01")
+            .then().statusCode(200);
+        given().when().get(RG + "/providers/Microsoft.Storage/storageAccounts/" + outerName + "?api-version=2023-01-01")
+            .then().statusCode(200);
+    }
+
+    @Test
+    void aUserDefinedFunctionReadingVariablesIsRefusedAtValidation() {
+        json(USER_FUNCTION_DEPLOYMENT.replace("toLower(parameters('namePrefix'))", "variables('x')"))
+            .when().post(DEPLOYMENTS + "/udf-bad/validate" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidTemplate"))
+            .body("error.message", containsString("can't access variables"));
+    }
+
     @Test
     void aMissingResourceGroupIsResourceGroupNotFound() {
         json(DEPLOYMENT).when()

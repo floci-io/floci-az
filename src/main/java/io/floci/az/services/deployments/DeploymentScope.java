@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -166,6 +167,11 @@ final class DeploymentScope implements TemplateScope {
     @Override
     public JsonNode list(String resourceId, String action, String apiVersion, JsonNode body) {
         return live.list(resourceId, action, apiVersion, body);
+    }
+
+    @Override
+    public JsonNode userFunction(String name, List<JsonNode> arguments) {
+        return template.functions().call(name, arguments, this);
     }
 
     /** Every declared parameter's value, in declaration order: supplied, else its default. */

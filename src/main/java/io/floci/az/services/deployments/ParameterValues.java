@@ -54,15 +54,7 @@ final class ParameterValues {
 
     /** Fails unless {@code value} fits {@code declared}'s type and is one of its allowed values. */
     static void check(DeploymentTemplate.Parameter declared, JsonNode value) {
-        boolean fits = switch (declared.type()) {
-            case "string", "securestring" -> value.isTextual();
-            case "int" -> value.isIntegralNumber();
-            case "bool" -> value.isBoolean();
-            case "object", "secureobject" -> value.isObject();
-            case "array" -> value.isArray();
-            default -> false;
-        };
-        if (!fits) {
+        if (!fits(declared.type(), value)) {
             throw DeploymentTemplate.invalid("The provided value for the template parameter '" + declared.name()
                 + "' is not valid. Expected a value of type '" + typeName(declared) + "'.");
         }
@@ -71,6 +63,21 @@ final class ParameterValues {
                 + "parameter '" + declared.name() + "' is not valid. The parameter value is not part of the allowed "
                 + "values: '" + display(declared.allowedValues()) + "'.");
         }
+    }
+
+    /** Whether {@code value} is of the declared {@code type} (lowercase, as {@link DeploymentTemplate} keeps it). */
+    static boolean fits(String type, JsonNode value) {
+        if (value == null) {
+            return false;
+        }
+        return switch (type) {
+            case "string", "securestring" -> value.isTextual();
+            case "int" -> value.isIntegralNumber();
+            case "bool" -> value.isBoolean();
+            case "object", "secureobject" -> value.isObject();
+            case "array" -> value.isArray();
+            default -> false;
+        };
     }
 
     /**

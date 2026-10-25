@@ -2,6 +2,8 @@ package io.floci.az.services.deployments;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.util.List;
+
 /**
  * The scope of one iteration of a copy loop: everything is its enclosing scope's, except {@code copyIndex()}.
  * {@code copyIndex('name')} answers this loop's index when the name is this loop's and asks the enclosing scope
@@ -50,6 +52,11 @@ final class CopyScope implements TemplateScope {
     @Override
     public JsonNode variable(String name) {
         return parent.variable(name);
+    }
+
+    @Override
+    public JsonNode userFunction(String name, List<JsonNode> arguments) {
+        return parent.userFunction(name, arguments);
     }
 
     @Override

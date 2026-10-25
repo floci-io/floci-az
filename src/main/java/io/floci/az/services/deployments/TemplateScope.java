@@ -2,6 +2,8 @@ package io.floci.az.services.deployments;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.util.List;
+
 /**
  * Everything an expression can read beyond its own arguments: the template's parameters and variables, the
  * deployment's scope objects, and the resources it can reference. The deployment engine implements it; the
@@ -52,6 +54,15 @@ public interface TemplateScope {
      * that does not evaluate a whole template counts nothing.
      */
     default void expand(int iterations) {
+    }
+
+    /**
+     * A user-defined function, {@code namespace.member(...)}, called with {@code arguments}. Without a
+     * {@code functions} section there is none to find.
+     */
+    default JsonNode userFunction(String name, List<JsonNode> arguments) {
+        throw TemplateException.invalid("The template function '" + name
+            + "' is not found. Please see https://aka.ms/arm-functions for usage details.");
     }
 
     /**

@@ -20,8 +20,8 @@ import java.util.Set;
  *
  * <p>A child declared inside its parent's {@code resources} is read as a top-level resource carrying its parent's type
  * and name ({@link #flatten}). What floci-az does not serve is refused at validation with {@code InvalidTemplate},
- * never skipped: user-defined {@code functions}, symbolic resource names ({@code languageVersion} 2.0, whose
- * {@code resources} is an object). A nested deployment ({@code Microsoft.Resources/deployments}, which a Bicep module
+ * never skipped: symbolic resource names ({@code languageVersion} 2.0, whose {@code resources} is an object).
+ * User-defined {@code functions} are read into {@link UserFunctions}. A nested deployment ({@code Microsoft.Resources/deployments}, which a Bicep module
  * compiles to) carries its template inline or links to it. A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
  * {@code parallel} or {@code serial}, and a {@code batchSize} is at least 1.
  *
@@ -30,9 +30,10 @@ import java.util.Set;
  * @param variables  the {@code variables} object, unevaluated
  * @param resources  the resources, in template order
  * @param outputs    the {@code outputs} object, unevaluated
+ * @param functions  the user-defined functions of its {@code functions} section
  */
 public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> parameters, ObjectNode variables,
-                                 List<Resource> resources, ObjectNode outputs) {
+                                 List<Resource> resources, ObjectNode outputs, UserFunctions functions) {
 
     /** Azure's code for every template validation and evaluation error. */
     public static final String INVALID_TEMPLATE = "InvalidTemplate";
@@ -90,10 +91,6 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         if (!(template instanceof ObjectNode object)) {
             throw invalid("The template must be a JSON object.");
         }
-        JsonNode functions = object.path("functions");
-        if (functions.isArray() && !functions.isEmpty()) {
-            throw unsupported("user-defined 'functions'");
-        }
         JsonNode resources = object.path("resources");
         if (resources.isObject()) {
             throw unsupported("symbolic resource names (languageVersion 2.0)");
@@ -103,7 +100,13 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         }
         return new DeploymentTemplate(object, parameters(object.path("parameters")),
             objectOrEmpty(object.path("variables"), "variables"), resources(resources),
-            objectOrEmpty(object.path("outputs"), "outputs"));
+            objectOrEmpty(object.path("outputs"), "outputs"), UserFunctions.parse(object.path("functions")));
+    }
+
+    /** A declared type, lowercase, when it is one ARM accepts for a parameter or an output; null otherwise. */
+    static String declaredType(JsonNode type) {
+        String lower = type.asText("").toLowerCase(Locale.ROOT);
+        return PARAMETER_TYPES.contains(lower) ? lower : null;
     }
 
     private static Map<String, Parameter> parameters(JsonNode declared) {
@@ -118,8 +121,8 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
             JsonNode definition = field.getValue();
-            String type = definition.path("type").asText("").toLowerCase(Locale.ROOT);
-            if (!PARAMETER_TYPES.contains(type)) {
+            String type = declaredType(definition.path("type"));
+            if (type == null) {
                 throw invalid("The template parameter '" + field.getKey() + "' has an invalid type '"
                     + definition.path("type").asText("") + "'.");
             }

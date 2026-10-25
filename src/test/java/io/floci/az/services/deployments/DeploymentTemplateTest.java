@@ -62,7 +62,6 @@ class DeploymentTemplateTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "{\"functions\": [{\"namespace\": \"n\"}]}",
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
     })
     void whatPhaseOneDoesNotServeIsRefusedNotSkipped(String template) {
@@ -82,6 +81,15 @@ class DeploymentTemplateTest {
         "{\"resources\": [\"not an object\"]}",
         "{\"resources\": 3}",
         "{\"outputs\": []}",
+        "{\"functions\": {}}",
+        "{\"functions\": [{\"namespace\": \"n\"}]}",
+        "{\"functions\": [{\"members\": {}}]}",
+        "{\"functions\": [{\"namespace\": \"n\", \"members\": {\"f\": {\"parameters\": [{\"name\": \"p\","
+            + " \"type\": \"string\", \"defaultValue\": \"x\"}], \"output\": {\"type\": \"string\", \"value\": \"x\"}}}}]}",
+        "{\"functions\": [{\"namespace\": \"n\", \"members\": {\"f\": {\"output\": {\"type\": \"string\"}}}}]}",
+        "{\"functions\": [{\"namespace\": \"n\", \"members\": {\"f\": {\"output\": {\"type\": \"date\", \"value\": 1}}}}]}",
+        "{\"functions\": [{\"namespace\": \"n\", \"members\": {\"f\": {\"output\": {\"type\": \"int\", \"value\": 1}}}},"
+            + " {\"namespace\": \"N\", \"members\": {\"F\": {\"output\": {\"type\": \"int\", \"value\": 2}}}}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\"}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\","
             + " \"properties\": {\"template\": {}, \"expressionEvaluationOptions\": {\"scope\": \"sideways\"}}}]}",

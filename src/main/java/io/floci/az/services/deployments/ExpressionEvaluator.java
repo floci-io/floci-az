@@ -23,14 +23,15 @@ import static io.floci.az.services.deployments.TemplateValues.typeName;
  * <p>Function names are case-insensitive. {@code if} evaluates only the branch its condition selects, and
  * {@code and} and {@code or} stop at the first argument that decides the result, so a branch that would fail
  * (a {@code reference()} to a resource the condition excludes) is never evaluated. Property access is
- * case-insensitive, as ARM matches property names.
+ * case-insensitive, as ARM matches property names. A dotted name, {@code namespace.member()}, is a user-defined
+ * function the scope answers ({@link UserFunctions}).
  *
  * <p>Functions floci-az does not implement are an {@code InvalidTemplate} error, never a silent value:
  * {@code providers}, {@code references}, {@code pickZones},
  * {@code managementGroup}, {@code managementGroupResourceId}, {@code deployer}, {@code roleDefinitions}, the lambda
  * functions ({@code lambda}, {@code filter}, {@code map}, {@code reduce}, {@code sort}, {@code toObject},
  * {@code groupBy}, {@code mapValues}), the CIDR functions ({@code parseCidr}, {@code cidrSubnet}, {@code cidrHost}),
- * user-defined functions ({@code namespace.member()}), and the scope functions with arguments
+ * and the scope functions with arguments
  * ({@code resourceGroup(...)}, {@code subscription(...)}).
  *
  * <p>Values that differ from Azure's: {@code uniqueString()} has Azure's length and alphabet but not its hash,

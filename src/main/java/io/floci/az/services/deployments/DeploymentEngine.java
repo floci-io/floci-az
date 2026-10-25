@@ -674,8 +674,9 @@ public class DeploymentEngine {
      * The template a nested deployment is sent with. An {@code inner} one is its own template and goes as written.
      * An {@code outer} one (the default) resolves the parent's parameters and variables
      * ({@code linked-templates.md}, "Expression evaluation scope in nested templates"): it goes with the parent's
-     * parameters declared as its own, each defaulting to the parent's value, and the parent's variable values as its
-     * variables, so it then runs as an inner one; a value that would read as an expression is escaped. Its
+     * parameters declared as its own, each defaulting to the parent's value, the parent's variable values as its
+     * variables and the parent's user-defined functions as its own, so it then runs as an inner one; a value that
+     * would read as an expression is escaped. Its
      * {@code resourceGroup()} and {@code subscription()} then answer for its own target, where Azure answers the
      * parent's: they differ only when an outer-scope nested deployment targets another scope.
      */
@@ -701,6 +702,9 @@ public class DeploymentEngine {
         for (JsonNode loop : plan.template().variables().path("copy")) {
             String name = loop.path("name").asText();
             variables.set(name, escaped(plan.scope().variable(name)));
+        }
+        if (plan.template().template().has("functions")) {
+            outer.set("functions", plan.template().template().get("functions").deepCopy());
         }
         return outer;
     }

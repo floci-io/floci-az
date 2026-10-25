@@ -184,11 +184,21 @@ A `count` is an integer from 0 to 800, as in Azure; anything else is `InvalidTem
 template that builds a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the
 emulator routes.
 
+### User-defined functions
+
+A template's `functions` section declares functions called as `namespace.member(...)`. Each one is its `output`
+expression over its own parameters, checked against their declared types, and its result is checked against the
+output's type. The scope functions (`resourceGroup()`, `subscription()`, `tenant()`, `deployment()`,
+`environment()`) answer for the deployment. The restrictions Azure documents are each `400 InvalidTemplate`: a
+function reads only its own parameters, never the template's or `variables()`, calls no other user-defined
+function, uses neither `reference()` nor a `list*` function, and declares no parameter defaults. An outer-scope
+nested deployment calls its parent's functions.
+
 ## Not supported yet
 
 Each of these is refused with `400 InvalidTemplate`, never skipped:
 
-- user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
+- symbolic resource names (`languageVersion` 2.0)
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR

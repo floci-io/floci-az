@@ -71,7 +71,10 @@ final class TemplateFunctions {
 
     static JsonNode call(String name, List<JsonNode> args, TemplateScope scope) {
         String key = lower(name);
-        if (UNSUPPORTED.contains(key) || key.contains(".")) {
+        if (key.contains(".")) {
+            return scope.userFunction(name, args);
+        }
+        if (UNSUPPORTED.contains(key)) {
             throw TemplateException.invalid("The template function '" + name + "' is not supported by floci-az.");
         }
         if (key.startsWith("list")) {
