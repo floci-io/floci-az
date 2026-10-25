@@ -24,6 +24,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -782,5 +783,28 @@ class DeploymentsHandlerTest {
             .body("properties.scope", equalTo(ACCOUNT));
         given().when().get(RG + "/providers/Microsoft.Authorization/policyAssignments/onAccount?api-version=2025-03-01")
             .then().statusCode(404);
+    }
+
+    @Test
+    void anOuterNestedDeploymentKeepsTheParentsSecureValuesOutOfItsTemplate() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("withsecret", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"value": "s3cr3t-value"}, "config": {"value": {"key": "0bj-s3cr3t"}}},
+              "template": {
+                "parameters": {"secret": {"type": "securestring"}, "config": {"type": "secureObject"},
+                               "plain": {"type": "string", "defaultValue": "visible"}},
+                "resources": [{"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01",
+                  "name": "outerchild", "properties": {"mode": "Incremental", "template": {"resources": [],
+                    "outputs": {"length": {"type": "int", "value": "[length(parameters('secret'))]"}}}}}]}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/withsecret" + API).asString());
+
+        String exported = given().when().post(DEPLOYMENTS + "/outerchild/exportTemplate" + API).then()
+            .statusCode(200).body("template.parameters.plain.defaultValue", equalTo("visible"))
+            .extract().asString();
+        assertFalse(exported.contains("s3cr3t"), exported);
+        String child = given().when().get(DEPLOYMENTS + "/outerchild" + API).then().statusCode(200)
+            .body("properties.outputs.length.value", equalTo(12))
+            .extract().asString();
+        assertFalse(child.contains("s3cr3t"), child);
     }
 }

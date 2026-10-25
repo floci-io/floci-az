@@ -700,8 +700,8 @@ public class DeploymentEngine {
             resolveRelativePath((ObjectNode) evaluated.get("properties"), plan);
         }
         if (nestedTemplate != null) {
-            ((ObjectNode) evaluated.get("properties")).set("template",
-                nestedTemplate(definition, (ObjectNode) nestedTemplate, plan));
+            ObjectNode properties = (ObjectNode) evaluated.get("properties");
+            properties.set("template", nestedTemplate(definition, (ObjectNode) nestedTemplate, plan, properties));
         }
         String apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
         ObjectNode body = JsonNodeFactory.instance.objectNode();
@@ -770,7 +770,7 @@ public class DeploymentEngine {
      * {@code resourceGroup()} and {@code subscription()} then answer for its own target, where Azure answers the
      * parent's: they differ only when an outer-scope nested deployment targets another scope.
      */
-    private JsonNode nestedTemplate(ObjectNode definition, ObjectNode template, Plan plan) {
+    private JsonNode nestedTemplate(ObjectNode definition, ObjectNode template, Plan plan, ObjectNode properties) {
         if (isInnerScope(definition)) {
             return template;
         }
@@ -780,7 +780,13 @@ public class DeploymentEngine {
             DeploymentTemplate.Parameter declared = plan.template().parameter(entry.getKey());
             ObjectNode parameter = parameters.putObject(declared.name());
             parameter.put("type", declared.type());
-            parameter.set("defaultValue", escaped(entry.getValue()));
+            if (declared.secure()) {
+                // A secure value never goes into the template, which exportTemplate returns: it is supplied as a
+                // parameter value, which the child never echoes.
+                properties.withObjectProperty("parameters").putObject(declared.name()).set("value", entry.getValue());
+            } else {
+                parameter.set("defaultValue", escaped(entry.getValue()));
+            }
         }
         ObjectNode variables = outer.putObject("variables");
         for (Map.Entry<String, JsonNode> field : plan.template().variables().properties()) {
