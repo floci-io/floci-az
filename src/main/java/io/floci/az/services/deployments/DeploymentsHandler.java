@@ -36,6 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -249,11 +250,11 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
             return invalidContent();
         }
         String key = key(subscriptionId, resourceGroup, name);
-        StoredDeployment existing = deployments.get(key);
-        if (existing != null && existing.active()) {
-            return deploymentActive(name, existing);
+        StoredDeployment current = deployments.get(key);
+        if (current != null && current.active()) {
+            return deploymentActive(name, current);
         }
-        Response location = checkLocation(resourceGroup, name, body, existing);
+        Response location = checkLocation(resourceGroup, name, body, current);
         if (location != null) {
             return location;
         }
@@ -271,7 +272,17 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         ObjectNode accepted = acceptedBody(request, body, prepared, correlationId);
         StoredDeployment stored = new StoredDeployment(accepted, body.path("properties").get("template"),
             operationId, new AtomicBoolean(), JsonNodeFactory.instance.arrayNode());
-        deployments.put(key, stored);
+        // The name is reserved in one atomic step: of two PUTs that both passed the check above, one stores its
+        // run and the other finds it active, so a deployment never has two runs.
+        AtomicReference<StoredDeployment> previous = new AtomicReference<>();
+        StoredDeployment reserved = deployments.compute(key, (ignored, prior) -> {
+            previous.set(prior);
+            return prior != null && prior.active() ? prior : stored;
+        });
+        if (reserved != stored) {
+            return deploymentActive(name, reserved);
+        }
+        StoredDeployment existing = previous.get();
         operations.put(operationId, status("Accepted", null));
         runner.submit(() -> run(key, stored, prepared, body, correlationId));
         String statusUrl = RequestUrls.resolveBaseUrl(req, config) + request.id() + "/operationStatuses/" + operationId
