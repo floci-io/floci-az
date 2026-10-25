@@ -416,4 +416,26 @@ class DeploymentsHandlerTest {
         given().when().get(RG + "/providers/Microsoft.Authorization/policyAssignments/onAccount?api-version=2025-03-01")
             .then().statusCode(404);
     }
+
+    @Test
+    void laterPagesKeepTheFilterOfTheFirst() throws Exception {
+        String failing = """
+            {"properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "BAD_NAME!",
+               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}]}}}
+            """;
+        String empty = "{\"properties\": {\"mode\": \"Incremental\", \"template\": {\"resources\": []}}}";
+        assertEquals("Succeeded", awaitTerminal(put("a", empty)));
+        assertEquals("Failed", awaitTerminal(put("b", failing)));
+        assertEquals("Succeeded", awaitTerminal(put("c", empty)));
+
+        Response first = given().queryParam("$filter", "provisioningState eq 'Succeeded'").queryParam("$top", 1)
+            .when().get(DEPLOYMENTS + API);
+        first.then().statusCode(200).body("value.name", contains("a"));
+        URI next = URI.create(first.path("nextLink"));
+        given().urlEncodingEnabled(false).when().get(next.getRawPath() + "?" + next.getRawQuery())
+            .then().statusCode(200)
+            .body("value.name", contains("c"))
+            .body("nextLink", nullValue());
+    }
 }

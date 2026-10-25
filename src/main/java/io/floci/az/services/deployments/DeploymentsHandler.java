@@ -23,6 +23,8 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -383,11 +385,29 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         answer.set("value", value);
         int next = skip + value.size();
         if (next < items.size()) {
-            String apiVersion = req.queryParams() == null ? null : req.queryParams().get("api-version");
-            answer.put("nextLink", RequestUrls.resolveBaseUrl(req, config) + "/" + path + "?"
-                + (apiVersion == null ? "" : "api-version=" + apiVersion + "&") + "$top=" + top + "&$skiptoken=" + next);
+            answer.put("nextLink", RequestUrls.resolveBaseUrl(req, config) + "/" + path + "?" + carriedQuery(req)
+                + "$top=" + top + "&$skiptoken=" + next);
         }
         return answer;
+    }
+
+    /**
+     * The query options a {@code nextLink} carries over, each followed by {@code &}: {@code api-version} and
+     * {@code $filter}, so a later page reads the same result set as the first.
+     */
+    private static String carriedQuery(AzureRequest req) {
+        StringBuilder query = new StringBuilder();
+        if (req.queryParams() == null) {
+            return "";
+        }
+        for (String option : List.of("api-version", "$filter")) {
+            String value = req.queryParams().get(option);
+            if (value != null) {
+                query.append(option).append('=')
+                    .append(URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")).append('&');
+            }
+        }
+        return query.toString();
     }
 
     private static int intParam(AzureRequest req, String name, int fallback) {
