@@ -185,7 +185,7 @@ public class BannerLogger {
                 "Microsoft.Network (vnet, subnet, nic, public-ip, nsg, dns)"));
         sb.append(String.format("   %-9s [%s]  %s\n", "deploy",
                 config.services().deployments().enabled() ? "enabled " : "disabled",
-                "Microsoft.Resources/deployments (ARM templates, resource-group scope, synchronous)"));
+                "Microsoft.Resources/deployments (ARM templates, resource-group scope)"));
         sb.append(String.format("   %-9s [%s]  %s\n", "managedid",
                 config.services().managedIdentity().enabled() ? "enabled " : "disabled",
                 "Microsoft.ManagedIdentity (user-assigned identities + IMDS token endpoint)"));

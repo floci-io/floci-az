@@ -30,18 +30,27 @@ deployments existed.
 ## Endpoints
 
 ```
-PUT    .../deployments/{name}                    # CreateOrUpdate: runs the deployment, 201 (200 on a re-PUT)
+PUT    .../deployments/{name}                    # CreateOrUpdate: 201 (200 on a re-PUT), Accepted, then runs
+GET    .../deployments/{name}/operationStatuses/{id}   # the poll the PUT's Azure-AsyncOperation names
 GET    .../deployments/{name}                    # Get
 HEAD   .../deployments/{name}                    # CheckExistence: 204 or 404
 DELETE .../deployments/{name}                    # Delete: removes the record, never the resources; 204
 GET    .../deployments[?$filter=provisioningState eq 'X'&$top=N]
 POST   .../deployments/{name}/validate           # 200, or 400 with the template error
 POST   .../deployments/{name}/exportTemplate     # {"template": ...}
+POST   .../deployments/{name}/cancel             # 204 while it runs
 ```
 
 The resource group must exist, or the answer is `404 ResourceGroupNotFound`.
 
 ## How a deployment runs
+
+A `PUT` checks the template at once and answers `201` with `provisioningState: Accepted` and an
+`Azure-AsyncOperation` header, as Azure does. The deployment then runs in the background: the
+`operationStatuses` URL answers `{"status": "Accepted"}` until it ends, then `Succeeded`, `Failed` with the
+error, or `Canceled`, and `GET` of the deployment shows `Running` and then the final state. A `PUT` or
+`DELETE` of a deployment that is still running is `409 DeploymentActive`. `cancel` stops it before its next
+resource and leaves what it already created in place.
 
 1. The template is read and checked: parameters (type and `allowedValues`), variables, resources and
    outputs. A template floci-az cannot run is refused with `400 InvalidTemplate` before anything is created.
@@ -99,9 +108,11 @@ operations listings answer `404`.
 
 ## Intentional deviations
 
-- **Synchronous**: a `PUT` returns once the deployment has finished, answering `201` with the final
-  `provisioningState`. Azure answers `Accepted` and lets the client poll; azurerm and the az CLI both read a
-  `201` that already says `Succeeded` as complete.
+- **`Retry-After: 1`** on the `PUT` and on every status that is not final yet: Azure sends none, and clients
+  then fall back to their own, much longer, poll interval (30 seconds for the az CLI, which polls once straight
+  after the `PUT`); a local deployment usually finishes within the first second.
+- **A refused `cancel`** (of a deployment that is no longer running) is `409 DeploymentNotActive`; Azure
+  documents that only an `Accepted` or `Running` deployment can be canceled, but not the error.
 - **Delete** answers `204` at once; Azure answers `202` and lets the client poll.
 - **The first failing resource stops the deployment.** Azure goes on with the resources that do not depend
   on it.

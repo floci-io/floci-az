@@ -10,10 +10,12 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.directory.ResourceGroups;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -27,8 +29,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,10 +47,14 @@ import java.util.regex.Pattern;
  * operations and shapes are the same):
  *
  * <ul>
- *   <li>{@code PUT} ({@code Deployments_CreateOrUpdate}) runs the deployment to the end and answers {@code 201},
- *       or {@code 200} for an existing name, with the final {@code provisioningState}: azurerm and the az CLI both
- *       read a 201 without async headers as complete when its body says so. Azure answers {@code Accepted} and
- *       polls; Phase 1 is synchronous. A template it cannot run is {@code 400} with the template error.</li>
+ *   <li>{@code PUT} ({@code Deployments_CreateOrUpdate}) checks the template at once, a template it cannot run
+ *       being {@code 400} with the template error, then answers {@code 201}, or {@code 200} for an existing name,
+ *       with {@code provisioningState: Accepted} and an {@code Azure-AsyncOperation} header, as Azure records it,
+ *       and runs the deployment in the background. {@code GET .../operationStatuses/{id}} answers
+ *       {@code {"status": "Accepted"}} until it ends, then {@code Succeeded}, {@code Failed} with the error, or
+ *       {@code Canceled}. A {@code PUT} or {@code DELETE} while it runs is {@code 409 DeploymentActive}.</li>
+ *   <li>{@code POST cancel} ({@code 204}) stops a running deployment before its next resource and leaves what it
+ *       created in place; it is {@code 409} for a deployment that is no longer running</li>
  *   <li>{@code GET}, {@code HEAD}, list with {@code $filter=provisioningState eq '...'} and {@code $top}</li>
  *   <li>{@code DELETE} removes the deployment record only, never its resources, as Azure does; it answers
  *       {@code 204} at once, where Azure answers {@code 202} and polls</li>
@@ -53,8 +64,10 @@ import java.util.regex.Pattern;
  *
  * <p>The body is read as JSONC, the way the az CLI sends it (see {@link #LENIENT}).
  *
- * <p>{@code whatIf}, {@code cancel}, {@code operations} and {@code operationStatuses}, and deployments at any other
- * scope, answer {@code 404} in Phase 1. Deployments live in memory, as the rest of ARM state does.
+ * <p>Emulator choices, with no Azure source to settle them: a {@code Retry-After} of 1 second on the {@code PUT}
+ * (Azure sends none, and clients then fall back to a much longer poll interval), and the code of a refused cancel.
+ * {@code whatIf}, {@code operations} and deployments at any other scope answer {@code 404} for now. Deployments
+ * live in memory, as the rest of ARM state does.
  */
 @ApplicationScoped
 public class DeploymentsHandler implements AzureServiceHandler, Resettable {
@@ -82,23 +95,49 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         "subscriptions/([^/]+)/resourcegroups/([^/]+)/providers/microsoft\\.resources/deployments(?:/([^/?]+)(?:/([^/?]+))?)?/?",
         Pattern.CASE_INSENSITIVE);
 
+    /** {@code .../deployments/{name}/operationStatuses/{id}}. */
+    private static final Pattern OPERATION_STATUS = Pattern.compile(
+        "subscriptions/[^/]+/resourcegroups/[^/]+/providers/microsoft\\.resources/deployments/[^/?]+"
+            + "/operationstatuses/([^/?]+)/?", Pattern.CASE_INSENSITIVE);
+
     private static final Pattern STATE_FILTER =
         Pattern.compile("provisioningState\\s+eq\\s+'([^']*)'", Pattern.CASE_INSENSITIVE);
+
+    /** Seconds a client waits between polls; short, because a local deployment finishes quickly. */
+    static final String RETRY_AFTER_SECONDS = "1";
+
+    private static final Set<String> ACTIVE_STATES = Set.of("accepted", "running");
 
     private final EmulatorConfig config;
     private final DeploymentEngine engine;
     private final ResourceGroups groups;
 
+    /** Runs each deployment after its {@code PUT} has been answered; virtual threads, as runs mostly wait. */
+    private final ExecutorService runner = Executors.newVirtualThreadPerTaskExecutor();
+
     /** Every deployment, keyed by {@link #key}. */
     private final Map<String, StoredDeployment> deployments = new ConcurrentHashMap<>();
+
+    /** The status each deployment run answers at {@code operationStatuses/{id}}, by operation id. */
+    private final Map<String, ObjectNode> operations = new ConcurrentHashMap<>();
 
     /**
      * One deployment as {@code GET} answers it, and the template {@code exportTemplate} returns.
      *
-     * @param body     the {@code DeploymentExtended} body
-     * @param template the template as sent
+     * @param body        the {@code DeploymentExtended} body
+     * @param template    the template as sent
+     * @param operationId the run whose status {@code operationStatuses} answers
+     * @param canceled    set by {@code cancel}, read by the run before each resource
      */
-    record StoredDeployment(ObjectNode body, JsonNode template) {
+    record StoredDeployment(ObjectNode body, JsonNode template, String operationId, AtomicBoolean canceled) {
+
+        String state() {
+            return body.path("properties").path("provisioningState").asText();
+        }
+
+        boolean active() {
+            return ACTIVE_STATES.contains(state().toLowerCase(Locale.ROOT));
+        }
     }
 
     @Inject
@@ -134,6 +173,13 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         int query = path.indexOf('?');
+        Matcher operationStatus = OPERATION_STATUS.matcher(query < 0 ? path : path.substring(0, query));
+        if (operationStatus.matches()) {
+            if (!"GET".equals(req.method().toUpperCase(Locale.ROOT))) {
+                return Response.status(405).build();
+            }
+            return operationStatus(operationStatus.group(1));
+        }
         Matcher matcher = PATH.matcher(query < 0 ? path : path.substring(0, query));
         if (!matcher.matches()) {
             return ArmErrors.notFound("floci-az serves deployments at resource-group scope only: " + path);
@@ -168,19 +214,83 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         if (body == null) {
             return invalidContent();
         }
+        String key = key(subscriptionId, resourceGroup, name);
+        StoredDeployment existing = deployments.get(key);
+        if (existing != null && existing.active()) {
+            return deploymentActive(name, existing);
+        }
         DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
-            body.get("properties"), req);
-        DeploymentEngine.Result result;
+            body.get("properties"), req.detached());
+        DeploymentEngine.Prepared prepared;
         try {
-            result = engine.deploy(request);
+            prepared = engine.prepare(request);
         } catch (TemplateException e) {
             LOG.infov("Deployment {0} refused: {1}", name, e.getMessage());
             return templateError(e);
         }
-        ObjectNode answer = deploymentBody(request, body, result);
-        boolean created = deployments.put(key(subscriptionId, resourceGroup, name),
-            new StoredDeployment(answer, body.path("properties").get("template"))) == null;
-        return json(created ? 201 : 200, answer);
+        String operationId = operationId();
+        String correlationId = UUID.randomUUID().toString();
+        ObjectNode accepted = acceptedBody(request, body, prepared, correlationId);
+        StoredDeployment stored = new StoredDeployment(accepted, body.path("properties").get("template"),
+            operationId, new AtomicBoolean());
+        deployments.put(key, stored);
+        operations.put(operationId, status("Accepted", null));
+        runner.submit(() -> run(key, stored, prepared, body, correlationId));
+        String statusUrl = RequestUrls.resolveBaseUrl(req, config) + request.id() + "/operationStatuses/" + operationId
+            + apiVersionQuery(req);
+        return Response.status(existing == null ? 201 : 200).entity(accepted).type(MediaType.APPLICATION_JSON)
+            .header("Azure-AsyncOperation", statusUrl)
+            .header("Retry-After", RETRY_AFTER_SECONDS)
+            .build();
+    }
+
+    /** Runs a deployment in the background and records how it ended, unless it was replaced or reset meanwhile. */
+    private void run(String key, StoredDeployment stored, DeploymentEngine.Prepared prepared, JsonNode body,
+                     String correlationId) {
+        DeploymentEngine.Result result;
+        try {
+            replace(key, stored, withState(stored, "Running"));
+            result = engine.run(prepared, stored.canceled()::get);
+        } catch (RuntimeException e) {
+            LOG.errorv(e, "Deployment {0} failed unexpectedly", prepared.request().name());
+            ObjectNode error = JsonNodeFactory.instance.objectNode();
+            error.put("code", "InternalServerError");
+            error.put("message", "The deployment failed unexpectedly: " + e.getMessage());
+            operations.put(stored.operationId(), status("Failed", error));
+            return;
+        }
+        ObjectNode finished = deploymentBody(prepared.request(), body, result, correlationId);
+        replace(key, stored, new StoredDeployment(finished, stored.template(), stored.operationId(),
+            stored.canceled()));
+        operations.put(stored.operationId(), status(result.provisioningState(), result.error()));
+    }
+
+    /**
+     * {@code GET .../operationStatuses/{id}}. A status that is not final carries {@code Retry-After}: the az CLI polls
+     * once straight after the {@code PUT}, and without the header it waits its 30-second default before the next.
+     */
+    private Response operationStatus(String operationId) {
+        ObjectNode answer = operations.get(operationId);
+        if (answer == null) {
+            return ArmErrors.notFound("Deployment operation status not found: " + operationId);
+        }
+        Response.ResponseBuilder response = Response.ok(answer).type(MediaType.APPLICATION_JSON);
+        if (ACTIVE_STATES.contains(answer.path("status").asText().toLowerCase(Locale.ROOT))) {
+            response.header("Retry-After", RETRY_AFTER_SECONDS);
+        }
+        return response.build();
+    }
+
+    /** Swaps the record of one run for its next state, leaving a newer run or a reset alone. */
+    private void replace(String key, StoredDeployment run, StoredDeployment next) {
+        deployments.computeIfPresent(key, (ignored, current) ->
+            current.operationId().equals(run.operationId()) ? next : current);
+    }
+
+    private static StoredDeployment withState(StoredDeployment stored, String state) {
+        ObjectNode body = stored.body().deepCopy();
+        body.withObjectProperty("properties").put("provisioningState", state);
+        return new StoredDeployment(body, stored.template(), stored.operationId(), stored.canceled());
     }
 
     private Response get(String subscriptionId, String resourceGroup, String name) {
@@ -189,7 +299,25 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
     }
 
     private Response delete(String subscriptionId, String resourceGroup, String name) {
+        StoredDeployment existing = deployments.get(key(subscriptionId, resourceGroup, name));
+        if (existing != null && existing.active()) {
+            return deploymentActive(name, existing);
+        }
         deployments.remove(key(subscriptionId, resourceGroup, name));
+        return Response.status(204).build();
+    }
+
+    private Response cancel(String subscriptionId, String resourceGroup, String name) {
+        StoredDeployment existing = deployments.get(key(subscriptionId, resourceGroup, name));
+        if (existing == null) {
+            return deploymentNotFound(name);
+        }
+        if (!existing.active()) {
+            return ArmErrors.error(409, "DeploymentNotActive", "The deployment '" + name + "' cannot be canceled: "
+                + "its provisioning state is '" + existing.state() + "'. Only an Accepted or Running deployment can "
+                + "be canceled.");
+        }
+        existing.canceled().set(true);
         return Response.status(204).build();
     }
 
@@ -227,6 +355,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
                             String action) {
         return switch (action.toLowerCase(Locale.ROOT)) {
             case "validate" -> validate(req, subscriptionId, resourceGroup, name);
+            case "cancel" -> cancel(subscriptionId, resourceGroup, name);
             case "exporttemplate" -> {
                 StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
                 if (stored == null) {
@@ -249,12 +378,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
             body.get("properties"), req);
         try {
-            List<String> resources = engine.validate(request);
+            DeploymentEngine.Prepared prepared = engine.prepare(request);
+            List<String> resources = prepared.resourceIds();
             ObjectNode answer = header(request, body);
             ObjectNode properties = answer.putObject("properties");
-            properties.put("templateHash", DeploymentEngine.templateHash(
-                DeploymentTemplate.parse(body.path("properties").get("template"))));
-            properties.set("parameters", engine.echoedParameters(request));
+            properties.put("templateHash", prepared.templateHash());
+            properties.set("parameters", prepared.echoedParameters());
             properties.put("mode", body.path("properties").path("mode").asText());
             properties.put("provisioningState", "Succeeded");
             properties.put("timestamp", Instant.now().toString());
@@ -270,7 +399,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
 
     /** The {@code DeploymentExtended} body of a finished deployment. */
     private static ObjectNode deploymentBody(DeploymentEngine.Request request, JsonNode body,
-                                             DeploymentEngine.Result result) {
+                                             DeploymentEngine.Result result, String correlationId) {
         ObjectNode answer = header(request, body);
         ObjectNode properties = answer.putObject("properties");
         properties.put("templateHash", result.templateHash());
@@ -279,7 +408,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         properties.put("provisioningState", result.provisioningState());
         properties.put("timestamp", result.finished().toString());
         properties.put("duration", Duration.between(result.started(), result.finished()).toString());
-        properties.put("correlationId", UUID.randomUUID().toString());
+        properties.put("correlationId", correlationId);
         properties.set("providers", result.providers());
         properties.set("dependencies", result.dependencies());
         properties.set("outputs", result.outputs());
@@ -289,6 +418,49 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
             properties.set("error", result.error());
         }
         return answer;
+    }
+
+    /** The {@code 201} body of an accepted deployment, as Azure records it: no parameters or outputs yet. */
+    private static ObjectNode acceptedBody(DeploymentEngine.Request request, JsonNode body,
+                                           DeploymentEngine.Prepared prepared, String correlationId) {
+        ObjectNode answer = header(request, body);
+        ObjectNode properties = answer.putObject("properties");
+        properties.put("templateHash", prepared.templateHash());
+        properties.put("mode", body.path("properties").path("mode").asText());
+        properties.put("provisioningState", "Accepted");
+        properties.put("timestamp", Instant.now().toString());
+        properties.put("duration", "PT0S");
+        properties.put("correlationId", correlationId);
+        properties.putArray("providers");
+        properties.putArray("dependencies");
+        return answer;
+    }
+
+    /** An {@code operationStatuses} answer: {@code {"status": ...}}, with the error when the run failed. */
+    private static ObjectNode status(String state, ObjectNode error) {
+        ObjectNode status = JsonNodeFactory.instance.objectNode();
+        status.put("status", state);
+        if (error != null) {
+            status.set("error", error);
+        }
+        return status;
+    }
+
+    /** An operation id in Azure's form, a 20-digit decimal number. */
+    private static String operationId() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        return String.format("%010d%010d", random.nextLong(10_000_000_000L), random.nextLong(10_000_000_000L));
+    }
+
+    private static String apiVersionQuery(AzureRequest req) {
+        String apiVersion = req.queryParams() == null ? null : req.queryParams().get("api-version");
+        return apiVersion == null ? "" : "?api-version=" + apiVersion;
+    }
+
+    private static Response deploymentActive(String name, StoredDeployment existing) {
+        return ArmErrors.error(409, "DeploymentActive", "Unable to edit or replace deployment '" + name
+            + "': the previous deployment is still active (current provisioning state is: '" + existing.state()
+            + "').");
     }
 
     private static ObjectNode header(DeploymentEngine.Request request, JsonNode body) {
@@ -336,6 +508,13 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
 
     @Override
     public void clear() {
+        deployments.values().forEach(deployment -> deployment.canceled().set(true));
         deployments.clear();
+        operations.clear();
+    }
+
+    @PreDestroy
+    void stop() {
+        runner.shutdownNow();
     }
 }

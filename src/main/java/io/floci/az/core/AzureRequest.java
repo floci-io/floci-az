@@ -5,6 +5,7 @@ import io.floci.az.core.cloud.ScopeContext;
 import jakarta.ws.rs.core.HttpHeaders;
 
 import java.io.InputStream;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -116,6 +117,30 @@ public record AzureRequest(
         return new AzureRequest(method, accountName, serviceType, resourcePath, headers, bodyStream,
              queryParams, queryParamsMulti, authContext, secure, host, remoteAddress, rawPath, rawQuery, authority,
              resolved, armCall);
+    }
+
+    /**
+     * A copy of this request that outlives it, for work that goes on after the response is sent (a template
+     * deployment running in the background): the request-scoped headers are replaced by a snapshot of the ones an
+     * internal request forwards ({@code Authorization}, {@code X-Forwarded-Proto}, {@code Host}), the authority is
+     * resolved now, and the body is dropped, from the request and from its {@link ArmCall}, which keeps no
+     * reference to the original request.
+     */
+    public AzureRequest detached() {
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        if (headers != null) {
+            for (String name : List.of(HttpHeaders.AUTHORIZATION, "X-Forwarded-Proto", HttpHeaders.HOST)) {
+                String value = headers.getHeaderString(name);
+                if (value != null) {
+                    snapshot.put(name, value);
+                }
+            }
+        }
+        return new AzureRequest(method, accountName, serviceType, resourcePath, new SyntheticHttpHeaders(snapshot),
+             InputStream.nullInputStream(), queryParams, queryParamsMulti, authContext, secure, host, remoteAddress,
+             rawPath, rawQuery, RequestUrls.resolveAuthority(this), scope, armCall == null ? null
+                 : new ArmCall(armCall.scope(), armCall.id(), armCall.type(), armCall.method(),
+                     armCall.normalizedLocation()));
     }
 
     /** Returns a copy of this request marked as inside the ARM request gate with {@code call}. */

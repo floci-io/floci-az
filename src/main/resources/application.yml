@@ -334,7 +334,7 @@ floci-az:
       default-region: eastus
       max-delivery-attempts: 30
     deployments:
-      enabled: true       # Microsoft.Resources/deployments: ARM template deployments at resource-group scope, run synchronously
+      enabled: true       # Microsoft.Resources/deployments: ARM template deployments at resource-group scope, run in the background and polled
     managed-identity:
       enabled: true       # Microsoft.ManagedIdentity — user-assigned identities + IMDS/App Service token endpoints (tokens signed with the entra key)
       # ARM scope that seeds the system-assigned IMDS identity; set it to your resource's

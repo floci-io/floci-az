@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /**
  * Runs a resource-group template deployment: reads and checks the template, resolves its parameters, orders its
@@ -42,7 +43,10 @@ import java.util.Set;
  * request would. {@code reference()} and {@code list*()} are internal {@code GET} and {@code POST} requests the
  * same way.
  *
- * <p>Phase 1 runs synchronously: {@link #deploy} returns once every resource reached a terminal state. A resource
+ * <p>{@link #prepare} does everything that can fail before a resource is created, so the caller can answer a
+ * template error at once; {@link #run} then creates the resources, and may run after the request that asked for
+ * it has been answered. {@link #deploy} is both, in one call. {@link #run} returns once every resource reached a
+ * terminal state, or once a cancellation is seen between two resources. A resource
  * whose handler answers 202, or a non-terminal {@code provisioningState}, is polled with {@code GET} for a bounded
  * time. The first resource that fails stops the deployment, which then fails with Azure's
  * {@code DeploymentFailed} error carrying that resource's error as its detail; Azure would go on with the
@@ -116,7 +120,7 @@ public class DeploymentEngine {
     }
 
     /** A deployment read, checked and ordered, ready to run. */
-    private record Plan(DeploymentTemplate template, DeploymentScope scope, Map<String, JsonNode> parameters,
+    record Plan(DeploymentTemplate template, DeploymentScope scope, Map<String, JsonNode> parameters,
                         List<DependencyGraph.Node> order) {
     }
 
@@ -135,27 +139,69 @@ public class DeploymentEngine {
      * the resources it would deploy, in creation order; a template it cannot run throws {@link TemplateException}.
      */
     public List<String> validate(Request request) {
-        return plan(request).order().stream().map(DependencyGraph.Node::id).toList();
+        return prepare(request).resourceIds();
     }
 
-    /** Echoes {@code request}'s parameters as a deployment answer does, once they have been validated. */
-    public ObjectNode echoedParameters(Request request) {
-        Plan plan = plan(request);
-        return ParameterValues.echo(plan.template(), plan.parameters());
+    /**
+     * A deployment read, checked and ordered by {@link #prepare}, ready for {@link #run}.
+     *
+     * @param request the deployment request
+     * @param plan    its template, scope, resolved parameters and creation order
+     */
+    public record Prepared(Request request, Plan plan) {
+
+        /** The ids of the resources it will deploy, in creation order. */
+        public List<String> resourceIds() {
+            return plan.order().stream().map(DependencyGraph.Node::id).toList();
+        }
+
+        /** Its parameters as a deployment answer echoes them. */
+        public ObjectNode echoedParameters() {
+            return ParameterValues.echo(plan.template(), plan.parameters());
+        }
+
+        /** A stable hash of its template. */
+        public String templateHash() {
+            return DeploymentEngine.templateHash(plan.template());
+        }
     }
+
+    /**
+     * Reads, checks and orders a deployment without creating anything. A template it cannot run throws
+     * {@link TemplateException}.
+     */
+    public Prepared prepare(Request request) {
+        return new Prepared(request, plan(request));
+    }
+
 
     /**
      * {@code Deployments_CreateOrUpdate}, run to the end. A template it cannot run throws
      * {@link TemplateException} before anything is created; a resource that fails ends it {@code Failed}.
      */
     public Result deploy(Request request) {
+        return run(prepare(request), () -> false);
+    }
+
+    /**
+     * Creates the resources of a prepared deployment, in order, and evaluates its outputs. {@code canceled} is read
+     * before each resource: once it answers true, nothing more is created and the deployment ends {@code Canceled},
+     * leaving what was already created in place, as Azure does.
+     */
+    public Result run(Prepared prepared, BooleanSupplier canceled) {
+        Request request = prepared.request();
+        Plan plan = prepared.plan();
         Instant started = Instant.now();
-        Plan plan = plan(request);
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
         List<String> deployed = new ArrayList<>();
         List<DependencyGraph.Node> deployedNodes = new ArrayList<>();
         for (DependencyGraph.Node node : plan.order()) {
+            if (canceled.getAsBoolean()) {
+                LOG.infov("Deployment {0} canceled after {1} resource(s)", request.name(), deployed.size());
+                return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), deployed,
+                    providers(deployedNodes), dependencies(plan), null, templateHash, started, Instant.now());
+            }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
             if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scope()))) {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
@@ -170,7 +216,15 @@ public class DeploymentEngine {
             deployed.add(node.id());
             deployedNodes.add(node);
         }
-        ObjectNode outputs = outputs(plan);
+        ObjectNode outputs;
+        try {
+            outputs = outputs(plan);
+        } catch (TemplateException e) {
+            return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
+                providers(deployedNodes), dependencies(plan),
+                deploymentFailed(request, detail(e.code(), request.id(), e.getMessage())), templateHash, started,
+                Instant.now());
+        }
         LOG.infov("Deployment {0} succeeded: {1} resource(s)", request.name(), deployed.size());
         return new Result("Succeeded", parameters, outputs, deployed, providers(deployedNodes), dependencies(plan),
             null, templateHash, started, Instant.now());

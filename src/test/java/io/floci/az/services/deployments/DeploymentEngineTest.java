@@ -237,6 +237,28 @@ class DeploymentEngineTest {
     }
 
     @Test
+    void aCanceledRunCreatesNothingMoreAndEndsCanceled() throws Exception {
+        DeploymentEngine.Prepared prepared = engine.prepare(request(STORAGE_TEMPLATE));
+
+        DeploymentEngine.Result result = engine.run(prepared, () -> true);
+
+        assertEquals("Canceled", result.provisioningState());
+        assertTrue(sent.isEmpty());
+        assertTrue(result.outputResources().isEmpty());
+        assertNull(result.error());
+    }
+
+    @Test
+    void aCancelSeenAfterTheFirstResourceKeepsIt() throws Exception {
+        DeploymentEngine.Prepared prepared = engine.prepare(request(STORAGE_TEMPLATE));
+
+        DeploymentEngine.Result result = engine.run(prepared, () -> !sent.isEmpty());
+
+        assertEquals("Canceled", result.provisioningState());
+        assertEquals(List.of(SA_ID), result.outputResources());
+    }
+
+    @Test
     void validateChecksEverythingAndSendsNothing() throws Exception {
         List<String> ids = engine.validate(request(STORAGE_TEMPLATE));
 
