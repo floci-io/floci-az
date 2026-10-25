@@ -427,7 +427,7 @@ public class DeploymentEngine {
         List<DependencyGraph.Node> withImplicit = new ArrayList<>();
         for (DependencyGraph.Node node : nodes) {
             TemplateScope nodeScope = instanceScopes.getOrDefault(node.id().toLowerCase(Locale.ROOT), scope);
-            withImplicit.add(withImplicitReferences(node, template, nodeScope, emptyLoops));
+            withImplicit.add(withImplicitReferences(node, template, nodeScope, emptyLoops, nodes));
         }
         return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes);
     }
@@ -520,14 +520,27 @@ public class DeploymentEngine {
      * the {@code dependsOn} entries that name a copy loop of no iterations, which depend on nothing.
      */
     private DependencyGraph.Node withImplicitReferences(DependencyGraph.Node node, DeploymentTemplate template,
-                                                       TemplateScope scope, Set<String> emptyLoops) {
+                                                       TemplateScope scope, Set<String> emptyLoops,
+                                                       List<DependencyGraph.Node> nodes) {
         Set<String> dependsOn = new LinkedHashSet<>();
         for (String entry : node.dependsOn()) {
             if (!emptyLoops.contains(entry.toLowerCase(Locale.ROOT))) {
                 dependsOn.add(entry);
             }
         }
-        collectReferences(template.resources().get(node.index()).definition(), scope, dependsOn);
+        ObjectNode definition = template.resources().get(node.index()).definition();
+        if (DeploymentTemplate.isNestedDeployment(definition) && definition.path("properties").has("template")) {
+            // An inline nested template is the child's to scan when it is prepared; the parent scans the rest of the
+            // nested deployment (its name, parameters and target), which it evaluates itself.
+            ObjectNode outside = definition.deepCopy();
+            JsonNode body = ((ObjectNode) outside.get("properties")).remove("template");
+            collectReferences(outside, scope, dependsOn);
+            if (!isInnerScope(definition)) {
+                collectOuterReferences(body, scope, nodes, dependsOn);
+            }
+        } else {
+            collectReferences(definition, scope, dependsOn);
+        }
         return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn),
             node.loop());
     }
@@ -560,6 +573,36 @@ public class DeploymentEngine {
                 dependsOn.add(evaluated.asText());
             }
         }
+    }
+
+    /**
+     * Adds the parent's resources an {@code outer}-scope nested template's {@code reference()} and {@code list*()}
+     * calls name: Azure evaluates such a template's expressions in the parent ({@code linked-templates.md},
+     * "Expression evaluation scope in nested templates"), so they order the parent's resources first. A call whose
+     * argument reads the nested template's own loops cannot be evaluated here and is left to the child, as is a
+     * name the parent does not declare.
+     */
+    private static void collectOuterReferences(JsonNode body, TemplateScope scope, List<DependencyGraph.Node> nodes,
+                                               Set<String> dependsOn) {
+        for (Expression argument : DependencyGraph.implicitReferences(body)) {
+            JsonNode evaluated;
+            try {
+                evaluated = ExpressionEvaluator.evaluate(argument, scope);
+            } catch (TemplateException e) {
+                LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+                continue;
+            }
+            if (evaluated.isTextual() && DependencyGraph.isName(evaluated.asText())
+                    && nodes.stream().anyMatch(declared -> declared.name().equalsIgnoreCase(evaluated.asText()))) {
+                dependsOn.add(evaluated.asText());
+            }
+        }
+    }
+
+    /** True for a nested deployment whose template evaluates its own expressions ({@code scope: inner}). */
+    private static boolean isInnerScope(ObjectNode definition) {
+        return definition.path("properties").path("expressionEvaluationOptions").path("scope").asText("outer")
+            .equalsIgnoreCase("inner");
     }
 
     private static void collectLoopReferences(JsonNode loop, TemplateScope scope, Set<String> dependsOn) {
@@ -728,8 +771,7 @@ public class DeploymentEngine {
      * parent's: they differ only when an outer-scope nested deployment targets another scope.
      */
     private JsonNode nestedTemplate(ObjectNode definition, ObjectNode template, Plan plan) {
-        String scope = definition.path("properties").path("expressionEvaluationOptions").path("scope").asText("outer");
-        if (scope.equalsIgnoreCase("inner")) {
+        if (isInnerScope(definition)) {
             return template;
         }
         ObjectNode outer = template.deepCopy();
