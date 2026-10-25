@@ -148,7 +148,12 @@ public class DeploymentEngine {
 
     /** A deployment read, checked and ordered, ready to run. */
     record Plan(DeploymentTemplate template, DeploymentScope scope, Map<String, JsonNode> parameters,
-                        List<DependencyGraph.Node> order) {
+                        List<DependencyGraph.Node> order, Map<String, TemplateScope> instanceScopes) {
+
+        /** The scope a resource is evaluated in: its copy iteration's, or the deployment's. */
+        TemplateScope scopeOf(DependencyGraph.Node node) {
+            return instanceScopes.getOrDefault(node.id().toLowerCase(Locale.ROOT), scope);
+        }
     }
 
     @Inject
@@ -232,7 +237,7 @@ public class DeploymentEngine {
                     operations);
             }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
-            if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scope()))) {
+            if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scopeOf(node)))) {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
                 continue;
             }
@@ -289,17 +294,37 @@ public class DeploymentEngine {
         List<DependencyGraph.Node> nodes = new ArrayList<>();
         DeploymentScope scope = scope(request, template, supplied, nodes);
         Map<String, JsonNode> parameters = scope.resolvedParameters();
+        Map<String, TemplateScope> instanceScopes = new LinkedHashMap<>();
+        Set<String> emptyLoops = new LinkedHashSet<>();
         for (DeploymentTemplate.Resource resource : template.resources()) {
-            nodes.add(node(request, resource, scope));
+            JsonNode copy = resource.definition().get("copy");
+            if (copy == null) {
+                nodes.add(node(request, resource, scope, null));
+                continue;
+            }
+            // A copy loop is one resource per iteration, each evaluated with copyIndex() at its iteration.
+            String loop = copy.get("name").asText();
+            int count = CopyLoops.count(copy.get("count"), scope, loop);
+            if (count == 0) {
+                emptyLoops.add(loop.toLowerCase(Locale.ROOT));
+            }
+            for (int i = 0; i < count; i++) {
+                CopyScope iteration = new CopyScope(scope, loop, i, true);
+                DependencyGraph.Node node = node(request, resource, iteration, loop);
+                instanceScopes.put(node.id().toLowerCase(Locale.ROOT), iteration);
+                nodes.add(node);
+            }
         }
         List<DependencyGraph.Node> withImplicit = new ArrayList<>();
         for (DependencyGraph.Node node : nodes) {
-            withImplicit.add(withImplicitReferences(node, template, scope));
+            TemplateScope nodeScope = instanceScopes.getOrDefault(node.id().toLowerCase(Locale.ROOT), scope);
+            withImplicit.add(withImplicitReferences(node, template, nodeScope, emptyLoops));
         }
-        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit));
+        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes);
     }
 
-    private DependencyGraph.Node node(Request request, DeploymentTemplate.Resource resource, DeploymentScope scope) {
+    private DependencyGraph.Node node(Request request, DeploymentTemplate.Resource resource, TemplateScope scope,
+                                      String loop) {
         ObjectNode definition = resource.definition();
         String type = text(evaluate(definition.get("type"), scope), "type");
         String name = text(evaluate(definition.get("name"), scope), "name");
@@ -311,13 +336,21 @@ public class DeploymentEngine {
             }
         }
         return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(request.resourceGroupId(), type, name),
-            type, name, dependsOn);
+            type, name, dependsOn, loop);
     }
 
-    /** {@code node} with the resources its {@code reference()} and {@code list*()} calls name added. */
+    /**
+     * {@code node} with the resources its {@code reference()} and {@code list*()} calls name added, and without
+     * the {@code dependsOn} entries that name a copy loop of no iterations, which depend on nothing.
+     */
     private DependencyGraph.Node withImplicitReferences(DependencyGraph.Node node, DeploymentTemplate template,
-                                                       DeploymentScope scope) {
-        Set<String> dependsOn = new LinkedHashSet<>(node.dependsOn());
+                                                       TemplateScope scope, Set<String> emptyLoops) {
+        Set<String> dependsOn = new LinkedHashSet<>();
+        for (String entry : node.dependsOn()) {
+            if (!emptyLoops.contains(entry.toLowerCase(Locale.ROOT))) {
+                dependsOn.add(entry);
+            }
+        }
         for (Expression argument : DependencyGraph.implicitReferences(
                 template.resources().get(node.index()).definition())) {
             JsonNode value = ExpressionEvaluator.evaluate(argument, scope);
@@ -325,7 +358,8 @@ public class DeploymentEngine {
                 dependsOn.add(value.asText());
             }
         }
-        return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn));
+        return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn),
+            node.loop());
     }
 
     private DeploymentScope scope(Request request, DeploymentTemplate template, Map<String, JsonNode> supplied,
@@ -358,7 +392,10 @@ public class DeploymentEngine {
         ObjectNode evaluated;
         String apiVersion;
         try {
-            evaluated = (ObjectNode) ExpressionEvaluator.evaluateValue(definition, plan.scope());
+            // The resource's own copy loop is how it was expanded, not a property to send.
+            ObjectNode withoutLoop = definition.deepCopy();
+            withoutLoop.remove("copy");
+            evaluated = (ObjectNode) CopyLoops.evaluate(withoutLoop, plan.scopeOf(node));
             apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
         } catch (TemplateException e) {
             ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
@@ -524,18 +561,28 @@ public class DeploymentEngine {
         ObjectNode outputs = JsonNodeFactory.instance.objectNode();
         for (Map.Entry<String, JsonNode> field : plan.template().outputs().properties()) {
             JsonNode declared = field.getValue();
-            if (declared.has("copy")) {
-                throw DeploymentTemplate.invalid("The template output '" + field.getKey() + "' uses 'copy', which "
-                    + "floci-az does not support yet.");
-            }
             if (declared.has("condition") && !truthy(evaluate(declared.get("condition"), plan.scope()))) {
                 continue;
             }
             ObjectNode output = outputs.putObject(field.getKey());
             output.put("type", declared.path("type").asText("String"));
-            output.set("value", evaluate(declared.get("value"), plan.scope()));
+            output.set("value", declared.has("copy") ? outputLoop(field.getKey(), declared.get("copy"), plan.scope())
+                : evaluate(declared.get("value"), plan.scope()));
         }
         return outputs;
+    }
+
+    /** An output copy loop ({@code copy-outputs.md}): {@code count} evaluations of {@code input}, unnamed. */
+    private static ArrayNode outputLoop(String output, JsonNode copy, TemplateScope scope) {
+        int count = CopyLoops.count(copy.get("count"), scope, output);
+        if (!copy.has("input")) {
+            throw DeploymentTemplate.invalid("The copy loop of output '" + output + "' has no 'input'.");
+        }
+        ArrayNode values = JsonNodeFactory.instance.arrayNode();
+        for (int i = 0; i < count; i++) {
+            values.add(CopyLoops.evaluate(copy.get("input"), new CopyScope(scope, null, i, true)));
+        }
+        return values;
     }
 
     private ArrayNode providers(List<DependencyGraph.Node> deployed) {
@@ -659,7 +706,7 @@ public class DeploymentEngine {
         return Long.toUnsignedString(hash);
     }
 
-    private static JsonNode evaluate(JsonNode value, DeploymentScope scope) {
+    private static JsonNode evaluate(JsonNode value, TemplateScope scope) {
         return ExpressionEvaluator.evaluateValue(value, scope);
     }
 

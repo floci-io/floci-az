@@ -63,8 +63,6 @@ class DeploymentTemplateTest {
         "{\"functions\": [{\"namespace\": \"n\"}]}",
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
         "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
-            + " \"copy\": {\"name\": \"c\", \"count\": 2}}]}",
-        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
             + " \"resources\": [{}]}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\"}]}",
     })
@@ -85,6 +83,14 @@ class DeploymentTemplateTest {
         "{\"resources\": [\"not an object\"]}",
         "{\"resources\": 3}",
         "{\"outputs\": []}",
+        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
+            + " \"copy\": {\"count\": 2}}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
+            + " \"copy\": {\"name\": \"c\", \"count\": 2, \"mode\": \"sideways\"}}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
+            + " \"copy\": {\"name\": \"c\", \"count\": 2, \"batchSize\": 0}}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Network/virtualNetworks/subnets\", \"apiVersion\": \"1\","
+            + " \"name\": \"v/s\", \"properties\": {\"copy\": [{\"name\": \"x\", \"count\": 1, \"input\": 1}]}}]}",
     })
     void aMalformedTemplateIsAnInvalidTemplate(String template) {
         assertEquals("InvalidTemplate",

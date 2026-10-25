@@ -79,6 +79,22 @@ fails, the deployment ends `Failed` with Azure's `DeploymentFailed` error, whose
 resource's own error; a resource that ends in a `Failed` provisioning state is a
 `ResourceDeploymentFailure`.
 
+## Copy loops
+
+All four kinds of copy loop are served, with `copyIndex([loopName], [offset])`:
+
+- **Resources**: `"copy": {"name", "count", "mode", "batchSize"}` deploys one resource per iteration. A
+  `dependsOn` entry naming the loop depends on every instance, and a loop whose `count` is 0 deploys nothing
+  and satisfies any dependency on it. Instances are created one at a time in iteration order, which meets both
+  `parallel` and `serial` mode.
+- **Properties**: a `copy` array of `{"name", "count", "input"}` in a top-level resource's `properties` builds
+  the array property of that name; `copyIndex` there names its loop.
+- **Variables**: a `copy` array in `variables` defines one array variable per entry, and a `copy` array
+  inside a variable's value builds an array property of it.
+- **Outputs**: an output with `"copy": {"count", "input"}` is the array of its iterations.
+
+A `count` is an integer from 0 to 800, as in Azure; anything else is `InvalidTemplate`.
+
 ## Template functions
 
 | Group | Functions |
@@ -86,6 +102,7 @@ resource's own error; a resource that ends in a `Failed` provisioning state is a
 | Scope | `parameters`, `variables`, `resourceGroup`, `subscription`, `tenant`, `deployment`, `environment` |
 | Resource ids | `resourceId` (every arity), `subscriptionResourceId`, `tenantResourceId`, `extensionResourceId` |
 | Live | `reference` (by name or id, optional api-version and `'Full'`), every `list*` function (`listKeys`, ...) |
+| Loops | `copyIndex` |
 | Logical | `true`, `false`, `null`, `not`, `and`, `or`, `if`, `bool`, `coalesce` |
 | Comparison | `equals`, `less`, `lessOrEquals`, `greater`, `greaterOrEquals` |
 | String | `concat`, `format`, `uniqueString`, `guid`, `newGuid`, `toLower`, `toUpper`, `string`, `int`, `float`, `json`, `length`, `empty`, `first`, `last`, `take`, `skip`, `split`, `replace`, `substring`, `trim`, `padLeft`, `startsWith`, `endsWith`, `contains`, `indexOf`, `lastIndexOf`, `like` |
@@ -102,7 +119,6 @@ emulator routes.
 
 Each of these is refused with `400 InvalidTemplate`, never skipped:
 
-- `copy` loops (resources and outputs) and `copyIndex()`
 - nested `resources`, nested deployments (`Microsoft.Resources/deployments` inside a template, which Bicep
   modules compile to), user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR

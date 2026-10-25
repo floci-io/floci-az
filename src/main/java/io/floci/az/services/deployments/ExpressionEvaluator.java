@@ -26,7 +26,7 @@ import static io.floci.az.services.deployments.TemplateValues.typeName;
  * case-insensitive, as ARM matches property names.
  *
  * <p>Functions floci-az does not implement are an {@code InvalidTemplate} error, never a silent value:
- * {@code copyIndex} (copy loops), {@code providers}, {@code references}, {@code pickZones},
+ * {@code providers}, {@code references}, {@code pickZones},
  * {@code managementGroup}, {@code managementGroupResourceId}, {@code deployer}, {@code roleDefinitions}, the lambda
  * functions ({@code lambda}, {@code filter}, {@code map}, {@code reduce}, {@code sort}, {@code toObject},
  * {@code groupBy}, {@code mapValues}), the CIDR functions ({@code parseCidr}, {@code cidrSubnet}, {@code cidrHost}),

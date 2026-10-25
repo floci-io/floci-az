@@ -45,4 +45,15 @@ public interface TemplateScope {
      * @param body the function's optional values, or null
      */
     JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
+
+    /**
+     * {@code copyIndex()}: the zero-based iteration of the copy loop named {@code loopName}, or of the resource's
+     * own loop when it is null. Outside a loop of that name it is an error, as in Azure.
+     */
+    default long copyIndex(String loopName) {
+        throw TemplateException.invalid(loopName == null
+            ? "The template function 'copyIndex' is not expected here: it is only valid inside a copy loop."
+            : "The template function 'copyIndex' refers to the copy loop '" + loopName
+                + "', which does not enclose this expression.");
+    }
 }

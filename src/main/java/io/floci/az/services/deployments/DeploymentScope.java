@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The {@link TemplateScope} of one deployment: its parameter values, its variables, the objects
@@ -94,18 +95,24 @@ final class DeploymentScope implements TemplateScope {
         if (known != null) {
             return known;
         }
-        JsonNode declared = null;
-        String declaredName = name;
+        JsonNode value = null;
         for (Map.Entry<String, JsonNode> field : template.variables().properties()) {
-            if (field.getKey().equalsIgnoreCase(name)) {
-                declared = field.getValue();
-                declaredName = field.getKey();
+            if (field.getKey().equalsIgnoreCase(name) && !isCopyArray(field)) {
+                JsonNode declared = field.getValue();
+                value = guarded("variable '" + field.getKey() + "'", () -> CopyLoops.evaluate(declared, this));
             }
         }
-        if (declared == null) {
+        if (value == null) {
+            // A variable may be built by a copy loop: variables.copy is an array of {"name", "count", "input"}.
+            for (JsonNode loop : template.variables().path("copy")) {
+                if (loop.path("name").asText().equalsIgnoreCase(name)) {
+                    value = guarded("variable '" + loop.get("name").asText() + "'", () -> CopyLoops.loop(loop, this));
+                }
+            }
+        }
+        if (value == null) {
             throw DeploymentTemplate.invalid("The template variable '" + name + "' is not found.");
         }
-        JsonNode value = guarded("variable '" + declaredName + "'", declared);
         variableValues.put(key, value);
         return value;
     }
@@ -159,16 +166,21 @@ final class DeploymentScope implements TemplateScope {
             throw DeploymentTemplate.invalid("The value for the template parameter '" + declared.name()
                 + "' is not provided.");
         }
-        return guarded("parameter '" + declared.name() + "'", declared.defaultValue());
+        return guarded("parameter '" + declared.name() + "'",
+            () -> ExpressionEvaluator.evaluateValue(declared.defaultValue(), this));
     }
 
-    /** Evaluates {@code value}, failing on a parameter default or variable that needs itself. */
-    private JsonNode guarded(String what, JsonNode value) {
+    private static boolean isCopyArray(Map.Entry<String, JsonNode> field) {
+        return field.getKey().equals("copy") && field.getValue().isArray();
+    }
+
+    /** Evaluates with {@code evaluation}, failing on a parameter default or variable that needs itself. */
+    private JsonNode guarded(String what, Supplier<JsonNode> evaluation) {
         if (!evaluating.add(what.toLowerCase(Locale.ROOT))) {
             throw DeploymentTemplate.invalid("The template " + what + " refers to itself.");
         }
         try {
-            return ExpressionEvaluator.evaluateValue(value, this);
+            return evaluation.get();
         } finally {
             evaluating.remove(what.toLowerCase(Locale.ROOT));
         }

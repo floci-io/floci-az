@@ -18,11 +18,11 @@ import java.util.Set;
  * An ARM template (the {@code properties.template} of a deployment), read and checked once before anything is
  * evaluated: its parameters, variables, resources and outputs.
  *
- * <p>Phase 1 serves the template language a resource-group deployment of plain resources needs. What it does not
- * serve is refused at validation with {@code InvalidTemplate}, never skipped: {@code copy} loops, nested
+ * <p>What floci-az does not serve is refused at validation with {@code InvalidTemplate}, never skipped: nested
  * {@code resources}, user-defined {@code functions}, symbolic resource names ({@code languageVersion} 2.0, whose
  * {@code resources} is an object) and nested deployments ({@code Microsoft.Resources/deployments}, which Bicep
- * modules compile to).
+ * modules compile to). A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
+ * {@code parallel} or {@code serial}, and a {@code batchSize} is at least 1.
  *
  * @param template   the template as sent, for {@code exportTemplate}
  * @param parameters the declared parameters, by name in declaration order; names compare case-insensitively
@@ -145,7 +145,12 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
                 }
             }
             if (resource.has("copy")) {
-                throw unsupported("'copy' loops (resource '" + resource.get("name").asText() + "')");
+                checkCopy(resource);
+            }
+            if (ArmResourcePath.segments(resource.get("type").asText()).size() > 2
+                    && resource.path("properties").path("copy").isArray()) {
+                throw invalid("The resource '" + resource.get("name").asText() + "' uses a property copy loop, "
+                    + "which is only allowed on a top-level resource.");
             }
             JsonNode nested = resource.path("resources");
             if (nested.isArray() && !nested.isEmpty()) {
@@ -157,6 +162,23 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             resources.add(new Resource(i, resource));
         }
         return resources;
+    }
+
+    /** A resource copy loop's shape; its count is checked once it is evaluated. */
+    private static void checkCopy(ObjectNode resource) {
+        JsonNode copy = resource.get("copy");
+        String name = resource.get("name").asText();
+        if (!copy.isObject() || !copy.path("name").isTextual() || !copy.has("count")) {
+            throw invalid("The copy loop of resource '" + name + "' needs a 'name' and a 'count'.");
+        }
+        String mode = copy.path("mode").asText("parallel");
+        if (!mode.equalsIgnoreCase("parallel") && !mode.equalsIgnoreCase("serial")) {
+            throw invalid("The copy loop '" + copy.get("name").asText() + "' has an invalid mode '" + mode
+                + "': it is 'parallel' or 'serial'.");
+        }
+        if (copy.has("batchSize") && (!copy.get("batchSize").isIntegralNumber() || copy.get("batchSize").asInt() < 1)) {
+            throw invalid("The copy loop '" + copy.get("name").asText() + "' needs a 'batchSize' of at least 1.");
+        }
     }
 
     private static ObjectNode objectOrEmpty(JsonNode value, String property) {

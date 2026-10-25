@@ -13,7 +13,9 @@ import java.util.Set;
  * template order. Azure's dependency rules ("Define the order for deploying resources in ARM templates"):
  *
  * <ul>
- *   <li>an explicit {@code dependsOn} entry names a resource by name, by {@code type/name}, or by id</li>
+ *   <li>an explicit {@code dependsOn} entry names a resource by name, by {@code type/name}, or by id, or names a
+ *       copy loop, which depends on every instance of it ({@code resource-dependency.md}, "Depend on resources in a
+ *       loop")</li>
  *   <li>{@code reference()} and the {@code list*} functions create an implicit dependency when they name a
  *       resource by name; passing an id creates none, and {@code resourceId()} alone creates none</li>
  *   <li>a child resource gets no implicit dependency on its parent</li>
@@ -32,11 +34,17 @@ public final class DependencyGraph {
      * @param type      its type as the template spells it
      * @param name      its name as evaluated, slash-separated for a child
      * @param dependsOn what it depends on: evaluated {@code dependsOn} entries and implicit references by name
+     * @param loop      the name of the copy loop it is an instance of, or null
      */
-    public record Node(int index, String id, String type, String name, List<String> dependsOn) {
+    public record Node(int index, String id, String type, String name, List<String> dependsOn, String loop) {
 
         public Node {
             dependsOn = List.copyOf(dependsOn);
+        }
+
+        /** A resource that is not part of a copy loop. */
+        public Node(int index, String id, String type, String name, List<String> dependsOn) {
+            this(index, id, type, name, dependsOn, null);
         }
     }
 
@@ -49,9 +57,10 @@ public final class DependencyGraph {
         for (int i = 0; i < nodes.size(); i++) {
             Set<Integer> targets = new LinkedHashSet<>();
             for (String reference : nodes.get(i).dependsOn()) {
-                int target = resolve(nodes, reference, nodes.get(i));
-                if (target != i) {
-                    targets.add(target);
+                for (int target : resolve(nodes, reference, nodes.get(i))) {
+                    if (target != i) {
+                        targets.add(target);
+                    }
                 }
             }
             edges.add(List.copyOf(targets));
@@ -108,8 +117,20 @@ public final class DependencyGraph {
         }
     }
 
-    /** The index of the node {@code reference} names: by id, by {@code type/name}, or by name. */
-    private static int resolve(List<Node> nodes, String reference, Node from) {
+    /**
+     * The indexes of the nodes {@code reference} names: every instance of the copy loop it names, else the one node
+     * it names by id, by {@code type/name}, or by name.
+     */
+    private static List<Integer> resolve(List<Node> nodes, String reference, Node from) {
+        List<Integer> loop = new ArrayList<>();
+        for (int i = 0; i < nodes.size(); i++) {
+            if (nodes.get(i).loop() != null && nodes.get(i).loop().equalsIgnoreCase(reference)) {
+                loop.add(i);
+            }
+        }
+        if (!loop.isEmpty()) {
+            return loop;
+        }
         List<Integer> matches = new ArrayList<>();
         for (int i = 0; i < nodes.size(); i++) {
             if (matches(nodes.get(i), reference)) {
@@ -124,7 +145,7 @@ public final class DependencyGraph {
             throw DeploymentTemplate.invalid("The dependency '" + reference + "' of '" + from.name()
                 + "' matches more than one resource; name it by type and name, or by id.");
         }
-        return matches.getFirst();
+        return List.of(matches.getFirst());
     }
 
     private static boolean matches(Node node, String reference) {

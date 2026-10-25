@@ -51,7 +51,7 @@ final class TemplateFunctions {
 
     /** Functions Azure documents that floci-az does not implement; calling one is an error, never a guess. */
     static final Set<String> UNSUPPORTED = Set.of(
-        "copyindex", "providers", "references", "pickzones", "managementgroup", "managementgroupresourceid",
+        "providers", "references", "pickzones", "managementgroup", "managementgroupresourceid",
         "deployer", "roledefinitions", "lambda", "filter", "map", "reduce", "sort", "toobject", "groupby",
         "mapvalues", "parsecidr", "cidrsubnet", "cidrhost");
 
@@ -90,6 +90,7 @@ final class TemplateFunctions {
             case "tenantresourceid" -> NODES.textNode(tenantResourceId(name, args));
             case "extensionresourceid" -> NODES.textNode(extensionResourceId(name, args));
             case "reference" -> reference(name, args, scope);
+            case "copyindex" -> copyIndex(name, args, scope);
             case "true" -> booleanValue(name, args, true);
             case "false" -> booleanValue(name, args, false);
             case "null" -> nullValue(name, args);
@@ -347,6 +348,26 @@ final class TemplateFunctions {
         String apiVersion = args.size() > 1 && !isNull(args.get(1)) ? string(name, args, 1, 1, 3) : null;
         boolean full = args.size() > 2 && "full".equalsIgnoreCase(string(name, args, 2, 1, 3));
         return scope.reference(target, apiVersion, full);
+    }
+
+    /**
+     * {@code copyIndex([loopName], [offset])} ({@code template-functions-numeric.md}): the iteration of the named
+     * loop, or of the resource's own loop, plus {@code offset}.
+     */
+    private static JsonNode copyIndex(String name, List<JsonNode> args, TemplateScope scope) {
+        arity(name, args, 0, 2);
+        String loop = null;
+        long offset = 0;
+        if (!args.isEmpty() && args.getFirst().isTextual()) {
+            loop = args.getFirst().asText();
+            if (args.size() == 2) {
+                offset = integer(name, args, 1, 0, 2);
+            }
+        } else if (!args.isEmpty()) {
+            arity(name, args, 0, 1);
+            offset = integer(name, args, 0, 0, 1);
+        }
+        return number(scope.copyIndex(loop) + offset);
     }
 
     /** {@code listKeys(resourceNameOrId, apiVersion, [functionValues])} and every other {@code list*} action. */

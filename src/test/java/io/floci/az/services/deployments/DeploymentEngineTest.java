@@ -290,6 +290,65 @@ class DeploymentEngineTest {
         assertEquals("StorageAccountAlreadyTaken", failed.error().path("code").asText());
     }
 
+    private static final String LOOP_TEMPLATE = """
+        {"mode": "Incremental", "parameters": {"count": {"value": 3}}, "template": {
+          "parameters": {"count": {"type": "int"}},
+          "variables": {
+            "copy": [{"name": "names", "count": "[parameters('count')]",
+                      "input": "[concat('sa', copyIndex('names', 1))]"}],
+            "disks": {"copy": [{"name": "list", "count": 2, "input": {"lun": "[copyIndex('list')]"}}]}},
+          "resources": [
+            {"type": "Microsoft.Web/sites", "apiVersion": "2022-03-01", "name": "app", "location": "eastus",
+             "dependsOn": ["accounts"],
+             "properties": {"copy": [{"name": "slots", "count": 2,
+                                      "input": {"slot": "[copyIndex('slots')]", "of": "[variables('names')[copyIndex('slots')]]"}}]}},
+            {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+             "name": "[variables('names')[copyIndex()]]", "location": "eastus",
+             "copy": {"name": "accounts", "count": "[parameters('count')]", "mode": "serial", "batchSize": 1},
+             "tags": {"index": "[string(copyIndex())]", "disks": "[string(length(variables('disks').list))]"}},
+            {"type": "Microsoft.KeyVault/vaults", "apiVersion": "2023-07-01", "name": "[concat('kv', copyIndex())]",
+             "location": "eastus", "copy": {"name": "none", "count": 0}}],
+          "outputs": {"ids": {"type": "array", "copy": {"count": "[parameters('count')]",
+                                                     "input": "[concat('out', copyIndex())]"}}}}}
+        """;
+
+    @Test
+    void aResourceCopyLoopDeploysOneResourcePerIterationWithItsCopyIndex() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(LOOP_TEMPLATE));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        List<String> puts = sent.stream().filter(request -> request.method().equals("PUT")).map(Sent::path).toList();
+        assertEquals(List.of(RG_ID + "/providers/Microsoft.Storage/storageAccounts/sa1",
+            RG_ID + "/providers/Microsoft.Storage/storageAccounts/sa2",
+            RG_ID + "/providers/Microsoft.Storage/storageAccounts/sa3",
+            RG_ID + "/providers/Microsoft.Web/sites/app"), puts, "dependsOn a loop waits for every instance");
+        assertEquals("{\"index\":\"1\",\"disks\":\"2\"}", sent.get(1).body().path("tags").toString());
+        assertFalse(sent.get(0).body().has("copy"), "the resource loop is not sent");
+    }
+
+    @Test
+    void propertyVariableAndOutputLoopsBuildArrays() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(LOOP_TEMPLATE));
+
+        JsonNode app = sent.stream().filter(request -> request.path().endsWith("/sites/app")).findFirst()
+            .orElseThrow().body();
+        assertEquals("[{\"slot\":0,\"of\":\"sa1\"},{\"slot\":1,\"of\":\"sa2\"}]",
+            app.path("properties").path("slots").toString());
+        assertFalse(app.path("properties").has("copy"));
+        assertEquals("[\"out0\",\"out1\",\"out2\"]", result.outputs().path("ids").path("value").toString());
+    }
+
+    @Test
+    void aCopyCountOutsideZeroToEightHundredIsAnInvalidTemplate() {
+        for (String count : new String[] {"-1", "801", "\"x\""}) {
+            TemplateException refused = assertThrows(TemplateException.class, () -> engine.validate(request(
+                "{\"mode\": \"Incremental\", \"template\": {\"resources\": [{\"type\": "
+                    + "\"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"[concat('a', copyIndex())]\","
+                    + " \"copy\": {\"name\": \"c\", \"count\": " + count + "}}]}}")));
+            assertTrue(refused.getMessage().contains("from 0 to 800"), refused.getMessage());
+        }
+    }
+
     @Test
     void validateChecksEverythingAndSendsNothing() throws Exception {
         List<String> ids = engine.validate(request(STORAGE_TEMPLATE));
