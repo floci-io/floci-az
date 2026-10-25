@@ -103,5 +103,6 @@ nav:
     - Azure Policy: services/policy.md
     - Azure Resource Graph: services/resourcegraph.md
     - Azure Management Groups: services/managementgroups.md
+    - ARM Template Deployments: services/deployments.md
   - Contributing: contributing.md
   - Changelog: changelog.md

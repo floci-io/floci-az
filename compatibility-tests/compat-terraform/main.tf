@@ -429,3 +429,50 @@ resource "azurerm_mssql_database" "sqldb" {
 output "mssql_server_fqdn" {
   value = azurerm_mssql_server.sql.fully_qualified_domain_name
 }
+
+# ── ARM template deployment ──────────────────────────────────────────────────
+
+resource "azurerm_resource_group_template_deployment" "tpl" {
+  name                = "floci-test-deployment"
+  resource_group_name = azurerm_resource_group.rg.name
+  deployment_mode     = "Incremental"
+
+  parameters_content = jsonencode({
+    accountName = { value = "flocitesttplsa" }
+  })
+
+  template_content = jsonencode({
+    "$schema"      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
+    contentVersion = "1.0.0.0"
+    parameters = {
+      accountName = { type = "string" }
+    }
+    resources = [
+      {
+        type       = "Microsoft.Storage/storageAccounts"
+        apiVersion = "2023-01-01"
+        name       = "[parameters('accountName')]"
+        location   = "[resourceGroup().location]"
+        kind       = "StorageV2"
+        sku        = { name = "Standard_LRS" }
+      },
+      {
+        type       = "Microsoft.Storage/storageAccounts/blobServices/containers"
+        apiVersion = "2023-01-01"
+        name       = "[concat(parameters('accountName'), '/default/tplcontainer')]"
+        dependsOn  = ["[resourceId('Microsoft.Storage/storageAccounts', parameters('accountName'))]"]
+        properties = {}
+      }
+    ]
+    outputs = {
+      blobEndpoint = {
+        type  = "string"
+        value = "[reference(parameters('accountName')).primaryEndpoints.blob]"
+      }
+    }
+  })
+}
+
+output "template_blob_endpoint" {
+  value = jsondecode(azurerm_resource_group_template_deployment.tpl.output_content).blobEndpoint.value
+}

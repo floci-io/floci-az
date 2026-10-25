@@ -331,6 +331,11 @@ in deprovisioning state and cannot perform this operation.` (Azure documents the
 `ResourceGroupBeingDeleted` code, with the advice to wait for the deletion to complete, but not its
 status or message).
 
+## Template deployments
+
+`Microsoft.Resources/deployments` is served by its own handler; see
+[ARM Template Deployments](deployments.md).
+
 ## Resource providers
 
 `GET /subscriptions/{sub}/providers` lists every namespace floci-az serves, and only those: a namespace it

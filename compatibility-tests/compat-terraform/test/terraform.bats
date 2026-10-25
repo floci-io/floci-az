@@ -248,6 +248,24 @@ setup() {
     assert_output --partial "memoryInGB"
 }
 
+@test "Terraform: template deployment succeeded with an output read live from its storage account" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Resources/deployments/floci-test-deployment?api-version=2020-06-01"
+    assert_success
+    assert_output --partial '"provisioningState":"Succeeded"'
+    run terraform output -raw template_blob_endpoint
+    assert_success
+    assert_output --partial "flocitesttplsa"
+}
+
+@test "Terraform: template deployment created a real storage account and container" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/flocitesttplsa?api-version=2023-01-01"
+    assert_success
+    assert_output --partial "primaryEndpoints"
+    run curl -sf "${FLOCI_AZ_ENDPOINT}/flocitesttplsa?comp=list&restype=container"
+    assert_success
+    assert_output --partial "tplcontainer"
+}
+
 @test "Terraform: mssql server created with its TLS version and connection policy" {
     local server="subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Sql/servers/${SQL_NAME}"
     run arm_get "${server}?api-version=2023-08-01-preview"
