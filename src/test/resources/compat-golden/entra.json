@@ -18,7 +18,8 @@
       "subject_types_supported" : [ "pairwise" ],
       "tenant_region_scope" : "NA",
       "token_endpoint" : "http://localhost:<port>/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token",
-      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ]
+      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ],
+      "userinfo_endpoint" : "http://localhost:<port>/oidc/userinfo"
     },
     "headers" : {
       "Content-Type" : "application/json"
@@ -45,7 +46,8 @@
       "subject_types_supported" : [ "pairwise" ],
       "tenant_region_scope" : "NA",
       "token_endpoint" : "http://localhost:<port>/common/oauth2/v2.0/token",
-      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ]
+      "token_endpoint_auth_methods_supported" : [ "client_secret_post", "client_secret_basic", "private_key_jwt" ],
+      "userinfo_endpoint" : "http://localhost:<port>/oidc/userinfo"
     },
     "headers" : {
       "Content-Type" : "application/json"

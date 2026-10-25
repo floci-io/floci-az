@@ -145,8 +145,9 @@ class CompatModeGoldenTest {
     void entraIdentityPlatform() {
         Script script = new Script("entra");
         // Fix (discovery over-advertising): main listed the refresh_token and device_code grants, offline_access,
-        // device_authorization_endpoint, userinfo_endpoint, the id_token response types and form_post, none of
+        // device_authorization_endpoint, the id_token response types and form_post, none of
         // which the token service serves. Discovery now lists only what is registered.
+        // Fix (#495): UserInfo is now served, so tenant and common discovery advertise its endpoint.
         script.step("discovery, tenant v2.0", given(), "GET",
             "/" + DEFAULT_TENANT + "/v2.0/.well-known/openid-configuration");
         script.step("discovery, common v2.0", given(), "GET", "/common/v2.0/.well-known/openid-configuration");
