@@ -123,6 +123,9 @@ public class LinkedTemplates {
         if (!"http".equalsIgnoreCase(target.getScheme()) && !"https".equalsIgnoreCase(target.getScheme())) {
             throw unavailable(uri, "only HTTP and HTTPS links can be downloaded");
         }
+        if (target.getHost() == null) {
+            throw unavailable(uri, "it names no host");
+        }
         Instant deadline = Instant.now().plus(timeout);
         try {
             HttpResponse<InputStream> response = http.send(

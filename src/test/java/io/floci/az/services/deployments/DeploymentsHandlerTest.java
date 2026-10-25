@@ -572,6 +572,9 @@ class DeploymentsHandlerTest {
             + "resourceGroups/y/providers/Microsoft.Resources/templateSpecs/z/versions/1\"}}}")
             .when().put(DEPLOYMENTS + "/spec" + API).then().statusCode(400)
             .body("error.message", containsString("template spec"));
+        json("{\"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"http:/no-host.json\"}}}")
+            .when().put(DEPLOYMENTS + "/nohost" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidContentLink"));
     }
 
     /** The documented contoso.uniqueName template, with an outer-scope nested deployment calling it too. */
