@@ -596,6 +596,7 @@ public class DeploymentEngine {
         if (!copy.has("input")) {
             throw DeploymentTemplate.invalid("The copy loop of output '" + output + "' has no 'input'.");
         }
+        scope.expand(count);
         ArrayNode values = JsonNodeFactory.instance.arrayNode();
         for (int i = 0; i < count; i++) {
             values.add(CopyLoops.evaluate(copy.get("input"), new CopyScope(scope, null, i, true)));

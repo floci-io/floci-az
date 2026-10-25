@@ -47,6 +47,14 @@ public interface TemplateScope {
     JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
 
     /**
+     * Charges {@code iterations} copy-loop iterations to the evaluation of one template, before they are built;
+     * throws {@link TemplateException} once the template expands past what it may (see {@link CopyLoops}). A scope
+     * that does not evaluate a whole template counts nothing.
+     */
+    default void expand(int iterations) {
+    }
+
+    /**
      * {@code copyIndex()}: the zero-based iteration of the copy loop named {@code loopName}, or of the resource's
      * own loop when it is null. Outside a loop of that name it is an error, as in Azure.
      */

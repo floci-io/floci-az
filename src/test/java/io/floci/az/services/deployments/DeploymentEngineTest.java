@@ -402,4 +402,19 @@ class DeploymentEngineTest {
         assertThrows(TemplateException.class, () -> engine.validate(request(
             "{\"mode\": \"Incremental\", \"parameters\": {\"other\": {\"value\": \"x\"}}, " + template + "}")));
     }
+
+    @Test
+    void nestedCopyLoopsThatExpandPastTheTemplateBudgetAreRefusedBeforeTheyAreBuilt() {
+        TemplateException refused = assertThrows(TemplateException.class, () -> engine.validate(request("""
+            {"mode": "Incremental", "template": {
+              "variables": {"huge": {"copy": [{"name": "a", "count": 800, "input": {
+                "copy": [{"name": "b", "count": 800, "input": {
+                  "copy": [{"name": "c", "count": 800, "input": "[copyIndex('c')]"}]}}]}}]}},
+              "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                "name": "[concat('sa', length(variables('huge').a))]", "location": "eastus"}]}}
+            """)));
+
+        assertEquals("InvalidTemplate", refused.code());
+        assertTrue(refused.getMessage().contains("expand to more than 640000 values"), refused.getMessage());
+    }
 }

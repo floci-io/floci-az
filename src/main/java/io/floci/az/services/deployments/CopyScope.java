@@ -38,6 +38,11 @@ final class CopyScope implements TemplateScope {
     }
 
     @Override
+    public void expand(int iterations) {
+        parent.expand(iterations);
+    }
+
+    @Override
     public JsonNode parameter(String name) {
         return parent.parameter(name);
     }

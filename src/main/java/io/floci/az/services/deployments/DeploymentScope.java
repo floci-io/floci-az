@@ -44,6 +44,9 @@ final class DeploymentScope implements TemplateScope {
     private final Map<String, JsonNode> variableValues = new HashMap<>();
     private final Set<String> evaluating = new HashSet<>();
 
+    /** The copy-loop iterations this template's evaluation has built so far. */
+    private long expanded;
+
     /**
      * @param template      the parsed template
      * @param supplied      the parameter values the request supplied, keyed by lowercase name
@@ -115,6 +118,15 @@ final class DeploymentScope implements TemplateScope {
         }
         variableValues.put(key, value);
         return value;
+    }
+
+    @Override
+    public void expand(int iterations) {
+        expanded += iterations;
+        if (expanded > CopyLoops.MAX_EXPANSION) {
+            throw DeploymentTemplate.invalid("The template's copy loops expand to more than "
+                + CopyLoops.MAX_EXPANSION + " values in all, more than a template may hold once expanded.");
+        }
     }
 
     @Override

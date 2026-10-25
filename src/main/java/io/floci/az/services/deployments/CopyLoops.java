@@ -13,10 +13,19 @@ import java.util.Map;
  * available to {@code copyIndex('name')}. This is property iteration in a resource's {@code properties}
  * ({@code copy-properties.md}) and in a variable's value ({@code copy-variables.md}); the {@code copy} array itself
  * is removed. A count is an integer from 0 to 800, as Azure limits it.
+ *
+ * <p>Azure limits one loop to 800 and a template, once its loops are expanded and its variables resolved, to 4 MB
+ * ({@code best-practices.md}, "Template limits"), so nested loops cannot multiply without bound. floci-az counts
+ * every iteration of one template's evaluation against {@link #MAX_EXPANSION}, 800 x 800: two fully nested loops of
+ * the largest count fit, while a third level, or anything else that could not fit in 4 MB, is an
+ * {@code InvalidTemplate} before its values are built.
  */
 final class CopyLoops {
 
     static final int MAX_COUNT = 800;
+
+    /** The copy-loop iterations one template's evaluation may build in all. */
+    static final long MAX_EXPANSION = (long) MAX_COUNT * MAX_COUNT;
 
     private CopyLoops() {
     }
@@ -48,6 +57,7 @@ final class CopyLoops {
     static ArrayNode loop(JsonNode loop, TemplateScope scope) {
         String name = name(loop);
         int count = count(loop.get("count"), scope, name);
+        scope.expand(count);
         ArrayNode items = JsonNodeFactory.instance.arrayNode();
         for (int i = 0; i < count; i++) {
             items.add(evaluate(loop.get("input"), new CopyScope(scope, name, i, false)));
@@ -68,7 +78,7 @@ final class CopyLoops {
         return count.asInt();
     }
 
-    private static String name(JsonNode loop) {
+    static String name(JsonNode loop) {
         if (!loop.path("name").isTextual() || !loop.has("input")) {
             throw DeploymentTemplate.invalid("A property copy loop needs a 'name', a 'count' and an 'input'.");
         }
