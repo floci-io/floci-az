@@ -14,6 +14,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Linked templates and parameter files ({@code linked-templates.md}, "Linked template"): a deployment's
@@ -28,7 +33,8 @@ import java.time.Duration;
  *   <li>A template spec ({@code templateLink.id}) is refused: floci-az does not serve template specs.</li>
  * </ul>
  *
- * <p>Downloads time out after 30 seconds and stop at 4 MB, Azure's limit on a template's size.
+ * <p>A download, headers and body together, must finish within 30 seconds and stops at 4 MB, Azure's limit on a
+ * template's size; a server that sends its headers and then stalls is cut off at the deadline.
  */
 @ApplicationScoped
 public class LinkedTemplates {
@@ -44,11 +50,22 @@ public class LinkedTemplates {
         .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
         .build();
 
-    private final HttpClient http = HttpClient.newBuilder()
-        .version(HttpClient.Version.HTTP_1_1)
-        .connectTimeout(TIMEOUT)
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build();
+    private final Duration timeout;
+    private final HttpClient http;
+
+    public LinkedTemplates() {
+        this(TIMEOUT);
+    }
+
+    /** A downloader with its own deadline, for tests. */
+    LinkedTemplates(Duration timeout) {
+        this.timeout = timeout;
+        this.http = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(timeout)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+    }
 
     /**
      * {@code properties} with a linked template and parameter file downloaded and inlined as {@code template} and
@@ -106,13 +123,11 @@ public class LinkedTemplates {
         if (!"http".equalsIgnoreCase(target.getScheme()) && !"https".equalsIgnoreCase(target.getScheme())) {
             throw unavailable(uri, "only HTTP and HTTPS links can be downloaded");
         }
+        Instant deadline = Instant.now().plus(timeout);
         try {
             HttpResponse<InputStream> response = http.send(
-                HttpRequest.newBuilder(target).timeout(TIMEOUT).GET().build(), HttpResponse.BodyHandlers.ofInputStream());
-            byte[] content;
-            try (InputStream body = response.body()) {
-                content = body.readNBytes(MAX_BYTES + 1);
-            }
+                HttpRequest.newBuilder(target).timeout(timeout).GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+            byte[] content = readBody(uri, response.body(), deadline);
             if (response.statusCode() != 200) {
                 throw unavailable(uri, "it answered " + response.statusCode());
             }
@@ -126,6 +141,29 @@ public class LinkedTemplates {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw unavailable(uri, "the download was interrupted");
+        }
+    }
+
+    /**
+     * At most {@code MAX_BYTES + 1} bytes of {@code body}, read by the deadline. The request timeout ends once the
+     * headers arrive, so the body is read on a thread of its own and the stream closed at the deadline, which ends a
+     * read that a stalled server would otherwise hold forever.
+     */
+    private byte[] readBody(String uri, InputStream body, Instant deadline) throws IOException, InterruptedException {
+        FutureTask<byte[]> read = new FutureTask<>(() -> body.readNBytes(MAX_BYTES + 1));
+        Thread.ofVirtual().name("linked-template-read").start(read);
+        try {
+            return read.get(Math.max(0, Duration.between(Instant.now(), deadline).toMillis()), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            read.cancel(true);
+            throw unavailable(uri, "it did not finish downloading within " + timeout.toSeconds() + " seconds");
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+            throw new IOException(e.getCause());
+        } finally {
+            body.close();
         }
     }
 
