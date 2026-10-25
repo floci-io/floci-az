@@ -8,8 +8,8 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 > credentials** and **resource-owner password / ROPC**). **Phase 2**
 > ([#120](https://github.com/floci-io/floci-az/issues/120)) adds the **authorization code + PKCE**
 > grant for interactive (browser SPA) sign-in, plus a narrow Microsoft Graph slice for group
-> membership: see [`services/graph.md`](graph.md). App-registration management and full Graph
-> CRUD are not implemented yet.
+> membership. App registrations and their client secrets are managed through that slice too: see
+> [`services/graph.md`](graph.md). Full Graph CRUD is not implemented.
 
 ## Features
 
