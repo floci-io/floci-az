@@ -53,6 +53,19 @@ class WhatIfTest {
         ObjectNode after = WhatIf.applied((ObjectNode) json("{\"id\": \"x\", \"Tags\": {\"a\": \"1\"}, \"properties\": {\"keep\": 1, \"set\": 1}}"),
             (ObjectNode) json("{\"tags\": {\"b\": \"2\"}, \"properties\": {\"set\": 2}}"));
 
-        assertEquals("{\"id\":\"x\",\"Tags\":{\"a\":\"1\",\"b\":\"2\"},\"properties\":{\"keep\":1,\"set\":2}}", after.toString());
+        assertEquals("{\"id\":\"x\",\"Tags\":{\"b\":\"2\"},\"properties\":{\"keep\":1,\"set\":2}}", after.toString(),
+            "a PUT replaces the tags as a whole, while other objects merge");
+    }
+
+    @Test
+    void aTagTheTemplateLeavesOutIsADelete() throws Exception {
+        ArrayNode delta = diff("{\"tags\": {\"a\": \"1\", \"b\": \"2\"}}", "{\"tags\": {\"a\": \"1\"}}");
+
+        assertEquals(1, delta.size(), delta.toString());
+        assertEquals("tags.b", delta.get(0).path("path").asText());
+        assertEquals("Delete", delta.get(0).path("propertyChangeType").asText());
+        assertEquals("\"2\"", delta.get(0).path("before").toString());
+        assertEquals("{\"tags\":{\"a\":\"1\"}}", WhatIf.applied((ObjectNode) json("{\"tags\": {\"a\": \"1\", \"b\": \"2\"}}"),
+            (ObjectNode) json("{\"tags\": {\"a\": \"1\"}}")).toString());
     }
 }

@@ -20,14 +20,25 @@ final class WhatIf {
      * {@code current} lacks ({@code Create}) or holds differently ({@code Modify}), recursing into objects. Property
      * names match case-insensitively, as ARM matches them, numbers by value, and a {@code location} by its canonical
      * form. An array that differs is one {@code Modify} of the whole array, where Azure lists its element changes as
-     * {@code Array} children.
+     * {@code Array} children. A resource's {@code tags} are compared as a whole set, since a {@code PUT} replaces
+     * them: a tag the deployment leaves out is a {@code Delete}.
      */
     static void diff(String prefix, JsonNode current, JsonNode desired, ArrayNode delta) {
         for (Map.Entry<String, JsonNode> field : desired.properties()) {
             String path = prefix.isEmpty() ? field.getKey() : prefix + "." + field.getKey();
             JsonNode before = property(current, field.getKey());
             JsonNode after = field.getValue();
-            if (before == null || before.isNull()) {
+            if (prefix.isEmpty() && isTags(field.getKey()) && before != null && before.isObject() && after.isObject()) {
+                diff(path, before, after, delta);
+                for (Map.Entry<String, JsonNode> tag : before.properties()) {
+                    if (property(after, tag.getKey()) == null) {
+                        ObjectNode change = delta.addObject();
+                        change.put("path", path + "." + tag.getKey());
+                        change.put("propertyChangeType", "Delete");
+                        change.set("before", tag.getValue());
+                    }
+                }
+            } else if (before == null || before.isNull()) {
                 if (!after.isNull()) {
                     ObjectNode change = delta.addObject();
                     change.put("path", path);
@@ -46,19 +57,32 @@ final class WhatIf {
         }
     }
 
-    /** {@code before} with {@code desired}'s properties applied over it, objects merged and anything else replaced. */
+    /**
+     * {@code before} with {@code desired}'s properties applied over it, objects merged and anything else replaced;
+     * the resource's {@code tags} are replaced as a whole, as a {@code PUT} replaces them.
+     */
     static ObjectNode applied(ObjectNode before, ObjectNode desired) {
+        return applied(before, desired, true);
+    }
+
+    private static ObjectNode applied(ObjectNode before, ObjectNode desired, boolean resource) {
         ObjectNode after = before.deepCopy();
         for (Map.Entry<String, JsonNode> field : desired.properties()) {
             String key = existingKey(after, field.getKey());
             JsonNode existing = after.get(key);
-            if (existing instanceof ObjectNode existingObject && field.getValue() instanceof ObjectNode value) {
-                after.set(key, applied(existingObject, value));
+            if (resource && isTags(key)) {
+                after.set(key, field.getValue());
+            } else if (existing instanceof ObjectNode existingObject && field.getValue() instanceof ObjectNode value) {
+                after.set(key, applied(existingObject, value, false));
             } else {
                 after.set(key, field.getValue());
             }
         }
         return after;
+    }
+
+    private static boolean isTags(String name) {
+        return name.equalsIgnoreCase("tags");
     }
 
     private static boolean same(String name, JsonNode before, JsonNode after) {
