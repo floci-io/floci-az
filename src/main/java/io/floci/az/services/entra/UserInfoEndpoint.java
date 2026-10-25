@@ -2,6 +2,8 @@ package io.floci.az.services.entra;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,8 +29,7 @@ public class UserInfoEndpoint implements EntraEndpoint {
     private static final Logger LOG = Logger.getLogger(UserInfoEndpoint.class);
     private static final String PATH = "oidc/userinfo";
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final Set<String> GRAPH_AUDIENCES = Set.of(
-            "https://graph.microsoft.com", "00000003-0000-0000-c000-000000000000");
+    private static final String GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000";
 
     private final SigningKeyProvider keys;
     private final DirectoryReader directory;
@@ -118,8 +119,11 @@ public class UserInfoEndpoint implements EntraEndpoint {
             String tid = claims.path("tid").asText("");
             String client = claims.path("azp").asText(claims.path("appid").asText(""));
             String audience = claims.path("aud").asText("");
+            CloudProfile cloud = request.request().scope() == null
+                    ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : request.request().scope().cloud();
+            boolean graphAudience = GRAPH_APP_ID.equals(audience) || cloud.endpoints().microsoftGraph().equals(audience);
             // Existing local v2 delegated tokens name their client as audience. Also accept Graph's audiences.
-            if (tid.isBlank() || client.isBlank() || (!client.equals(audience) && !GRAPH_AUDIENCES.contains(audience))) {
+            if (tid.isBlank() || client.isBlank() || (!client.equals(audience) && !graphAudience)) {
                 return null;
             }
             String issuer = issuers.issuer(request.baseUrl(), tid, "2.0".equals(claims.path("ver").asText()));

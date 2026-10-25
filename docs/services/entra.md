@@ -243,8 +243,9 @@ issuer, expiry, not-before time and audience before reading the selected user fr
 ID token and is not returned by UserInfo.
 
 The local authorization-code access token retains these OIDC scopes in `scp`; token response
-scope formatting is unchanged. UserInfo accepts Graph audiences and the client audience used by
-existing local v2 delegated tokens. App-only tokens and tokens for other API audiences are
+scope formatting is unchanged. UserInfo accepts the request cloud's Graph endpoint audience,
+Graph's application ID and the client audience used by existing local v2 delegated tokens.
+App-only tokens and tokens for other API audiences are
 rejected. This endpoint serves directory-backed code-flow users; synthetic password-grant
 identities are not directory provisioning. Invalid tokens return a Bearer 401, and missing
 `openid` permission returns a Bearer 403. It does not accept external Microsoft tokens.

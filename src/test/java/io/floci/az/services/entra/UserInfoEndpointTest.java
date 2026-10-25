@@ -2,17 +2,26 @@ package io.floci.az.services.entra;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.core.AzureRequest;
+import io.floci.az.core.SyntheticHttpHeaders;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.ScopeContext;
+import io.floci.az.core.cloud.ScopeSource;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -29,6 +38,9 @@ class UserInfoEndpointTest {
 
     @Inject
     TokenIssuer tokens;
+
+    @Inject
+    UserInfoEndpoint userInfo;
 
     @ParameterizedTest
     @ValueSource(strings = {"GET", "POST"})
@@ -98,6 +110,36 @@ class UserInfoEndpointTest {
     @Test
     void unsupportedMethodsAdvertiseGetAndPost() {
         given().put("/oidc/userinfo").then().statusCode(405).header("Allow", is("GET, POST"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "AzureCloud, https://graph.microsoft.com",
+            "AzureUSGovernment, https://graph.microsoft.us",
+            "AzureChinaCloud, https://microsoftgraph.chinacloudapi.cn"
+    })
+    void graphAudiencesFollowTheRequestCloud(String cloudName, String graphEndpoint) {
+        CloudProfile cloud = CloudCatalog.forName(cloudName).orElseThrow();
+        for (String audience : List.of(graphEndpoint, "00000003-0000-0000-c000-000000000000")) {
+            assertEquals(200, userInfoStatus(cloud, audience));
+        }
+        for (CloudProfile other : CloudCatalog.all()) {
+            if (!other.endpoints().microsoftGraph().equals(graphEndpoint)) {
+                assertEquals(401, userInfoStatus(cloud, other.endpoints().microsoftGraph()));
+            }
+        }
+    }
+
+    private int userInfoStatus(CloudProfile cloud, String audience) {
+        String token = issue("openid", 300, issuer(), audience, null, Map.of());
+        AzureRequest request = new AzureRequest("GET", null, "entra", "oidc/userinfo",
+                new SyntheticHttpHeaders(Map.of("Authorization", "Bearer " + token)), null, Map.of(), null, false)
+                .withScope(new ScopeContext(cloud, TENANT, null, null, null, ScopeSource.DEFAULT));
+        EntraRequest entra = new EntraRequest(request, "oidc/userinfo", "oidc", new TenantRef(TENANT, TENANT, true),
+                root.toString().replaceFirst("/$", ""));
+        try (Response response = userInfo.handle(entra)) {
+            return response.getStatus();
+        }
     }
 
     private String issuer() {
