@@ -1061,8 +1061,12 @@ public class DeploymentEngine {
         if (!request.atTenant()) {
             return directory.tenantOfSubscription(request.subscriptionId());
         }
-        String caller = request.origin() == null || request.origin().scope() == null ? null
-            : request.origin().scope().tokenTenantId();
+        return callerTenant(request.origin());
+    }
+
+    /** The tenant a tenant-scope deployment acts in: the caller's token tenant when it is known, else the default. */
+    public String callerTenant(AzureRequest origin) {
+        String caller = origin == null || origin.scope() == null ? null : origin.scope().tokenTenantId();
         return caller != null && directory.tenant(caller).isPresent() ? caller : directory.defaultTenantId();
     }
 

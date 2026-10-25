@@ -258,10 +258,10 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         }
         return switch (method) {
             case "PUT" -> createOrUpdate(req, subscriptionId, resourceGroup, name);
-            case "GET" -> get(subscriptionId, resourceGroup, name);
-            case "HEAD" -> Response.status(deployments.containsKey(key(subscriptionId, resourceGroup, name))
+            case "GET" -> get(req, subscriptionId, resourceGroup, name);
+            case "HEAD" -> Response.status(deployments.containsKey(key(req, subscriptionId, resourceGroup, name))
                 ? 204 : 404).build();
-            case "DELETE" -> delete(subscriptionId, resourceGroup, name);
+            case "DELETE" -> delete(req, subscriptionId, resourceGroup, name);
             default -> Response.status(405).build();
         };
     }
@@ -276,7 +276,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (body == null) {
             return invalidContent();
         }
-        String key = key(subscriptionId, resourceGroup, name);
+        String key = key(req, subscriptionId, resourceGroup, name);
         StoredDeployment current = deployments.get(key);
         if (current != null && current.active()) {
             return deploymentActive(name, current);
@@ -392,7 +392,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     /** {@code DeploymentOperations_List} and {@code DeploymentOperations_Get}. */
     private Response operations(AzureRequest req, String path, String subscriptionId, String resourceGroup,
                                 String name, String operationId) {
-        StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
+        StoredDeployment stored = deployments.get(key(req, subscriptionId, resourceGroup, name));
         if (stored == null) {
             return deploymentNotFound(name);
         }
@@ -487,17 +487,17 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         return bodies;
     }
 
-    private Response get(String subscriptionId, String resourceGroup, String name) {
-        StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
+    private Response get(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        StoredDeployment stored = deployments.get(key(req, subscriptionId, resourceGroup, name));
         return stored == null ? deploymentNotFound(name) : json(200, stored.body());
     }
 
-    private Response delete(String subscriptionId, String resourceGroup, String name) {
-        StoredDeployment existing = deployments.get(key(subscriptionId, resourceGroup, name));
+    private Response delete(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        StoredDeployment existing = deployments.get(key(req, subscriptionId, resourceGroup, name));
         if (existing != null && existing.active()) {
             return deploymentActive(name, existing);
         }
-        deployments.remove(key(subscriptionId, resourceGroup, name));
+        deployments.remove(key(req, subscriptionId, resourceGroup, name));
         return Response.status(204).build();
     }
 
@@ -528,8 +528,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         }
     }
 
-    private Response cancel(String subscriptionId, String resourceGroup, String name) {
-        StoredDeployment existing = deployments.get(key(subscriptionId, resourceGroup, name));
+    private Response cancel(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        StoredDeployment existing = deployments.get(key(req, subscriptionId, resourceGroup, name));
         if (existing == null) {
             return deploymentNotFound(name);
         }
@@ -543,7 +543,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     private Response list(AzureRequest req, String subscriptionId, String resourceGroup) {
-        String prefix = key(subscriptionId, resourceGroup, "");
+        String prefix = key(req, subscriptionId, resourceGroup, "");
         String state = null;
         String filter = req.queryParams() == null ? null : req.queryParams().get("$filter");
         if (filter != null) {
@@ -569,10 +569,10 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
                             String action) {
         return switch (action.toLowerCase(Locale.ROOT)) {
             case "validate" -> validate(req, subscriptionId, resourceGroup, name);
-            case "cancel" -> cancel(subscriptionId, resourceGroup, name);
+            case "cancel" -> cancel(req, subscriptionId, resourceGroup, name);
             case "whatif" -> whatIf(req, subscriptionId, resourceGroup, name);
             case "exporttemplate" -> {
-                StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
+                StoredDeployment stored = deployments.get(key(req, subscriptionId, resourceGroup, name));
                 if (stored == null) {
                     yield deploymentNotFound(name);
                 }
@@ -766,13 +766,18 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     }
 
     /**
-     * A deployment's key; a subscription-scope deployment has an empty resource-group part, and a tenant-scope one an
-     * empty subscription part too.
+     * A deployment's key: {@code {subscription}/{group}/{name}}, a subscription-scope deployment having an empty group
+     * part. A tenant-scope deployment belongs to the caller's tenant, so its key is {@code tenant:{tenantId}//{name}}
+     * and two tenants never read or replace each other's.
      */
-    private static String key(String subscriptionId, String resourceGroup, String name) {
-        String subscription = subscriptionId == null ? "" : subscriptionId;
+    private String key(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        return key(subscriptionId == null ? "tenant:" + engine.callerTenant(req) : subscriptionId, resourceGroup,
+            name);
+    }
+
+    private static String key(String owner, String resourceGroup, String name) {
         String group = resourceGroup == null ? "" : resourceGroup;
-        return (subscription + "/" + group + "/" + name).toLowerCase(Locale.ROOT);
+        return (owner + "/" + group + "/" + name).toLowerCase(Locale.ROOT);
     }
 
     private static Response templateError(TemplateException e) {
