@@ -42,6 +42,7 @@ All endpoints are tenant-rooted at the base URL (port `4577`). `{tenant}` may be
 | `POST /{tenant}/oauth2/token` | Token endpoint (v1.0) |
 | `GET /{tenant}/v2.0/.well-known/openid-configuration` | OpenID discovery |
 | `GET /{tenant}/.well-known/openid-configuration` | OpenID discovery |
+| `GET /oidc/userinfo`, `POST /oidc/userinfo` | Scoped profile for a locally signed delegated access token |
 | `GET /{tenant}/discovery/v2.0/keys` | JWKS |
 | `GET /common/userrealm/{username}?api-version=1.0` | Home realm discovery: always `account_type: Managed`, so MSAL username-password sign-in goes straight to the password grant |
 
@@ -61,7 +62,7 @@ early with a clear message instead of calling a route that does not exist:
 | `scopes_supported` | `openid`, `profile`, `email` |
 | `end_session_endpoint` | `{base}/{tenant}/oauth2/v2.0/logout` |
 
-There is no `device_authorization_endpoint` or `userinfo_endpoint`, and `refresh_token`,
+There is no `device_authorization_endpoint`, and `refresh_token`,
 the device code grant and the `offline_access` scope are not listed, because none of them is
 implemented yet. msal-python's `initiate_device_flow` therefore stops with "You need to provide
 device authorization endpoint" before sending any request. `end_session_endpoint` is listed even though logout is not served yet, because
@@ -231,3 +232,19 @@ floci-az:
 > **Keep `enabled: true` unless you have a reason not to.** The OAuth2 token endpoint
 > (`/{tenant}/oauth2/v2.0/token`) is served by this service. Disabling Entra makes that endpoint
 > `404`, which breaks the ARM/Terraform and SDK sign-in handshakes that authenticate through it.
+
+## UserInfo
+
+Discovery advertises the request base URL plus `/oidc/userinfo`. Use GET or POST with an authorization-code
+access token as `Authorization: Bearer <token>`. The endpoint verifies the local RSA signature,
+issuer, expiry, not-before time and audience before reading the selected user from the directory.
+`openid` is required; `profile` permits `name`, while `email` permits `email` when present.
+`sub` matches the ID token from the same code exchange. `preferred_username` remains in the
+ID token and is not returned by UserInfo.
+
+The local authorization-code access token retains these OIDC scopes in `scp`; token response
+scope formatting is unchanged. UserInfo accepts Graph audiences and the client audience used by
+existing local v2 delegated tokens. App-only tokens and tokens for other API audiences are
+rejected. This endpoint serves directory-backed code-flow users; synthetic password-grant
+identities are not directory provisioning. Invalid tokens return a Bearer 401, and missing
+`openid` permission returns a Bearer 403. It does not accept external Microsoft tokens.

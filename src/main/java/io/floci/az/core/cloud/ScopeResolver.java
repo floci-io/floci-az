@@ -52,7 +52,7 @@ public class ScopeResolver {
     private static final Set<String> TENANT_ALIASES = Set.of("common", "organizations", "consumers");
 
     /** First segments of Entra paths that carry no tenant segment. */
-    private static final Set<String> TENANTLESS_ENTRA_ROOTS = Set.of("oauth2", "discovery", ".well-known", "v2.0");
+    private static final Set<String> TENANTLESS_ENTRA_ROOTS = Set.of("oauth2", "discovery", ".well-known", "v2.0", "oidc");
 
     private static final String USER_REALM_PREFIX = "common/userrealm/";
 
@@ -95,7 +95,7 @@ public class ScopeResolver {
      * {@code common/userrealm/{username}}.
      */
     public static boolean isEntraPath(String path) {
-        return path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
+        return "oidc/userinfo".equals(path) || path.contains("oauth2/v2.0/token") || path.endsWith("oauth2/token")
             || path.contains("oauth2/v2.0/authorize")
             || path.endsWith("discovery/v2.0/keys")
             || path.endsWith(".well-known/openid-configuration")
