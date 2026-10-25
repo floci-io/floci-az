@@ -1,8 +1,8 @@
 # ARM Template Deployments
 
-floci-az runs ARM template deployments (`Microsoft.Resources/deployments`) at resource-group scope: the
-calls behind `az deployment group create`, Terraform's `azurerm_resource_group_template_deployment`, and
-any Bicep file once the client has compiled it to ARM JSON.
+floci-az runs ARM template deployments (`Microsoft.Resources/deployments`) at resource-group and subscription
+scope: the calls behind `az deployment group create` and `az deployment sub create`, Terraform's
+`azurerm_resource_group_template_deployment`, and any Bicep file once the client has compiled it to ARM JSON.
 
 Each resource in the template is created through the same ARM routing, request gate and handler a client
 request would reach, so a deployed storage account, virtual network or key vault is exactly the resource a
@@ -10,7 +10,8 @@ direct `PUT` creates, and every other floci-az service sees it.
 
 **Protocol:** ARM REST, JSON
 
-**Path:** `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Resources/deployments/{name}`
+**Path:** `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Resources/deployments/{name}`, or
+`/subscriptions/{sub}/providers/Microsoft.Resources/deployments/{name}` at subscription scope
 
 **Api-versions:** the Resources spec 2025-04-01, which the az CLI sends; azurerm sends 2020-06-01, whose
 operations and shapes are the same.
@@ -42,7 +43,18 @@ POST   .../deployments/{name}/exportTemplate     # {"template": ...}
 POST   .../deployments/{name}/cancel             # 204 while it runs
 ```
 
-The resource group must exist, or the answer is `404 ResourceGroupNotFound`.
+The resource group must exist, or the answer is `404 ResourceGroupNotFound`. Every endpoint is served at
+subscription scope too, under `/subscriptions/{sub}/providers/Microsoft.Resources/deployments`.
+
+## Subscription-scope deployments
+
+A subscription-scope deployment deploys subscription-level resources, typically resource groups
+(`Microsoft.Resources/resourceGroups`, whose id is `/subscriptions/{sub}/resourceGroups/{name}`), and policy.
+As Azure requires, the body carries a `location` where the deployment's data is stored: a missing one is
+`400 LocationRequired`, and reusing a deployment name with another location is
+`400 InvalidDeploymentLocation`. A resource type that lives in a resource group (a storage account, say) is
+`InvalidTemplate` at this scope, and `resourceGroup()` is an error here. Deploying into a resource group from a
+subscription-scope template takes a nested deployment, which floci-az does not serve yet.
 
 ## How a deployment runs
 
@@ -138,7 +150,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
   references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
-Deployments at subscription, management-group and tenant scope and `whatIf` answer `404`.
+Deployments at management-group and tenant scope and `whatIf` answer `404`.
 
 ## Intentional deviations
 

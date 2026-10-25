@@ -46,6 +46,7 @@ setup() {
 
 teardown_file() {
     az group delete -n "$DEPLOY_RG" --yes -o none 2>/dev/null || true
+    az group delete -n floci-test-sub-deploy-rg --yes -o none 2>/dev/null || true
     rm -f "$TEMPLATE_FILE"
 }
 
@@ -103,4 +104,33 @@ teardown_file() {
     assert_failure
     run az storage account show -n "$DEPLOY_SA" -g "$DEPLOY_RG" -o none
     assert_success
+}
+
+@test "az deployment sub create: a subscription-scope template creates a resource group" {
+    local sub_template
+    sub_template="$(mktemp --suffix .json)"
+    cat > "$sub_template" <<'JSON'
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {"rgName": {"type": "string"}},
+  "resources": [
+    {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+     "name": "[parameters('rgName')]", "location": "westeurope", "tags": {"made": "sub"}}
+  ],
+  "outputs": {
+    "rgId": {"type": "string", "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"}
+  }
+}
+JSON
+    run az_json deployment sub create -n floci-test-sub-deployment -l "$LOCATION" --template-file "$sub_template" \
+        --parameters rgName=floci-test-sub-deploy-rg
+    rm -f "$sub_template"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
+
+    run az_json group show -n floci-test-sub-deploy-rg
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.location')" "westeurope"
+    assert_equal "$(echo "$output" | jq -r '.tags.made')" "sub"
 }

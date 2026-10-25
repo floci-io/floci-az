@@ -9,6 +9,7 @@ import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceType;
+import io.floci.az.core.arm.ArmScopeKind;
 import io.floci.az.core.arm.ArmTypeRegistry;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
@@ -80,10 +81,10 @@ public class DeploymentEngine {
     private final ObjectMapper mapper;
 
     /**
-     * One deployment request.
+     * One deployment request, at resource-group scope, or at subscription scope when {@code resourceGroup} is null.
      *
      * @param subscriptionId the subscription, as the path spells it
-     * @param resourceGroup  the resource group, as the path spells it
+     * @param resourceGroup  the resource group, as the path spells it; null for a subscription-scope deployment
      * @param name           the deployment name
      * @param properties     the request body's {@code properties}
      * @param origin         the client request, whose caller the internal requests act for
@@ -93,11 +94,18 @@ public class DeploymentEngine {
 
         /** The deployment's ARM id. */
         public String id() {
-            return resourceGroupId() + "/providers/" + DEPLOYMENTS_TYPE + "/" + name;
+            return scopeId() + "/providers/" + DEPLOYMENTS_TYPE + "/" + name;
         }
 
-        String resourceGroupId() {
-            return "/subscriptions/" + subscriptionId + "/resourceGroups/" + resourceGroup;
+        /** True for a deployment at subscription scope. */
+        public boolean atSubscription() {
+            return resourceGroup == null;
+        }
+
+        /** What the deployment's resources sit under: the resource group, or the subscription. */
+        String scopeId() {
+            String subscription = "/subscriptions/" + subscriptionId;
+            return atSubscription() ? subscription : subscription + "/resourceGroups/" + resourceGroup;
         }
     }
 
@@ -335,7 +343,16 @@ public class DeploymentEngine {
                 dependsOn.add(text(evaluate(entry, scope), "dependsOn"));
             }
         }
-        return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(request.resourceGroupId(), type, name),
+        if (request.atSubscription()) {
+            types.type(ArmResourcePath.normalizedType(type))
+                .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP)
+                .ifPresent(served -> {
+                    throw DeploymentTemplate.invalid("The resource '" + name + "' of type '" + type + "' belongs "
+                        + "in a resource group and cannot be deployed at subscription scope; deploy it through a "
+                        + "nested deployment that names the resource group.");
+                });
+        }
+        return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(request.scopeId(), type, name),
             type, name, dependsOn, loop);
     }
 
@@ -378,7 +395,8 @@ public class DeploymentEngine {
                 return DeploymentEngine.this.list(request, resourceId, action, apiVersion, body);
             }
         };
-        return new DeploymentScope(template, supplied, resourceGroupObject(request, cloud),
+        return new DeploymentScope(template, supplied,
+            request.atSubscription() ? null : resourceGroupObject(request, cloud),
             subscriptionObject(request, tenantId), tenantObject(tenantId), environmentObject(cloud),
             self -> deploymentObject(request, template), live);
     }
@@ -497,14 +515,14 @@ public class DeploymentEngine {
                                String nameOrId, String apiVersion, boolean full) {
         DependencyGraph.Node declared = nodes.stream()
             .filter(node -> DependencyGraph.isName(nameOrId) ? node.name().equalsIgnoreCase(nameOrId)
-                : node.id().equalsIgnoreCase(nameOrId))
+                : ArmResourcePath.canonical(node.id()).equalsIgnoreCase(ArmResourcePath.canonical(nameOrId)))
             .findFirst()
             .orElse(null);
         if (declared == null && DependencyGraph.isName(nameOrId)) {
             throw DeploymentTemplate.invalid("The template reference '" + nameOrId
                 + "' is not valid: no resource in the template has this name.");
         }
-        String id = declared == null ? nameOrId : declared.id();
+        String id = declared == null ? ArmResourcePath.canonical(nameOrId) : declared.id();
         String version = apiVersion;
         if (version == null && declared != null) {
             JsonNode templateVersion = template.resources().get(declared.index()).definition().path("apiVersion");
@@ -533,7 +551,7 @@ public class DeploymentEngine {
 
     private JsonNode list(Request request, String resourceId, String action, String apiVersion, JsonNode body) {
         String version = apiVersion != null ? apiVersion : newestApiVersion(resourceId);
-        Response response = router.get().dispatchInternal("POST", resourceId + "/" + action,
+        Response response = router.get().dispatchInternal("POST", ArmResourcePath.canonical(resourceId) + "/" + action,
             Map.of("api-version", version), Map.of(), body == null ? null : bytes(body), request.origin());
         JsonNode answer = entity(response);
         if (response.getStatus() / 100 != 2) {
@@ -645,7 +663,7 @@ public class DeploymentEngine {
             .map(group -> (ObjectNode) mapper.valueToTree(group.body()))
             .orElseGet(() -> {
                 ObjectNode group = JsonNodeFactory.instance.objectNode();
-                group.put("id", request.resourceGroupId());
+                group.put("id", request.scopeId());
                 group.put("name", request.resourceGroup());
                 group.put("type", "Microsoft.Resources/resourceGroups");
                 group.put("location", cloud.effectiveDefaultLocation());

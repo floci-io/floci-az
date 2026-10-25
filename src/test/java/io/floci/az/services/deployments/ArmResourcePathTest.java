@@ -42,4 +42,14 @@ class ArmResourcePathTest {
         assertThrows(TemplateException.class, () -> ArmResourcePath.id(RG, "Microsoft.KeyVault/vaults", "v/s"));
         assertThrows(TemplateException.class, () -> ArmResourcePath.id(RG, "Microsoft.KeyVault", "v"));
     }
+
+    @Test
+    void aResourceGroupHasNoProviderSectionInItsId() {
+        assertEquals("/subscriptions/s1/resourceGroups/rg2",
+            ArmResourcePath.id("/subscriptions/s1", "Microsoft.Resources/resourceGroups", "rg2"));
+        assertEquals("/subscriptions/s1/resourceGroups/rg2",
+            ArmResourcePath.canonical("/subscriptions/s1/providers/Microsoft.Resources/resourceGroups/rg2"));
+        assertEquals(RG + "/providers/Microsoft.Storage/storageAccounts/sa1",
+            ArmResourcePath.canonical(RG + "/providers/Microsoft.Storage/storageAccounts/sa1"));
+    }
 }

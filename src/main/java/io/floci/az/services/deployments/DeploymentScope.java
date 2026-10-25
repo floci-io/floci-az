@@ -47,7 +47,7 @@ final class DeploymentScope implements TemplateScope {
     /**
      * @param template      the parsed template
      * @param supplied      the parameter values the request supplied, keyed by lowercase name
-     * @param resourceGroup what {@code resourceGroup()} returns
+     * @param resourceGroup what {@code resourceGroup()} returns; null at subscription scope, where it is an error
      * @param subscription  what {@code subscription()} returns
      * @param tenant        what {@code tenant()} returns
      * @param environment   what {@code environment()} returns
@@ -119,6 +119,10 @@ final class DeploymentScope implements TemplateScope {
 
     @Override
     public JsonNode resourceGroup() {
+        if (resourceGroup == null) {
+            throw DeploymentTemplate.invalid("The template function 'resourceGroup' is not expected at this "
+                + "location: a subscription-scope deployment has no resource group.");
+        }
         return resourceGroup.deepCopy();
     }
 

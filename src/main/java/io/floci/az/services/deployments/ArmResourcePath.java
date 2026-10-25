@@ -15,6 +15,8 @@ import java.util.List;
  */
 public final class ArmResourcePath {
 
+    static final String RESOURCE_GROUPS = "Microsoft.Resources/resourceGroups";
+
     private ArmResourcePath() {
     }
 
@@ -25,6 +27,10 @@ public final class ArmResourcePath {
     public static String id(String scopeId, String type, String name) {
         List<String> types = segments(type);
         List<String> names = segments(name);
+        if (String.join("/", types).equalsIgnoreCase(RESOURCE_GROUPS) && names.size() == 1) {
+            // A resource group's id has no provider section: /subscriptions/{sub}/resourceGroups/{name}.
+            return scopeId + "/resourceGroups/" + names.getFirst();
+        }
         if (types.size() < 2 || types.size() != names.size() + 1) {
             throw DeploymentTemplate.invalid("The template resource '" + name + "' for type '" + type
                 + "' has incorrect segment lengths: a type has one more segment than its name.");
@@ -34,6 +40,15 @@ public final class ArmResourcePath {
             id.append('/').append(types.get(i + 1)).append('/').append(names.get(i));
         }
         return id.toString();
+    }
+
+    /**
+     * {@code id} in the form ARM names a resource group by, for comparing two spellings of one id: the provider
+     * form {@code .../providers/Microsoft.Resources/resourceGroups/{name}}, which {@code subscriptionResourceId()}
+     * returns, is {@code .../resourceGroups/{name}}.
+     */
+    static String canonical(String id) {
+        return id.replaceFirst("(?i)/providers/Microsoft\\.Resources/resourceGroups/", "/resourceGroups/");
     }
 
     /** {@code value} split on slashes, empty segments dropped. */

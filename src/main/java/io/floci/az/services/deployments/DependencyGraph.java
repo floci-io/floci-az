@@ -150,7 +150,7 @@ public final class DependencyGraph {
 
     private static boolean matches(Node node, String reference) {
         if (reference.startsWith("/")) {
-            return node.id().equalsIgnoreCase(reference);
+            return ArmResourcePath.canonical(node.id()).equalsIgnoreCase(ArmResourcePath.canonical(reference));
         }
         if (reference.contains("/")) {
             return (ArmResourcePath.normalizedType(node.type()) + "/" + node.name())

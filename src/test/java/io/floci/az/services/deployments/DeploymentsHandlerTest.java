@@ -306,6 +306,74 @@ class DeploymentsHandlerTest {
         given().when().get(DEPLOYMENTS + "/dep4/operationStatuses/00000000000000000000" + API).then().statusCode(404);
     }
 
+    private static final String SUB_DEPLOYMENTS = "/subscriptions/" + SUB + "/providers/Microsoft.Resources/deployments";
+
+    /** A subscription-scope template that creates a resource group, depending on it by its provider-form id. */
+    private static final String SUBSCRIPTION_DEPLOYMENT = """
+        {"location": "westeurope", "properties": {"mode": "Incremental", "template": {
+          "parameters": {"groupName": {"type": "string", "defaultValue": "rg-from-sub"}},
+          "resources": [
+            {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+             "name": "[parameters('groupName')]", "location": "northeurope", "tags": {"made": "sub"}}],
+          "outputs": {
+            "groupId": {"type": "string",
+                        "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('groupName'))]"},
+            "groupLocation": {"type": "string",
+                              "value": "[reference(subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('groupName')), '2021-04-01', 'Full').location]"}}}}}
+        """;
+
+    @Test
+    void aSubscriptionDeploymentCreatesAResourceGroup() throws Exception {
+        Response accepted = json(SUBSCRIPTION_DEPLOYMENT).when().put(SUB_DEPLOYMENTS + "/sub1" + API);
+        accepted.then().statusCode(201)
+            .body("id", equalTo(SUB_DEPLOYMENTS + "/sub1"))
+            .body("location", equalTo("westeurope"));
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(SUB_DEPLOYMENTS + "/sub1" + API).asString());
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-from-sub?api-version=2021-04-01")
+            .then().statusCode(200)
+            .body("location", equalTo("northeurope"));
+        given().when().get(SUB_DEPLOYMENTS + "/sub1" + API).then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Succeeded"))
+            .body("properties.outputResources[0].id", equalTo("/subscriptions/" + SUB + "/resourceGroups/rg-from-sub"))
+            .body("properties.outputs.groupLocation.value", equalTo("northeurope"));
+        given().when().get(SUB_DEPLOYMENTS + "/sub1/operations" + API).then().statusCode(200)
+            .body("value[0].properties.targetResource.resourceType", equalTo("Microsoft.Resources/resourceGroups"));
+        given().when().get(SUB_DEPLOYMENTS + API).then().statusCode(200).body("value.name", contains("sub1"));
+        given().when().get(DEPLOYMENTS + API).then().statusCode(200).body("value", hasSize(0));
+    }
+
+    @Test
+    void aSubscriptionDeploymentNeedsAFixedLocation() throws Exception {
+        json(SUBSCRIPTION_DEPLOYMENT.replace("\"location\": \"westeurope\", ", ""))
+            .when().put(SUB_DEPLOYMENTS + "/noloc" + API).then().statusCode(400)
+            .body("error.code", equalTo("LocationRequired"));
+        assertEquals("Succeeded", awaitTerminal(json(SUBSCRIPTION_DEPLOYMENT).when().put(SUB_DEPLOYMENTS + "/fixed" + API)));
+        json(SUBSCRIPTION_DEPLOYMENT.replace("westeurope", "eastus"))
+            .when().put(SUB_DEPLOYMENTS + "/fixed" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidDeploymentLocation"));
+    }
+
+    @Test
+    void aSubscriptionDeploymentRefusesResourceGroupTypesAndResourceGroupFunctions() throws Exception {
+        json("""
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "subsa0001",
+               "location": "westeurope"}]}}}
+            """).when().put(SUB_DEPLOYMENTS + "/rgtype" + API).then().statusCode(400)
+            .body("error.code", equalTo("InvalidTemplate"))
+            .body("error.message", containsString("cannot be deployed at subscription scope"));
+        Response failed = json("""
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {
+              "outputs": {"rg": {"type": "string", "value": "[resourceGroup().name]"}}}}}
+            """).when().put(SUB_DEPLOYMENTS + "/rgfn2" + API);
+        assertEquals("Failed", awaitTerminal(failed));
+        given().when().get(SUB_DEPLOYMENTS + "/rgfn2" + API).then().statusCode(200)
+            .body("properties.error.details[0].code", equalTo("InvalidTemplate"))
+            .body("properties.error.details[0].message", containsString("subscription-scope deployment has no resource group"));
+    }
+
     @Test
     void aMissingResourceGroupIsResourceGroupNotFound() {
         json(DEPLOYMENT).when()
