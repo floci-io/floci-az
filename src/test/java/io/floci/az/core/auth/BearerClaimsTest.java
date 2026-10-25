@@ -65,6 +65,15 @@ class BearerClaimsTest {
     }
 
     @Test
+    void keepsTheJsonTypeOfEveryClaim() {
+        BearerClaims claims = BearerClaims.parse(token("{\"oid\": \"o1\", \"acrs\": [\"c1\", \"c2\"], \"n\": 3}"));
+        assertEquals(java.util.List.of("c1", "c2"), claims.values().get("acrs"));
+        assertEquals(3, claims.values().get("n"));
+        assertEquals("[\"c1\",\"c2\"]", claims.claims().get("acrs"));
+        assertEquals("3", claims.claims().get("n"));
+    }
+
+    @Test
     void answersNoneForMissingOrUnreadableTokens() {
         assertFalse(BearerClaims.parse(null).present());
         assertFalse(BearerClaims.parse("Basic abc").present());

@@ -134,13 +134,19 @@ public class PolicyEngine {
         return id.providerNamespace() != null ? id.name() : id.resourceGroup();
     }
 
+    /** The assignments as stored right now, one snapshot a caller can hand to several steps of one request. */
+    public List<Map<String, Object>> assignments() {
+        return List.copyOf(store.listAssignments());
+    }
+
     /**
-     * Whether any assignment's scope reaches the resource, before its content is known: what decides whether a
-     * PATCH needs the stored resource to be evaluated at all. Selectors, which need the content, are not applied.
+     * Whether any of {@code assignments} has a scope reaching the resource, before its content is known: what
+     * decides whether a PATCH needs the stored resource to be evaluated at all. Selectors, which need the
+     * content, are not applied.
      */
-    public boolean anyAssignmentCovers(ArmResourceId id) {
+    public boolean anyAssignmentCovers(ArmResourceId id, List<Map<String, Object>> assignments) {
         String resourceKey = key(id.id());
-        for (Map<String, Object> assignment : store.listAssignments()) {
+        for (Map<String, Object> assignment : assignments) {
             Map<String, Object> assignmentProperties = properties(assignment);
             if (!scopeCovers(key(String.valueOf(assignmentProperties.getOrDefault("scope", ""))), resourceKey)) {
                 continue;
@@ -162,6 +168,11 @@ public class PolicyEngine {
     }
 
     public Outcome evaluate(Request request) {
+        return evaluate(request, assignments());
+    }
+
+    /** Evaluates against {@code assignments}, the snapshot the caller already used to decide what to read. */
+    public Outcome evaluate(Request request, List<Map<String, Object>> assignments) {
         ArmCall call = request.call();
         ArmResourceId id = call.id();
         String resourceKey = key(id.id());
@@ -174,7 +185,7 @@ public class PolicyEngine {
             requestContext(request), resourceGroupFacts(id), subscriptionFacts(id));
 
         List<Candidate> candidates = new ArrayList<>();
-        for (Map<String, Object> assignment : store.listAssignments()) {
+        for (Map<String, Object> assignment : assignments) {
             if (!applies(assignment, resourceKey, content, resourceType)) {
                 continue;
             }

@@ -108,8 +108,10 @@ public class PolicyEvaluationRule implements ArmRequestRule {
         }
         AzureRequest request = call.request();
         // A PATCH is judged on the resource it produces: the stored resource with the patch applied, read only
-        // once an assignment's scope reaches the resource, so unassigned scopes cost no extra read.
-        Map<String, Object> stored = "PATCH".equals(call.method()) && engine.anyAssignmentCovers(call.id())
+        // once an assignment's scope reaches the resource, so unassigned scopes cost no extra read. The same
+        // assignment snapshot decides the read and the evaluation, so one landing in between cannot see a bare patch.
+        List<Map<String, Object>> assignments = engine.assignments();
+        Map<String, Object> stored = "PATCH".equals(call.method()) && engine.anyAssignmentCovers(call.id(), assignments)
             ? storedResource(call) : null;
         Map<String, Object> evaluated = stored == null ? PatchMerge.copy(content) : PatchMerge.apply(stored, content);
         Map<String, Object> beforePolicies = stored == null ? null : PatchMerge.copy(evaluated);
@@ -122,7 +124,7 @@ public class PolicyEvaluationRule implements ArmRequestRule {
             "PATCH".equals(call.method()) && changesOnlyTags(content));
         Outcome outcome;
         try {
-            outcome = engine.evaluate(evaluation);
+            outcome = engine.evaluate(evaluation, assignments);
         } catch (RuntimeException e) {
             LOG.errorf(e, "Policy evaluation failed for %s %s", call.method(), call.id().id());
             return ArmVerdict.respond(ArmErrors.error(500, "PolicyEvaluationFailed",
@@ -240,7 +242,8 @@ public class PolicyEvaluationRule implements ArmRequestRule {
         if (claims == BearerClaims.NONE) {
             return identity;
         }
-        for (Map.Entry<String, String> entry : claims.claims().entrySet()) {
+        // The typed values: an array claim such as acrs stays an array for count.value and the like.
+        for (Map.Entry<String, Object> entry : claims.values().entrySet()) {
             if (KEPT_CLAIMS.contains(entry.getKey())) {
                 identity.put(entry.getKey(), entry.getValue());
             }

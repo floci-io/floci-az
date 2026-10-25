@@ -22,17 +22,25 @@ import java.util.Map;
  * @param idtyp   {@code app}, {@code user} or null when the token does not say and no claim implies it
  * @param managedIdentity true when the token names a managed identity resource ({@code xms_mirid} or {@code xms_az_rid})
  * @param claims  every claim of the token as a string, for the Activity Log; empty when not read
+ * @param values  every claim of the token with its JSON type kept (arrays stay lists), for policy
+ *                expressions that read {@code requestContext().identity}; empty when not read
  */
 public record BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity,
-                           Map<String, String> claims) {
+                           Map<String, String> claims, Map<String, Object> values) {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false, Map.of());
+    public static final BearerClaims NONE = new BearerClaims(null, null, null, null, false, Map.of(), Map.of());
 
-    /** Claims without the full map, for callers that only need the identity. */
+    /** Claims without the full maps, for callers that only need the identity. */
     public BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity) {
-        this(oid, appId, upn, idtyp, managedIdentity, Map.of());
+        this(oid, appId, upn, idtyp, managedIdentity, Map.of(), Map.of());
+    }
+
+    /** Claims with their string forms only. */
+    public BearerClaims(String oid, String appId, String upn, String idtyp, boolean managedIdentity,
+                        Map<String, String> claims) {
+        this(oid, appId, upn, idtyp, managedIdentity, claims, Map.of());
     }
 
     /** The claims of the request's bearer token, or {@link #NONE} when it carries none that can be read. */
@@ -58,11 +66,13 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
                 return NONE; // a payload of JSON null
             }
             Map<String, String> all = new LinkedHashMap<>();
+            Map<String, Object> typed = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : claims.entrySet()) {
                 if (entry.getValue() != null) {
                     all.put(String.valueOf(entry.getKey()), entry.getValue() instanceof String text ? text
                         : entry.getValue() instanceof Map<?, ?> || entry.getValue() instanceof java.util.List<?>
                             ? MAPPER.writeValueAsString(entry.getValue()) : String.valueOf(entry.getValue()));
+                    typed.put(String.valueOf(entry.getKey()), entry.getValue());
                 }
             }
             String oid = string(claims, "oid");
@@ -83,7 +93,7 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
                 // A delegated token carries the user's scopes (scp); an app-only token carries roles instead.
                 idtyp = upn != null || string(claims, "scp") != null ? "user" : "app";
             }
-            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity, Map.copyOf(all));
+            return new BearerClaims(oid, appId, upn, idtyp, managedIdentity, Map.copyOf(all), Map.copyOf(typed));
         } catch (IOException | IllegalArgumentException e) {
             return NONE;
         }
