@@ -6,6 +6,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.services.entra.DirectoryEntitySet;
 import io.floci.az.services.entra.DirectoryObject;
 import io.floci.az.services.entra.DirectoryReader;
@@ -55,16 +56,18 @@ public class GraphServiceHandler implements AzureServiceHandler {
     private final GraphDirectoryStore store;
     private final DirectoryReader directory;
     private final TenantResolver tenants;
+    private final AzureDirectory azureDirectory;
     private final ObjectMapper mapper = new ObjectMapper();
     private final SecureRandom random = new SecureRandom();
 
     @Inject
     public GraphServiceHandler(EmulatorConfig config, GraphDirectoryStore store, DirectoryReader directory,
-                               TenantResolver tenants) {
+                               TenantResolver tenants, AzureDirectory azureDirectory) {
         this.config = config;
         this.store = store;
         this.directory = directory;
         this.tenants = tenants;
+        this.azureDirectory = azureDirectory;
     }
 
     @Override public String getServiceType() { return "graph"; }
@@ -150,7 +153,8 @@ public class GraphServiceHandler implements AzureServiceHandler {
                     }
                     return result;
                 }).toList();
-        return json(Map.of("@odata.context", "https://graph.microsoft.com/v1.0/$metadata#groups"
+        return json(Map.of("@odata.context", azureDirectory.cloudOfTenant(tenantId).endpoints().microsoftGraph()
+                + "/v1.0/$metadata#groups"
                 + (includeMembers ? "(members())" : ""), "value", groups));
     }
 
