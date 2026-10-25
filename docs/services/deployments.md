@@ -99,7 +99,9 @@ the deployment's properties and in `deployment().properties.templateLink`. A tem
 storage works, the local counterpart of a storage account with a SAS token.
 
 - A nested deployment's `templateLink.relativePath` resolves against the link its parent's template came from,
-  keeping the parent link's query string, as Azure does; a parent sent inline has no base, so it is refused.
+  keeping the parent link's query string, as Azure does; a parent sent inline has no base, so it is refused. It
+  must stay relative: an absolute URI, or a path such as `//other.host/child.json` that leaves the parent's
+  scheme, host or port, is `400 InvalidTemplate`, so the parent's SAS token never reaches another host.
 - A link that cannot be downloaded (no `uri`, not HTTP or HTTPS, a non-`200` answer, a timeout after 30 seconds,
   more than 4 MB), whose content is not a JSON object, or whose content carries a different `contentVersion` than
   the link names is `400 InvalidContentLink`.
