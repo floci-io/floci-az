@@ -801,7 +801,84 @@ public class DeploymentEngine {
         if (plan.template().template().has("functions")) {
             outer.set("functions", plan.template().template().get("functions").deepCopy());
         }
+        for (String section : List.of("resources", "outputs")) {
+            if (outer.has(section)) {
+                outer.set(section, withParentReferences(outer.get(section), plan));
+            }
+        }
         return outer;
+    }
+
+    /**
+     * {@code value} with every {@code reference()} and {@code list*()} call that names a resource of the parent by
+     * name rewritten to name it by id: Azure evaluates an {@code outer}-scope nested template's expressions in the
+     * parent ({@code linked-templates.md}, "Expression evaluation scope in nested templates"), so its names are the
+     * parent's, which the child, running as a deployment of its own, does not declare. A {@code reference()} that
+     * names no api-version gets the parent resource's own. A call whose argument reads the nested template's own
+     * loops cannot be evaluated in the parent and is left as written.
+     */
+    private static JsonNode withParentReferences(JsonNode value, Plan plan) {
+        if (value instanceof ObjectNode object) {
+            ObjectNode copy = JsonNodeFactory.instance.objectNode();
+            object.properties().forEach(field -> copy.set(field.getKey(), withParentReferences(field.getValue(), plan)));
+            return copy;
+        }
+        if (value instanceof ArrayNode array) {
+            ArrayNode copy = JsonNodeFactory.instance.arrayNode();
+            array.forEach(item -> copy.add(withParentReferences(item, plan)));
+            return copy;
+        }
+        if (!value.isTextual() || !ExpressionParser.isExpression(value.asText())) {
+            return value;
+        }
+        Expression parsed = ExpressionParser.parse(value.asText());
+        Expression rewritten = withParentReferences(parsed, plan);
+        return rewritten.equals(parsed) ? value
+            : JsonNodeFactory.instance.textNode("[" + ExpressionParser.format(rewritten) + "]");
+    }
+
+    private static Expression withParentReferences(Expression expression, Plan plan) {
+        return switch (expression) {
+            case Expression.Literal literal -> literal;
+            case Expression.PropertyAccess access ->
+                new Expression.PropertyAccess(withParentReferences(access.target(), plan), access.property());
+            case Expression.IndexAccess access -> new Expression.IndexAccess(
+                withParentReferences(access.target(), plan), withParentReferences(access.index(), plan));
+            case Expression.FunctionCall call -> {
+                List<Expression> arguments = new ArrayList<>();
+                call.arguments().forEach(argument -> arguments.add(withParentReferences(argument, plan)));
+                String function = call.name().toLowerCase(Locale.ROOT);
+                if ((function.equals("reference") || function.startsWith("list")) && !arguments.isEmpty()) {
+                    DependencyGraph.Node declared = parentResource(arguments.getFirst(), plan);
+                    if (declared != null) {
+                        arguments.set(0, new Expression.Literal(JsonNodeFactory.instance.textNode(declared.id())));
+                        JsonNode version = plan.template().resources().get(declared.index()).definition()
+                            .path("apiVersion");
+                        if (function.equals("reference") && arguments.size() == 1 && version.isTextual()
+                                && !ExpressionParser.isExpression(version.asText())) {
+                            arguments.add(new Expression.Literal(version));
+                        }
+                    }
+                }
+                yield new Expression.FunctionCall(call.name(), arguments);
+            }
+        };
+    }
+
+    /** The parent resource {@code argument} names by name, evaluated in the parent; null for anything else. */
+    private static DependencyGraph.Node parentResource(Expression argument, Plan plan) {
+        JsonNode name;
+        try {
+            name = ExpressionEvaluator.evaluate(argument, plan.scope());
+        } catch (TemplateException e) {
+            LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+            return null;
+        }
+        if (!name.isTextual() || !DependencyGraph.isName(name.asText())) {
+            return null;
+        }
+        return plan.order().stream().filter(node -> node.name().equalsIgnoreCase(name.asText())).findFirst()
+            .orElse(null);
     }
 
     /** {@code value} with every string that would read as an expression escaped, so it stays a literal. */

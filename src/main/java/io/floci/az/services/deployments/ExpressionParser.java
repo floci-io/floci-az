@@ -54,6 +54,21 @@ public final class ExpressionParser {
         return expression;
     }
 
+    /** {@code expression} written back in the template language, without the outer brackets. */
+    static String format(Expression expression) {
+        return switch (expression) {
+            case Literal literal -> literal.value().isTextual()
+                ? "'" + literal.value().asText().replace("'", "''") + "'" : literal.value().toString();
+            case FunctionCall call -> {
+                List<String> arguments = new ArrayList<>();
+                call.arguments().forEach(argument -> arguments.add(format(argument)));
+                yield call.name() + "(" + String.join(", ", arguments) + ")";
+            }
+            case PropertyAccess access -> format(access.target()) + "." + access.property();
+            case IndexAccess access -> format(access.target()) + "[" + format(access.index()) + "]";
+        };
+    }
+
     private Expression expression() {
         Expression primary = primary();
         while (true) {

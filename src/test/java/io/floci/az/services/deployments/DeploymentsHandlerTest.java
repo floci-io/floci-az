@@ -807,4 +807,27 @@ class DeploymentsHandlerTest {
             .extract().asString();
         assertFalse(child.contains("s3cr3t"), child);
     }
+
+    @Test
+    void anOuterNestedOutputReadsAResourceOnlyTheParentDeclares() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("outerref", """
+            {"properties": {"mode": "Incremental", "template": {
+              "variables": {"account": "deploysa0001"},
+              "resources": [
+                {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                 "name": "[variables('account')]", "location": "westeurope", "kind": "StorageV2",
+                 "sku": {"name": "Standard_LRS"}},
+                {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "outerreader",
+                 "properties": {"mode": "Incremental", "template": {"resources": [], "outputs": {
+                   "blob": {"type": "string",
+                            "value": "[reference(variables('account')).primaryEndpoints.blob]"}}}}}],
+              "outputs": {"blob": {"type": "string",
+                                   "value": "[reference('outerreader').outputs.blob.value]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/outerreader" + API).asString());
+
+        String blob = given().when().get(ACCOUNT + "?api-version=2023-01-01").then().statusCode(200)
+            .extract().path("properties.primaryEndpoints.blob");
+        given().when().get(DEPLOYMENTS + "/outerref" + API).then().statusCode(200)
+            .body("properties.outputs.blob.value", equalTo(blob));
+    }
 }
