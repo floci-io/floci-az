@@ -19,6 +19,7 @@ import io.floci.az.core.directory.DirectoryOrigin;
 import io.floci.az.core.directory.Subscription;
 import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.apim.ApiManagementHandler;
+import io.floci.az.services.deployments.DeploymentsHandler;
 import io.floci.az.services.managedidentity.ManagedIdentityHandler;
 import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.floci.az.services.network.NetworkHandler;
@@ -78,13 +79,20 @@ public class ArmHandler implements AzureServiceHandler {
     /** The Providers API: the namespaces floci-az serves and the subscription's registration with each. */
     private final ProviderService providerService;
 
+    /**
+     * Template deployments, for the one path shape their provider route cannot match: Azure's
+     * {@code DeploymentOperations_List} has no {@code providers/Microsoft.Resources} segment. Resolved lazily, since
+     * the deployment engine dispatches back through the router that holds this handler.
+     */
+    private final Instance<DeploymentsHandler> deployments;
+
     @Inject
     public ArmHandler(EmulatorConfig config, ApiManagementHandler apiManagementHandler,
                       NetworkHandler networkHandler, ManagedIdentityHandler managedIdentityHandler,
                       Instance<ArmProviderService> providerServices,
                       Instance<ResourceIndexContributor> resourceIndexContributors, ArmRequestGate gate,
                       AzureDirectory directory, ResourceGroupService resourceGroups,
-                      ProviderService providerService) {
+                      ProviderService providerService, Instance<DeploymentsHandler> deployments) {
         this.config               = config;
         this.apiManagementHandler = apiManagementHandler;
         this.networkHandler       = networkHandler;
@@ -95,6 +103,7 @@ public class ArmHandler implements AzureServiceHandler {
         this.directory            = directory;
         this.resourceGroups       = resourceGroups;
         this.providerService      = providerService;
+        this.deployments          = deployments;
     }
 
     /**
@@ -149,6 +158,14 @@ public class ArmHandler implements AzureServiceHandler {
         String method = req.method().toUpperCase();
 
         LOG.debugf("ArmHandler %s %s", method, path);
+
+        // ── Template deployments without a provider segment ───────────────────
+        // subscriptions/{sub}/resourcegroups/{rg}/deployments/{name}/operations: the spec's own path, and the one
+        // the az CLI sends. The provider route only matches /providers/Microsoft.Resources/deployments.
+        if (DeploymentsHandler.isProviderlessPath(path)) {
+            DeploymentsHandler handler = deployments.get();
+            return handler.enabled(handler.getServiceType()) ? handler.handle(req) : armNotFound(path);
+        }
 
         // ── Providers API ─────────────────────────────────────────────────────
         // First, because register and unregister carry the namespace's /providers/Microsoft.X/ segment

@@ -35,7 +35,8 @@ GET    .../deployments/{name}/operationStatuses/{id}   # the poll the PUT's Azur
 GET    .../deployments/{name}                    # Get
 HEAD   .../deployments/{name}                    # CheckExistence: 204 or 404
 DELETE .../deployments/{name}                    # Delete: removes the record, never the resources; 204
-GET    .../deployments[?$filter=provisioningState eq 'X'&$top=N]
+GET    .../deployments[?$filter=provisioningState eq 'X'&$top=N]   # nextLink when $top leaves more
+GET    .../deployments/{name}/operations[/{operationId}]           # also without providers/Microsoft.Resources
 POST   .../deployments/{name}/validate           # 200, or 400 with the template error
 POST   .../deployments/{name}/exportTemplate     # {"template": ...}
 POST   .../deployments/{name}/cancel             # 204 while it runs
@@ -63,6 +64,13 @@ resource and leaves what it already created in place.
    keys (`type`, `apiVersion`, `name`, `dependsOn`, `condition`, `comments`). A resource whose `condition`
    is false is skipped. A `202`, or a `provisioningState` that is not terminal, is polled with `GET`.
 4. The outputs are evaluated once every resource exists, so `reference()` reads the live resource.
+
+Each resource the run tries is a deployment operation (`provisioningOperation: Create`, with the provider's
+answer as `statusCode`, `OK` or `Created`, its `targetResource`, and a `statusMessage` holding the error when it
+failed), followed by one `EvaluateDeploymentOutput` operation, as Azure records them. The operations list is
+served both under `.../providers/Microsoft.Resources/deployments/{name}/operations` and under the spec's own
+`.../resourcegroups/{rg}/deployments/{name}/operations`, which has no provider segment and is the form the az
+CLI sends.
 
 The deployment answers with Azure's `DeploymentExtended` body: `provisioningState`, the echoed
 `parameters` (a `securestring` or `secureObject` value is never echoed), `outputs`, `outputResources`,
@@ -103,8 +111,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
   references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
-Deployments at subscription, management-group and tenant scope, `whatIf`, `cancel`, and the deployment
-operations listings answer `404`.
+Deployments at subscription, management-group and tenant scope and `whatIf` answer `404`.
 
 ## Intentional deviations
 

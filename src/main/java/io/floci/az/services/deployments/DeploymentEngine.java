@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -116,7 +117,33 @@ public class DeploymentEngine {
      */
     public record Result(String provisioningState, ObjectNode parameters, ObjectNode outputs,
                          List<String> outputResources, ArrayNode providers, ArrayNode dependencies, ObjectNode error,
-                         String templateHash, Instant started, Instant finished) {
+                         String templateHash, Instant started, Instant finished, List<Operation> operations) {
+
+        public Result {
+            operations = List.copyOf(operations);
+        }
+    }
+
+    /**
+     * One deployment operation, as {@code DeploymentOperations_List} reports it: the creation of one resource, or
+     * the evaluation of the outputs ({@code EvaluateDeploymentOutput}, which has no target resource).
+     *
+     * @param operationId           16 uppercase hex characters, the form Azure records
+     * @param provisioningOperation {@code Create} or {@code EvaluateDeploymentOutput}
+     * @param provisioningState     {@code Succeeded} or {@code Failed}
+     * @param timestamp             when it ended
+     * @param duration              how long it took
+     * @param statusCode            the provider's answer as an HTTP status name ({@code OK}, {@code Created}), or
+     *                              null when no request was sent
+     * @param error                 the error, when it failed
+     * @param targetId              the resource's id, or null for the outputs
+     * @param targetType            the resource's type, or null for the outputs
+     * @param targetName            the resource's name, or null for the outputs
+     * @param apiVersion            the api-version it was sent with, or null for the outputs
+     */
+    public record Operation(String operationId, String provisioningOperation, String provisioningState,
+                            Instant timestamp, Duration duration, String statusCode, ObjectNode error,
+                            String targetId, String targetType, String targetName, String apiVersion) {
     }
 
     /** A deployment read, checked and ordered, ready to run. */
@@ -196,38 +223,43 @@ public class DeploymentEngine {
         String templateHash = templateHash(plan.template());
         List<String> deployed = new ArrayList<>();
         List<DependencyGraph.Node> deployedNodes = new ArrayList<>();
+        List<Operation> operations = new ArrayList<>();
         for (DependencyGraph.Node node : plan.order()) {
             if (canceled.getAsBoolean()) {
                 LOG.infov("Deployment {0} canceled after {1} resource(s)", request.name(), deployed.size());
                 return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                    providers(deployedNodes), dependencies(plan), null, templateHash, started, Instant.now());
+                    providers(deployedNodes), dependencies(plan), null, templateHash, started, Instant.now(),
+                    operations);
             }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
             if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scope()))) {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
                 continue;
             }
-            ObjectNode failure = create(request, plan, node, definition);
+            ObjectNode failure = create(request, plan, node, definition, operations);
             if (failure != null) {
                 return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
                     providers(deployedNodes), dependencies(plan), deploymentFailed(request, failure), templateHash,
-                    started, Instant.now());
+                    started, Instant.now(), operations);
             }
             deployed.add(node.id());
             deployedNodes.add(node);
         }
         ObjectNode outputs;
+        Instant outputsStarted = Instant.now();
         try {
             outputs = outputs(plan);
         } catch (TemplateException e) {
+            ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
+            operations.add(outputOperation("Failed", detail, outputsStarted));
             return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                providers(deployedNodes), dependencies(plan),
-                deploymentFailed(request, detail(e.code(), request.id(), e.getMessage())), templateHash, started,
-                Instant.now());
+                providers(deployedNodes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
+                Instant.now(), operations);
         }
+        operations.add(outputOperation("Succeeded", null, outputsStarted));
         LOG.infov("Deployment {0} succeeded: {1} resource(s)", request.name(), deployed.size());
         return new Result("Succeeded", parameters, outputs, deployed, providers(deployedNodes), dependencies(plan),
-            null, templateHash, started, Instant.now());
+            null, templateHash, started, Instant.now(), operations);
     }
 
     // ── Preparing ──────────────────────────────────────────────────────────────────
@@ -320,14 +352,18 @@ public class DeploymentEngine {
     // ── Creating ───────────────────────────────────────────────────────────────────
 
     /** Creates one resource; null when it ended {@code Succeeded}, else the error detail for the deployment. */
-    private ObjectNode create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition) {
+    private ObjectNode create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
+                              List<Operation> operations) {
+        Instant started = Instant.now();
         ObjectNode evaluated;
         String apiVersion;
         try {
             evaluated = (ObjectNode) ExpressionEvaluator.evaluateValue(definition, plan.scope());
             apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
         } catch (TemplateException e) {
-            return detail(e.code(), node.id(), e.getMessage());
+            ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
+            operations.add(resourceOperation(node, null, "Failed", null, failure, started));
+            return failure;
         }
         ObjectNode body = JsonNodeFactory.instance.objectNode();
         for (Map.Entry<String, JsonNode> field : evaluated.properties()) {
@@ -338,18 +374,63 @@ public class DeploymentEngine {
         Response response = router.get().dispatchInternal("PUT", node.id(), Map.of("api-version", apiVersion),
             Map.of(), bytes(body), request.origin());
         JsonNode answer = entity(response);
+        String statusCode = statusName(response.getStatus());
         if (response.getStatus() / 100 != 2) {
-            return handlerError(node.id(), response, answer);
+            ObjectNode failure = handlerError(node.id(), response, answer);
+            operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
+            return failure;
         }
         String state = answer.path("properties").path("provisioningState").asText("Succeeded");
         if (response.getStatus() == 202 || !TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
             state = poll(request, node.id(), apiVersion);
         }
         if (!state.equalsIgnoreCase("Succeeded")) {
-            return detail("ResourceDeploymentFailure", node.id(), "The resource write operation failed to complete "
-                + "successfully, because it reached terminal provisioning state '" + state + "'.");
+            ObjectNode failure = detail("ResourceDeploymentFailure", node.id(), "The resource write operation failed "
+                + "to complete successfully, because it reached terminal provisioning state '" + state + "'.");
+            operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
+            return failure;
         }
+        operations.add(resourceOperation(node, apiVersion, "Succeeded", statusCode, null, started));
         return null;
+    }
+
+    private static Operation resourceOperation(DependencyGraph.Node node, String apiVersion, String state,
+                                               String statusCode, ObjectNode error, Instant started) {
+        Instant now = Instant.now();
+        return new Operation(operationId(), "Create", state, now, Duration.between(started, now), statusCode, error,
+            node.id(), ArmResourcePath.normalizedType(node.type()), node.name(), apiVersion);
+    }
+
+    private static Operation outputOperation(String state, ObjectNode error, Instant started) {
+        Instant now = Instant.now();
+        return new Operation(operationId(), "EvaluateDeploymentOutput", state, now, Duration.between(started, now),
+            "OK", error, null, null, null, null);
+    }
+
+    /** An operation id in the form Azure records: 16 uppercase hex characters. */
+    private static String operationId() {
+        return String.format("%016X", ThreadLocalRandom.current().nextLong());
+    }
+
+    /** The HTTP status as the name Azure's {@code statusCode} uses ({@code OK}, {@code Created}, ...). */
+    static String statusName(int status) {
+        return switch (status) {
+            case 200 -> "OK";
+            case 201 -> "Created";
+            case 202 -> "Accepted";
+            case 204 -> "NoContent";
+            case 400 -> "BadRequest";
+            case 401 -> "Unauthorized";
+            case 403 -> "Forbidden";
+            case 404 -> "NotFound";
+            case 405 -> "MethodNotAllowed";
+            case 409 -> "Conflict";
+            case 412 -> "PreconditionFailed";
+            case 429 -> "TooManyRequests";
+            case 500 -> "InternalServerError";
+            case 503 -> "ServiceUnavailable";
+            default -> Integer.toString(status);
+        };
     }
 
     /** Polls a resource with {@code GET} until its {@code provisioningState} is terminal, for a bounded time. */

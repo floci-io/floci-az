@@ -15,6 +15,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -229,6 +230,69 @@ class DeploymentsHandlerTest {
 
         given().when().head(DEPLOYMENTS + "/dep3" + API).then().statusCode(404);
         given().when().get(ACCOUNT + "?api-version=2023-01-01").then().statusCode(200);
+    }
+
+    @Test
+    void operationsAreListedInBothPathFormsAndReadOneByOne() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("ops", DEPLOYMENT)));
+
+        String withoutProvider = RG + "/deployments/ops/operations" + API;
+        Response list = given().when().get(withoutProvider);
+        list.then().statusCode(200)
+            .body("value", hasSize(5))
+            .body("value[0].properties.provisioningOperation", equalTo("Create"))
+            .body("value[0].properties.provisioningState", equalTo("Succeeded"))
+            .body("value[0].properties.statusCode", equalTo("OK"))
+            .body("value[0].properties.targetResource.id", equalTo(ACCOUNT))
+            .body("value[0].properties.targetResource.resourceType", equalTo("Microsoft.Storage/storageAccounts"))
+            .body("value[4].properties.provisioningOperation", equalTo("EvaluateDeploymentOutput"))
+            .body("value[0].id", startsWith(DEPLOYMENTS + "/ops/operations/"));
+        String operationId = list.path("value[0].operationId");
+
+        given().when().get(DEPLOYMENTS + "/ops/operations" + API).then().statusCode(200)
+            .body("value", hasSize(5));
+        given().when().get(RG + "/deployments/ops/operations/" + operationId + API).then().statusCode(200)
+            .body("operationId", equalTo(operationId))
+            .body("properties.targetResource.resourceName", equalTo("deploysa0001"));
+        given().when().get(DEPLOYMENTS + "/ops/operations/0000000000000000" + API).then().statusCode(404)
+            .body("error.code", equalTo("DeploymentOperationNotFound"));
+        given().when().get(RG + "/deployments/missing/operations" + API).then().statusCode(404)
+            .body("error.code", equalTo("DeploymentNotFound"));
+    }
+
+    @Test
+    void aFailedOperationCarriesTheProvidersStatusAndError() throws Exception {
+        assertEquals("Failed", awaitTerminal(put("failop", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "BAD_NAME!",
+               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}]}}}
+            """)));
+
+        given().when().get(RG + "/deployments/failop/operations" + API).then().statusCode(200)
+            .body("value", hasSize(1))
+            .body("value[0].properties.provisioningState", equalTo("Failed"))
+            .body("value[0].properties.statusCode", equalTo("BadRequest"))
+            .body("value[0].properties.statusMessage.status", equalTo("Failed"))
+            .body("value[0].properties.statusMessage.error.code", notNullValue());
+    }
+
+    @Test
+    void listsPageWithTopAndANextLink() throws Exception {
+        for (String name : new String[] {"page1", "page2", "page3"}) {
+            assertEquals("Succeeded", awaitTerminal(put(name, DEPLOYMENT)));
+        }
+
+        Response first = given().queryParam("$top", 2).when().get(DEPLOYMENTS + API);
+        first.then().statusCode(200).body("value.name", contains("page1", "page2"));
+        String next = first.path("nextLink");
+        assertNotNull(next);
+        assertTrue(next.contains("$skiptoken=2"), next);
+        given().when().get(URI.create(next).getRawPath() + "?" + URI.create(next).getRawQuery()).then().statusCode(200)
+            .body("value.name", contains("page3"))
+            .body("nextLink", nullValue());
+        given().when().get(DEPLOYMENTS + API).then().statusCode(200)
+            .body("value", hasSize(3))
+            .body("nextLink", nullValue());
     }
 
     @Test

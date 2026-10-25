@@ -95,6 +95,18 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         "subscriptions/([^/]+)/resourcegroups/([^/]+)/providers/microsoft\\.resources/deployments(?:/([^/?]+)(?:/([^/?]+))?)?/?",
         Pattern.CASE_INSENSITIVE);
 
+    /**
+     * {@code .../deployments/{name}/operations[/{id}]}, with or without the {@code providers/Microsoft.Resources}
+     * segment: the spec's {@code DeploymentOperations_List} path has none, and the az CLI sends that form.
+     */
+    private static final Pattern OPERATIONS = Pattern.compile(
+        "subscriptions/([^/]+)/resourcegroups/([^/]+)/(?:providers/microsoft\\.resources/)?deployments/([^/?]+)"
+            + "/operations(?:/([^/?]+))?/?", Pattern.CASE_INSENSITIVE);
+
+    /** {@code subscriptions/{sub}/resourcegroups/{rg}/deployments/...}: the form with no provider segment. */
+    private static final Pattern NO_PROVIDER_SEGMENT = Pattern.compile(
+        "subscriptions/[^/]+/resourcegroups/[^/]+/deployments/.*", Pattern.CASE_INSENSITIVE);
+
     /** {@code .../deployments/{name}/operationStatuses/{id}}. */
     private static final Pattern OPERATION_STATUS = Pattern.compile(
         "subscriptions/[^/]+/resourcegroups/[^/]+/providers/microsoft\\.resources/deployments/[^/?]+"
@@ -128,8 +140,10 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
      * @param template    the template as sent
      * @param operationId the run whose status {@code operationStatuses} answers
      * @param canceled    set by {@code cancel}, read by the run before each resource
+     * @param operations  its deployment operations, empty until the run ends
      */
-    record StoredDeployment(ObjectNode body, JsonNode template, String operationId, AtomicBoolean canceled) {
+    record StoredDeployment(ObjectNode body, JsonNode template, String operationId, AtomicBoolean canceled,
+                            ArrayNode operations) {
 
         String state() {
             return body.path("properties").path("provisioningState").asText();
@@ -164,6 +178,15 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
             .build();
     }
 
+    /**
+     * True for a deployment path with no provider segment ({@code subscriptions/{sub}/resourcegroups/{rg}/
+     * deployments/...}), which no provider route can match; {@code ArmHandler} hands it here.
+     */
+    public static boolean isProviderlessPath(String path) {
+        int query = path.indexOf('?');
+        return NO_PROVIDER_SEGMENT.matcher(query < 0 ? path : path.substring(0, query)).matches();
+    }
+
     /** A path under {@code /providers/Microsoft.Resources/deployments}, at any scope. */
     static boolean isDeploymentPath(String path) {
         return ArmPaths.indexOfIgnoreCase(path, MARKER) >= 0;
@@ -173,7 +196,16 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
     public Response handle(AzureRequest req) {
         String path = req.resourcePath();
         int query = path.indexOf('?');
-        Matcher operationStatus = OPERATION_STATUS.matcher(query < 0 ? path : path.substring(0, query));
+        String bare = query < 0 ? path : path.substring(0, query);
+        Matcher operationsPath = OPERATIONS.matcher(bare);
+        if (operationsPath.matches()) {
+            if (!"GET".equals(req.method().toUpperCase(Locale.ROOT))) {
+                return Response.status(405).build();
+            }
+            return operations(req, bare, operationsPath.group(1), operationsPath.group(2), operationsPath.group(3),
+                operationsPath.group(4));
+        }
+        Matcher operationStatus = OPERATION_STATUS.matcher(bare);
         if (operationStatus.matches()) {
             if (!"GET".equals(req.method().toUpperCase(Locale.ROOT))) {
                 return Response.status(405).build();
@@ -232,7 +264,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         String correlationId = UUID.randomUUID().toString();
         ObjectNode accepted = acceptedBody(request, body, prepared, correlationId);
         StoredDeployment stored = new StoredDeployment(accepted, body.path("properties").get("template"),
-            operationId, new AtomicBoolean());
+            operationId, new AtomicBoolean(), JsonNodeFactory.instance.arrayNode());
         deployments.put(key, stored);
         operations.put(operationId, status("Accepted", null));
         runner.submit(() -> run(key, stored, prepared, body, correlationId));
@@ -261,7 +293,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
         }
         ObjectNode finished = deploymentBody(prepared.request(), body, result, correlationId);
         replace(key, stored, new StoredDeployment(finished, stored.template(), stored.operationId(),
-            stored.canceled()));
+            stored.canceled(), operationBodies(prepared.request(), result)));
         operations.put(stored.operationId(), status(result.provisioningState(), result.error()));
     }
 
@@ -290,7 +322,88 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
     private static StoredDeployment withState(StoredDeployment stored, String state) {
         ObjectNode body = stored.body().deepCopy();
         body.withObjectProperty("properties").put("provisioningState", state);
-        return new StoredDeployment(body, stored.template(), stored.operationId(), stored.canceled());
+        return new StoredDeployment(body, stored.template(), stored.operationId(), stored.canceled(),
+            stored.operations());
+    }
+
+    /** {@code DeploymentOperations_List} and {@code DeploymentOperations_Get}. */
+    private Response operations(AzureRequest req, String path, String subscriptionId, String resourceGroup,
+                                String name, String operationId) {
+        StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
+        if (stored == null) {
+            return deploymentNotFound(name);
+        }
+        if (operationId == null) {
+            List<JsonNode> items = new ArrayList<>();
+            stored.operations().forEach(items::add);
+            return json(200, page(req, path, items));
+        }
+        for (JsonNode operation : stored.operations()) {
+            if (operation.path("operationId").asText().equalsIgnoreCase(operationId)) {
+                return json(200, operation);
+            }
+        }
+        return ArmErrors.error(404, "DeploymentOperationNotFound", "Deployment operation '" + operationId
+            + "' of deployment '" + name + "' could not be found.");
+    }
+
+    /**
+     * One page of {@code items}: from {@code $skiptoken} (an offset), at most {@code $top} of them, with a
+     * {@code nextLink} to the rest when some are left. Without {@code $top} every item is on one page.
+     */
+    private ObjectNode page(AzureRequest req, String path, List<JsonNode> items) {
+        int skip = intParam(req, "$skiptoken", 0);
+        int top = intParam(req, "$top", Integer.MAX_VALUE);
+        ArrayNode value = JsonNodeFactory.instance.arrayNode();
+        for (int i = skip; i < items.size() && value.size() < top; i++) {
+            value.add(items.get(i));
+        }
+        ObjectNode answer = JsonNodeFactory.instance.objectNode();
+        answer.set("value", value);
+        int next = skip + value.size();
+        if (next < items.size()) {
+            String apiVersion = req.queryParams() == null ? null : req.queryParams().get("api-version");
+            answer.put("nextLink", RequestUrls.resolveBaseUrl(req, config) + "/" + path + "?"
+                + (apiVersion == null ? "" : "api-version=" + apiVersion + "&") + "$top=" + top + "&$skiptoken=" + next);
+        }
+        return answer;
+    }
+
+    private static int intParam(AzureRequest req, String name, int fallback) {
+        String value = req.queryParams() == null ? null : req.queryParams().get(name);
+        return value != null && value.matches("\\d+") ? Integer.parseInt(value) : fallback;
+    }
+
+    /** The {@code DeploymentOperation} bodies of a finished run, in the order they ran. */
+    private static ArrayNode operationBodies(DeploymentEngine.Request request, DeploymentEngine.Result result) {
+        ArrayNode bodies = JsonNodeFactory.instance.arrayNode();
+        for (DeploymentEngine.Operation operation : result.operations()) {
+            ObjectNode body = bodies.addObject();
+            body.put("id", request.id() + "/operations/" + operation.operationId());
+            body.put("operationId", operation.operationId());
+            ObjectNode properties = body.putObject("properties");
+            properties.put("provisioningOperation", operation.provisioningOperation());
+            properties.put("provisioningState", operation.provisioningState());
+            properties.put("timestamp", operation.timestamp().toString());
+            properties.put("duration", operation.duration().toString());
+            properties.put("trackingId", UUID.randomUUID().toString());
+            if (operation.statusCode() != null) {
+                properties.put("statusCode", operation.statusCode());
+            }
+            if (operation.error() != null) {
+                ObjectNode message = properties.putObject("statusMessage");
+                message.put("status", operation.provisioningState());
+                message.set("error", operation.error());
+            }
+            if (operation.targetId() != null) {
+                ObjectNode target = properties.putObject("targetResource");
+                target.put("id", operation.targetId());
+                target.put("resourceType", operation.targetType());
+                target.put("resourceName", operation.targetName());
+                target.put("apiVersion", operation.apiVersion());
+            }
+        }
+        return bodies;
     }
 
     private Response get(String subscriptionId, String resourceGroup, String name) {
@@ -329,26 +442,19 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
             Matcher matcher = STATE_FILTER.matcher(filter);
             state = matcher.find() ? matcher.group(1) : null;
         }
-        int top = Integer.MAX_VALUE;
-        String topParam = req.queryParams() == null ? null : req.queryParams().get("$top");
-        if (topParam != null && topParam.matches("\\d+")) {
-            top = Integer.parseInt(topParam);
-        }
-        ArrayNode value = JsonNodeFactory.instance.arrayNode();
         List<Map.Entry<String, StoredDeployment>> entries = new ArrayList<>(deployments.entrySet());
         entries.sort(Map.Entry.comparingByKey());
+        List<JsonNode> matching = new ArrayList<>();
         for (Map.Entry<String, StoredDeployment> entry : entries) {
-            if (value.size() >= top || !entry.getKey().startsWith(prefix)) {
-                continue;
-            }
             ObjectNode body = entry.getValue().body();
-            if (state == null || body.path("properties").path("provisioningState").asText().equalsIgnoreCase(state)) {
-                value.add(body);
+            if (entry.getKey().startsWith(prefix) && (state == null
+                    || body.path("properties").path("provisioningState").asText().equalsIgnoreCase(state))) {
+                matching.add(body);
             }
         }
-        ObjectNode answer = JsonNodeFactory.instance.objectNode();
-        answer.set("value", value);
-        return json(200, answer);
+        String path = req.resourcePath();
+        int query = path.indexOf('?');
+        return json(200, page(req, query < 0 ? path : path.substring(0, query), matching));
     }
 
     private Response action(AzureRequest req, String subscriptionId, String resourceGroup, String name,

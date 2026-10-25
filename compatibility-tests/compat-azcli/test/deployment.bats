@@ -86,6 +86,15 @@ teardown_file() {
     assert_equal "$(echo "$output" | jq -r '.contentVersion')" "1.0.0.0"
 }
 
+@test "az deployment operation group list: one Create per resource and the output evaluation" {
+    run az_json deployment operation group list -g "$DEPLOY_RG" -n "$DEPLOY_NAME"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '[.[] | select(.properties.provisioningOperation == "Create")] | length')" "1"
+    assert_equal "$(echo "$output" | jq -r '.[0].properties.targetResource.resourceName')" "$DEPLOY_SA"
+    assert_equal "$(echo "$output" | jq -r '.[0].properties.provisioningState')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.[-1].properties.provisioningOperation')" "EvaluateDeploymentOutput"
+}
+
 @test "az deployment group delete: removes the deployment and keeps its resources" {
     run az deployment group delete -g "$DEPLOY_RG" -n "$DEPLOY_NAME" -o none
     assert_success

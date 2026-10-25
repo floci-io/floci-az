@@ -259,6 +259,38 @@ class DeploymentEngineTest {
     }
 
     @Test
+    void everyResourceAndTheOutputsAreRecordedAsOperations() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        List<DeploymentEngine.Operation> operations = result.operations();
+        assertEquals(3, operations.size());
+        assertEquals("Create", operations.get(0).provisioningOperation());
+        assertEquals(SA_ID, operations.get(0).targetId());
+        assertEquals("Microsoft.Storage/storageAccounts", operations.get(0).targetType());
+        assertEquals("sa1", operations.get(0).targetName());
+        assertEquals("OK", operations.get(0).statusCode());
+        assertEquals("2023-01-01", operations.get(0).apiVersion());
+        assertEquals(CONTAINER_ID, operations.get(1).targetId());
+        assertEquals("EvaluateDeploymentOutput", operations.get(2).provisioningOperation());
+        assertNull(operations.get(2).targetId());
+        assertTrue(operations.get(0).operationId().matches("[0-9A-F]{16}"), operations.get(0).operationId());
+    }
+
+    @Test
+    void aFailedResourceIsAFailedOperationWithTheHandlersStatusAndError() throws Exception {
+        answer = request -> Response.status(409).entity(Map.of("error",
+            Map.of("code", "StorageAccountAlreadyTaken", "message", "taken"))).build();
+
+        DeploymentEngine.Result result = engine.deploy(request(STORAGE_TEMPLATE));
+
+        DeploymentEngine.Operation failed = result.operations().getFirst();
+        assertEquals(1, result.operations().size());
+        assertEquals("Failed", failed.provisioningState());
+        assertEquals("Conflict", failed.statusCode());
+        assertEquals("StorageAccountAlreadyTaken", failed.error().path("code").asText());
+    }
+
+    @Test
     void validateChecksEverythingAndSendsNothing() throws Exception {
         List<String> ids = engine.validate(request(STORAGE_TEMPLATE));
 
