@@ -382,4 +382,19 @@ class DeploymentsHandlerTest {
             .then().statusCode(404)
             .body("error.code", equalTo("ResourceGroupNotFound"));
     }
+
+    @Test
+    void aRunThatFailsUnexpectedlyLeavesItsRecordFailedAndReplaceable() throws Exception {
+        String overflowing = """
+            {"properties": {"mode": "Incremental", "template": {
+              "outputs": {"big": {"type": "int", "value": "[add(9223372036854775807, 1)]"}}}}}
+            """;
+        assertEquals("Failed", awaitTerminal(put("overflow", overflowing)));
+
+        given().when().get(DEPLOYMENTS + "/overflow" + API).then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Failed"))
+            .body("properties.error.code", equalTo("InternalServerError"));
+        assertEquals("Failed", awaitTerminal(put("overflow", overflowing)), "a failed name can be deployed again");
+        given().when().delete(DEPLOYMENTS + "/overflow" + API).then().statusCode(204);
+    }
 }

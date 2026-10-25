@@ -305,6 +305,10 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable {
             ObjectNode error = JsonNodeFactory.instance.objectNode();
             error.put("code", "InternalServerError");
             error.put("message", "The deployment failed unexpectedly: " + e.getMessage());
+            // The record ends too, or a PUT and DELETE of the name would answer DeploymentActive forever.
+            StoredDeployment failed = withState(stored, "Failed");
+            failed.body().withObjectProperty("properties").set("error", error);
+            replace(key, stored, failed);
             operations.put(stored.operationId(), status("Failed", error));
             return;
         }
