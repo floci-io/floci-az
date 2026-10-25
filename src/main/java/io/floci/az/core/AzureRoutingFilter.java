@@ -257,10 +257,13 @@ public class AzureRoutingFilter {
         String remoteAddress = serverRequest.remoteAddress() == null
                 ? null : serverRequest.remoteAddress().hostAddress();
 
+        // Unordered: an ordered executeBlocking runs one task at a time per event-loop context, so requests
+        // sharing an event loop queued behind each other, and a request that calls back into floci-az (a
+        // deployment downloading a linked template from floci's own blob storage) waited on itself.
         return Uni.createFrom().completionStage(
             vertx.executeBlocking(() -> doFilter(
                     requestContext, path0, rawPath0, rawQuery0, headers, capturedHost, remoteAddress,
-                    authority))
+                    authority), false)
                  .toCompletionStage()
         );
     }
