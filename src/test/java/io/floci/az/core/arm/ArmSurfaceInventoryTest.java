@@ -32,7 +32,7 @@ class ArmSurfaceInventoryTest {
 
     /** Namespaces {@code ArmHandler} serves itself, with no handler or provider service behind them. */
     private static final Set<String> ARM_HANDLER_INLINE = Set.of(
-        "Microsoft.KeyVault", "Microsoft.Network", "Microsoft.Resources", "Microsoft.Web");
+        "Microsoft.Network", "Microsoft.Resources");
 
     private static final Path GENERATOR = Path.of("tools/arm/gen_providers.py");
     private static final Pattern NAMESPACES = Pattern.compile("NAMESPACES = \\[(.*?)]", Pattern.DOTALL);

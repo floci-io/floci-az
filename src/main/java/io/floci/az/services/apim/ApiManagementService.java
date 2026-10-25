@@ -214,6 +214,12 @@ public class ApiManagementService implements GlobalNameSource {
                 .toList();
     }
 
+    @Override
+    public boolean holds(CloudSuffix suffix, String name, ArmResourceId owner) {
+        return suffix == CloudSuffix.APIM
+            && services.get(owner).filter(stored -> name.equalsIgnoreCase(stored.value().name())).isPresent();
+    }
+
     private ApimService newService(ArmResourceId id, Map<String, Object> body) {
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
         properties.put("provisioningState", "Succeeded");

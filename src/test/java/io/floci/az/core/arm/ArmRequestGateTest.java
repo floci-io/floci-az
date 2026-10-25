@@ -124,6 +124,28 @@ class ArmRequestGateTest {
     }
 
     @Test
+    void anExitHookThatThrowsDoesNotSkipTheLaterOnes() {
+        List<String> log = new ArrayList<>();
+        ArmRequestRule failing = new ArmRequestRule() {
+            @Override
+            public int order() {
+                return 1;
+            }
+
+            @Override
+            public void exit(ArmCall call, Response response) {
+                throw new IllegalStateException("exit1");
+            }
+        };
+        ArmRequestGate gate = new ArmRequestGate(List.of(failing, new LoggingRule(2, log)));
+
+        assertThrows(IllegalStateException.class,
+            () -> gate.serve(request("GET", "subscriptions/s"), req -> Response.ok().build()));
+
+        assertEquals(List.of("enter2 GET /subscriptions/s", "exit2 200"), log);
+    }
+
+    @Test
     void aPathOutsideTheArmRootsEntersWithoutAnId() {
         ArmRequestGate gate = new ArmRequestGate(List.of());
 

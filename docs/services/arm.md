@@ -34,8 +34,11 @@ Managed Identity, and the other `Microsoft.*` providers).
   spelling. See [Resource groups](#resource-groups)
 - **Storage accounts**: an ARM shell that bridges `Microsoft.Storage/storageAccounts` to the live
   [Blob](blob.md) and [Queue](queue.md) backends, returning the well-known development account key
-- **Key vaults**: an ARM shell for `Microsoft.KeyVault/vaults` whose `vaultUri` points at the
-  live [Key Vault](key-vault.md) handler
+- **Key vaults and managed HSMs**: ARM shells for `Microsoft.KeyVault/vaults` and `managedHSMs` whose
+  `vaultUri` and `hsmUri` point at the live [Key Vault](key-vault.md) handler, kept in the `arm-keyvault` store
+  under the global storage mode
+- **Sites**: an ARM shell for `Microsoft.Web/sites` and its `config/web` that provisions a
+  [Functions](functions.md) app from `linuxFxVersion`, kept in the `arm-web` store under the global storage mode
 - **Resource listing**: `GET /subscriptions/{sub}/resources` and
   `POST .../{namespace}/checkNameAvailability`
 - **Resource providers**: every namespace floci-az serves, with its resource types and Azure's
@@ -412,6 +415,8 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.DBforPostgreSQL/flexibleServers` | 3 to 63 letters, digits and hyphens, starting and ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.EventGrid/eventSubscriptions` | 3 to 64 letters, digits and hyphens |
 | `Microsoft.EventGrid/topics` | 3 to 50 letters, digits and hyphens |
+| `Microsoft.KeyVault/managedHSMs` | 3 to 24 letters, digits and hyphens, starting with a letter, ending with a letter or digit, no consecutive hyphens |
+| `Microsoft.KeyVault/vaults` | 3 to 24 letters, digits and hyphens, starting with a letter, ending with a letter or digit, no consecutive hyphens |
 | `Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials` | 3 to 120 letters, digits, hyphens and underscores, starting with a letter or digit |
 | `Microsoft.ManagedIdentity/userAssignedIdentities` | 3 to 128 letters, digits, hyphens and underscores, starting with a letter or digit |
 | `Microsoft.Network/networkInterfaces` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
@@ -424,6 +429,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.Sql/servers/firewallRules` | 1 to 128 characters without `<>*%&:;\/?` or control characters, not ending with a period |
 | `Microsoft.Sql/servers` | 1 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen |
 | `Microsoft.Storage/storageAccounts` | 3 to 24 lowercase letters and digits; checked with or without `strict-names`, answered `400 AccountNameInvalid` as floci-az always has, before any name conflict |
+| `Microsoft.Web/sites` | 2 to 60 letters, digits and hyphens, not starting or ending with a hyphen (the Unicode characters Azure maps to Punycode are refused) |
 
 The other types declare theirs as they move to the shared resource store. The code is an emulator choice: no local
 source records Azure's answer for a name outside the rule.
@@ -454,8 +460,9 @@ Concurrent creates of one name from several subscriptions leave exactly one owne
 | `Microsoft.ApiManagement/service` | `409 ServiceAlreadyExists` |
 | `Microsoft.Communication/communicationServices` | `409 Conflict` (see below) |
 
-`POST /subscriptions/{sub}/providers/Microsoft.Storage/checkNameAvailability` and the
-`Microsoft.KeyVault` equivalent report a taken name as `nameAvailable: false`, reason `AlreadyExists`.
+`POST /subscriptions/{sub}/providers/Microsoft.Storage/checkNameAvailability`, the
+`Microsoft.KeyVault` equivalent and its `checkMhsmNameAvailability`, and the `Microsoft.Web` one for a site name
+report a taken name as `nameAvailable: false`, reason `AlreadyExists`.
 For `Microsoft.Storage`, malformed names report `nameAvailable: false`, reason
 `AccountNameInvalid`. Storage account names must contain 3 to 24 lowercase letters or digits. A `PUT`
 that creates a storage account with such a name is refused with `400 AccountNameInvalid`.

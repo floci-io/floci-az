@@ -17,9 +17,6 @@ src/main/java/io/floci/az/services/aks/AksHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/apim/ApiManagementService.java	location-literal	1
 src/main/java/io/floci/az/services/apim/ApiManagementService.java	scope-parse	1
 src/main/java/io/floci/az/services/appconfig/AppConfigHandler.java	cloud-literal	1
-src/main/java/io/floci/az/services/arm/ArmHandler.java	cloud-literal	2
-src/main/java/io/floci/az/services/arm/ArmHandler.java	location-literal	4
-src/main/java/io/floci/az/services/arm/ArmHandler.java	name-guard	1
 src/main/java/io/floci/az/services/arm/ArmHandler.java	scope-parse	2
 src/main/java/io/floci/az/services/blob/BlobServiceHandler.java	cloud-literal	3
 src/main/java/io/floci/az/services/containerapps/ContainerAppsHandler.java	location-literal	4
@@ -31,6 +28,9 @@ src/main/java/io/floci/az/services/entra/DiscoveryProvider.java	cloud-literal	1
 src/main/java/io/floci/az/services/entra/IssuerFactory.java	cloud-literal	1
 src/main/java/io/floci/az/services/eventgrid/EventGridDelivery.java	cloud-literal	1
 src/main/java/io/floci/az/services/graph/GraphServiceHandler.java	cloud-literal	1
+src/main/java/io/floci/az/services/keyvault/KeyVaultArmService.java	cloud-literal	2
+src/main/java/io/floci/az/services/keyvault/KeyVaultArmService.java	location-literal	2
+src/main/java/io/floci/az/services/keyvault/KeyVaultArmService.java	scope-parse	1
 src/main/java/io/floci/az/services/keyvault/KeyVaultCertificates.java	cloud-literal	1
 src/main/java/io/floci/az/services/keyvault/KeyVaultHandler.java	cloud-literal	9
 src/main/java/io/floci/az/services/keyvault/KeyVaultKeys.java	cloud-literal	2
@@ -58,3 +58,5 @@ src/main/java/io/floci/az/services/storageaccounts/StorageAccountArmService.java
 src/main/java/io/floci/az/services/table/TableServiceHandler.java	cloud-literal	1
 src/main/java/io/floci/az/services/vm/VmHandler.java	location-literal	2
 src/main/java/io/floci/az/services/vm/VmHandler.java	scope-parse	2
+src/main/java/io/floci/az/services/web/WebArmService.java	location-literal	1
+src/main/java/io/floci/az/services/web/WebArmService.java	scope-parse	1

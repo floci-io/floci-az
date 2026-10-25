@@ -7,7 +7,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,6 +96,28 @@ class GlobalNameRegistryTest {
     }
 
     @Test
+    void aDeleteThatFinishesAfterAPutRecreatedTheResourceKeepsTheName() {
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        GlobalNameSource.Claim claim = new GlobalNameSource.Claim(CloudSuffix.REDIS, "c1", owner);
+        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        stored.add(claim);
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+
+        stored.remove(claim);
+        assertEquals(GlobalNameRegistry.Outcome.OWNED,
+            registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner).outcome(),
+            "a PUT to the same cache while the DELETE is in flight finds the name owned");
+        stored.add(claim);
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+
+        assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow(),
+            "the PUT stored the cache again, so the DELETE's release keeps the name");
+        assertEquals(GlobalNameRegistry.Outcome.TAKEN,
+            registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", cache("s2", "rg", "c1")).outcome());
+    }
+
+    @Test
     void eachCloudAndEachSuffixHasItsOwnNames() {
         registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", cache("s1", "rg", "c1"));
 
@@ -140,5 +164,76 @@ class GlobalNameRegistryTest {
         stored.clear();
         registry.clear();
         assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "kept").isEmpty());
+    }
+
+    /** A source of one suffix answering {@link GlobalNameSource#holds} by key, counting how it is read. */
+    private static final class KeyedSource implements GlobalNameSource {
+        private final CloudSuffix suffix;
+        private final Map<String, String> namesByResource = new HashMap<>();
+        private int listings;
+        private int lookups;
+
+        KeyedSource(CloudSuffix suffix) {
+            this.suffix = suffix;
+        }
+
+        void store(ArmResourceId owner, String name) {
+            namesByResource.put(owner.canonicalKey(), name);
+        }
+
+        @Override
+        public List<Claim> globalNames() {
+            listings++;
+            return List.of();
+        }
+
+        @Override
+        public boolean holds(CloudSuffix asked, String name, ArmResourceId owner) {
+            if (asked != suffix) {
+                return false;
+            }
+            lookups++;
+            return name.equalsIgnoreCase(namesByResource.get(owner.canonicalKey()));
+        }
+    }
+
+    @Test
+    void aReleaseLooksUpTheOwnerInTheSourcesOfItsSuffixWithoutListingAnyClaims() {
+        KeyedSource caches = new KeyedSource(CloudSuffix.REDIS);
+        KeyedSource registries = new KeyedSource(CloudSuffix.ACR);
+        GlobalNameRegistry keyed = new GlobalNameRegistry(() -> List.of(caches, registries),
+            subscription -> PUBLIC, () -> Set.of(CloudSuffix.REDIS));
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        keyed.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        keyed.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        caches.store(owner, "c1");
+        int listingsAfterBuild = caches.listings + registries.listings;
+
+        keyed.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(owner, keyed.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow(), "the owner is still stored");
+        caches.namesByResource.clear();
+        keyed.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertTrue(keyed.owner(PUBLIC, CloudSuffix.REDIS, "c1").isEmpty());
+        caches.store(owner, "c1");
+        keyed.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(owner, keyed.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow(), "commit re-holds it");
+
+        assertEquals(3, caches.lookups);
+        assertEquals(0, registries.lookups, "a source of another suffix is not looked into");
+        assertEquals(listingsAfterBuild, caches.listings + registries.listings, "no claims are listed after the build");
+    }
+
+    @Test
+    void aSourceWithoutAKeyedLookupIsStillAnsweredFromItsClaims() {
+        ArmResourceId owner = cache("s1", "rg", "c1");
+        registry.reserve(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        registry.commit(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        stored.add(new GlobalNameSource.Claim(CloudSuffix.REDIS, "C1", owner));
+
+        registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertEquals(owner, registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").orElseThrow());
+        stored.clear();
+        registry.release(PUBLIC, CloudSuffix.REDIS, "c1", owner);
+        assertTrue(registry.owner(PUBLIC, CloudSuffix.REDIS, "c1").isEmpty());
     }
 }

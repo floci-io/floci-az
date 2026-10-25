@@ -30,7 +30,8 @@ public enum CloudSuffix {
     COMMUNICATION(true),
     AKS(false),
     ACI(false),
-    APIM(false);
+    APIM(false),
+    WEB(false);
 
     private final boolean hostRouted;
 

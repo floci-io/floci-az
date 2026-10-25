@@ -855,6 +855,10 @@
         "TABLE": {
           "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
           "value": "table.core.windows.net"
+        },
+        "WEB": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (App Service, Azure Public)",
+          "value": "azurewebsites.net"
         }
       }
     },
@@ -1215,6 +1219,10 @@
         "TABLE": {
           "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
           "value": "table.core.usgovcloudapi.net"
+        },
+        "WEB": {
+          "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (App Service, Azure Government)",
+          "value": "azurewebsites.us"
         }
       }
     },
@@ -1574,6 +1582,10 @@
         "TABLE": {
           "source": "azure-cli/src/azure-cli-core/azure/cli/core/cloud.py storage_endpoint + azure-cli/src/azure-cli/azure/cli/command_modules/storage/_client_factory.py get_account_url ('https://{account}.{service}.{storage_endpoint}')",
           "value": "table.core.chinacloudapi.cn"
+        },
+        "WEB": {
+          "source": "UNSETTLED: App Service host suffix in AzureChinaCloud; no local source",
+          "value": null
         }
       }
     }
