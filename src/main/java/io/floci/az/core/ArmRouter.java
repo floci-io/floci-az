@@ -13,20 +13,22 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -167,20 +169,36 @@ public class ArmRouter {
     // ── Requests floci-az makes to itself ───────────────────────────────────────
 
     /**
-     * Sends an ARM request on behalf of {@code origin}, through the same stages, request gate and handler a
-     * client's request to {@code path} would reach, so the handler applies its own side effects. The request
-     * carries no body; it keeps the origin's credentials, scheme and authority, so the handler sees the same
-     * caller and generates the same URLs.
-     *
-     * @param method the HTTP method
-     * @param path   an ARM path ({@code /subscriptions/...}), with or without a leading slash; no query
-     * @param query  the query parameters, such as {@code api-version}
-     * @param origin the request this one is made for
-     * @return the handler's response; an ARM {@code 404 ResourceNotFound} when no stage claims the path
+     * Sends a bodyless ARM request on behalf of {@code origin}; see
+     * {@link #dispatchInternal(String, String, Map, Map, byte[], AzureRequest)}.
      */
     public Response dispatchInternal(String method, String path, Map<String, String> query, AzureRequest origin) {
+        return dispatchInternal(method, path, query, Map.of(), null, origin);
+    }
+
+    /**
+     * Sends an ARM request on behalf of {@code origin}, through the same stages, request gate and handler a
+     * client's request to {@code path} would reach, so the handler applies its own side effects. It keeps the
+     * origin's credentials, scheme and authority, so the handler sees the same caller and generates the same URLs.
+     * This is how floci-az acts as a client of itself (a resource-group delete's cascade, a template deployment's
+     * resources); it never calls a handler's methods directly, which would skip routing, the gate and the
+     * disabled-service guard.
+     *
+     * @param method  the HTTP method
+     * @param path    an ARM path ({@code /subscriptions/...}), with or without a leading slash; no query
+     * @param query   the query parameters, such as {@code api-version}
+     * @param headers request headers to send besides the forwarded ones, such as {@code If-Match}; a header named
+     *                here replaces a forwarded one
+     * @param body    the request body, or null for none; a body sent without a {@code Content-Type} is sent as
+     *                {@code application/json}, the type of every ARM body
+     * @param origin  the request this one is made for
+     * @return the handler's response; an ARM {@code 404 ResourceNotFound} when no stage claims the path
+     */
+    public Response dispatchInternal(String method, String path, Map<String, String> query,
+                                     Map<String, String> headers, byte[] body, AzureRequest origin) {
         String relative = path.startsWith("/") ? path.substring(1) : path;
-        Map<String, String> initialHeaders = new LinkedHashMap<>();
+        // Case-insensitive, as header names are, so a caller's header replaces a forwarded one in any spelling.
+        Map<String, String> initialHeaders = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         if (origin.headers() != null) {
             for (String name : FORWARDED_HEADERS) {
                 initialHeaders.put(name, origin.headers().getHeaderString(name));
@@ -190,14 +208,19 @@ public class ArmRouter {
         if (authority != null) {
             initialHeaders.put(HttpHeaders.HOST, authority);
         }
-        SyntheticHttpHeaders headers = new SyntheticHttpHeaders(initialHeaders);
+        initialHeaders.putAll(headers);
+        if (body != null && headers.keySet().stream().noneMatch(HttpHeaders.CONTENT_TYPE::equalsIgnoreCase)) {
+            initialHeaders.put(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
+        }
+        SyntheticHttpHeaders requestHeaders = new SyntheticHttpHeaders(initialHeaders);
         MultivaluedMap<String, String> queryParameters = new MultivaluedHashMap<>();
         query.forEach(queryParameters::putSingle);
         String rawQuery = query.isEmpty() ? null : query.entrySet().stream()
             .map(entry -> entry.getKey() + "=" + entry.getValue())
             .collect(Collectors.joining("&"));
         RoutingContext ctx = new RoutingContext(method.toUpperCase(Locale.ROOT), relative, relative, rawQuery,
-            headers, headers.map(), queryParameters, InputStream.nullInputStream(), origin.host(), origin.secure(),
+            requestHeaders, requestHeaders.map(), queryParameters,
+            body == null ? InputStream.nullInputStream() : new ByteArrayInputStream(body), origin.host(), origin.secure(),
             origin.remoteAddress(), authority, scopeResolver.resolve(relative, origin.host(), authorization(origin)));
         LOG.debugv("Internal ARM request: {0} {1}", ctx.method(), relative);
         for (Function<RoutingContext, RouteOutcome> stage : internalStages) {
