@@ -74,6 +74,12 @@ public class DeploymentEngine {
     private static final Duration POLL_INTERVAL = Duration.ofMillis(250);
     private static final int POLL_ATTEMPTS = 120;
 
+    /** A nested deployment may hold many resources, so it is polled for up to ten minutes. */
+    private static final int NESTED_POLL_ATTEMPTS = 2400;
+
+    /** Keys of a nested deployment that pick its target, which its id already carries. */
+    private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
+
     private final Instance<ArmRouter> router;
     private final ResourceGroups groups;
     private final AzureDirectory directory;
@@ -343,7 +349,8 @@ public class DeploymentEngine {
                 dependsOn.add(text(evaluate(entry, scope), "dependsOn"));
             }
         }
-        if (request.atSubscription()) {
+        boolean nested = DeploymentTemplate.isNestedDeployment(definition);
+        if (request.atSubscription() && !nested) {
             types.type(ArmResourcePath.normalizedType(type))
                 .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP)
                 .ifPresent(served -> {
@@ -352,11 +359,31 @@ public class DeploymentEngine {
                         + "nested deployment that names the resource group.");
                 });
         }
-        String scopeId = definition.has("scope")
-            ? extensionScope(request, text(evaluate(definition.get("scope"), scope), "scope"), name)
-            : request.scopeId();
+        String scopeId;
+        if (nested) {
+            scopeId = nestedTarget(request, definition, scope);
+        } else if (definition.has("scope")) {
+            scopeId = extensionScope(request, text(evaluate(definition.get("scope"), scope), "scope"), name);
+        } else {
+            scopeId = request.scopeId();
+        }
         return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(scopeId, type, name),
             type, name, dependsOn, loop);
+    }
+
+    /**
+     * Where a nested deployment runs ({@code deploy-to-subscription.md}, "Deployment scopes"): the resource group its
+     * {@code resourceGroup} names, in the subscription its {@code subscriptionId} names or the parent's; a
+     * subscription it names without a group; else the parent deployment's own scope.
+     */
+    private static String nestedTarget(Request request, ObjectNode definition, TemplateScope scope) {
+        String subscription = definition.has("subscriptionId")
+            ? text(evaluate(definition.get("subscriptionId"), scope), "subscriptionId") : request.subscriptionId();
+        if (definition.has("resourceGroup")) {
+            return "/subscriptions/" + subscription + "/resourceGroups/"
+                + text(evaluate(definition.get("resourceGroup"), scope), "resourceGroup");
+        }
+        return definition.has("subscriptionId") ? "/subscriptions/" + subscription : request.scopeId();
     }
 
     /**
@@ -475,7 +502,13 @@ public class DeploymentEngine {
             // The resource's own copy loop is how it was expanded, not a property to send.
             ObjectNode withoutLoop = definition.deepCopy();
             withoutLoop.remove("copy");
+            JsonNode nestedTemplate = DeploymentTemplate.isNestedDeployment(definition)
+                ? ((ObjectNode) withoutLoop.get("properties")).remove("template") : null;
             evaluated = (ObjectNode) CopyLoops.evaluate(withoutLoop, plan.scopeOf(node));
+            if (nestedTemplate != null) {
+                ((ObjectNode) evaluated.get("properties")).set("template",
+                    nestedTemplate(definition, (ObjectNode) nestedTemplate, plan));
+            }
             apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
         } catch (TemplateException e) {
             ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
@@ -484,7 +517,8 @@ public class DeploymentEngine {
         }
         ObjectNode body = JsonNodeFactory.instance.objectNode();
         for (Map.Entry<String, JsonNode> field : evaluated.properties()) {
-            if (!TEMPLATE_ONLY_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))) {
+            if (!TEMPLATE_ONLY_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))
+                    && !NESTED_TARGET_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))) {
                 body.set(field.getKey(), field.getValue());
             }
         }
@@ -499,7 +533,8 @@ public class DeploymentEngine {
         }
         String state = answer.path("properties").path("provisioningState").asText("Succeeded");
         if (response.getStatus() == 202 || !TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
-            state = poll(request, node.id(), apiVersion);
+            state = poll(request, node.id(), apiVersion,
+                DeploymentTemplate.isNestedDeployment(definition) ? NESTED_POLL_ATTEMPTS : POLL_ATTEMPTS);
         }
         if (!state.equalsIgnoreCase("Succeeded")) {
             ObjectNode failure = detail("ResourceDeploymentFailure", node.id(), "The resource write operation failed "
@@ -509,6 +544,59 @@ public class DeploymentEngine {
         }
         operations.add(resourceOperation(node, apiVersion, "Succeeded", statusCode, null, started));
         return null;
+    }
+
+    /**
+     * The template a nested deployment is sent with. An {@code inner} one is its own template and goes as written.
+     * An {@code outer} one (the default) resolves the parent's parameters and variables
+     * ({@code linked-templates.md}, "Expression evaluation scope in nested templates"): it goes with the parent's
+     * parameters declared as its own, each defaulting to the parent's value, and the parent's variable values as its
+     * variables, so it then runs as an inner one; a value that would read as an expression is escaped. Its
+     * {@code resourceGroup()} and {@code subscription()} then answer for its own target, where Azure answers the
+     * parent's: they differ only when an outer-scope nested deployment targets another scope.
+     */
+    private JsonNode nestedTemplate(ObjectNode definition, ObjectNode template, Plan plan) {
+        String scope = definition.path("properties").path("expressionEvaluationOptions").path("scope").asText("outer");
+        if (scope.equalsIgnoreCase("inner")) {
+            return template;
+        }
+        ObjectNode outer = template.deepCopy();
+        ObjectNode parameters = outer.putObject("parameters");
+        for (Map.Entry<String, JsonNode> entry : plan.parameters().entrySet()) {
+            DeploymentTemplate.Parameter declared = plan.template().parameter(entry.getKey());
+            ObjectNode parameter = parameters.putObject(declared.name());
+            parameter.put("type", declared.type());
+            parameter.set("defaultValue", escaped(entry.getValue()));
+        }
+        ObjectNode variables = outer.putObject("variables");
+        for (Map.Entry<String, JsonNode> field : plan.template().variables().properties()) {
+            if (!(field.getKey().equals("copy") && field.getValue().isArray())) {
+                variables.set(field.getKey(), escaped(plan.scope().variable(field.getKey())));
+            }
+        }
+        for (JsonNode loop : plan.template().variables().path("copy")) {
+            String name = loop.path("name").asText();
+            variables.set(name, escaped(plan.scope().variable(name)));
+        }
+        return outer;
+    }
+
+    /** {@code value} with every string that would read as an expression escaped, so it stays a literal. */
+    private static JsonNode escaped(JsonNode value) {
+        if (value.isTextual() && value.asText().startsWith("[")) {
+            return JsonNodeFactory.instance.textNode("[" + value.asText());
+        }
+        if (value instanceof ObjectNode object) {
+            ObjectNode copy = JsonNodeFactory.instance.objectNode();
+            object.properties().forEach(field -> copy.set(field.getKey(), escaped(field.getValue())));
+            return copy;
+        }
+        if (value instanceof ArrayNode array) {
+            ArrayNode copy = JsonNodeFactory.instance.arrayNode();
+            array.forEach(item -> copy.add(escaped(item)));
+            return copy;
+        }
+        return value;
     }
 
     private static Operation resourceOperation(DependencyGraph.Node node, String apiVersion, String state,
@@ -551,8 +639,8 @@ public class DeploymentEngine {
     }
 
     /** Polls a resource with {@code GET} until its {@code provisioningState} is terminal, for a bounded time. */
-    private String poll(Request request, String id, String apiVersion) {
-        for (int attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
+    private String poll(Request request, String id, String apiVersion, int attempts) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
             Response response = router.get().dispatchInternal("GET", id, Map.of("api-version", apiVersion),
                 request.origin());
             JsonNode answer = entity(response);

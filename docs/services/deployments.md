@@ -54,7 +54,25 @@ As Azure requires, the body carries a `location` where the deployment's data is 
 `400 LocationRequired`, and reusing a deployment name with another location is
 `400 InvalidDeploymentLocation`. A resource type that lives in a resource group (a storage account, say) is
 `InvalidTemplate` at this scope, and `resourceGroup()` is an error here. Deploying into a resource group from a
-subscription-scope template takes a nested deployment, which floci-az does not serve yet.
+subscription-scope template takes a nested deployment (see below), which is what `azd provision` and a Bicep file
+with `targetScope = 'subscription'` and modules send.
+
+## Nested deployments
+
+A `Microsoft.Resources/deployments` resource inside a template, which a Bicep module compiles to, is deployed
+as a deployment of its own at its target: the resource group its `resourceGroup` property names (in the
+subscription `subscriptionId` names, else the parent's), the subscription `subscriptionId` alone names, or else
+the parent's own scope. It runs like any other deployment, so it is listed, polled and read at its target, and
+the parent waits for it: `reference('module').outputs.name.value` reads its outputs once it has finished.
+
+- With `expressionEvaluationOptions.scope` set to `inner`, as Bicep modules are, the nested template is its own
+  template: its expressions use its own parameters, which the nested deployment's `parameters` pass in.
+- With `outer`, the default, its expressions use the parent's parameters and variables: floci-az sends it with
+  the parent's parameters declared as its own (defaulting to the parent's values) and the parent's variable values
+  as its variables. `resourceGroup()` and `subscription()` there answer for the nested deployment's own target,
+  where Azure answers the parent's; they differ only when an outer-scope nested deployment targets another scope.
+
+A nested deployment's template is inline; a nested `templateLink` is refused, as at the top level.
 
 ## How a deployment runs
 
@@ -140,8 +158,7 @@ emulator routes.
 
 Each of these is refused with `400 InvalidTemplate`, never skipped:
 
-- nested deployments (`Microsoft.Resources/deployments` inside a template, which Bicep modules compile to),
-  user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
+- user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR

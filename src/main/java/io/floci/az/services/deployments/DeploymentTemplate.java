@@ -21,8 +21,8 @@ import java.util.Set;
  * <p>A child declared inside its parent's {@code resources} is read as a top-level resource carrying its parent's type
  * and name ({@link #flatten}). What floci-az does not serve is refused at validation with {@code InvalidTemplate},
  * never skipped: user-defined {@code functions}, symbolic resource names ({@code languageVersion} 2.0, whose
- * {@code resources} is an object) and nested deployments ({@code Microsoft.Resources/deployments}, which Bicep
- * modules compile to). A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
+ * {@code resources} is an object) and linked templates. A nested deployment ({@code Microsoft.Resources/deployments},
+ * which a Bicep module compiles to) carries its template inline. A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
  * {@code parallel} or {@code serial}, and a {@code batchSize} is at least 1.
  *
  * @param template   the template as sent, for {@code exportTemplate}
@@ -173,8 +173,8 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             throw invalid("The resource '" + name + "' uses a property copy loop, which is only allowed on a "
                 + "top-level resource.");
         }
-        if (ArmResourcePath.normalizedType(flattened.get("type").asText()).equalsIgnoreCase(NESTED_DEPLOYMENT)) {
-            throw unsupported("nested deployments (resource '" + name + "')");
+        if (isNestedDeployment(flattened)) {
+            checkNestedDeployment(flattened, name);
         }
         flat.add(flattened);
         if (nested == null || nested.isEmpty()) {
@@ -224,6 +224,30 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             return value.substring(1, value.length() - 1);
         }
         return "'" + ExpressionParser.unescape(value).replace("'", "''") + "'";
+    }
+
+    /** True for a nested deployment ({@code Microsoft.Resources/deployments}), which a Bicep module compiles to. */
+    static boolean isNestedDeployment(ObjectNode resource) {
+        return ArmResourcePath.normalizedType(resource.path("type").asText()).equalsIgnoreCase(NESTED_DEPLOYMENT);
+    }
+
+    /**
+     * A nested deployment carries its template inline, with a {@code mode}; a linked template
+     * ({@code templateLink}) is refused, as for a top-level deployment.
+     */
+    private static void checkNestedDeployment(ObjectNode resource, String name) {
+        JsonNode properties = resource.path("properties");
+        if (properties.has("templateLink")) {
+            throw unsupported("a linked template in nested deployment '" + name + "'");
+        }
+        if (!properties.path("template").isObject()) {
+            throw invalid("The nested deployment '" + name + "' has no inline 'template'.");
+        }
+        String scope = properties.path("expressionEvaluationOptions").path("scope").asText("outer");
+        if (!scope.equalsIgnoreCase("outer") && !scope.equalsIgnoreCase("inner")) {
+            throw invalid("The nested deployment '" + name + "' has an invalid expression evaluation scope '"
+                + scope + "': it is 'inner' or 'outer'.");
+        }
     }
 
     /** A resource copy loop's shape; its count is checked once it is evaluated. */

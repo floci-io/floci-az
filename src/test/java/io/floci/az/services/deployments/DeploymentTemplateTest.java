@@ -64,7 +64,8 @@ class DeploymentTemplateTest {
     @ValueSource(strings = {
         "{\"functions\": [{\"namespace\": \"n\"}]}",
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
-        "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\"}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\","
+            + " \"properties\": {\"mode\": \"Incremental\", \"templateLink\": {\"uri\": \"https://x\"}}}]}",
     })
     void whatPhaseOneDoesNotServeIsRefusedNotSkipped(String template) {
         TemplateException refused = assertThrows(TemplateException.class,
@@ -83,6 +84,9 @@ class DeploymentTemplateTest {
         "{\"resources\": [\"not an object\"]}",
         "{\"resources\": 3}",
         "{\"outputs\": []}",
+        "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\"}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\","
+            + " \"properties\": {\"template\": {}, \"expressionEvaluationOptions\": {\"scope\": \"sideways\"}}}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
             + " \"resources\": [{}]}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Network/virtualNetworks\", \"apiVersion\": \"1\", \"name\": \"v\","

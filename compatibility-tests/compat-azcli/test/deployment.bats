@@ -106,7 +106,7 @@ teardown_file() {
     assert_success
 }
 
-@test "az deployment sub create: a subscription-scope template creates a resource group" {
+@test "az deployment sub create: a subscription-scope template creates a resource group and deploys into it" {
     local sub_template
     sub_template="$(mktemp --suffix .json)"
     cat > "$sub_template" <<'JSON'
@@ -116,10 +116,22 @@ teardown_file() {
   "parameters": {"rgName": {"type": "string"}},
   "resources": [
     {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
-     "name": "[parameters('rgName')]", "location": "westeurope", "tags": {"made": "sub"}}
+     "name": "[parameters('rgName')]", "location": "westeurope", "tags": {"made": "sub"}},
+    {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "storage-module",
+     "resourceGroup": "[parameters('rgName')]",
+     "dependsOn": ["[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"],
+     "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"},
+       "template": {
+         "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+         "contentVersion": "1.0.0.0",
+         "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                        "name": "flocitestazmodulesa", "location": "westeurope",
+                        "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}],
+         "outputs": {"accountName": {"type": "string", "value": "flocitestazmodulesa"}}}}}
   ],
   "outputs": {
-    "rgId": {"type": "string", "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"}
+    "rgId": {"type": "string", "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"},
+    "accountFromModule": {"type": "string", "value": "[reference('storage-module').outputs.accountName.value]"}
   }
 }
 JSON
@@ -129,8 +141,13 @@ JSON
     assert_success
     assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "Succeeded"
 
+    assert_equal "$(echo "$output" | jq -r '.properties.outputs.accountFromModule.value')" "flocitestazmodulesa"
+
     run az_json group show -n floci-test-sub-deploy-rg
     assert_success
     assert_equal "$(echo "$output" | jq -r '.location')" "westeurope"
     assert_equal "$(echo "$output" | jq -r '.tags.made')" "sub"
+
+    run az_json storage account show -n flocitestazmodulesa -g floci-test-sub-deploy-rg
+    assert_success
 }

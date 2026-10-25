@@ -367,6 +367,53 @@ class DeploymentEngineTest {
         assertFalse(sent.get(0).body().has("resources"), "nested children are not sent with the parent");
     }
 
+    private static final String NESTED_TEMPLATE = """
+        {"mode": "Incremental", "parameters": {"prefix": {"value": "[literal"}}, "template": {
+          "parameters": {"prefix": {"type": "string"}},
+          "variables": {"suffix": "[concat(parameters('prefix'), '-v')]"},
+          "resources": [
+            {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "inner",
+             "resourceGroup": "rg2",
+             "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"},
+               "parameters": {"name": {"value": "[variables('suffix')]"}},
+               "template": {"parameters": {"name": {"type": "string"}},
+                            "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                           "name": "[parameters('name')]"}]}}},
+            {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "outer",
+             "properties": {"mode": "Incremental",
+               "template": {"resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                           "name": "[variables('suffix')]"}]}}}]}}
+        """;
+
+    @Test
+    void anInnerNestedDeploymentIsSentAsWrittenToItsTargetResourceGroup() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request(NESTED_TEMPLATE));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        Sent inner = sent.get(0);
+        assertEquals("/subscriptions/" + SUB + "/resourceGroups/rg2/providers/Microsoft.Resources/deployments/inner",
+            inner.path());
+        assertEquals("2022-09-01", inner.apiVersion());
+        assertFalse(inner.body().has("resourceGroup"), "the target is in the id, not the body");
+        assertEquals("[parameters('name')]",
+            inner.body().path("properties").path("template").path("resources").get(0).path("name").asText(),
+            "an inner template is not evaluated by the parent");
+        assertEquals("[literal-v", inner.body().path("properties").path("parameters").path("name").path("value").asText());
+    }
+
+    @Test
+    void anOuterNestedDeploymentCarriesTheParentsValuesEscaped() throws Exception {
+        engine.deploy(request(NESTED_TEMPLATE));
+
+        Sent outer = sent.stream().filter(request -> request.path().endsWith("/deployments/outer")).findFirst()
+            .orElseThrow();
+        assertEquals(RG_ID + "/providers/Microsoft.Resources/deployments/outer", outer.path());
+        JsonNode template = outer.body().path("properties").path("template");
+        assertEquals("[[literal", template.path("parameters").path("prefix").path("defaultValue").asText());
+        assertEquals("[[literal-v", template.path("variables").path("suffix").asText());
+        assertEquals("[variables('suffix')]", template.path("resources").get(0).path("name").asText());
+    }
+
     @Test
     void validateChecksEverythingAndSendsNothing() throws Exception {
         List<String> ids = engine.validate(request(STORAGE_TEMPLATE));

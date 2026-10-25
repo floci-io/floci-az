@@ -374,6 +374,63 @@ class DeploymentsHandlerTest {
             .body("properties.error.details[0].message", containsString("subscription-scope deployment has no resource group"));
     }
 
+    /** azd's shape: a subscription template that creates a group, then deploys into it through a module. */
+    private static String moduleDeployment(String scope) {
+        return """
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {
+              "parameters": {"accountName": {"type": "string", "defaultValue": "moduleacct01"}},
+              "variables": {"groupName": "rg-module"},
+              "resources": [
+                {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+                 "name": "[variables('groupName')]", "location": "westeurope"},
+                {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "storage",
+                 "resourceGroup": "[variables('groupName')]",
+                 "dependsOn": ["[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('groupName'))]"],
+                 "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "SCOPE"},
+                   PARAMETERS
+                   "template": {
+                     PARAMETER_DECLARATIONS
+                     "resources": [{"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                    "name": "[parameters('accountName')]", "location": "westeurope",
+                                    "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}],
+                     "outputs": {"accountId": {"type": "string",
+                       "value": "[resourceId('Microsoft.Storage/storageAccounts', parameters('accountName'))]"}}}}}],
+              "outputs": {"fromModule": {"type": "string",
+                "value": "[reference('storage').outputs.accountId.value]"}}}}}
+            """.replace("SCOPE", scope)
+            .replace("PARAMETERS", scope.equals("inner")
+                ? "\"parameters\": {\"accountName\": {\"value\": \"[parameters('accountName')]\"}}," : "")
+            .replace("PARAMETER_DECLARATIONS", scope.equals("inner")
+                ? "\"parameters\": {\"accountName\": {\"type\": \"string\"}}," : "");
+    }
+
+    @Test
+    void aSubscriptionTemplateDeploysIntoItsNewGroupThroughAnInnerModule() throws Exception {
+        Response accepted = json(moduleDeployment("inner")).when().put(SUB_DEPLOYMENTS + "/main" + API);
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(SUB_DEPLOYMENTS + "/main" + API).asString());
+
+        String account = "/subscriptions/" + SUB + "/resourceGroups/rg-module/providers/Microsoft.Storage/"
+            + "storageAccounts/moduleacct01";
+        given().when().get(account + "?api-version=2023-01-01").then().statusCode(200);
+        given().when().get(SUB_DEPLOYMENTS + "/main" + API).then().statusCode(200)
+            .body("properties.outputs.fromModule.value", equalTo(account));
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-module/providers/Microsoft.Resources/"
+            + "deployments/storage" + API).then().statusCode(200)
+            .body("properties.provisioningState", equalTo("Succeeded"))
+            .body("properties.outputs.accountId.value", equalTo(account));
+    }
+
+    @Test
+    void anOuterModuleUsesTheParentsParameters() throws Exception {
+        Response accepted = json(moduleDeployment("outer")).when().put(SUB_DEPLOYMENTS + "/main-outer" + API);
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(SUB_DEPLOYMENTS + "/main-outer" + API).asString());
+
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-module/providers/Microsoft.Storage/"
+            + "storageAccounts/moduleacct01?api-version=2023-01-01").then().statusCode(200);
+    }
+
     @Test
     void aMissingResourceGroupIsResourceGroupNotFound() {
         json(DEPLOYMENT).when()
