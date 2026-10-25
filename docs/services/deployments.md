@@ -128,6 +128,10 @@ resource and leaves what it already created in place.
    is false is skipped. A `202`, or a `provisioningState` that is not terminal, is polled with `GET`.
 4. The outputs are evaluated once every resource exists, so `reference()` reads the live resource.
 
+An extension resource's `scope` names the resource it extends, as a full id or as the `Namespace/type/name` of a
+resource at the deployment's scope (`Microsoft.Storage/storageAccounts/sa1`); the resource is created at
+`{scope}/providers/{type}/{name}`, a policy assignment or a lock on that one account, say.
+
 Each resource the run tries is a deployment operation (`provisioningOperation: Create`, with the provider's
 answer as `statusCode`, `OK` or `Created`, its `targetResource`, and a `statusMessage` holding the error when it
 failed), followed by one `EvaluateDeploymentOutput` operation, as Azure records them. The operations list is
@@ -177,7 +181,10 @@ All four kinds of copy loop are served, with `copyIndex([loopName], [offset])`:
   inside a variable's value builds an array property of it.
 - **Outputs**: an output with `"copy": {"count", "input"}` is the array of its iterations.
 
-A `count` is an integer from 0 to 800, as in Azure; anything else is `InvalidTemplate`.
+A `count` is an integer from 0 to 800, as in Azure; anything else is `InvalidTemplate`. Loops nested in one another
+share one budget per template: once all of a template's copy iterations together pass 800 x 800, the template is
+an `InvalidTemplate` before the values are built. Azure caps the expanded template at 4 MB, which a deeper
+expansion could not fit in.
 
 ## Template functions
 
