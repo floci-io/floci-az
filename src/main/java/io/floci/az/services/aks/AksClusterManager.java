@@ -17,6 +17,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -163,7 +164,12 @@ public class AksClusterManager {
             }
             int code = conn.getResponseCode();
             return code == 200 || code == 401 || code == 403;
+        } catch (MalformedURLException e) {
+            // Not "still starting": the probe itself cannot run, so the cluster would stay Creating forever.
+            LOG.warnv("Cannot probe {0} for AKS cluster {1}: {2}", livezUrl, cluster.getName(), e.getMessage());
+            return false;
         } catch (Exception e) {
+            LOG.debugv("AKS cluster {0} not ready at {1}: {2}", cluster.getName(), livezUrl, e.toString());
             return false;
         }
     }

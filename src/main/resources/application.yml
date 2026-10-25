@@ -17,6 +17,9 @@ quarkus:
   native:
     resources:
       includes: artemis/**,azure/**
+    # Quarkus registers only the http URL protocol by default, so an https java.net.URL throws
+    # MalformedURLException in the native image. AksClusterManager.isReady probes k3s over https.
+    enable-https-url-handler: true
     additional-build-args: >-
       --initialize-at-run-time=org.apache.hc.client5.http.impl.auth.NTLMEngineImpl,
       --initialize-at-run-time=com.github.dockerjava.transport.NamedPipeSocket$Kernel32,
