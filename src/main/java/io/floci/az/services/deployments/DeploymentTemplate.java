@@ -18,8 +18,9 @@ import java.util.Set;
  * An ARM template (the {@code properties.template} of a deployment), read and checked once before anything is
  * evaluated: its parameters, variables, resources and outputs.
  *
- * <p>What floci-az does not serve is refused at validation with {@code InvalidTemplate}, never skipped: nested
- * {@code resources}, user-defined {@code functions}, symbolic resource names ({@code languageVersion} 2.0, whose
+ * <p>A child declared inside its parent's {@code resources} is read as a top-level resource carrying its parent's type
+ * and name ({@link #flatten}). What floci-az does not serve is refused at validation with {@code InvalidTemplate},
+ * never skipped: user-defined {@code functions}, symbolic resource names ({@code languageVersion} 2.0, whose
  * {@code resources} is an object) and nested deployments ({@code Microsoft.Resources/deployments}, which Bicep
  * modules compile to). A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
  * {@code parallel} or {@code serial}, and a {@code batchSize} is at least 1.
@@ -131,37 +132,98 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
     }
 
     private static List<Resource> resources(JsonNode declared) {
-        List<Resource> resources = new ArrayList<>();
+        List<ObjectNode> flat = new ArrayList<>();
         if (declared.isMissingNode()) {
-            return resources;
+            return List.of();
         }
         for (int i = 0; i < declared.size(); i++) {
-            if (!(declared.get(i) instanceof ObjectNode resource)) {
-                throw invalid("The template resource at index " + i + " must be an object.");
-            }
-            for (String required : List.of("type", "apiVersion", "name")) {
-                if (!resource.path(required).isTextual()) {
-                    throw invalid("The template resource at index " + i + " is missing its '" + required + "'.");
-                }
-            }
-            if (resource.has("copy")) {
-                checkCopy(resource);
-            }
-            if (ArmResourcePath.segments(resource.get("type").asText()).size() > 2
-                    && resource.path("properties").path("copy").isArray()) {
-                throw invalid("The resource '" + resource.get("name").asText() + "' uses a property copy loop, "
-                    + "which is only allowed on a top-level resource.");
-            }
-            JsonNode nested = resource.path("resources");
-            if (nested.isArray() && !nested.isEmpty()) {
-                throw unsupported("nested 'resources' (resource '" + resource.get("name").asText() + "')");
-            }
-            if (ArmResourcePath.normalizedType(resource.get("type").asText()).equalsIgnoreCase(NESTED_DEPLOYMENT)) {
-                throw unsupported("nested deployments (resource '" + resource.get("name").asText() + "')");
-            }
-            resources.add(new Resource(i, resource));
+            flatten(declared.get(i), null, "at index " + i, flat);
+        }
+        List<Resource> resources = new ArrayList<>();
+        for (int i = 0; i < flat.size(); i++) {
+            resources.add(new Resource(i, flat.get(i)));
         }
         return resources;
+    }
+
+    /**
+     * Checks one declared resource and appends it, then its nested children, to {@code flat}. A child declared in
+     * its parent's {@code resources} ({@code child-resource-name-type.md}, "Within parent resource") writes its type
+     * and name as one segment each; it is appended as a top-level resource whose type and name carry the parent's,
+     * right after the parent, so template order still creates the parent first. As Azure, a nested child does not
+     * depend on its parent unless its {@code dependsOn} says so.
+     */
+    private static void flatten(JsonNode declared, ObjectNode parent, String where, List<ObjectNode> flat) {
+        if (!(declared instanceof ObjectNode resource)) {
+            throw invalid("The template resource " + where + " must be an object.");
+        }
+        for (String required : List.of("type", "apiVersion", "name")) {
+            if (!resource.path(required).isTextual()) {
+                throw invalid("The template resource " + where + " is missing its '" + required + "'.");
+            }
+        }
+        ObjectNode flattened = parent == null ? resource.deepCopy() : asTopLevel(resource, parent);
+        JsonNode nested = flattened.remove("resources");
+        String name = flattened.get("name").asText();
+        if (flattened.has("copy")) {
+            checkCopy(flattened);
+        }
+        if (ArmResourcePath.segments(flattened.get("type").asText()).size() > 2
+                && flattened.path("properties").path("copy").isArray()) {
+            throw invalid("The resource '" + name + "' uses a property copy loop, which is only allowed on a "
+                + "top-level resource.");
+        }
+        if (ArmResourcePath.normalizedType(flattened.get("type").asText()).equalsIgnoreCase(NESTED_DEPLOYMENT)) {
+            throw unsupported("nested deployments (resource '" + name + "')");
+        }
+        flat.add(flattened);
+        if (nested == null || nested.isEmpty()) {
+            return;
+        }
+        if (!nested.isArray()) {
+            throw invalid("The 'resources' of resource '" + name + "' must be an array.");
+        }
+        if (flattened.has("copy")) {
+            throw invalid("The resource '" + name + "' has a copy loop and nested child resources; declare the "
+                + "children outside the parent, with the parent's name in theirs.");
+        }
+        for (int i = 0; i < nested.size(); i++) {
+            flatten(nested.get(i), flattened, "nested at index " + i + " of '" + name + "'", flat);
+        }
+    }
+
+    /** A nested child as a top-level resource: its type and name prefixed with its parent's. */
+    private static ObjectNode asTopLevel(ObjectNode child, ObjectNode parent) {
+        if (child.has("copy")) {
+            throw invalid("The nested resource '" + child.get("name").asText() + "' has a copy loop; declare it "
+                + "outside its parent to repeat it.");
+        }
+        ObjectNode flattened = child.deepCopy();
+        String type = child.get("type").asText();
+        if (ArmResourcePath.segments(type).size() == 1) {
+            flattened.put("type", ArmResourcePath.normalizedType(parent.get("type").asText()) + "/" + type);
+            flattened.put("name", joined(parent.get("name").asText(), child.get("name").asText()));
+        }
+        return flattened;
+    }
+
+    /**
+     * {@code parent + "/" + child} as a template value: plain text when both are, else one {@code concat}
+     * expression, so a name built from {@code parameters()} still evaluates.
+     */
+    static String joined(String parent, String child) {
+        if (!ExpressionParser.isExpression(parent) && !ExpressionParser.isExpression(child)) {
+            return ExpressionParser.unescape(parent) + "/" + ExpressionParser.unescape(child);
+        }
+        return "[concat(" + argument(parent) + ", '/', " + argument(child) + ")]";
+    }
+
+    /** A template value as an argument of an expression: an expression's body, or a quoted literal. */
+    private static String argument(String value) {
+        if (ExpressionParser.isExpression(value)) {
+            return value.substring(1, value.length() - 1);
+        }
+        return "'" + ExpressionParser.unescape(value).replace("'", "''") + "'";
     }
 
     /** A resource copy loop's shape; its count is checked once it is evaluated. */

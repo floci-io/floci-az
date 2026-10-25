@@ -350,6 +350,24 @@ class DeploymentEngineTest {
     }
 
     @Test
+    void aNestedChildIsDeployedAfterItsParentUnderTheJoinedName() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "parameters": {"vnet": {"value": "vnet1"}}, "template": {
+              "parameters": {"vnet": {"type": "string"}},
+              "resources": [{"type": "Microsoft.Network/virtualNetworks", "apiVersion": "2023-05-01",
+                "name": "[parameters('vnet')]", "location": "eastus",
+                "resources": [{"type": "subnets", "apiVersion": "2023-05-01", "name": "default",
+                  "dependsOn": ["[parameters('vnet')]"], "properties": {"addressPrefix": "10.0.1.0/24"}}]}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        assertEquals(List.of(RG_ID + "/providers/Microsoft.Network/virtualNetworks/vnet1",
+            RG_ID + "/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/default"),
+            sent.stream().map(Sent::path).toList());
+        assertFalse(sent.get(0).body().has("resources"), "nested children are not sent with the parent");
+    }
+
+    @Test
     void validateChecksEverythingAndSendsNothing() throws Exception {
         List<String> ids = engine.validate(request(STORAGE_TEMPLATE));
 

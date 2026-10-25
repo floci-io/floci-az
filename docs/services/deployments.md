@@ -79,6 +79,15 @@ fails, the deployment ends `Failed` with Azure's `DeploymentFailed` error, whose
 resource's own error; a resource that ends in a `Failed` provisioning state is a
 `ResourceDeploymentFailure`.
 
+## Child resources
+
+A child resource can be declared outside its parent, with the full type and name
+(`Microsoft.Network/virtualNetworks/subnets`, `vnet1/default`), or inside the parent's `resources` array
+with one segment each (`subnets`, `default`), at any depth. A child declared inside is read as a top-level
+resource whose type and name carry its parent's, right after the parent, so template order creates the parent
+first. As in Azure, it does not depend on its parent unless its `dependsOn` says so, and it is never sent as part
+of the parent's body.
+
 ## Copy loops
 
 All four kinds of copy loop are served, with `copyIndex([loopName], [offset])`:
@@ -119,8 +128,10 @@ emulator routes.
 
 Each of these is refused with `400 InvalidTemplate`, never skipped:
 
-- nested `resources`, nested deployments (`Microsoft.Resources/deployments` inside a template, which Bicep
-  modules compile to), user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
+- nested deployments (`Microsoft.Resources/deployments` inside a template, which Bicep modules compile to),
+  user-defined `functions`, and symbolic resource names (`languageVersion` 2.0)
+- a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
+  ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR
   functions, `pickZones`, `providers`, `references`, `managementGroup`, `deployer`, `roleDefinitions`
 - linked templates and parameter files (`templateLink`, `parametersLink`) and Key Vault parameter

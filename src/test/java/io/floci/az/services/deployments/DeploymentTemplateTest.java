@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -62,8 +64,6 @@ class DeploymentTemplateTest {
     @ValueSource(strings = {
         "{\"functions\": [{\"namespace\": \"n\"}]}",
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
-        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
-            + " \"resources\": [{}]}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"1\", \"name\": \"m\"}]}",
     })
     void whatPhaseOneDoesNotServeIsRefusedNotSkipped(String template) {
@@ -84,6 +84,14 @@ class DeploymentTemplateTest {
         "{\"resources\": 3}",
         "{\"outputs\": []}",
         "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
+            + " \"resources\": [{}]}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Network/virtualNetworks\", \"apiVersion\": \"1\", \"name\": \"v\","
+            + " \"resources\": [{\"type\": \"subnets\", \"apiVersion\": \"1\", \"name\": \"[concat('s', copyIndex())]\","
+            + " \"copy\": {\"name\": \"c\", \"count\": 2}}]}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Network/virtualNetworks\", \"apiVersion\": \"1\","
+            + " \"name\": \"[concat('v', copyIndex())]\", \"copy\": {\"name\": \"c\", \"count\": 2},"
+            + " \"resources\": [{\"type\": \"subnets\", \"apiVersion\": \"1\", \"name\": \"s\"}]}]}",
+        "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
             + " \"copy\": {\"count\": 2}}]}",
         "{\"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"1\", \"name\": \"a\","
             + " \"copy\": {\"name\": \"c\", \"count\": 2, \"mode\": \"sideways\"}}]}",
@@ -95,5 +103,41 @@ class DeploymentTemplateTest {
     void aMalformedTemplateIsAnInvalidTemplate(String template) {
         assertEquals("InvalidTemplate",
             assertThrows(TemplateException.class, () -> DeploymentTemplate.parse(json(template))).code());
+    }
+
+    @Test
+    void nestedChildrenBecomeTopLevelResourcesRightAfterTheirParent() throws Exception {
+        DeploymentTemplate template = DeploymentTemplate.parse(json("""
+            {"resources": [
+              {"type": "Microsoft.Network/virtualNetworks", "apiVersion": "2023-05-01", "name": "vnet1",
+               "resources": [
+                 {"type": "subnets", "apiVersion": "2023-05-01", "name": "default", "dependsOn": ["vnet1"]},
+                 {"type": "Microsoft.Network/virtualNetworks/subnets", "apiVersion": "2023-05-01",
+                  "name": "vnet1/full"}]},
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+               "name": "[parameters('account')]",
+               "resources": [{"type": "blobServices", "apiVersion": "2023-01-01", "name": "default",
+                 "resources": [{"type": "containers", "apiVersion": "2023-01-01", "name": "it's"}]}]}]}
+            """));
+
+        assertEquals(List.of("Microsoft.Network/virtualNetworks:vnet1",
+            "Microsoft.Network/virtualNetworks/subnets:vnet1/default",
+            "Microsoft.Network/virtualNetworks/subnets:vnet1/full",
+            "Microsoft.Storage/storageAccounts:[parameters('account')]",
+            "Microsoft.Storage/storageAccounts/blobServices:[concat(parameters('account'), '/', 'default')]",
+            "Microsoft.Storage/storageAccounts/blobServices/containers:"
+                + "[concat(concat(parameters('account'), '/', 'default'), '/', 'it''s')]"),
+            template.resources().stream().map(resource -> resource.definition().get("type").asText() + ":"
+                + resource.definition().get("name").asText()).toList());
+        assertEquals(List.of(0, 1, 2, 3, 4, 5), template.resources().stream().map(DeploymentTemplate.Resource::index).toList());
+        assertFalse(template.resources().getFirst().definition().has("resources"));
+        assertEquals("vnet1", template.resources().get(1).definition().get("dependsOn").get(0).asText());
+    }
+
+    @Test
+    void joinedNamesKeepLiteralsLiteralAndEscapesUnescaped() {
+        assertEquals("a/b", DeploymentTemplate.joined("a", "b"));
+        assertEquals("[x]/b", DeploymentTemplate.joined("[[x]", "b"));
+        assertEquals("[concat('a', '/', variables('b'))]", DeploymentTemplate.joined("a", "[variables('b')]"));
     }
 }
