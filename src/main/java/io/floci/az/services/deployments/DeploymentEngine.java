@@ -352,8 +352,33 @@ public class DeploymentEngine {
                         + "nested deployment that names the resource group.");
                 });
         }
-        return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(request.scopeId(), type, name),
+        String scopeId = definition.has("scope")
+            ? extensionScope(request, text(evaluate(definition.get("scope"), scope), "scope"), name)
+            : request.scopeId();
+        return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(scopeId, type, name),
             type, name, dependsOn, loop);
+    }
+
+    /**
+     * The id an extension resource's {@code scope} names ({@code scope-extension-resources.md}): a full resource
+     * id, or the {@code Namespace/type/name} of a resource at the deployment's own scope, such as
+     * {@code Microsoft.Storage/storageAccounts/sa1}. The resource is then created under it,
+     * {@code {scope}/providers/{type}/{name}}.
+     */
+    private static String extensionScope(Request request, String declared, String resourceName) {
+        if (declared.startsWith("/")) {
+            String id = declared.replaceAll("/+$", "");
+            if (id.isEmpty()) {
+                throw DeploymentTemplate.invalid("The scope of resource '" + resourceName + "' is empty.");
+            }
+            return id;
+        }
+        List<String> segments = ArmResourcePath.segments(declared);
+        if (segments.size() < 3 || segments.size() % 2 == 0) {
+            throw DeploymentTemplate.invalid("The scope '" + declared + "' of resource '" + resourceName
+                + "' is neither a resource id nor the 'Namespace/type/name' of a resource.");
+        }
+        return request.scopeId() + "/providers/" + String.join("/", segments);
     }
 
     /**

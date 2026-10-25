@@ -442,4 +442,29 @@ class DeploymentEngineTest {
         assertEquals("[{\"state\":\"Succeeded\"},{\"state\":\"Succeeded\"}]",
             app.path("properties").path("slots").toString());
     }
+
+    @Test
+    void anExtensionResourceIsCreatedUnderTheResourceItsScopeNames() throws Exception {
+        DeploymentEngine.Result result = engine.deploy(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "sa1",
+               "location": "eastus"},
+              {"type": "Microsoft.Authorization/locks", "apiVersion": "2020-05-01", "name": "byName",
+               "scope": "Microsoft.Storage/storageAccounts/sa1", "dependsOn": ["sa1"],
+               "properties": {"level": "CanNotDelete"}},
+              {"type": "Microsoft.Authorization/locks", "apiVersion": "2020-05-01", "name": "byId",
+               "scope": "[resourceId('Microsoft.Storage/storageAccounts', 'sa1')]", "dependsOn": ["sa1"],
+               "properties": {"level": "ReadOnly"}}]}}
+            """));
+
+        assertEquals("Succeeded", result.provisioningState(), String.valueOf(result.error()));
+        assertEquals(List.of(SA_ID, SA_ID + "/providers/Microsoft.Authorization/locks/byName",
+            SA_ID + "/providers/Microsoft.Authorization/locks/byId"), sent.stream().map(Sent::path).toList());
+        assertFalse(sent.get(1).body().has("scope"), "the scope is the path, not a property");
+        assertEquals("InvalidTemplate", assertThrows(TemplateException.class, () -> engine.validate(request("""
+            {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Authorization/locks", "apiVersion": "2020-05-01", "name": "lock",
+               "scope": "Microsoft.Storage/storageAccounts"}]}}
+            """))).code());
+    }
 }
