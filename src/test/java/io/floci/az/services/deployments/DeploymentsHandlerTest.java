@@ -13,6 +13,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -442,6 +443,54 @@ class DeploymentsHandlerTest {
         assertEquals("Succeeded", awaitTerminal(put("hashed", DEPLOYMENT)));
         given().when().get(DEPLOYMENTS + "/hashed" + API).then().statusCode(200)
             .body("properties.templateHash", equalTo(hashed.path("templateHash")));
+    }
+
+    @Test
+    void whatIfPredictsCreatesWithoutCreatingAnything() {
+        given().contentType("application/json").body(DEPLOYMENT).when().post(DEPLOYMENTS + "/preview/whatIf" + API)
+            .then().statusCode(200)
+            .body("status", equalTo("Succeeded"))
+            .body("properties.changes", hasSize(4))
+            // The container is left out: the ARM container GET answers 200 for any container.
+            .body("properties.changes.findAll { !it.resourceId.contains('/containers/') }.changeType",
+                everyItem(equalTo("Create")))
+            .body("properties.changes[0].resourceId", equalTo(ACCOUNT))
+            .body("properties.changes[0].after.type", equalTo("Microsoft.Storage/storageAccounts"))
+            .body("properties.changes[0].after.location", equalTo("westeurope"));
+        given().when().get(ACCOUNT + "?api-version=2023-01-01").then().statusCode(404);
+        given().when().get(DEPLOYMENTS + "/preview" + API).then().statusCode(404);
+    }
+
+    @Test
+    void whatIfAfterADeploymentShowsWhatTheTemplateWouldChange() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("base", DEPLOYMENT)));
+
+        given().contentType("application/json").body(DEPLOYMENT).when().post(DEPLOYMENTS + "/base/whatIf" + API)
+            .then().statusCode(200)
+            .body("properties.changes.find { it.resourceId.endsWith('/virtualNetworks/vnet1') }.changeType",
+                equalTo("NoChange"));
+        given().contentType("application/json").body(DEPLOYMENT.replace("10.0.0.0/16", "10.9.0.0/16"))
+            .when().post(DEPLOYMENTS + "/base/whatIf" + API).then().statusCode(200)
+            .body("properties.changes.find { it.resourceId.endsWith('/virtualNetworks/vnet1') }.changeType",
+                equalTo("Modify"))
+            .body("properties.changes.find { it.resourceId.endsWith('/virtualNetworks/vnet1') }.delta[0].path",
+                equalTo("properties.addressSpace.addressPrefixes"));
+        given().contentType("application/json")
+            .body(DEPLOYMENT.replace("\"mode\": \"Incremental\",",
+                "\"mode\": \"Incremental\", \"whatIfSettings\": {\"resultFormat\": \"ResourceIdOnly\"},"))
+            .when().post(DEPLOYMENTS + "/base/whatIf" + API).then().statusCode(200)
+            .body("properties.changes[0].before", nullValue())
+            .body("properties.changes[0].after", nullValue())
+            .body("properties.changes[0].resourceId", equalTo(ACCOUNT));
+    }
+
+    @Test
+    void whatIfMarksANestedDeploymentUnsupported() {
+        given().contentType("application/json").body(moduleDeployment("inner"))
+            .when().post(SUB_DEPLOYMENTS + "/main/whatIf" + API).then().statusCode(200)
+            .body("properties.changes[0].changeType", equalTo("Create"))
+            .body("properties.changes[1].changeType", equalTo("Unsupported"))
+            .body("properties.changes[1].unsupportedReason", containsString("nested deployment"));
     }
 
     @Test

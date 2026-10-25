@@ -59,6 +59,18 @@ teardown_file() {
     assert_failure
 }
 
+@test "az deployment group what-if: predicts a Create without creating anything" {
+    run az_json deployment group what-if -g "$DEPLOY_RG" --template-file "$TEMPLATE_FILE" \
+        --parameters accountName="$DEPLOY_SA" --no-pretty-print
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.status')" "Succeeded"
+    assert_equal "$(echo "$output" | jq -r '.changes[0].changeType')" "Create"
+    assert_equal "$(echo "$output" | jq -r '.changes[0].resourceId | ascii_downcase')" \
+        "/subscriptions/${SUB_ID}/resourcegroups/${DEPLOY_RG}/providers/microsoft.storage/storageaccounts/${DEPLOY_SA}"
+    run az storage account show -n "$DEPLOY_SA" -g "$DEPLOY_RG" -o none
+    assert_failure
+}
+
 @test "az deployment group create: deploys the storage account and answers its outputs" {
     run az_json deployment group create -g "$DEPLOY_RG" -n "$DEPLOY_NAME" --template-file "$TEMPLATE_FILE" \
         --parameters accountName="$DEPLOY_SA"

@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
@@ -220,6 +221,90 @@ public class DeploymentEngine {
         return new Prepared(request, plan(request));
     }
 
+
+    /**
+     * {@code Deployments_WhatIf}: what a deployment would change, without changing anything. Each resource is
+     * evaluated into the request a deployment would send, and its current state read with an internal {@code GET}:
+     * a resource that does not exist is a {@code Create}; one that does is a {@code Modify}, listing in
+     * {@code delta} the template's properties whose value differs, or a {@code NoChange}. Properties the template
+     * does not set are left out of the comparison, as a provider's own read-only properties would otherwise count as
+     * changes. {@code after} is the current resource with the template's values applied. A nested deployment, and a
+     * resource whose expressions cannot be evaluated yet (a {@code reference()} to a resource the deployment has not
+     * created), are {@code Unsupported}, with the reason. With {@code resultFormat} {@code ResourceIdOnly} the
+     * changes carry no documents. A template it cannot run throws {@link TemplateException}.
+     */
+    public ObjectNode whatIf(Request request) {
+        Plan plan = plan(request);
+        boolean idsOnly = "ResourceIdOnly".equalsIgnoreCase(
+            request.properties().path("whatIfSettings").path("resultFormat").asText(""));
+        ArrayNode changes = JsonNodeFactory.instance.arrayNode();
+        for (DependencyGraph.Node node : plan.order()) {
+            ObjectNode definition = plan.template().resources().get(node.index()).definition();
+            if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scopeOf(node)))) {
+                continue;
+            }
+            ObjectNode change = changes.addObject();
+            change.put("resourceId", node.id());
+            if (DeploymentTemplate.isNestedDeployment(definition)) {
+                unsupported(change, "floci-az does not predict the changes of a nested deployment.");
+                continue;
+            }
+            ResourceRequest prepared;
+            try {
+                prepared = resourceRequest(plan, node, definition);
+            } catch (TemplateException e) {
+                unsupported(change, "The resource could not be evaluated before deployment: " + e.getMessage());
+                continue;
+            }
+            Response response = router.get().dispatchInternal("GET", node.id(),
+                Map.of("api-version", prepared.apiVersion()), request.origin());
+            ObjectNode desired = document(node, prepared);
+            if (response.getStatus() == 404) {
+                change.put("changeType", "Create");
+                if (!idsOnly) {
+                    change.set("after", desired);
+                }
+                continue;
+            }
+            if (response.getStatus() != 200 || !(entity(response) instanceof ObjectNode current)) {
+                unsupported(change, "The resource's current state could not be read (status "
+                    + response.getStatus() + ").");
+                continue;
+            }
+            ArrayNode delta = JsonNodeFactory.instance.arrayNode();
+            WhatIf.diff("", current, prepared.body(), delta);
+            change.put("changeType", delta.isEmpty() ? "NoChange" : "Modify");
+            if (!idsOnly) {
+                ObjectNode before = current.deepCopy();
+                before.put("apiVersion", prepared.apiVersion());
+                change.set("before", before);
+                change.set("after", WhatIf.applied(before, desired));
+                change.set("delta", delta);
+            }
+        }
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        result.put("status", "Succeeded");
+        ObjectNode properties = result.putObject("properties");
+        properties.put("correlationId", UUID.randomUUID().toString());
+        properties.set("changes", changes);
+        return result;
+    }
+
+    /** The resource a deployment would leave, as what-if shows it: id, name, type and api-version, then its body. */
+    private static ObjectNode document(DependencyGraph.Node node, ResourceRequest prepared) {
+        ObjectNode document = JsonNodeFactory.instance.objectNode();
+        document.put("id", node.id());
+        document.put("name", ArmResourcePath.segments(node.name()).getLast());
+        document.put("type", ArmResourcePath.normalizedType(node.type()));
+        document.put("apiVersion", prepared.apiVersion());
+        document.setAll(prepared.body());
+        return document;
+    }
+
+    private static void unsupported(ObjectNode change, String reason) {
+        change.put("changeType", "Unsupported");
+        change.put("unsupportedReason", reason);
+    }
 
     /**
      * {@code Deployments_CreateOrUpdate}, run to the end. A template it cannot run throws
@@ -496,32 +581,16 @@ public class DeploymentEngine {
     private ObjectNode create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
                               List<Operation> operations) {
         Instant started = Instant.now();
-        ObjectNode evaluated;
-        String apiVersion;
+        ResourceRequest prepared;
         try {
-            // The resource's own copy loop is how it was expanded, not a property to send.
-            ObjectNode withoutLoop = definition.deepCopy();
-            withoutLoop.remove("copy");
-            JsonNode nestedTemplate = DeploymentTemplate.isNestedDeployment(definition)
-                ? ((ObjectNode) withoutLoop.get("properties")).remove("template") : null;
-            evaluated = (ObjectNode) CopyLoops.evaluate(withoutLoop, plan.scopeOf(node));
-            if (nestedTemplate != null) {
-                ((ObjectNode) evaluated.get("properties")).set("template",
-                    nestedTemplate(definition, (ObjectNode) nestedTemplate, plan));
-            }
-            apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
+            prepared = resourceRequest(plan, node, definition);
         } catch (TemplateException e) {
             ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
             operations.add(resourceOperation(node, null, "Failed", null, failure, started));
             return failure;
         }
-        ObjectNode body = JsonNodeFactory.instance.objectNode();
-        for (Map.Entry<String, JsonNode> field : evaluated.properties()) {
-            if (!TEMPLATE_ONLY_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))
-                    && !NESTED_TARGET_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))) {
-                body.set(field.getKey(), field.getValue());
-            }
-        }
+        String apiVersion = prepared.apiVersion();
+        ObjectNode body = prepared.body();
         Response response = router.get().dispatchInternal("PUT", node.id(), Map.of("api-version", apiVersion),
             Map.of(), bytes(body), request.origin());
         JsonNode answer = entity(response);
@@ -544,6 +613,36 @@ public class DeploymentEngine {
         }
         operations.add(resourceOperation(node, apiVersion, "Succeeded", statusCode, null, started));
         return null;
+    }
+
+    /** What a resource is sent as: its evaluated body, and the api-version it is sent with. */
+    private record ResourceRequest(ObjectNode body, String apiVersion) {
+    }
+
+    /**
+     * Evaluates a resource into the request its provider gets: the template-only keys and a nested deployment's
+     * target keys left out, its own copy loop dropped (it is how the resource was expanded), and a nested
+     * deployment's template sent as {@link #nestedTemplate} says.
+     */
+    private ResourceRequest resourceRequest(Plan plan, DependencyGraph.Node node, ObjectNode definition) {
+        ObjectNode withoutLoop = definition.deepCopy();
+        withoutLoop.remove("copy");
+        JsonNode nestedTemplate = DeploymentTemplate.isNestedDeployment(definition)
+            ? ((ObjectNode) withoutLoop.get("properties")).remove("template") : null;
+        ObjectNode evaluated = (ObjectNode) CopyLoops.evaluate(withoutLoop, plan.scopeOf(node));
+        if (nestedTemplate != null) {
+            ((ObjectNode) evaluated.get("properties")).set("template",
+                nestedTemplate(definition, (ObjectNode) nestedTemplate, plan));
+        }
+        String apiVersion = text(evaluated.get("apiVersion"), "apiVersion");
+        ObjectNode body = JsonNodeFactory.instance.objectNode();
+        for (Map.Entry<String, JsonNode> field : evaluated.properties()) {
+            if (!TEMPLATE_ONLY_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))
+                    && !NESTED_TARGET_KEYS.contains(field.getKey().toLowerCase(Locale.ROOT))) {
+                body.set(field.getKey(), field.getValue());
+            }
+        }
+        return new ResourceRequest(body, apiVersion);
     }
 
     /**

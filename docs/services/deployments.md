@@ -41,6 +41,7 @@ GET    .../deployments/{name}/operations[/{operationId}]           # also withou
 POST   .../deployments/{name}/validate           # 200, or 400 with the template error
 POST   .../deployments/{name}/exportTemplate     # {"template": ...}
 POST   .../deployments/{name}/cancel             # 204 while it runs
+POST   .../deployments/{name}/whatIf             # the changes it would make, 200
 POST   /providers/Microsoft.Resources/calculateTemplateHash   # {"minifiedTemplate", "templateHash"}
 ```
 
@@ -110,6 +111,18 @@ fails, the deployment ends `Failed` with Azure's `DeploymentFailed` error, whose
 resource's own error; a resource that ends in a `Failed` provisioning state is a
 `ResourceDeploymentFailure`.
 
+## What-if
+
+`whatIf` prepares the deployment as a `PUT` would, then reads each resource's current state instead of writing
+it: a resource that does not exist is a `Create`; one that does is a `Modify`, with a `delta` listing each
+property the template sets to a different value, or a `NoChange`. Only the properties the template sets are
+compared, so a provider's own read-only properties never count as changes; `after` is the current resource with
+the template's values applied. A nested deployment, and a resource whose expressions cannot be evaluated before
+deployment (a `reference()` to a resource the deployment would create), are `Unsupported` with the reason.
+`whatIfSettings.resultFormat` `ResourceIdOnly` leaves the documents out. The prediction is only as good as the
+providers' reads: a provider that answers `200` for anything it is asked about makes a new resource look like a
+`NoChange`.
+
 ## Child resources
 
 A child resource can be declared outside its parent, with the full type and name
@@ -168,7 +181,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
   references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
-Deployments at management-group and tenant scope and `whatIf` answer `404`.
+Deployments at management-group and tenant scope answer `404`.
 
 ## Intentional deviations
 
@@ -178,6 +191,9 @@ Deployments at management-group and tenant scope and `whatIf` answer `404`.
 - **A refused `cancel`** (of a deployment that is no longer running) is `409 DeploymentNotActive`; Azure
   documents that only an `Accepted` or `Running` deployment can be canceled, but not the error.
 - **Delete** answers `204` at once; Azure answers `202` and lets the client poll.
+- **`whatIf`** answers `200` with the result at once, one of the two answers the spec declares; Azure answers `202`
+  and lets the client poll a `Location`. An array that changed is one `Modify` of the whole array, where Azure
+  lists its element changes as `Array` children, and a nested deployment's own changes are not predicted.
 - **The first failing resource stops the deployment.** Azure goes on with the resources that do not depend
   on it.
 - **`templateHash`** is a 64-bit hash of the minified, uppercased template, so it is the same for a deployment

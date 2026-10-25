@@ -490,6 +490,28 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         return Response.status(204).build();
     }
 
+    /**
+     * {@code Deployments_WhatIf}: the changes the deployment would make, answered {@code 200} at once, one of the two
+     * answers the spec declares; Azure answers {@code 202} and lets the client poll a {@code Location}. A template it
+     * cannot run is {@code 400} with the template error.
+     */
+    private Response whatIf(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        JsonNode body = body(req);
+        if (body == null) {
+            return invalidContent();
+        }
+        Response location = checkLocation(resourceGroup, name, body, null);
+        if (location != null) {
+            return location;
+        }
+        try {
+            return json(200, engine.whatIf(new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
+                body.get("properties"), req.detached())));
+        } catch (TemplateException e) {
+            return templateError(e);
+        }
+    }
+
     private Response cancel(String subscriptionId, String resourceGroup, String name) {
         StoredDeployment existing = deployments.get(key(subscriptionId, resourceGroup, name));
         if (existing == null) {
@@ -532,6 +554,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         return switch (action.toLowerCase(Locale.ROOT)) {
             case "validate" -> validate(req, subscriptionId, resourceGroup, name);
             case "cancel" -> cancel(subscriptionId, resourceGroup, name);
+            case "whatif" -> whatIf(req, subscriptionId, resourceGroup, name);
             case "exporttemplate" -> {
                 StoredDeployment stored = deployments.get(key(subscriptionId, resourceGroup, name));
                 if (stored == null) {
