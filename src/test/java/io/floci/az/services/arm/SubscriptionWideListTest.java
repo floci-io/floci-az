@@ -113,7 +113,7 @@ class SubscriptionWideListTest {
     }
 
     @Test
-    void apiManagementCheckNameAvailabilityKeepsAnsweringAvailable() {
+    void apiManagementCheckNameAvailabilityAnswersAnUnownedNameAvailable() {
         given().contentType(ContentType.JSON).body("{\"name\":\"any-apim\"}")
             .when().post(SUB + "/providers/Microsoft.ApiManagement/checkNameAvailability?api-version=2022-08-01")
             .then().statusCode(200).body("nameAvailable", equalTo(true));

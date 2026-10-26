@@ -16,8 +16,11 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -93,10 +96,12 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     private final ArmResourceStore<CommunicationResource> emailDomains;
 
     private final EmulatorConfig config;
+    private final GlobalNameRegistry names;
 
     @Inject
-    public EmailHandler(EmulatorConfig config, StorageFactory storageFactory) {
+    public EmailHandler(EmulatorConfig config, StorageFactory storageFactory, GlobalNameRegistry names) {
         this.config = config;
+        this.names = names;
         this.emailStorage = storageFactory.create(STORE);
         this.communicationServices = armStore(storageFactory, COMMUNICATION_SERVICES);
         this.emailServices = armStore(storageFactory, EMAIL_SERVICES);
@@ -290,6 +295,11 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     private Response handleArmCommunication(AzureRequest req, String path, String method) {
         String tail = extractCommunicationPath(path);
 
+        // ── CommunicationServices_CheckNameAvailability (subscription level) ──
+        if (tail.matches("(?i:checkNameAvailability)(\\?.*)?")) {
+            return "POST".equals(method) ? checkNameAvailability(req) : Response.status(405).build();
+        }
+
         // Every Communication resource lives in a resource group, so a path that names none addresses none.
         if (tail.matches("(communicationServices|emailServices)/[^/?]+.*")
                 && ArmScope.of(path).map(ArmScope::resourceGroup).isEmpty()) {
@@ -339,6 +349,28 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
         }
 
         return notFound("Unknown Communication path: " + tail);
+    }
+
+    /**
+     * {@code CommunicationServices_CheckNameAvailability}: a communication service name the name registry holds, in
+     * any subscription, is {@code AlreadyExists}; the reasons and messages are the spec's examples. Only a
+     * communication service name is global, so a body naming another type is always available.
+     */
+    private Response checkNameAvailability(AzureRequest req) {
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        String name = ArmJson.string(body, "name", "");
+        String type = ArmJson.string(body, "type", COMMUNICATION_SERVICES);
+        boolean global = type.equalsIgnoreCase(COMMUNICATION_SERVICES) || type.equalsIgnoreCase("communicationServices");
+        if (global && names.owner(cloud(req), CloudSuffix.COMMUNICATION, name).isPresent()) {
+            return Response.ok(Map.of("nameAvailable", false, "reason", "AlreadyExists",
+                    "message", "Requested name is unavailable for the requested type")).build();
+        }
+        return Response.ok(Map.of("nameAvailable", true, "reason", "NameAvailable",
+                "message", "Requested name is available for the requested type")).build();
+    }
+
+    private static CloudProfile cloud(AzureRequest req) {
+        return req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : req.scope().cloud();
     }
 
     /** Builds the resource a PUT writes, from the request body and the resource it replaces, if any. */

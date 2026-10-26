@@ -14,7 +14,8 @@ in-process.
 
 ## Supported
 
-- **Management service** resources: create, get, delete, and list in a resource group or across the subscription.
+- **Management service** resources: create, get, list (by resource group and across the subscription), delete, and
+  `checkNameAvailability`.
 - **API** resources: create, get, list, delete.
 - **Operation** resources: create, get, list, delete.
 - **Policy** resources at service, API, and operation scope.
@@ -55,8 +56,10 @@ A service name is a global DNS name (`{name}.azure-api.net`, `azure-api.us` in A
 Azure China): the first subscription and resource group to create it own it, and a create of the same name from any
 other scope is refused with `409 ServiceAlreadyExists` until the owner deletes it. Another scope reads the name as
 `404`, and its `DELETE` is a no-op `200` that leaves the owner's service in place. The name is unique across every
-cloud the emulator serves, since one gateway serves every service by name. There is no `checkNameAvailability` for API
-Management services. Paths that differ only in case address the same service and its child resources. With
+cloud the emulator serves, since one gateway serves every service by name. `POST
+/subscriptions/{sub}/providers/Microsoft.ApiManagement/checkNameAvailability` answers from the same owners, in any
+subscription: `nameAvailable: false` with reason `AlreadyExists` for an owned name, `Invalid` for a name outside the
+service name rule below, and otherwise `nameAvailable: true` with reason `Valid`. Paths that differ only in case address the same service and its child resources. With
 `parity-overrides.strict-names` a name outside 1 to 50 letters, digits and hyphens, starting with a letter and ending
 with a letter or digit, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 

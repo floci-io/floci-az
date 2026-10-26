@@ -10,7 +10,10 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.apim.ApiManagementModels.ApimService;
@@ -48,10 +51,13 @@ public class ApiManagementService implements GlobalNameSource {
     private final Map<String, Map<String, Object>> backends;
     private final Map<String, String> productApis;
     private final EmulatorConfig config;
+    private final GlobalNameRegistry names;
 
     @Inject
-    public ApiManagementService(EmulatorConfig config, ApiManagementStore store, StorageFactory storageFactory) {
+    public ApiManagementService(EmulatorConfig config, ApiManagementStore store, StorageFactory storageFactory,
+                                GlobalNameRegistry names) {
         this.config = config;
+        this.names = names;
         this.services = ArmResourceStore.create(storageFactory, "apim", ApimService.class, ApimService::id,
                 key -> false);
         this.apis = store.apis;
@@ -69,7 +75,7 @@ public class ApiManagementService implements GlobalNameSource {
         String[] parts = split(tail);
         Optional<String> group = ArmPaths.resourceGroup(path);
         if (group.isEmpty()) {
-            return handleSubscriptionPath(path, method, sub, parts);
+            return handleSubscriptionPath(request, path, method, sub, parts);
         }
         String rg = group.get();
 
@@ -100,17 +106,17 @@ public class ApiManagementService implements GlobalNameSource {
 
     /**
      * A subscription-level path: {@code ApiManagementService_List}, every service in the subscription, and
-     * {@code checkNameAvailability}, which answers every name available, as floci-az answered it before this
-     * namespace served its own subscription-level paths. Any other path is ARM's 404.
+     * {@code ApiManagementService_CheckNameAvailability}. Any other path is ARM's 404.
      */
-    private Response handleSubscriptionPath(String path, String method, String sub, String[] parts) {
+    private Response handleSubscriptionPath(AzureRequest request, String path, String method, String sub,
+                                            String[] parts) {
         if (parts.length == 1 && "service".equalsIgnoreCase(parts[0])) {
             return "GET".equals(method)
                     ? Response.ok(Map.of("value", listSubscriptionServices(sub))).build()
                     : Response.status(405).build();
         }
         if (parts.length == 1 && "checkNameAvailability".equalsIgnoreCase(parts[0])) {
-            return Response.ok(Map.of("nameAvailable", true)).build();
+            return "POST".equals(method) ? checkNameAvailability(request) : Response.status(405).build();
         }
         return notFound(path);
     }
@@ -198,6 +204,32 @@ public class ApiManagementService implements GlobalNameSource {
         }
 
         return notFound(path);
+    }
+
+    /**
+     * {@code ApiManagementService_CheckNameAvailability}: a name outside the service name rule is {@code Invalid}, one
+     * the name registry holds in any subscription is {@code AlreadyExists}, in the
+     * {@code ApiManagementServiceNameAvailabilityResult} shape of the spec's example.
+     */
+    private Response checkNameAvailability(AzureRequest request) {
+        String name = ArmJson.string(ArmJson.parseBodyLenient(request), "name", "");
+        if (!ApiManagementArmSurface.SERVICE_NAME.accepts(name)) {
+            return nameAvailability(false, "Invalid", ApiManagementArmSurface.SERVICE_NAME.message(name));
+        }
+        if (names.owner(cloud(request), CloudSuffix.APIM, name).isPresent()) {
+            return nameAvailability(false, "AlreadyExists", "The API Management service name '" + name
+                    + "' is already in use.");
+        }
+        return nameAvailability(true, "Valid", "");
+    }
+
+    private static Response nameAvailability(boolean available, String reason, String message) {
+        return Response.ok(Map.of("nameAvailable", available, "reason", reason, "message", message)).build();
+    }
+
+    private static CloudProfile cloud(AzureRequest request) {
+        return request.scope() == null
+                ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD) : request.scope().cloud();
     }
 
     public List<Map<String, Object>> listServices(String sub, String rg) {

@@ -25,7 +25,7 @@ mailbox for your tests. No real email is ever delivered.
   `DELETE /emailMessages` clears the mailbox
 - **ARM management plane**: `Microsoft.Communication/communicationServices`,
   `.../emailServices`, and `.../emailServices/{name}/domains/{domain}` CreateOrUpdate, Get, Delete,
-  and List
+  and List, plus `checkNameAvailability` for communication service names
 
 ---
 
@@ -42,6 +42,7 @@ DELETE /emailMessages                            # clear the mailbox
 PUT/GET/DELETE .../providers/Microsoft.Communication/communicationServices/{name}
 PUT/GET/DELETE .../providers/Microsoft.Communication/emailServices/{name}
 PUT/GET/DELETE .../providers/Microsoft.Communication/emailServices/{name}/domains/{domain}
+POST   /subscriptions/{sub}/providers/Microsoft.Communication/checkNameAvailability
 ```
 
 The send and polling paths are also served when the SDK targets the ACS host form
@@ -134,6 +135,8 @@ floci-az:
 - **Communication service names are global.** A communication service owns
   `{name}.communication.azure.com`: the first subscription to create a name owns it, a create of
   the same name from another subscription or resource group answers `409 Conflict`, and the name is
-  free again once the owner deletes it. Email services and domains are scoped to their resource
+  free again once the owner deletes it. `checkNameAvailability` answers from the same owners, in any
+  subscription, with the reasons and messages of the spec examples (`AlreadyExists`, `NameAvailable`);
+  a body whose `type` names another resource type is always available. Email services and domains are scoped to their resource
   group. A path that differs from the creating one only in case addresses the same resource, which
   keeps the casing of its first PUT.

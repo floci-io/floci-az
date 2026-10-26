@@ -8,6 +8,8 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -97,5 +99,43 @@ class ApiManagementResourceStoreTest {
 
         given().when().delete(service("Sub-Store", "RG-Store", "Apim3") + API).then().statusCode(200);
         assertTrue(backend.keys().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Microsoft.ApiManagement/checkNameAvailability", "microsoft.apimanagement/checknameavailability"})
+    void checkNameAvailabilityAnswersFromTheRegistryInEverySubscription(String operation) {
+        String request = "{\"name\":\"checkapim\"}";
+        String inOwner = "/subscriptions/sub-check-a/providers/" + operation + API;
+        String inOther = "/subscriptions/sub-check-b/providers/" + operation + API;
+
+        given().contentType("application/json").body(request).when().post(inOther).then().statusCode(200)
+            .body("nameAvailable", equalTo(true)).body("reason", equalTo("Valid"));
+        given().contentType("application/json").body(BODY).when().put(service("sub-check-a", "rg", "CheckApim") + API)
+            .then().statusCode(200);
+        for (String check : new String[] {inOwner, inOther}) {
+            given().contentType("application/json").body(request).when().post(check).then().statusCode(200)
+                .body("nameAvailable", equalTo(false)).body("reason", equalTo("AlreadyExists"));
+        }
+        given().when().delete(service("sub-check-a", "rg", "CheckApim") + API).then().statusCode(200);
+        given().contentType("application/json").body(request).when().post(inOther).then().statusCode(200)
+            .body("nameAvailable", equalTo(true));
+    }
+
+    @Test
+    void checkNameAvailabilityRejectsANameOutsideTheServiceNameRule() {
+        given().contentType("application/json").body("{\"name\":\"1-starts-with-a-digit\"}")
+            .when().post("/subscriptions/sub-invalid/providers/Microsoft.ApiManagement/checkNameAvailability" + API)
+            .then().statusCode(200)
+            .body("nameAvailable", equalTo(false)).body("reason", equalTo("Invalid"));
+    }
+
+    @Test
+    void theSubscriptionWideListHoldsServicesOfEveryGroup() {
+        given().contentType("application/json").body(BODY).when().put(service("sub-all", "rg-a", "apim-a") + API)
+            .then().statusCode(200);
+        given().contentType("application/json").body(BODY).when().put(service("sub-all", "rg-b", "apim-b") + API)
+            .then().statusCode(200);
+        given().when().get("/subscriptions/sub-all/providers/Microsoft.ApiManagement/service" + API)
+            .then().statusCode(200).body("value", hasSize(2));
     }
 }
