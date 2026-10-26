@@ -18,6 +18,7 @@ import io.floci.az.services.entra.EntraModels.GroupMembership;
 import io.floci.az.services.entra.EntraModels.ServicePrincipal;
 import io.floci.az.services.entra.EntraModels.User;
 import io.floci.az.services.entra.SecretHasher.SecretHash;
+import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -58,7 +59,9 @@ import java.util.stream.Stream;
  *
  * <p>Plaintext client secrets are never written: {@link #put} replaces any {@code secretText} in an
  * application's {@code passwordCredentials} with a {@link SecretHash}.
+ * Configured seeds are loaded eagerly so a bad file prevents startup before readiness is reported.
  */
+@Startup
 @ApplicationScoped
 public class GraphDirectoryStore implements Resettable {
 
