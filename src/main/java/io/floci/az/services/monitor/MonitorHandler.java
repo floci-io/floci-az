@@ -8,6 +8,7 @@ import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
@@ -169,6 +170,15 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         return Set.of("Microsoft.OperationalInsights", "Microsoft.Insights");
     }
 
+    /**
+     * Its subscription-wide workspace, data collection endpoint and rule lists, the Activity Log, and a
+     * subscription's diagnostic settings.
+     */
+    @Override
+    public boolean servesSubscriptionPaths() {
+        return true;
+    }
+
     @Override
     public Response handleArm(AzureRequest req, String path, String method, String sub) {
         LOG.debugf("MonitorHandler ARM-plane %s /%s", method, path);
@@ -185,6 +195,10 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 ? listCollection(collection.group(3), new ArmScope(collection.group(1), collection.group(2)))
                 : Response.status(405).build();
         }
+        // Every workspace, endpoint and rule lives in a resource group: a subscription-level path only lists.
+        if (req.scope() != null && req.scope().resourceGroup() == null && !isDiagnosticSettingsPath(path)) {
+            return ArmErrors.notFound("Resource not found: " + path);
+        }
         if (ArmPaths.hasProviderType(path, "Microsoft.OperationalInsights", "workspaces")) {
             return handleWorkspaceArm(req, path, method);
         } else if (ArmPaths.hasProviderType(path, "Microsoft.Insights", "dataCollectionEndpoints")) {
@@ -194,7 +208,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         } else if (isDiagnosticSettingsPath(path)) {
             return handleDiagnosticSettingsArm(req, path, method.toUpperCase());
         }
-        return Response.status(404).entity("Provider resource not found").build();
+        return ArmErrors.notFound("Resource not found: " + path);
     }
 
     /** The workspaces, data collection endpoints or rules in a resource group, or in a whole subscription. */

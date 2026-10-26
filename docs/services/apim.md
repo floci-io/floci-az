@@ -14,7 +14,7 @@ in-process.
 
 ## Supported
 
-- **Management service** resources: create, get, list, delete.
+- **Management service** resources: create, get, delete, and list in a resource group or across the subscription.
 - **API** resources: create, get, list, delete.
 - **Operation** resources: create, get, list, delete.
 - **Policy** resources at service, API, and operation scope.

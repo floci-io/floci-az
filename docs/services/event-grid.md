@@ -48,6 +48,7 @@ PUT    {topicId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
 GET    {topicId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
 DELETE {topicId}/providers/Microsoft.EventGrid/eventSubscriptions/{name}
 GET    {topicId}/providers/Microsoft.EventGrid/eventSubscriptions
+GET    /subscriptions/{sub}/providers/Microsoft.EventGrid/eventSubscriptions
 
 POST   /{name}-eventgrid/api/events            # data-plane publish (topic endpoint)
 ```

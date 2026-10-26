@@ -71,6 +71,12 @@ public class EventGridHandler implements AzureServiceHandler, Resettable, ArmPro
         return Set.of("Microsoft.EventGrid");
     }
 
+    /** Its subscription-wide topic list and the event subscriptions whose scope is the subscription. */
+    @Override
+    public boolean servesSubscriptionPaths() {
+        return true;
+    }
+
     @Override
     public boolean armEnabled() {
         return config.services().eventGrid().enabled();

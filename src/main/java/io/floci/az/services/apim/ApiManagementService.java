@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 @ApplicationScoped
@@ -64,9 +65,13 @@ public class ApiManagementService implements GlobalNameSource {
     }
 
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
-        String rg = extractRg(path);
         String tail = ArmPaths.afterProvider(path, "Microsoft.ApiManagement", "unknown");
         String[] parts = split(tail);
+        Optional<String> group = ArmPaths.resourceGroup(path);
+        if (group.isEmpty()) {
+            return handleSubscriptionPath(path, method, sub, parts);
+        }
+        String rg = group.get();
 
         if (parts.length == 1 && "service".equals(parts[0])) {
             return Response.ok(Map.of("value", listServices(sub, rg))).build();
@@ -91,6 +96,23 @@ public class ApiManagementService implements GlobalNameSource {
         }
         return handleChild(request, path, method, services.get(requested).map(ArmResourceStore.Stored::id)
                 .orElse(requested), parts);
+    }
+
+    /**
+     * A subscription-level path: {@code ApiManagementService_List}, every service in the subscription, and
+     * {@code checkNameAvailability}, which answers every name available, as floci-az answered it before this
+     * namespace served its own subscription-level paths. Any other path is ARM's 404.
+     */
+    private Response handleSubscriptionPath(String path, String method, String sub, String[] parts) {
+        if (parts.length == 1 && "service".equalsIgnoreCase(parts[0])) {
+            return "GET".equals(method)
+                    ? Response.ok(Map.of("value", listSubscriptionServices(sub))).build()
+                    : Response.status(405).build();
+        }
+        if (parts.length == 1 && "checkNameAvailability".equalsIgnoreCase(parts[0])) {
+            return Response.ok(Map.of("nameAvailable", true)).build();
+        }
+        return notFound(path);
     }
 
     /**
@@ -688,10 +710,6 @@ public class ApiManagementService implements GlobalNameSource {
             return new String[0];
         }
         return clean.split("/", -1);
-    }
-
-    private static String extractRg(String path) {
-        return ArmPaths.resourceGroup(path, "unknown");
     }
 
     private static Map<String, Object> cast(Object value) {

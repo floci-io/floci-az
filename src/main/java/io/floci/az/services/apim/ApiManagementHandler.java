@@ -60,6 +60,12 @@ public class ApiManagementHandler implements AzureServiceHandler, Resettable, Ar
         return gateway.handle(request);
     }
 
+    /** Its subscription-wide service list and {@code checkNameAvailability}. */
+    @Override
+    public boolean servesSubscriptionPaths() {
+        return true;
+    }
+
     @Override
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
         return service.handleArm(request, path, method, sub);
