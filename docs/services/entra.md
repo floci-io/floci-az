@@ -249,3 +249,54 @@ App-only tokens and tokens for other API audiences are
 rejected. This endpoint serves directory-backed code-flow users; synthetic password-grant
 identities are not directory provisioning. Invalid tokens return a Bearer 401, and missing
 `openid` permission returns a Bearer 403. It does not accept external Microsoft tokens.
+
+## Startup directory seed file
+
+Set `FLOCI_AZ_SERVICES_ENTRA_SEED_FILE` (configuration key
+`floci-az.services.entra.seed-file`) to a JSON file readable by the Floci-AZ process. This adds
+local applications, users, groups and direct memberships without editing the persisted store.
+Mount the file into the container and use its container path in the environment variable.
+
+```json
+{
+  "applications": [{
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "appId": "aaaaaaaa-1111-1111-1111-111111111111",
+    "displayName": "Local app",
+    "clientSecret": "local-development-only"
+  }],
+  "users": [{
+    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+    "userPrincipalName": "reader@example.test",
+    "displayName": "Local Reader",
+    "mail": "reader@example.test"
+  }],
+  "groups": [{
+    "id": "cccccccc-0000-0000-0000-000000000001",
+    "displayName": "Readers",
+    "securityEnabled": true,
+    "members": ["bbbbbbbb-0000-0000-0000-000000000001"]
+  }]
+}
+```
+
+The arrays are optional. All object ids are required and unique within the file; use letters,
+digits, periods, underscores or hyphens. Applications require `appId`; users require
+`userPrincipalName`; groups require `displayName`. Application/user `displayName` defaults to
+appId/UPN, `mail` and `clientSecret` are optional, and `securityEnabled` defaults to true.
+The top-level `tenantId` defaults to `default-tenant-id`. Memberships must reference users or
+groups in that tenant, either already present or included in the file. Configure the tenant
+resolver appropriately when seeding a directory other than the default.
+
+The whole file is parsed and validated before configured objects are written. Duplicate ids,
+alternate-key conflicts, unknown fields and unresolved members fail startup. No file is read
+when the setting is absent; the built-in dev seed remains available. Seeding creates missing
+objects and merges memberships; it does not overwrite existing profiles, rotate their secrets
+or delete objects or memberships omitted on later starts. Repeat starts do not duplicate links.
+Explicit reset also reapplies the seed.
+
+Client secrets are hashed by the normal directory writer before persistence. Protect the seed
+file itself because its optional `clientSecret` values are plaintext. To check seeded clients,
+enable `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS`. Existing `login_hint` selects
+seeded users for authorization-code sign-in, and Graph membership reads use the same records.
+This is a startup seed contract, not a directory CRUD or interactive account-picker API.

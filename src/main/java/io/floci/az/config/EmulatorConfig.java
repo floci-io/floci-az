@@ -538,6 +538,9 @@ public interface EmulatorConfig {
          * {@code {storage.persistent-path}/entra}.
          */
         Optional<String> signingKeyPath();
+
+        /** Optional JSON file adding apps, users, groups and memberships at startup. */
+        Optional<String> seedFile();
     }
 
     /**
