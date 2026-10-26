@@ -21,7 +21,7 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
 - **JWKS**: `/discovery/v2.0/keys` exposing the public signing key (`kty`, `use`, `alg`, `kid`,
   `n`, `e`) plus the self-signed cert chain (`x5c`, `x5t`)
 - **Grants**: `client_credentials`, `password` (ROPC), and `authorization_code` (auth code + PKCE),
-  v1.0 and v2.0 token shapes
+  v1.0 and v2.0 token shapes; `refresh_token` at the v2.0 token endpoint
 - **Azure-shaped errors**: token errors return `error`, `error_description` (with the `AADSTS`
   code), `error_codes`, `trace_id`, `correlation_id`, `timestamp`, and `error_uri`
 - **Dev seed**: a default tenant, a well-known dev app registration, a dev user and a dev group
@@ -56,15 +56,14 @@ early with a clear message instead of calling a route that does not exist:
 |---|---|
 | `issuer` | The configured `issuer`, or `{base}/{tenant}/v2.0` when unset (`common` stays `common`) |
 | `authorization_endpoint`, `token_endpoint`, `jwks_uri` | the routes in the table above |
-| `grant_types_supported` | `authorization_code`, `client_credentials`, `password` |
+| `grant_types_supported` | `authorization_code`, `client_credentials`, `password`, `refresh_token` |
 | `response_types_supported` | `code` |
 | `response_modes_supported` | `query`, `fragment` |
-| `scopes_supported` | `openid`, `profile`, `email` |
+| `scopes_supported` | `openid`, `profile`, `email`, `offline_access` |
 | `end_session_endpoint` | `{base}/{tenant}/oauth2/v2.0/logout` |
 
-There is no `device_authorization_endpoint`, and `refresh_token`,
-the device code grant and the `offline_access` scope are not listed, because none of them is
-implemented yet. msal-python's `initiate_device_flow` therefore stops with "You need to provide
+There is no `device_authorization_endpoint` and the device code grant is not listed, because it is
+not implemented yet. msal-python's `initiate_device_flow` therefore stops with "You need to provide
 device authorization endpoint" before sending any request. `end_session_endpoint` is listed even though logout is not served yet, because
 MSAL.js refuses to log out without it.
 
@@ -119,7 +118,7 @@ curl -s http://localhost:4577/00000000-0000-0000-0000-000000000002/oauth2/v2.0/t
   -d code_verifier=<the PKCE verifier for the challenge you sent>
 ```
 
-The response carries both `access_token` and `id_token`. The ID token's `aud` is always the client
+The response carries an `access_token`, plus an `id_token` when `openid` was requested. The ID token's `aud` is always the client
 id (per OIDC, regardless of v1.0/v2.0), and it echoes the `nonce` from the `/authorize` request:
 MSAL rejects an ID token whose nonce doesn't match. PKCE verification (`S256` or `plain`) is
 skipped when `/authorize` was called without a `code_challenge`: `client_id` is still required and
@@ -128,8 +127,42 @@ know the client. There is no app-registration redirect-URI allow-list yet,
 so any `client_id` is accepted at `/authorize`, matching this phase's permissive client validation
 elsewhere (`client_credentials` is likewise accepted without strict validation).
 
-**Not yet supported:** `grant_type=refresh_token`: MSAL's silent token renewal via
-`offline_access` will not work against this emulator yet.
+## Refreshing a session
+
+Include `offline_access` in the original authorization request to receive an opaque
+`refresh_token` from the v2.0 code exchange. A request without this scope does not receive one.
+Renew the session without another authorization request:
+
+```bash
+curl -s http://localhost:4577/00000000-0000-0000-0000-000000000002/oauth2/v2.0/token \
+  -d grant_type=refresh_token \
+  -d client_id=11111111-1111-1111-1111-111111111111 \
+  --data-urlencode 'refresh_token=<refresh token from the code exchange>'
+```
+
+Send the client's secret too when the session used a confidential client and credential
+validation is enabled. HTTP Basic and form credentials follow the same policy as other grants.
+A code exchange that supplies a secret or assertion, or uses a registered `web.redirectUris`
+entry, binds a confidential session. Public-client sessions need no secret.
+
+The response contains a fresh access token and replacement refresh token. `openid` permits a
+fresh ID token for the same user, without repeating the authorization request's nonce. MSAL's
+`client_info=1` is supported for account caching. An optional `scope` may narrow the original
+authorization scopes; omitting it uses the original scopes. A narrowed access token does not
+remove the refresh token's original consent. New permissions require another authorization.
+
+Refresh tokens last 90 days by default, and a replacement starts a new 90-day lifetime. A redirect
+URI registered under the application's `spa.redirectUris` instead creates a 24-hour session;
+all replacements retain that original deadline. Replacement does not revoke the old token,
+matching [Microsoft's refresh-token contract](https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens).
+
+Tokens remain bound to the client and resolved tenant that authorized them, and renewal resolves
+the same user in that directory. Invalid, revoked, expired or incorrectly bound tokens return
+`invalid_grant`; extra scopes return `invalid_scope`. Expiry uses AADSTS700082, or AADSTS700084
+for the fixed SPA lifetime. Refresh state uses the existing Entra storage mode, persists only
+token digests, and is cleared by emulator reset. Cross-tenant consent, B2B sessions, password-change
+revocation and Graph's `revokeSignInSessions` action are not modelled. The v1.0 refresh grant is
+not implemented.
 
 **Group membership** for the signed-in user is *not* embedded in the token (no `groups` claim, matching
 real Entra's default behavior): call the Graph `getMemberGroups` endpoint instead, see

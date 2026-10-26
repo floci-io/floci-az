@@ -2,6 +2,7 @@ package io.floci.az.services.entra;
 
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.EntraModels.AuthorizationCode;
+import io.floci.az.services.entra.EntraModels.RefreshToken;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -29,14 +30,16 @@ public class AuthorizationCodeGrant implements GrantHandler {
     private final EntraStore store;
     private final DirectoryReader directory;
     private final EntraResponses responses;
+    private final ClientAuthenticator authenticator;
 
     @Inject
     public AuthorizationCodeGrant(TokenIssuer tokenIssuer, EntraStore store, DirectoryReader directory,
-                                  EntraResponses responses) {
+                                  EntraResponses responses, ClientAuthenticator authenticator) {
         this.tokenIssuer = tokenIssuer;
         this.store = store;
         this.directory = directory;
         this.responses = responses;
+        this.authenticator = authenticator;
     }
 
     @Override
@@ -78,6 +81,11 @@ public class AuthorizationCodeGrant implements GrantHandler {
         }
 
         String appId = request.appId();
+        boolean confidential = request.clientCredentialPresent()
+                || directory.hasRedirectUri(request.directoryTenantId(), appId, "web", authCode.redirectUri());
+        if (confidential && authenticator.enforced() && !request.clientCredentialPresent()) {
+            return responses.error(AadstsError.MISSING_CLIENT_CREDENTIAL);
+        }
         String scp = Scopes.normalize(authCode.scope());
         String accessAudience = request.v2() ? appId : Scopes.firstScope(authCode.scope(), request.baseUrl());
         String accessToken = tokenIssuer.issue(new TokenIssuer.TokenSpec(
@@ -85,11 +93,19 @@ public class AuthorizationCodeGrant implements GrantHandler {
                 Scopes.delegatedScopes(authCode.scope()), request.tokenVersion(), null, request.lifetimeSeconds()),
                 TokenIssuer.userClaims(request.tokenVersion(), user.userPrincipalName()));
         // The ID token audience is always the client id, whatever the API version: that is OIDC, not Azure.
-        String idToken = tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
+        String idToken = Scopes.values(authCode.scope()).contains("openid") ? tokenIssuer.issueIdToken(new TokenIssuer.TokenSpec(
                 request.tenantId(), request.issuer(), appId, user.id(), user.id(), appId, scp,
                 request.tokenVersion(), null, request.lifetimeSeconds()),
-                authCode.nonce(), user.displayName(), user.userPrincipalName(), user.mail());
-        return responses.token(accessToken, idToken, request.lifetimeSeconds(), scp);
+                authCode.nonce(), user.displayName(), user.userPrincipalName(), user.mail()) : null;
+        String refreshToken = null;
+        if (request.v2() && Scopes.values(authCode.scope()).contains("offline_access")) {
+            boolean spa = directory.hasRedirectUri(request.directoryTenantId(), appId, "spa", authCode.redirectUri());
+            refreshToken = store.issueRefreshToken(new RefreshToken(request.tenantId(), request.directoryTenantId(),
+                    clientId, user.id(), authCode.scope(), confidential, spa, RefreshTokenGrant.expiry(spa)));
+        }
+        String clientInfo = "1".equals(request.form().get("client_info"))
+                ? responses.clientInfo(user.id(), request.directoryTenantId()) : null;
+        return responses.token(accessToken, idToken, request.lifetimeSeconds(), scp, clientInfo, refreshToken);
     }
 
     /**

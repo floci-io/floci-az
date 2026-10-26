@@ -51,10 +51,10 @@ class DiscoveryGoldenTest {
         doc.put("response_modes_supported", List.of("query", "fragment"));
         doc.put("subject_types_supported", List.of("pairwise"));
         doc.put("id_token_signing_alg_values_supported", List.of("RS256"));
-        doc.put("scopes_supported", List.of("openid", "profile", "email"));
+        doc.put("scopes_supported", List.of("openid", "profile", "email", "offline_access"));
         doc.put("token_endpoint_auth_methods_supported",
                 List.of("client_secret_post", "client_secret_basic", "private_key_jwt"));
-        doc.put("grant_types_supported", List.of("authorization_code", "client_credentials", "password"));
+        doc.put("grant_types_supported", List.of("authorization_code", "client_credentials", "password", "refresh_token"));
         doc.put("http_logout_supported", true);
         doc.put("frontchannel_logout_supported", true);
         doc.put("request_uri_parameter_supported", false);
@@ -123,13 +123,13 @@ class DiscoveryGoldenTest {
     }
 
     @Test
-    void offlineAccessIsNotAdvertisedWithoutTheRefreshTokenGrant() {
+    void offlineAccessIsAdvertisedWithTheRefreshTokenGrant() {
         given()
           .when().get("/{tenant}/v2.0/.well-known/openid-configuration", TENANT)
           .then()
             .statusCode(200)
-            .body("grant_types_supported", not(hasItem("refresh_token")))
-            .body("scopes_supported", not(hasItem("offline_access")))
+            .body("grant_types_supported", hasItem("refresh_token"))
+            .body("scopes_supported", hasItem("offline_access"))
             .body("$", not(hasKey("device_authorization_endpoint")))
             .body("userinfo_endpoint", is(baseUrl() + "/oidc/userinfo"));
     }

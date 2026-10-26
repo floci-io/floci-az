@@ -50,6 +50,11 @@ public class EntraResponses {
 
     /** A token response that also carries {@code client_info} when it is not null. */
     public Response token(String accessToken, String idToken, long expiresIn, String scope, String clientInfo) {
+        return token(accessToken, idToken, expiresIn, scope, clientInfo, null);
+    }
+
+    public Response token(String accessToken, String idToken, long expiresIn, String scope, String clientInfo,
+                          String refreshToken) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("token_type", "Bearer");
         body.put("expires_in", expiresIn);
@@ -58,6 +63,9 @@ public class EntraResponses {
             body.put("scope", scope);
         }
         body.put("access_token", accessToken);
+        if (refreshToken != null) {
+            body.put("refresh_token", refreshToken);
+        }
         if (idToken != null) {
             body.put("id_token", idToken);
         }

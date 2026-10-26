@@ -50,6 +50,17 @@ class AadstsCatalogGoldenTest {
                 new Entry(70000, "invalid_grant", 400, "code_verifier does not match the code_challenge"));
         GOLDEN.put(AadstsError.CODE_UNKNOWN_USER,
                 new Entry(70000, "invalid_grant", 400, "authorization code does not resolve to a known user"));
+        GOLDEN.put(AadstsError.REFRESH_TOKEN_INVALID,
+                new Entry(70000, "invalid_grant", 400,
+                        "refresh token is invalid, revoked, or does not match the client, tenant or user"));
+        GOLDEN.put(AadstsError.REFRESH_TOKEN_EXPIRED,
+                new Entry(700082, "invalid_grant", 400, "refresh token has expired due to inactivity"));
+        GOLDEN.put(AadstsError.SPA_REFRESH_TOKEN_EXPIRED,
+                new Entry(700084, "invalid_grant", 400,
+                        "refresh token was issued to a single-page app and has reached its fixed lifetime"));
+        GOLDEN.put(AadstsError.INVALID_SCOPE,
+                new Entry(70011, "invalid_scope", 400,
+                        "The provided value for the input parameter 'scope' is not valid."));
         GOLDEN.put(AadstsError.MISSING_REQUIRED_PARAMETER,
                 new Entry(900144, "invalid_request", 400,
                         "The request body must contain the following parameter: '%s'."));

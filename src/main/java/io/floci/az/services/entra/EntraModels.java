@@ -82,4 +82,8 @@ public final class EntraModels {
         String state,
         Instant expiresAt
     ) {}
+
+    /** Refresh consent; only a SHA-256 digest of its opaque bearer token is stored as the key. */
+    public record RefreshToken(String tenantId, String directoryTenantId, String clientId, String userObjectId,
+                               String scope, boolean confidentialClient, boolean spa, Instant expiresAt) {}
 }

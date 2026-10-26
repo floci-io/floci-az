@@ -95,6 +95,18 @@ public class DirectoryReader {
                 .map(this::toApplication);
     }
 
+    boolean hasRedirectUri(String tenantId, String appId, String platform, String redirectUri) {
+        return store.findByAlternateKey(tenantId, DirectoryEntitySet.APPLICATIONS, "appId", appId)
+                .map(app -> {
+                    for (JsonNode uri : app.props().path(platform).path("redirectUris")) {
+                        if (uri.isTextual() && uri.asText().equals(redirectUri)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }).orElse(false);
+    }
+
     public Optional<DirectoryServicePrincipal> servicePrincipalByAppId(String tenantId, String appId) {
         return store.findByAlternateKey(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, "appId", appId)
                 .map(DirectoryReader::toServicePrincipal);

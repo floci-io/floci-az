@@ -1,6 +1,7 @@
 package io.floci.az.services.entra;
 
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /** Reads the audience and the {@code scp} claim out of a {@code scope} (or v1 {@code resource}) value. */
@@ -10,6 +11,11 @@ final class Scopes {
     private static final Set<String> OIDC_RESERVED = Set.of("openid", "profile", "email", "offline_access");
 
     private Scopes() {
+    }
+
+    static Set<String> values(String scope) {
+        return scope == null || scope.isBlank() ? Set.of()
+                : new LinkedHashSet<>(Arrays.asList(scope.trim().split("\\s+")));
     }
 
     /** v2.0 client_credentials scope is {@code {resource}/.default}; the audience is the resource. */

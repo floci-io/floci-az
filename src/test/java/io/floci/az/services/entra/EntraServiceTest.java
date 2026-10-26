@@ -164,6 +164,7 @@ class EntraServiceTest {
           .queryParam("redirect_uri", "https://app.local/callback")
           .queryParam("response_type", "code")
           .queryParam("nonce", "nonce-123")
+          .queryParam("scope", "openid")
           .queryParam("code_challenge", challenge)
           .queryParam("code_challenge_method", "S256")
           .when().get("/{tenant}/oauth2/v2.0/authorize", TENANT);

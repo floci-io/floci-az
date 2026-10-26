@@ -124,6 +124,7 @@ public class TokenEndpoint implements EntraEndpoint {
 
         return new TokenRequest(form, request.tenantId(), directoryTenantId, request.baseUrl(), v2, clientId, appId,
                 clientObjectId, issuers.issuer(request.baseUrl(), request.tenantId(), v2), scope,
-                config.services().entra().tokenLifetimeSeconds());
+                config.services().entra().tokenLifetimeSeconds(),
+                credentials.clientSecret() != null || credentials.assertion());
     }
 }
