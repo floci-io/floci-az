@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashSet;
@@ -59,13 +60,20 @@ public class EntraStore implements Resettable {
 
     private final EmulatorConfig config;
     private final StorageBackend<String, StoredObject> store;
+    private final Clock clock;
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final SecureRandom random = new SecureRandom();
+    private Instant nextRefreshCleanup = Instant.MIN;
 
     @Inject
     public EntraStore(StorageFactory storageFactory, EmulatorConfig config) {
+        this(storageFactory, config, Clock.systemUTC());
+    }
+
+    EntraStore(StorageFactory storageFactory, EmulatorConfig config, Clock clock) {
         this.config = config;
         this.store = storageFactory.create("entra");
+        this.clock = clock;
     }
 
     @PostConstruct
@@ -90,6 +98,7 @@ public class EntraStore implements Resettable {
             }
         }
         store.applyBatch(Map.of(), doomed);
+        nextRefreshCleanup = Instant.MIN;
         seed();
     }
 
@@ -112,11 +121,30 @@ public class EntraStore implements Resettable {
     }
 
     public synchronized String issueRefreshToken(RefreshToken grant) {
+        pruneExpiredRefreshTokens(clock.instant());
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         write(refreshKey(token), grant);
         return token;
+    }
+
+    /** Bound retained state without scanning the directory on every renewal. */
+    private void pruneExpiredRefreshTokens(Instant now) {
+        if (now.isBefore(nextRefreshCleanup)) {
+            return;
+        }
+        Set<String> expired = new HashSet<>();
+        for (StoredObject object : store.scan(key -> key.startsWith(REFRESH_PREFIX))) {
+            RefreshToken grant = parse(object.data(), RefreshToken.class, object.key());
+            if (!grant.expiresAt().isAfter(now)) {
+                expired.add(object.key());
+            }
+        }
+        if (!expired.isEmpty()) {
+            store.applyBatch(Map.of(), expired);
+        }
+        nextRefreshCleanup = now.plusSeconds(60);
     }
 
     public Optional<RefreshToken> getRefreshToken(String token) {

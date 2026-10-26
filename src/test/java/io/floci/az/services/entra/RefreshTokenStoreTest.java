@@ -8,6 +8,7 @@ import io.floci.az.services.entra.EntraModels.RefreshToken;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,9 +20,13 @@ class RefreshTokenStoreTest {
     private final EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
 
     private EntraStore store() {
+        return store(Clock.systemUTC());
+    }
+
+    private EntraStore store(Clock clock) {
         when(factory.create("entra")).thenReturn(backend);
         when(config.services().entra().defaultTenantId()).thenReturn("tenant");
-        return new EntraStore(factory, config);
+        return new EntraStore(factory, config, clock);
     }
 
     private static RefreshToken grant() {
@@ -63,5 +68,39 @@ class RefreshTokenStoreTest {
         store.clear();
         assertTrue(store.getRefreshToken(token).isEmpty());
         assertTrue(directory.get("tenant", DirectoryEntitySet.USERS, "user").isPresent());
+    }
+
+    @Test
+    void issuanceRemovesExpiredRecordsAndKeepsUnexpiredTokensAndDirectoryObjects() {
+        Clock clock = mock(Clock.class);
+        Instant now = Instant.now();
+        when(clock.instant()).thenReturn(now);
+        EntraStore store = store(clock);
+        GraphDirectoryStore directory = new GraphDirectoryStore(backend, "tenant");
+        directory.put(GraphDirectoryStore.user("tenant", "user", "user@example.test", "User", null));
+        String expiring = store.issueRefreshToken(new RefreshToken("tenant", "tenant", "client", "user",
+                "openid offline_access", false, false, now.plusSeconds(60)));
+        String valid = store.issueRefreshToken(grant());
+        when(clock.instant()).thenReturn(now.plusSeconds(59));
+        store.issueRefreshToken(grant());
+        assertTrue(store.getRefreshToken(expiring).isPresent());
+
+        when(clock.instant()).thenReturn(now.plusSeconds(60));
+        store.issueRefreshToken(grant());
+        assertTrue(store.getRefreshToken(expiring).isEmpty());
+        assertTrue(store.getRefreshToken(valid).isPresent());
+        assertTrue(directory.get("tenant", DirectoryEntitySet.USERS, "user").isPresent());
+    }
+
+    @Test
+    void theFirstIssuanceAfterRestartRemovesPreviouslyExpiredRecords() {
+        EntraStore original = store();
+        String expired = original.issueRefreshToken(new RefreshToken("tenant", "tenant", "client", "user",
+                "openid offline_access", false, false, Instant.now().minusSeconds(1)));
+        String valid = original.issueRefreshToken(grant());
+        EntraStore restarted = store();
+        restarted.issueRefreshToken(grant());
+        assertTrue(restarted.getRefreshToken(expired).isEmpty());
+        assertTrue(restarted.getRefreshToken(valid).isPresent());
     }
 }

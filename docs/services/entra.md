@@ -159,8 +159,9 @@ matching [Microsoft's refresh-token contract](https://learn.microsoft.com/en-us/
 Tokens remain bound to the client and resolved tenant that authorized them, and renewal resolves
 the same user in that directory. Invalid, revoked, expired or incorrectly bound tokens return
 `invalid_grant`; extra scopes return `invalid_scope`. Expiry uses AADSTS700082, or AADSTS700084
-for the fixed SPA lifetime. Refresh state uses the existing Entra storage mode, persists only
-token digests, and is cleared by emulator reset. Cross-tenant consent, B2B sessions, password-change
+for the fixed SPA lifetime. Refresh state uses the existing Entra storage mode and persists only
+token digests. Issuance removes expired records at most once a minute, including on the first
+issuance after restart. Emulator reset clears all refresh state. Cross-tenant consent, B2B sessions, password-change
 revocation and Graph's `revokeSignInSessions` action are not modelled. The v1.0 refresh grant is
 not implemented.
 
