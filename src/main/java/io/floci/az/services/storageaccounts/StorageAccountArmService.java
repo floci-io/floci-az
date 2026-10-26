@@ -15,6 +15,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
@@ -99,9 +100,13 @@ public class StorageAccountArmService
     private final BlobServiceHandler blobHandler;
     private final QueueServiceHandler queueHandler;
 
+    private final CloudDefaults defaults;
+
     @Inject
     public StorageAccountArmService(StorageFactory storageFactory, GlobalNameRegistry names, EmulatorConfig config,
-                                    BlobServiceHandler blobHandler, QueueServiceHandler queueHandler) {
+                                    BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
+                                    CloudDefaults defaults) {
+        this.defaults = defaults;
         this.accounts = ArmResourceStore.create(storageFactory, STORE, documentType(),
             StorageAccountArmService::idOf, key -> false);
         this.names = names;
@@ -313,15 +318,15 @@ public class StorageAccountArmService
                         : config.services().blob().hierarchicalNamespaceAccounts().contains(account);
         String accountId = existing.map(StorageAccountArmService::idOf).orElse(id.id());
         Map<String, Object> written = accounts.createOrUpdate(id,
-                ignored -> document(accountId, account, body, hnsEnabled)).stored().value();
+                ignored -> document(accountId, account, body, hnsEnabled, defaults.defaultLocation(req.scope()))).stored().value();
         blobHandler.setHierarchicalNamespaceEnabled(account, hnsEnabled);
         LOG.infov("ARM: created storage account {0}", account);
         return Response.ok(written).build();
     }
 
     private static Map<String, Object> document(String id, String account, Map<String, Object> body,
-                                                boolean hnsEnabled) {
-        String location = ArmJson.string(body, "location", "eastus");
+                                                boolean hnsEnabled, String defaultLocation) {
+        String location = ArmJson.string(body, "location", defaultLocation);
         // Return domain-based storage endpoints so the azurerm provider can parse the account name. No port, so
         // storage URLs use the standard HTTP port 80: test containers forward port 80 to the emulator via socat.
         Map<String, Object> resource = new LinkedHashMap<>();

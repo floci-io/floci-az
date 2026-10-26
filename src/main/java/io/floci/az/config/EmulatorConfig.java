@@ -3,6 +3,7 @@ package io.floci.az.config;
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
 import io.smallrye.config.WithName;
+import io.smallrye.config.WithParentName;
 
 import java.util.List;
 import java.util.Map;
@@ -218,6 +219,19 @@ public interface EmulatorConfig {
         @WithName("default")
         @WithDefault("AzureCloud")
         String defaultCloud();
+
+        /**
+         * Per-cloud settings keyed by catalog cloud name, compared case-insensitively:
+         * {@code floci-az.cloud.AzureCloud.default-location}. Read through {@code CloudDefaults}.
+         */
+        @WithParentName
+        Map<String, CloudSettings> clouds();
+    }
+
+    /** Settings for one cloud of the catalog. */
+    interface CloudSettings {
+        /** The location a resource or resource group gets when its request names none; the catalog's when absent. */
+        Optional<String> defaultLocation();
     }
 
     /** One configured tenant; only {@code id} is required. */
@@ -359,9 +373,11 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
-        /** Region label baked into the topic data-plane endpoint host returned by ARM. */
-        @WithDefault("eastus")
-        String defaultRegion();
+        /**
+         * Location of a topic whose PUT names none, also baked into its data-plane endpoint host. When absent, the
+         * request cloud's default location ({@code floci-az.cloud.<name>.default-location}).
+         */
+        Optional<String> defaultRegion();
 
         /** Default maximum delivery attempts when a subscription omits its own retry policy. */
         @WithDefault("30")

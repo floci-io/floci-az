@@ -134,6 +134,16 @@ class EventGridHandlerTest {
     }
 
     @Test
+    @DisplayName("a topic whose PUT names no location is created in the public cloud's default, eastus")
+    void aTopicWithoutALocationIsCreatedInEastus() {
+        given().contentType("application/json").body("{\"properties\":{}}")
+            .when().put("/subscriptions/" + SUB + "/resourceGroups/" + RG
+                + "/providers/Microsoft.EventGrid/topics/unlocated-topic" + API)
+            .then().statusCode(200)
+            .body("location", equalTo("eastus"));
+    }
+
+    @Test
     @DisplayName("topic listKeys returns key1 and key2")
     void listKeysReturnsBothKeys() {
         createTopic();

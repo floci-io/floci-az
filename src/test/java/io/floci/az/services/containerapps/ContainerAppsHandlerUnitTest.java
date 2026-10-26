@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
@@ -61,7 +62,7 @@ class ContainerAppsHandlerUnitTest {
         StorageFactory storageFactory = mock(StorageFactory.class);
         StorageBackend<String, StoredObject> storage = new InMemoryStorage<>();
         when(storageFactory.create("containerapps")).thenReturn(storage);
-        handler = new ContainerAppsHandler(config, runtimeManager, ingressProxy, storageFactory);
+        handler = new ContainerAppsHandler(config, runtimeManager, ingressProxy, storageFactory, CloudDefaults.catalogOnly());
     }
 
     @Test

@@ -8,6 +8,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmVerdict;
 import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.arm.ResourceGroupRule;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.inject.Instance;
@@ -71,10 +72,10 @@ class ResourceGroupDeleteRaceTest {
         when(routers.get()).thenReturn(router);
         groups = new ResourceGroups(null);
         groups.put(new ResourceGroup(SUB, GROUP, "westus", null, null, ResourceGroup.SUCCEEDED));
-        rule = new ResourceGroupRule(groups, config);
+        rule = new ResourceGroupRule(groups, config, CloudDefaults.catalogOnly());
         Instance<ResourceGroupCleanup> cleanups = mock(Instance.class);
         when(cleanups.iterator()).thenAnswer(invocation -> List.<ResourceGroupCleanup>of().iterator());
-        service = new ResourceGroupService(config, groups, routers, cleanups);
+        service = new ResourceGroupService(config, groups, routers, cleanups, CloudDefaults.catalogOnly());
         index.add(EXISTING);
     }
 

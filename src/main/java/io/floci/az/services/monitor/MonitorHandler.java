@@ -3,6 +3,7 @@ package io.floci.az.services.monitor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.services.monitor.activitylog.ActivityLogEndpoint;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
@@ -117,10 +118,14 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     @Inject
     ActivityLogEndpoint activityLog;
 
+    private final CloudDefaults defaults;
+
     @Inject
     public MonitorHandler(StorageFactory factory, EmulatorConfig config,
                           @ConfigProperty(name = "quarkus.http.limits.max-body-size", defaultValue = "2G")
-                          MemorySize maxBodySize) {
+                          MemorySize maxBodySize,
+                          CloudDefaults defaults) {
+        this.defaults = defaults;
         this.store = factory.create("monitor");
         this.workspaces = ArmResourceStore.create(factory, "monitor", WORKSPACE_TYPE, MonitorResource.class,
             MonitorResource::id, key -> key.startsWith("workspace/"));
@@ -279,8 +284,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             ? new LinkedHashMap<>((Map<String, Object>) props) : new LinkedHashMap<>();
     }
 
-    private static String bodyLocation(Map<String, Object> body) {
-        return (String) body.getOrDefault("location", "eastus");
+    private static String bodyLocation(Map<String, Object> body, String defaultLocation) {
+        return (String) body.getOrDefault("location", defaultLocation);
     }
 
     private static boolean isBlank(String value) {
@@ -318,7 +323,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                     newProps.put("provisioningState", "Succeeded");
                     newProps.put("customerId", customerId);
                     return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                        existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body),
+                        existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())),
                         newProps);
                 }).stored().value();
                 workspaceIndex().put(workspace.property("customerId"), id);
@@ -389,7 +394,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 props.put("logsIngestion", Map.of("endpoint", ingestUrl));
                 props.put("configurationAccess", Map.of("endpoint", ingestUrl));
                 return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                    existing.map(MonitorResource::name).orElse(id.name()), DCE_TYPE, bodyLocation(body), props);
+                    existing.map(MonitorResource::name).orElse(id.name()), DCE_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())), props);
             }).stored().value();
             return Response.status(201).entity(dce).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
@@ -432,7 +437,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                     newProps.put("provisioningState", "Succeeded");
                     newProps.put("immutableId", immutableId);
                     return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                        existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body), newProps);
+                        existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())), newProps);
                 }).stored().value();
                 ruleIndex().put(dcr.property("immutableId"), id);
             }

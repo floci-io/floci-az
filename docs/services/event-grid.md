@@ -124,7 +124,8 @@ floci-az:
   services:
     event-grid:
       enabled: true
-      default-region: eastus          # region label baked into the topic endpoint host text
+      # default-region: eastus        # a topic's location when its PUT names none, also in its endpoint host;
+                                      # default: the cloud's default location (cloud.<name>.default-location)
       max-delivery-attempts: 30        # default when a subscription omits its own retryPolicy
 ```
 

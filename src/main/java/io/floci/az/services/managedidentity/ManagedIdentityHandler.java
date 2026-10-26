@@ -12,6 +12,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.services.entra.TokenIssuer;
 import io.floci.az.services.managedidentity.ManagedIdentityModels.FederatedIdentityCredential;
 import io.floci.az.services.managedidentity.ManagedIdentityModels.UserAssignedIdentity;
@@ -59,9 +60,13 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
     private final ManagedIdentityStore store;
     private final TokenIssuer tokenIssuer;
 
+    private final CloudDefaults defaults;
+
     @Inject
     public ManagedIdentityHandler(EmulatorConfig config, ManagedIdentityStore store,
-                                  TokenIssuer tokenIssuer) {
+                                  TokenIssuer tokenIssuer,
+                                  CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.store = store;
         this.tokenIssuer = tokenIssuer;
@@ -199,16 +204,18 @@ public class ManagedIdentityHandler implements AzureServiceHandler, Resettable {
         // ids and the id's casing are the creating request's.
         Object tags = body.getOrDefault("tags", Map.of());
         ArmResourceStore.Written<UserAssignedIdentity> written = store.createOrUpdateIdentity(id, existing ->
-                existing.map(identity -> replaced(identity, body, tags)).orElseGet(() -> new UserAssignedIdentity(
-                        id.id(), name, ArmJson.string(body, "location", "eastus"), tags,
+                existing.map(identity -> replaced(identity, body, tags, defaults.defaultLocation(req.scope()))).orElseGet(() -> new UserAssignedIdentity(
+                        id.id(), name, ArmJson.string(body, "location", defaults.defaultLocation(req.scope())), tags,
                         config.services().entra().defaultTenantId(),
                         UUID.randomUUID().toString(), UUID.randomUUID().toString())));
         return Response.status(written.created() ? 201 : 200)
                 .entity(identityResponse(written.stored().value())).build();
     }
 
-    private static UserAssignedIdentity replaced(UserAssignedIdentity identity, Map<String, Object> body, Object tags) {
-        String location = ArmJson.string(body, "location", Objects.requireNonNullElse(identity.location(), "eastus"));
+    private static UserAssignedIdentity replaced(UserAssignedIdentity identity, Map<String, Object> body, Object tags,
+                                                String defaultLocation) {
+        String location = ArmJson.string(body, "location",
+                Objects.requireNonNullElse(identity.location(), defaultLocation));
         return new UserAssignedIdentity(identity.id(), identity.name(), location, tags, identity.tenantId(),
                 identity.principalId(), identity.clientId());
     }

@@ -16,6 +16,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aci.AciModels.ContainerGroup;
@@ -115,9 +116,13 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return t;
     });
 
+    private final CloudDefaults defaults;
+
     @Inject
     public AciHandler(EmulatorConfig config, AciContainerGroupManager containerManager,
-                      StorageFactory storageFactory) {
+                      StorageFactory storageFactory,
+                      CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.containerManager = containerManager;
         this.store = ArmResourceStore.create(storageFactory, "aci", ContainerGroup.class, ContainerGroup::armId,
@@ -317,7 +322,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 group.setName(name);
                 group.setTimeCreated(Instant.now());
             }
-            group.setLocation(body.path("location").asText(group.getLocation() == null ? "eastus" : group.getLocation()));
+            group.setLocation(body.path("location").asText(group.getLocation() == null ? defaults.defaultLocation(req.scope()) : group.getLocation()));
             Map<String, String> tags = parseTags(body.path("tags"));
             group.setTags(tags.isEmpty() ? null : tags);
             group.setProperties(properties);
@@ -757,7 +762,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private Response asyncActionResponse(AzureRequest req, int status, String sub, String location,
                                          boolean succeeded) {
-        String loc = (location == null || location.isBlank()) ? "eastus" : location;
+        String loc = (location == null || location.isBlank()) ? defaults.defaultLocation(req.scope()) : location;
         String operationId = UUID.randomUUID().toString();
         recordOperation(operationId, succeeded);
         // Built from the caller's own scheme and host, not the configured base URL: the az CLI

@@ -62,6 +62,18 @@ class EmailResourceStoreTest {
     }
 
     @Test
+    void aCommunicationResourceSentWithoutALocationIsGlobal() {
+        String service = provider("sub-global", "rg-global") + "/emailServices/global-mail";
+        given().contentType("application/json").body("{\"properties\":{\"dataLocation\":\"United States\"}}")
+            .when().put(provider("sub-global", "rg-global") + "/communicationServices/global-comm" + API)
+            .then().statusCode(201).body("location", equalTo("global"));
+        given().contentType("application/json").body("{}").when().put(service + API)
+            .then().statusCode(201).body("location", equalTo("global"));
+        given().contentType("application/json").body("{}").when().put(service + "/domains/AzureManagedDomain" + API)
+            .then().statusCode(201).body("location", equalTo("global"));
+    }
+
+    @Test
     void aPutThroughOtherCasingUpdatesTheOneEmailServiceAndDomain() {
         String service = provider("sub-case", "RG-Mail") + "/emailServices/case-mail";
         given().contentType("application/json").body(BODY).when().put(service + API).then().statusCode(201);

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.redis.RedisModels.RedisCache;
@@ -56,7 +57,7 @@ class RedisShadowedDuplicatesTest {
         when(factory.create("redis")).thenReturn(backend);
         RedisCacheManager containers = mock(RedisCacheManager.class);
         RedisHandler handler = new RedisHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory,
-            mock(GlobalNameRegistry.class));
+            mock(GlobalNameRegistry.class), CloudDefaults.catalogOnly());
 
         handler.dropShadowedCaches();
 

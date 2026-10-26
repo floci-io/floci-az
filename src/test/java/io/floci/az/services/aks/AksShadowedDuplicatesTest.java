@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -61,7 +62,7 @@ class AksShadowedDuplicatesTest {
         StorageFactory factory = mock(StorageFactory.class);
         when(factory.create("aks")).thenReturn(backend);
         AksClusterManager containers = mock(AksClusterManager.class);
-        AksHandler handler = new AksHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory);
+        AksHandler handler = new AksHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory, CloudDefaults.catalogOnly());
 
         handler.dropShadowedClusters();
 
@@ -84,7 +85,7 @@ class AksShadowedDuplicatesTest {
         ContainerLifecycleManager lifecycle = mock(ContainerLifecycleManager.class);
         AksClusterManager containers = new AksClusterManager(mock(ContainerBuilder.class), lifecycle,
             mock(ContainerDetector.class), mock(PortAllocator.class), config);
-        AksHandler handler = new AksHandler(config, containers, factory);
+        AksHandler handler = new AksHandler(config, containers, factory, CloudDefaults.catalogOnly());
 
         handler.dropShadowedClusters();
 

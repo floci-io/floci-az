@@ -16,6 +16,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.containerapps.ContainerAppsModels.ContainerAppState;
@@ -66,11 +67,15 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
     private final ArmResourceStore<ContainerAppState> appStore;
     private final Map<String, AtomicInteger> trafficCounters = new ConcurrentHashMap<>();
 
+    private final CloudDefaults defaults;
+
     @Inject
     public ContainerAppsHandler(EmulatorConfig config,
                                 ContainerAppRuntimeManager runtimeManager,
                                 ContainerAppIngressProxy ingressProxy,
-                                StorageFactory storageFactory) {
+                                StorageFactory storageFactory,
+                                CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.runtimeManager = runtimeManager;
         this.ingressProxy = ingressProxy;
@@ -221,8 +226,9 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                 ? deepMerge((ObjectNode) existing.get().getDocument().deepCopy(), incoming)
                 : incoming;
         if (!document.hasNonNull("location")) {
-            document.put("location", existing.map(value -> value.getDocument().path("location").asText("eastus"))
-                    .orElse("eastus"));
+            String fallback = defaults.defaultLocation(request.scope());
+            document.put("location", existing.map(value -> value.getDocument().path("location").asText(fallback))
+                    .orElse(fallback));
         }
 
         ManagedEnvironmentState environment = existing.orElseGet(() ->
@@ -284,7 +290,7 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         ObjectNode document = "PATCH".equals(method) && existing.isPresent()
                 ? deepMerge((ObjectNode) existing.get().getDocument().deepCopy(), incoming)
                 : incoming;
-        applyAppDefaults(document, existing);
+        applyAppDefaults(document, existing, defaults.defaultLocation(request.scope()));
         validateApp(document);
 
         ContainerAppState app = existing.orElseGet(() ->
@@ -307,10 +313,10 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         return Response.status(existing.isPresent() ? 200 : 201).entity(appResponse(app)).build();
     }
 
-    private void applyAppDefaults(ObjectNode document, Optional<ContainerAppState> existing) {
+    private void applyAppDefaults(ObjectNode document, Optional<ContainerAppState> existing, String defaultLocation) {
         if (!document.hasNonNull("location")) {
-            document.put("location", existing.map(app -> app.getDocument().path("location").asText("eastus"))
-                    .orElse("eastus"));
+            document.put("location", existing.map(app -> app.getDocument().path("location").asText(defaultLocation))
+                    .orElse(defaultLocation));
         }
         ObjectNode properties = document.withObject("/properties");
         if (!properties.hasNonNull("environmentId") && properties.hasNonNull("managedEnvironmentId")) {

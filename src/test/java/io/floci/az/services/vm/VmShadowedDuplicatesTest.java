@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
@@ -55,7 +56,7 @@ class VmShadowedDuplicatesTest {
         StorageFactory factory = mock(StorageFactory.class);
         when(factory.create("vm")).thenReturn(backend);
         VmContainerManager containers = mock(VmContainerManager.class);
-        VmHandler handler = new VmHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory);
+        VmHandler handler = new VmHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory, CloudDefaults.catalogOnly());
 
         handler.dropShadowedVms();
 

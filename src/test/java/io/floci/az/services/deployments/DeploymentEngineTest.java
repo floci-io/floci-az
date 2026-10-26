@@ -7,6 +7,7 @@ import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.ArmTypeRegistry;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.inject.Instance;
@@ -68,7 +69,7 @@ class DeploymentEngineTest {
         when(directory.cloudOfTenant(TENANT)).thenReturn(CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD));
         when(directory.subscription(SUB)).thenReturn(Optional.empty());
         when(directory.tenant(TENANT)).thenReturn(Optional.empty());
-        engine = new DeploymentEngine(instance, new ResourceGroups(null), directory, ArmTypeRegistry.empty(), MAPPER);
+        engine = new DeploymentEngine(instance, new ResourceGroups(null), directory, ArmTypeRegistry.empty(), MAPPER, CloudDefaults.catalogOnly());
         answer = request -> Response.ok(echo(request)).build();
     }
 

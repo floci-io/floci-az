@@ -20,6 +20,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
@@ -125,13 +126,17 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         return t;
     });
 
+    private final CloudDefaults defaults;
+
     @Inject
     public AcrHandler(EmulatorConfig config,
                       AcrRegistryManager registryManager,
                       AcrTokenService tokenService,
                       AcrRegistryProxy registryProxy,
                       StorageFactory storageFactory,
-                      GlobalNameRegistry names) {
+                      GlobalNameRegistry names,
+                      CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.registryManager = registryManager;
         this.tokenService = tokenService;
@@ -366,7 +371,7 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     private Response handleCreateOrUpdate(String sub, String rg, String registryName, AzureRequest req) {
         try {
             JsonNode body = readBody(req.bodyStream());
-            String location = body.path("location").asText("eastus");
+            String location = body.path("location").asText(defaults.defaultLocation(req.scope()));
             JsonNode sku = body.path("sku");
             JsonNode props = body.path("properties");
 

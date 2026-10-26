@@ -19,6 +19,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -79,9 +80,13 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
     private final GlobalNameRegistry names;
     private final ObjectMapper mapper;
 
+    private final CloudDefaults defaults;
+
     @Inject
     public SqlHandler(EmulatorConfig config, SqlState state, SqlServerManager serverManager,
-                      SqlProvisioningService provisioningService, GlobalNameRegistry names) {
+                      SqlProvisioningService provisioningService, GlobalNameRegistry names,
+                      CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.state = state;
         this.serverManager = serverManager;
@@ -239,7 +244,7 @@ public class SqlHandler implements AzureServiceHandler, Resettable, ResourceInde
 
         try {
             JsonNode body = readBody(request.bodyStream());
-            String location  = body.path("location").asText("eastus");
+            String location  = body.path("location").asText(defaults.defaultLocation(request.scope()));
             JsonNode props   = body.path("properties");
             Optional<SqlState.SqlServerEntry> current = state.getServer(serverName);
             // The login and password are required to create a server only ("required for server creation"): an

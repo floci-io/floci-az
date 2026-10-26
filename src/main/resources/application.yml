@@ -128,6 +128,10 @@ floci-az:
   # The cloud a tenant lives in when nothing names one: AzureCloud, AzureUSGovernment or AzureChinaCloud.
   cloud:
     default: AzureCloud             # FLOCI_AZ_CLOUD_DEFAULT
+    # The location a resource group or resource gets when its request names none. Default: the cloud's
+    # first catalog location (eastus, usgovvirginia, chinanorth). Env: FLOCI_AZ_CLOUD_AZURECLOUD_DEFAULT_LOCATION.
+    # AzureCloud:
+    #   default-location: westeurope
 
   # Tenants and subscriptions besides the defaults (services.entra.default-tenant-id and
   # services.arm.default-subscription-id, which always exist). Only id is required. An entry with a
@@ -344,7 +348,7 @@ floci-az:
       enabled: true       # Microsoft.Network — VNet, subnets, NIC, public IP, NSG, and DNS zones
     event-grid:
       enabled: true       # Microsoft.EventGrid — Custom Topics + webhook event subscriptions (HTTP pub/push)
-      default-region: eastus
+      # default-region: eastus   # a topic's location when its PUT names none; default: cloud.<name>.default-location
       max-delivery-attempts: 30
     deployments:
       enabled: true       # Microsoft.Resources/deployments: ARM template deployments at resource-group and subscription scope, run in the background and polled

@@ -82,6 +82,8 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     private static final String RETRY_AFTER_SECONDS = "3";
 
     private static final String STORE = "email";
+    /** Communication, Email and domain resources are global, as the spec examples and azurerm send them. */
+    private static final String GLOBAL_LOCATION = "global";
     private static final String COMMUNICATION_SERVICES = "Microsoft.Communication/communicationServices";
     private static final String EMAIL_SERVICES = "Microsoft.Communication/emailServices";
     private static final String EMAIL_DOMAINS = "Microsoft.Communication/emailServices/domains";
@@ -314,7 +316,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
             String name = extractSegment(tail, "communicationServices");
             return handleCrud(req, path, method, communicationServices, "communicationServices/" + name,
                     (id, body, existing) -> new CommunicationResource(id.id(), id.name(), COMMUNICATION_SERVICES,
-                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                            bodyString(body, "location", GLOBAL_LOCATION), body.get("tags"), Map.of(
                                     "provisioningState", "Succeeded",
                                     "dataLocation", "United States",
                                     "hostName", id.name() + ".communication.azure.com",
@@ -329,7 +331,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
             String domainName = extractSegment(tail, "domains");
             return handleCrud(req, path, method, emailDomains, "domains/" + domainName,
                     (id, body, existing) -> new CommunicationResource(id.id(), id.name(), EMAIL_DOMAINS,
-                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                            bodyString(body, "location", GLOBAL_LOCATION), body.get("tags"), Map.of(
                                     "provisioningState", "Succeeded",
                                     "domainManagement", bodyString(
                                             bodyMap(body, "properties"), "domainManagement", "CustomerManaged"),
@@ -343,7 +345,7 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
             String name = extractSegment(tail, "emailServices");
             return handleCrud(req, path, method, emailServices, "emailServices/" + name,
                     (id, body, existing) -> new CommunicationResource(id.id(), id.name(), EMAIL_SERVICES,
-                            bodyString(body, "location", "eastus"), body.get("tags"), Map.of(
+                            bodyString(body, "location", GLOBAL_LOCATION), body.get("tags"), Map.of(
                                     "provisioningState", "Succeeded",
                                     "dataLocation", "United States")));
         }

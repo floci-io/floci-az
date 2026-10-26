@@ -16,6 +16,7 @@ import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.PowerState;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
@@ -97,10 +98,14 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         return t;
     });
 
+    private final CloudDefaults defaults;
+
     @Inject
     public VmHandler(EmulatorConfig config,
                      VmContainerManager containerManager,
-                     StorageFactory storageFactory) {
+                     StorageFactory storageFactory,
+                     CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.containerManager = containerManager;
         this.store = ArmResourceStore.create(storageFactory, "vm", VirtualMachine.class, VirtualMachine::armId,
@@ -222,7 +227,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     private Response handleCreateOrUpdate(String sub, String rg, String vmName, AzureRequest req) {
         try {
             JsonNode body = readBody(req.bodyStream());
-            String location = body.path("location").asText("eastus");
+            String location = body.path("location").asText(defaults.defaultLocation(req.scope()));
             Map<String, String> tags = parseTags(body.path("tags"));
             Map<String, Object> properties = objectToMap(body.path("properties"));
 
@@ -490,7 +495,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
     }
 
     private Response acceptedWithAsync(String sub, String location) {
-        String loc = (location == null || location.isBlank()) ? "eastus" : location;
+        String loc = (location == null || location.isBlank()) ? defaults.defaultLocation() : location;
         String url = config.effectiveBaseUrl() + "/subscriptions/" + sub
                 + "/providers/Microsoft.Compute/locations/" + loc
                 + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION + "&monitor=true";

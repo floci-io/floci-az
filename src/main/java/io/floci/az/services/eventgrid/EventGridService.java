@@ -10,6 +10,7 @@ import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResourceStore.Stored;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterDestination;
 import io.floci.az.services.eventgrid.EventGridModels.DeadLetterIdentity;
@@ -60,15 +61,18 @@ public class EventGridService {
     private final ArmResourceStore<EventSubscription> subscriptions;
     private final EmulatorConfig config;
     private final EventGridDelivery delivery;
+    private final CloudDefaults defaults;
 
     @Inject
-    public EventGridService(StorageFactory factory, EmulatorConfig config, EventGridDelivery delivery) {
+    public EventGridService(StorageFactory factory, EmulatorConfig config, EventGridDelivery delivery,
+                            CloudDefaults defaults) {
         this.topics = ArmResourceStore.create(factory, "eventgrid", TOPIC_TYPE, Topic.class, Topic::resourceId,
                 key -> key.startsWith(LEGACY_TOPIC_PREFIX));
         this.subscriptions = ArmResourceStore.create(factory, "eventgrid", SUBSCRIPTION_TYPE, EventSubscription.class,
                 EventSubscription::resourceId, key -> key.startsWith(LEGACY_SUB_PREFIX));
         this.config = config;
         this.delivery = delivery;
+        this.defaults = defaults;
     }
 
     // ── ARM dispatch ──────────────────────────────────────────────────────────
@@ -127,7 +131,8 @@ public class EventGridService {
         Map<String, Object> body = parseBody(req);
         Map<String, Object> properties = cast(body.get("properties"));
         String inputSchema = stringOr(properties.get("inputSchema"), EventGridModels.SCHEMA_EVENT_GRID);
-        String location = stringOr(body.get("location"), config.services().eventGrid().defaultRegion());
+        String location = stringOr(body.get("location"), config.services().eventGrid().defaultRegion()
+                .orElseGet(() -> defaults.defaultLocation(req.scope())));
 
         Topic topic = topics.createOrUpdate(topicId(sub, rg, name), existing -> existing
                 .map(t -> new Topic(t.subscriptionId(), t.resourceGroup(), t.name(), location, inputSchema,

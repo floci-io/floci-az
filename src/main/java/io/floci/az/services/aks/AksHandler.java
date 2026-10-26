@@ -17,8 +17,7 @@ import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.ResourceIndexContributor;
-import io.floci.az.core.cloud.CloudCatalog;
-import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aks.AksModels.AgentPoolProfile;
 import io.floci.az.services.aks.AksModels.ManagedCluster;
@@ -78,6 +77,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
 
     private final EmulatorConfig config;
     private final AksClusterManager clusterManager;
+    private final CloudDefaults defaults;
     /**
      * Every cluster, keyed by its canonical id. Before the store, clusters were kept under raw-case
      * {@code sub/rg/name}; those entries are read as they are and move to their canonical key on their next write.
@@ -92,8 +92,10 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     @Inject
     public AksHandler(EmulatorConfig config,
                       AksClusterManager clusterManager,
-                      StorageFactory storageFactory) {
+                      StorageFactory storageFactory,
+                      CloudDefaults defaults) {
         this.config = config;
+        this.defaults = defaults;
         this.clusterManager = clusterManager;
         this.store = ArmResourceStore.create(storageFactory, "aks", ManagedCluster.class, ManagedCluster::armId,
                 key -> true);
@@ -238,7 +240,7 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     private Response handleCreateOrUpdate(String sub, String rg, String clusterName, AzureRequest req) {
         try {
             JsonNode body = readBody(req.bodyStream());
-            String location = body.path("location").asText("eastus");
+            String location = body.path("location").asText(defaults.defaultLocation(req.scope()));
             JsonNode props = body.path("properties");
             String k8sVersion = props.path("kubernetesVersion").asText("1.29");
             String dnsPrefix = props.path("dnsPrefix").asText(clusterName + "-dns");
@@ -370,10 +372,8 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     /** The default location of the cloud the request resolved to, for a cluster stored without one. */
-    private static String defaultLocation(AzureRequest req) {
-        CloudProfile cloud = req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
-            : req.scope().cloud();
-        return cloud.effectiveDefaultLocation();
+    private String defaultLocation(AzureRequest req) {
+        return defaults.defaultLocation(req.scope());
     }
 
     private static Response operationStatusResponse(String operationId) {

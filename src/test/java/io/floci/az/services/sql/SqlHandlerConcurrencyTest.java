@@ -3,6 +3,7 @@ package io.floci.az.services.sql;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.arm.GlobalNameRegistry;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.InMemoryStorage;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
@@ -55,7 +56,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names(), CloudDefaults.catalogOnly());
 
         ExecutorService requests = Executors.newFixedThreadPool(2);
         try {
@@ -91,7 +92,7 @@ class SqlHandlerConcurrencyTest {
             return SqlProvisioningService.SqlProvisioningOperation.inProgress(
                 "operation-id", desired.serverName(), desired.location(), desired.armId());
         });
-        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names());
+        SqlHandler handler = new SqlHandler(config, state, serverManager, provisioningService, names(), CloudDefaults.catalogOnly());
 
         Response response = handler.handle(request("PUT", BODY));
 
@@ -115,7 +116,7 @@ class SqlHandlerConcurrencyTest {
             SqlProvisioningService.SqlProvisioningOperation.inProgress("operation-id", "concurrentserver", "eastus",
                 state.getServer("concurrentserver").orElseThrow().armId())));
         SqlHandler handler = new SqlHandler(config, state, mock(SqlServerManager.class), provisioningService,
-            names());
+            names(), CloudDefaults.catalogOnly());
 
         assertEquals(202, handler.handle(request("PUT", BODY)).getStatus());
         Response changed = handler.handle(request("PUT", "{\"location\":\"eastus\",\"properties\":{"
@@ -136,7 +137,7 @@ class SqlHandlerConcurrencyTest {
         state.putDatabase("concurrentserver",
             SqlState.SqlDatabaseEntry.create("appdb", "concurrentserver", "c", "Standard", "S0"));
         SqlHandler handler = new SqlHandler(managedConfig(), state, mock(SqlServerManager.class),
-            mock(SqlProvisioningService.class), names());
+            mock(SqlProvisioningService.class), names(), CloudDefaults.catalogOnly());
         String policy = SERVER_PATH + "/databases/appdb/backupShortTermRetentionPolicies/default";
 
         ExecutorService requests = Executors.newFixedThreadPool(2);

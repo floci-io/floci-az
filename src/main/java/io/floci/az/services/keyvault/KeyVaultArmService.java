@@ -14,6 +14,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.directory.AzureDirectory;
@@ -78,8 +79,12 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     private final GlobalNameRegistry names;
     private final AzureDirectory directory;
 
+    private final CloudDefaults defaults;
+
     @Inject
-    public KeyVaultArmService(StorageFactory storageFactory, GlobalNameRegistry names, AzureDirectory directory) {
+    public KeyVaultArmService(StorageFactory storageFactory, GlobalNameRegistry names, AzureDirectory directory,
+                              CloudDefaults defaults) {
+        this.defaults = defaults;
         this.vaults = ArmResourceStore.create(storageFactory, STORE, VAULT_TYPE, documentType(),
             KeyVaultArmService::idOf, key -> false);
         this.hsms = ArmResourceStore.create(storageFactory, STORE, HSM_TYPE, documentType(),
@@ -239,7 +244,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             existing.map(KeyVaultArmService::idOf).orElse(id.id()),
             existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()),
             listed.orElseGet(() -> existing.map(document -> accessPolicies(ArmJson.cast(document.get("properties"))))
-                .orElse(List.of())))).stored().value();
+                .orElse(List.of())), defaults.defaultLocation(req.scope()))).stored().value();
         LOG.infov("ARM: created key vault {0} (vaultUri={1})", written.get("name"),
             ArmJson.cast(written.get("properties")).get("vaultUri"));
         return Response.ok(written).build();
@@ -293,8 +298,8 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
      * accepted rather than refused.
      */
     private Map<String, Object> vaultDocument(Map<String, Object> body, String id, String vaultName,
-                                              List<Map<String, Object>> accessPolicies) {
-        String location = ArmJson.string(body, "location", "eastus");
+                                              List<Map<String, Object>> accessPolicies, String defaultLocation) {
+        String location = ArmJson.string(body, "location", defaultLocation);
         Map<String, Object> bodyProps = body.containsKey("properties")
             ? ArmJson.cast(body.get("properties")) : Map.of();
         String tenantId = ArmJson.string(bodyProps, "tenantId", directory.defaultTenantId());
@@ -319,14 +324,16 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
         Map<String, Object> written = hsms.createOrUpdate(id, existing -> hsmDocument(body,
             existing.map(KeyVaultArmService::idOf).orElse(id.id()),
-            existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()))).stored().value();
+            existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()),
+            defaults.defaultLocation(req.scope()))).stored().value();
         LOG.infov("ARM: created managed HSM {0} (hsmUri={1})", written.get("name"),
             ArmJson.cast(written.get("properties")).get("hsmUri"));
         return Response.ok(written).build();
     }
 
-    private Map<String, Object> hsmDocument(Map<String, Object> body, String id, String hsmName) {
-        String location = ArmJson.string(body, "location", "eastus");
+    private Map<String, Object> hsmDocument(Map<String, Object> body, String id, String hsmName,
+                                            String defaultLocation) {
+        String location = ArmJson.string(body, "location", defaultLocation);
         Map<String, Object> bodyProps = body.containsKey("properties")
             ? ArmJson.cast(body.get("properties")) : Map.of();
         String tenantId = ArmJson.string(bodyProps, "tenantId", directory.defaultTenantId());

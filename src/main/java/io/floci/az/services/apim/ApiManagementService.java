@@ -13,6 +13,7 @@ import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
@@ -52,12 +53,14 @@ public class ApiManagementService implements GlobalNameSource {
     private final Map<String, String> productApis;
     private final EmulatorConfig config;
     private final GlobalNameRegistry names;
+    private final CloudDefaults defaults;
 
     @Inject
     public ApiManagementService(EmulatorConfig config, ApiManagementStore store, StorageFactory storageFactory,
-                                GlobalNameRegistry names) {
+                                GlobalNameRegistry names, CloudDefaults defaults) {
         this.config = config;
         this.names = names;
+        this.defaults = defaults;
         this.services = ArmResourceStore.create(storageFactory, "apim", ApimService.class, ApimService::id,
                 key -> false);
         this.apis = store.apis;
@@ -254,7 +257,7 @@ public class ApiManagementService implements GlobalNameSource {
         ArmResourceStore.Written<ApimService> written = services.createOrUpdate(requested, existing -> {
             // A service keeps the casing of the PUT that created it, as ARM does.
             ArmResourceId id = existing.map(service -> serviceId(service.id())).orElse(requested);
-            return newService(id, body);
+            return newService(id, body, defaults.defaultLocation(request.scope()));
         });
         LOG.infov("ARM: {0} API Management service {1}", written.created() ? "created" : "updated",
                 written.stored().value().name());
@@ -274,7 +277,7 @@ public class ApiManagementService implements GlobalNameSource {
             && services.get(owner).filter(stored -> name.equalsIgnoreCase(stored.value().name())).isPresent();
     }
 
-    private ApimService newService(ArmResourceId id, Map<String, Object> body) {
+    private ApimService newService(ArmResourceId id, Map<String, Object> body, String defaultLocation) {
         Map<String, Object> properties = new LinkedHashMap<>(cast(body.get("properties")));
         properties.put("provisioningState", "Succeeded");
         properties.putIfAbsent("gatewayUrl", gatewayUrl(id.name()));
@@ -283,7 +286,7 @@ public class ApiManagementService implements GlobalNameSource {
         properties.putIfAbsent("publisherName", "floci-az");
         Object sku = body.get("sku");
         Map<String, Object> skuValue = sku instanceof Map<?, ?> ? cast(sku) : Map.of("name", "Developer", "capacity", 1);
-        return new ApimService(id.id(), id.name(), bodyString(body, "location", "eastus"),
+        return new ApimService(id.id(), id.name(), bodyString(body, "location", defaultLocation),
                 "\"" + UUID.randomUUID() + "\"", properties, skuValue);
     }
 

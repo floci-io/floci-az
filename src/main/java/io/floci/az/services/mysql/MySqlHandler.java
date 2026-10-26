@@ -17,6 +17,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,9 +71,13 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
      */
     private final Object serverNames = new Object();
 
+    private final CloudDefaults defaults;
+
     @Inject
     public MySqlHandler(EmulatorConfig config, MySqlState state, MySqlServerManager serverManager,
-                        GlobalNameRegistry names) {
+                        GlobalNameRegistry names,
+                        CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.state = state;
         this.serverManager = serverManager;
@@ -198,7 +203,7 @@ public class MySqlHandler implements AzureServiceHandler, Resettable, ResourceIn
                 if (login.isBlank())    return badRequest("administratorLogin is required");
                 if (password.isBlank()) return badRequest("administratorLoginPassword is required");
 
-                String location = body.path("location").asText("eastus");
+                String location = body.path("location").asText(defaults.defaultLocation(request.scope()));
                 String version  = props.path("version").asText("8.0.21");
                 int storageGB   = props.path("storage").path("storageSizeGB").asInt(20);
                 String skuName  = sku.path("name").asText("Standard_B1ms");

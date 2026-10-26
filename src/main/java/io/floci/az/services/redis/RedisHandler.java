@@ -19,6 +19,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
@@ -98,11 +99,15 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         return t;
     });
 
+    private final CloudDefaults defaults;
+
     @Inject
     public RedisHandler(EmulatorConfig config,
                         RedisCacheManager cacheManager,
                         StorageFactory storageFactory,
-                        GlobalNameRegistry names) {
+                        GlobalNameRegistry names,
+                        CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.cacheManager = cacheManager;
         this.names = names;
@@ -226,7 +231,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
     private Response handleCreateOrUpdate(String sub, String rg, String cacheName, AzureRequest req) {
         try {
             JsonNode body = readBody(req.bodyStream());
-            String location = body.path("location").asText("eastus");
+            String location = body.path("location").asText(defaults.defaultLocation(req.scope()));
             JsonNode props = body.path("properties");
             JsonNode sku = props.path("sku");
 

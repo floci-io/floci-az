@@ -144,6 +144,7 @@ floci-az:
 | `parity-overrides.resource-group-delete` | `FLOCI_AZ_PARITY_OVERRIDES_RESOURCE_GROUP_DELETE` | on from `azure` | `true`: a resource-group `DELETE` deletes every resource in the group and answers `202` with a `Location` to poll; the generic listings also show Event Grid, Monitor and Email resources |
 | `parity-overrides.strict-resource-groups` | `FLOCI_AZ_PARITY_OVERRIDES_STRICT_RESOURCE_GROUPS` | on from `strict` | `true`: a request for a resource under a group that does not exist is `404 ResourceGroupNotFound`, and groups are kept in the directory store |
 | `cloud.default` | `FLOCI_AZ_CLOUD_DEFAULT` | `AzureCloud` | The cloud of the default tenant and of a tenant that names none: `AzureCloud`, `AzureUSGovernment` or `AzureChinaCloud`. An unknown name fails startup. Today it changes which cloud tenants and request scopes resolve to and the default location of a new group; endpoints, token issuers, DNS suffixes and TLS names stay the public cloud's, and a startup warning says so |
+| `cloud.<name>.default-location` | `FLOCI_AZ_CLOUD_<NAME>_DEFAULT_LOCATION` | the cloud's first catalog location | The location a resource or group of that cloud gets when its request names none; see [Resource locations](#resource-locations) |
 | `tenants[n].*` | `FLOCI_AZ_TENANTS_<n>__ID`, `..._DISPLAY_NAME`, `..._DEFAULT_DOMAIN`, `..._CLOUD` | none | Extra tenants; see below |
 | `subscriptions[n].*` | `FLOCI_AZ_SUBSCRIPTIONS_<n>__ID`, `..._TENANT_ID`, `..._DISPLAY_NAME`, `..._STATE` | none | Extra subscriptions; see below |
 | `storage.services.directory.mode` | `FLOCI_AZ_STORAGE_SERVICES_DIRECTORY_MODE` | `storage.mode` | Storage mode of the tenant and subscription directory |
@@ -366,6 +367,21 @@ with a location of its own, `None` otherwise). `defaultApiVersion`, `apiProfiles
 `authorizations` are optional in Azure's answer and omitted.
 
 ## Resource locations
+
+A resource or resource group whose request names no `location` gets its cloud's default location: the cloud's
+first location in the catalog (`eastus` for `AzureCloud`, `usgovvirginia` for `AzureUSGovernment`, `chinanorth`
+for `AzureChinaCloud`), or the one configured for that cloud:
+
+```yaml
+floci-az:
+  cloud:
+    AzureCloud:
+      default-location: westeurope   # FLOCI_AZ_CLOUD_AZURECLOUD_DEFAULT_LOCATION
+```
+
+The cloud name is matched without regard to case, so the environment variable form works. The value may be a
+name or a display name (`West Europe`) and is stored canonical; a location the cloud does not offer, or a cloud
+the catalog does not hold, fails startup.
 
 By default a resource's `location` is stored and echoed exactly as the client sent it, so `"East US"` and
 `eastus` are two different values, and names built from it keep the spelling: a container group's FQDN,

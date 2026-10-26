@@ -17,6 +17,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,9 +71,13 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
      */
     private final Object serverNames = new Object();
 
+    private final CloudDefaults defaults;
+
     @Inject
     public MariaDbHandler(EmulatorConfig config, MariaDbState state, MariaDbServerManager serverManager,
-                          GlobalNameRegistry names) {
+                          GlobalNameRegistry names,
+                          CloudDefaults defaults) {
+        this.defaults = defaults;
         this.config = config;
         this.state = state;
         this.serverManager = serverManager;
@@ -197,7 +202,7 @@ public class MariaDbHandler implements AzureServiceHandler, Resettable, Resource
                 if (login.isBlank())    return badRequest("administratorLogin is required");
                 if (password.isBlank()) return badRequest("administratorLoginPassword is required");
 
-                String location = body.path("location").asText("eastus");
+                String location = body.path("location").asText(defaults.defaultLocation(request.scope()));
                 String version  = props.path("version").asText("10.3");
                 int storageMB   = props.path("storageProfile").path("storageMB").asInt(5120);
 

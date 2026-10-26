@@ -2,8 +2,7 @@ package io.floci.az.core.arm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.cloud.CloudCatalog;
-import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -50,6 +49,7 @@ public class ResourceGroupRule implements ArmRequestRule {
     private final boolean strict;
     private final boolean autoCreate;
     private final boolean guardDeletes;
+    private final CloudDefaults defaults;
 
     /**
      * The writes this rule admitted and has not yet seen leave, by identity: the gate builds one call per
@@ -59,19 +59,26 @@ public class ResourceGroupRule implements ArmRequestRule {
         Collections.newSetFromMap(new IdentityHashMap<>()));
 
     @Inject
-    public ResourceGroupRule(ResourceGroups groups, EmulatorConfig config) {
-        this(groups, config.strictResourceGroups(), config.resourceGroupSemantics(), config.resourceGroupDelete());
+    public ResourceGroupRule(ResourceGroups groups, EmulatorConfig config, CloudDefaults defaults) {
+        this(groups, config.strictResourceGroups(), config.resourceGroupSemantics(), config.resourceGroupDelete(),
+            defaults);
     }
 
     ResourceGroupRule(ResourceGroups groups, boolean strict, boolean autoCreate) {
-        this(groups, strict, autoCreate, false);
+        this(groups, strict, autoCreate, false, CloudDefaults.catalogOnly());
     }
 
     ResourceGroupRule(ResourceGroups groups, boolean strict, boolean autoCreate, boolean guardDeletes) {
+        this(groups, strict, autoCreate, guardDeletes, CloudDefaults.catalogOnly());
+    }
+
+    ResourceGroupRule(ResourceGroups groups, boolean strict, boolean autoCreate, boolean guardDeletes,
+                      CloudDefaults defaults) {
         this.groups = groups;
         this.strict = strict;
         this.autoCreate = autoCreate;
         this.guardDeletes = guardDeletes;
+        this.defaults = defaults;
     }
 
     @Override
@@ -136,7 +143,7 @@ public class ResourceGroupRule implements ArmRequestRule {
     }
 
     /** The location the created resource reports, else the request cloud's default. */
-    private static String location(ArmCall call, Response response) {
+    private String location(ArmCall call, Response response) {
         String reported = reportedLocation(response.getEntity());
         if (reported != null && !reported.isBlank()) {
             return reported;
@@ -144,9 +151,7 @@ public class ResourceGroupRule implements ArmRequestRule {
         if (call.normalizedLocation() != null) {
             return call.normalizedLocation();
         }
-        CloudProfile cloud = call.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
-            : call.scope().cloud();
-        return cloud.effectiveDefaultLocation();
+        return defaults.defaultLocation(call.scope());
     }
 
     /** The {@code location} of a response body, whether the handler built it as a map or as a Jackson tree. */

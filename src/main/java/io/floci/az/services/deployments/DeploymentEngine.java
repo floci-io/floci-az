@@ -12,6 +12,7 @@ import io.floci.az.core.arm.ArmResourceType;
 import io.floci.az.core.arm.ArmScopeKind;
 import io.floci.az.core.arm.ArmTypeRegistry;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.directory.AzureDirectory;
 import io.floci.az.core.directory.ResourceGroups;
@@ -87,6 +88,7 @@ public class DeploymentEngine {
     private final AzureDirectory directory;
     private final ArmTypeRegistry types;
     private final ObjectMapper mapper;
+    private final CloudDefaults defaults;
 
     /**
      * One deployment request, at resource-group scope, or at subscription scope when {@code resourceGroup} is null.
@@ -187,8 +189,9 @@ public class DeploymentEngine {
 
     @Inject
     public DeploymentEngine(Instance<ArmRouter> router, ResourceGroups groups, AzureDirectory directory,
-                            ArmTypeRegistry types, ObjectMapper mapper) {
+                            ArmTypeRegistry types, ObjectMapper mapper, CloudDefaults defaults) {
         this.router = router;
+        this.defaults = defaults;
         this.groups = groups;
         this.directory = directory;
         this.types = types;
@@ -1143,7 +1146,7 @@ public class DeploymentEngine {
                 group.put("id", request.scopeId());
                 group.put("name", request.resourceGroup());
                 group.put("type", "Microsoft.Resources/resourceGroups");
-                group.put("location", cloud.effectiveDefaultLocation());
+                group.put("location", defaults.defaultLocation(cloud));
                 group.putObject("properties").put("provisioningState", "Succeeded");
                 return group;
             });

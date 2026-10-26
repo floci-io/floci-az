@@ -297,7 +297,7 @@ class CloudCatalogTest {
 
     @Test
     void theStartupValidatorLoadsTheCatalog() {
-        new CloudStartupValidator().onStart(null);
+        new CloudStartupValidator(CloudDefaults.catalogOnly()).onStart(null);
     }
 
     private static List<String> names(CloudProfile cloud) {

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.aci.AciModels.ContainerGroup;
@@ -42,7 +43,7 @@ class AciReadinessPollerTest {
     void setUp() throws Exception {
         StorageFactory factory = mock(StorageFactory.class);
         when(factory.create("aci")).thenReturn(backend);
-        handler = new AciHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory);
+        handler = new AciHandler(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS), containers, factory, CloudDefaults.catalogOnly());
         write(group("Creating", "old-container"));
     }
 

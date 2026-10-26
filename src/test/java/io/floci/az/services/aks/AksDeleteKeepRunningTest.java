@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -65,7 +66,7 @@ class AksDeleteKeepRunningTest {
         lifecycle = mock(ContainerLifecycleManager.class);
         AksClusterManager containers = new AksClusterManager(mock(ContainerBuilder.class), lifecycle,
             mock(ContainerDetector.class), mock(PortAllocator.class), config);
-        handler = new AksHandler(config, containers, factory);
+        handler = new AksHandler(config, containers, factory, CloudDefaults.catalogOnly());
     }
 
     @Test

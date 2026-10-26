@@ -8,8 +8,7 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ResourceGroupCleanup;
-import io.floci.az.core.cloud.CloudCatalog;
-import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.directory.ResourceGroup;
 import io.floci.az.core.directory.ResourceGroups;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -67,6 +66,7 @@ public class ResourceGroupService {
 
     private final EmulatorConfig config;
     private final ResourceGroups groups;
+    private final CloudDefaults defaults;
     private final Instance<ArmRouter> router;
     private final Instance<ResourceGroupCleanup> cleanups;
     private final boolean semantics;
@@ -77,8 +77,9 @@ public class ResourceGroupService {
 
     @Inject
     public ResourceGroupService(EmulatorConfig config, ResourceGroups groups, Instance<ArmRouter> router,
-                                Instance<ResourceGroupCleanup> cleanups) {
+                                Instance<ResourceGroupCleanup> cleanups, CloudDefaults defaults) {
         this.config = config;
+        this.defaults = defaults;
         this.groups = groups;
         this.router = router;
         this.cleanups = cleanups;
@@ -142,10 +143,8 @@ public class ResourceGroupService {
     }
 
     /** The default location of the cloud the request resolved to: the one an implicit group gets too. */
-    private static String defaultLocation(AzureRequest req) {
-        CloudProfile cloud = req.scope() == null ? CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD)
-            : req.scope().cloud();
-        return cloud.effectiveDefaultLocation();
+    private String defaultLocation(AzureRequest req) {
+        return defaults.defaultLocation(req.scope());
     }
 
     /** {@code ResourceGroupPatchable}: {@code tags} and {@code managedBy} replace what they name; nothing else changes. */

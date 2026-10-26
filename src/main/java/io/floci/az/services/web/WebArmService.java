@@ -14,6 +14,7 @@ import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
 import io.floci.az.core.arm.ResourceIndexContributor;
 import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
@@ -79,9 +80,13 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
     private final GlobalNameRegistry names;
     private final FunctionsServiceHandler functionsHandler;
 
+    private final CloudDefaults defaults;
+
     @Inject
     public WebArmService(StorageFactory storageFactory, GlobalNameRegistry names,
-                         FunctionsServiceHandler functionsHandler) {
+                         FunctionsServiceHandler functionsHandler,
+                         CloudDefaults defaults) {
+        this.defaults = defaults;
         this.sites = ArmResourceStore.create(storageFactory, STORE, SITE_TYPE, documentType(), WebArmService::idOf,
             key -> false);
         this.names = names;
@@ -210,7 +215,7 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
         Map<String, Object> properties = ArmJson.cast(body.get("properties"));
         Map<String, Object> siteConfig = ArmJson.cast(properties.get("siteConfig"));
         String linuxFxVersion = ArmJson.string(siteConfig, "linuxFxVersion", null);
-        String location = ArmJson.string(body, "location", "eastus");
+        String location = ArmJson.string(body, "location", defaults.defaultLocation(req.scope()));
         synchronized (siteWrites) {
             return writeSite(req, id, location, linuxFxVersion);
         }
