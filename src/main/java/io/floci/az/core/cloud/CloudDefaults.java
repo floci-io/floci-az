@@ -65,7 +65,7 @@ public class CloudDefaults {
     }
 
     /** The configured clouds, keeping only entries that set a location (the map also sees the sibling key). */
-    private static Map<String, String> configured(Map<String, EmulatorConfig.CloudSettings> clouds) {
+    static Map<String, String> configured(Map<String, EmulatorConfig.CloudSettings> clouds) {
         Map<String, String> configured = new HashMap<>();
         clouds.forEach((name, settings) -> settings.defaultLocation()
             .filter(location -> !location.isBlank())
