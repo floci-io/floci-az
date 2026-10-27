@@ -249,6 +249,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                     namespaceName, amqpEndpoint, amqpsEndpoint);
             return state;
         } catch (RuntimeException e) {
+            logFailedStart(namespaceName, containerId);
             boolean configuredPortsReusable = !createAttempted
                     || (containerId != null && !startAttempted)
                     || containerStarted
@@ -275,6 +276,21 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
 
         boolean portsReleased() {
             return portsReleased;
+        }
+    }
+
+    private void logFailedStart(String namespaceName, String containerId) {
+        if (containerId == null) {
+            return;
+        }
+        try {
+            String output = lifecycleManager.logs(containerId, 200, true);
+            LOG.errorf("Artemis startup output for Service Bus namespace '%s' (container %s, last 200 lines):%n%s",
+                    namespaceName, containerId, output.isBlank() ? "(no output available)" : output);
+        } catch (RuntimeException diagnosticsFailure) {
+            // Diagnostic failure must not replace the startup exception or prevent container cleanup.
+            LOG.warnv("Could not read Artemis startup output for namespace ''{0}'' (container {1}): {2}",
+                    namespaceName, containerId, diagnosticsFailure.getMessage());
         }
     }
 

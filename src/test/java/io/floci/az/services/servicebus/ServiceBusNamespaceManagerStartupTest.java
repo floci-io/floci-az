@@ -6,18 +6,29 @@ import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,8 +36,9 @@ import static org.mockito.Mockito.when;
 
 class ServiceBusNamespaceManagerStartupTest {
 
-    @Test
-    void failedDockerStartRemovesContainerWithoutReportingPortsReleased() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"output", "empty", "failure"})
+    void failedDockerStartPreservesDiagnosticsBeforeCleanup(String diagnostics) throws Exception {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
@@ -54,8 +66,16 @@ class ServiceBusNamespaceManagerStartupTest {
         when(builder.withLogRotation()).thenReturn(builder);
         when(builder.build()).thenReturn(spec);
         when(lifecycleManager.create(spec)).thenReturn("container-id");
-        when(lifecycleManager.startCreated("container-id", spec))
-                .thenThrow(new IllegalStateException("readiness failed"));
+        IllegalStateException startupFailure = new IllegalStateException("readiness failed");
+        when(lifecycleManager.startCreated("container-id", spec)).thenThrow(startupFailure);
+        String brokerOutput = "2026-10-27T12:00:00Z FATAL journal unavailable";
+        if (diagnostics.equals("failure")) {
+            when(lifecycleManager.logs("container-id", 200, true))
+                    .thenThrow(new IllegalStateException("logs unavailable"));
+        } else {
+            when(lifecycleManager.logs("container-id", 200, true))
+                    .thenReturn(diagnostics.equals("empty") ? "" : brokerOutput);
+        }
         when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-failed"))
                 .thenReturn(true);
         when(lifecycleManager.removeIfExistsAndConfirm("container-id")).thenReturn(true);
@@ -63,14 +83,30 @@ class ServiceBusNamespaceManagerStartupTest {
         ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
                 config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
 
-        ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
-                ServiceBusNamespaceManager.NamespaceStartException.class,
-                () -> manager.startNamespace("failed", 5672, 5671));
+        Logger logger = Logger.getLogger(ServiceBusNamespaceManager.class.getName());
+        CapturedLogs logs = new CapturedLogs();
+        logger.addHandler(logs);
+        try {
+            ServiceBusNamespaceManager.NamespaceStartException error = assertThrows(
+                    ServiceBusNamespaceManager.NamespaceStartException.class,
+                    () -> manager.startNamespace("failed", 5672, 5671));
 
-        verify(lifecycleManager).stopAndRemove("container-id", null);
-        verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
-        assertFalse(error.portsReleased());
-        assertTrue(manager.listNamespaces().isEmpty());
+            String expected = switch (diagnostics) {
+                case "failure" -> "logs unavailable";
+                case "empty" -> "(no output available)";
+                default -> brokerOutput;
+            };
+            assertTrue(logs.messages.stream().anyMatch(message -> message.contains(expected)));
+            InOrder cleanup = inOrder(lifecycleManager);
+            cleanup.verify(lifecycleManager).logs("container-id", 200, true);
+            cleanup.verify(lifecycleManager).stopAndRemove("container-id", null);
+            cleanup.verify(lifecycleManager).removeIfExistsAndConfirm("container-id");
+            assertSame(startupFailure, error.getCause());
+            assertFalse(error.portsReleased());
+            assertTrue(manager.listNamespaces().isEmpty());
+        } finally {
+            logger.removeHandler(logs);
+        }
     }
 
     @Test
@@ -167,6 +203,7 @@ class ServiceBusNamespaceManagerStartupTest {
         when(builder.withLogRotation()).thenReturn(builder);
         when(builder.build()).thenReturn(spec);
         when(lifecycleManager.create(spec)).thenReturn("container-id");
+        when(lifecycleManager.logs("container-id", 200, true)).thenReturn("");
         when(lifecycleManager.startCreated("container-id", spec))
                 .thenThrow(new IllegalStateException("endpoint resolution failed"));
         when(lifecycleManager.isContainerRunning("container-id")).thenReturn(true);
@@ -203,5 +240,22 @@ class ServiceBusNamespaceManagerStartupTest {
         manager.startMockedNamespace("default");
 
         assertTrue(manager.problems().isEmpty());
+    }
+
+    private static final class CapturedLogs extends Handler {
+        private final List<String> messages = new ArrayList<>();
+
+        @Override
+        public void publish(LogRecord record) {
+            messages.add(new SimpleFormatter().formatMessage(record));
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
     }
 }
