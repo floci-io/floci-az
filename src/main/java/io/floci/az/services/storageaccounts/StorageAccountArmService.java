@@ -28,7 +28,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,7 +36,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCOUNT_KEY;
@@ -425,18 +424,19 @@ public class StorageAccountArmService
         String container = ArmPaths.afterSegment(path, "/containers/", "unknown");
 
         return switch (method) {
+            // BlobContainers_Create: 201 when it created the container, 200 when it already existed.
             case "PUT" -> {
-                blobHandler.ensureContainer(account, container);
+                BlobServiceHandler.ContainerVersion version = blobHandler.ensureContainer(account, container);
                 Map<String, Object> props = Map.of(
                         "publicAccess",      "None",
                         "leaseStatus",       "Unlocked",
                         "leaseState",        "Available",
-                        "lastModifiedTime",  Instant.now().toString(),
-                        "etag",              "\"" + UUID.randomUUID() + "\"");
-                yield Response.status(201).entity(Map.of(
+                        "lastModifiedTime",  version.lastModified().truncatedTo(ChronoUnit.SECONDS).toString());
+                yield Response.status(version.created() ? 201 : 200).entity(Map.of(
                         "id",         path,
                         "name",       container,
                         "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
+                        "etag",       version.etag(),
                         "properties", props
                 )).build();
             }
