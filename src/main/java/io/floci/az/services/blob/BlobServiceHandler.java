@@ -485,7 +485,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
         String key = nsKey(request.accountName(), containerName);
-        Optional<StoredObject> container = store.get(key);
+        Optional<StoredObject> container = readContainer(key);
         if (container.isEmpty()) {
             return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -586,7 +586,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
         List<BlobModels.ContainerItem> containers = store.keys().stream()
                 .filter(k -> k.startsWith(nsFilter))
-                .flatMap(k -> store.get(k).map(container -> new BlobModels.ContainerItem(
+                .flatMap(k -> readContainer(k).map(container -> new BlobModels.ContainerItem(
                         k.substring(NS_PREFIX.length() + request.accountName().length() + 1),
                         new BlobModels.ContainerProperties(
                                 RFC1123_DATE_TIME.format(effectiveLastModified(container)),
@@ -866,7 +866,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> sentinel = store.get(nsKey(request.accountName(), filesystem));
+        Optional<StoredObject> sentinel = readContainer(nsKey(request.accountName(), filesystem));
         if (sentinel.isEmpty()) {
             return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
                     .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -894,7 +894,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        Optional<StoredObject> sentinel = store.get(nsKey(request.accountName(), filesystem));
+        Optional<StoredObject> sentinel = readContainer(nsKey(request.accountName(), filesystem));
         if (sentinel.isEmpty()) {
             return new AzureErrorResponse("FilesystemNotFound", "The specified filesystem does not exist.")
                     .toDataLakeJsonResponse(Response.Status.NOT_FOUND.getStatusCode());
@@ -1282,7 +1282,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     private DataLakePathState resolveDataLakePath(String account, String filesystem, String path) {
         if (path == null || path.isBlank() || "/".equals(path)) {
             String key = nsKey(account, filesystem);
-            return store.get(key).map(object -> new DataLakePathState(key, object, true, false, true)).orElse(null);
+            return readContainer(key).map(object -> new DataLakePathState(key, object, true, false, true)).orElse(null);
         }
         String normalized = normalizeDataLakePath(path);
         if (normalized == null) {
@@ -3597,6 +3597,28 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
     public void ensureContainer(String accountName, String containerName) {
         leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), newContainerRecord()));
+    }
+
+    /**
+     * Reads a container's record. A record stored without an ETag or Last-Modified gets both once, here, so
+     * later reads repeat them.
+     */
+    private Optional<StoredObject> readContainer(String key) {
+        Optional<StoredObject> container = store.get(key);
+        if (container.isEmpty() || hasVersion(container.get())) {
+            return container;
+        }
+        leaseService.exclusively(() -> store.get(key)
+                .filter(stored -> !hasVersion(stored))
+                .ifPresent(stored -> store.put(key, new StoredObject(stored.key(), stored.data(), stored.metadata(),
+                        effectiveLastModified(stored),
+                        stored.etag() == null || stored.etag().isBlank() ? etags.next() : stored.etag()))));
+        return store.get(key);
+    }
+
+    private static boolean hasVersion(StoredObject container) {
+        return container.lastModified() != null && !container.lastModified().equals(Instant.EPOCH)
+                && container.etag() != null && !container.etag().isBlank();
     }
 
     /** A container's stored record: the ETag and Last-Modified it keeps until the container changes. */

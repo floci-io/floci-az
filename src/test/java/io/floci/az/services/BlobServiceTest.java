@@ -872,6 +872,81 @@ public class BlobServiceTest {
     }
 
     @Test
+    void aContainerStoredWithoutAnEtagGetsOneOnItsFirstReadAndKeepsIt() {
+        String key = storeLegacyContainer();
+
+        String etag = given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .extract().header("ETag");
+        String lastModified = given()
+            .when().head("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag))
+            .extract().header("Last-Modified");
+        given()
+            .when().get("/{account}?comp=list&prefix={prefix}", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .body("EnumerationResults.Containers.Container.Properties.Etag", equalTo(etag))
+            .body("EnumerationResults.Containers.Container.Properties.Last-Modified", equalTo(lastModified));
+
+        StoredObject stored = storageFactory.create("blob").get(key).orElseThrow();
+        assertThat(stored.etag(), equalTo(etag));
+        assertThat(stored.lastModified(), not(equalTo(Instant.EPOCH)));
+        assertThat(stored.metadata(), hasEntry("DataLakeFilesystemProperties", "a2V5PXZhbHVl"));
+    }
+
+    @Test
+    void listContainersStoresTheEtagItGivesAContainerStoredWithoutOne() {
+        String key = storeLegacyContainer();
+
+        String etag = given()
+            .when().get("/{account}?comp=list&prefix={prefix}", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .extract().path("EnumerationResults.Containers.Container.Properties.Etag");
+
+        assertThat(etag, matchesPattern("^\"0x[A-F0-9]{15,}\"$"));
+        assertThat(storageFactory.create("blob").get(key).orElseThrow().etag(), equalTo(etag));
+        given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void dataLakeFilesystemPropertiesKeepTheEtagGivenToAFilesystemStoredWithoutOne() {
+        storeLegacyContainer();
+
+        String etag = given()
+            .header("Host", ACCOUNT + ".dfs.core.windows.net")
+            .when().head("/{container}?resource=filesystem", CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .header("x-ms-properties", equalTo("a2V5PXZhbHVl"))
+            .extract().header("ETag");
+        given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    /** Stores a container the way versions before stored container ETags did: no ETag, Last-Modified at the epoch. */
+    private String storeLegacyContainer() {
+        String key = "__ns__:" + ACCOUNT + "/" + CONTAINER;
+        storageFactory.create("blob").put(key, new StoredObject("", new byte[0],
+                Map.of("DataLakeFilesystemProperties", "a2V5PXZhbHVl"), Instant.EPOCH, ""));
+        return key;
+    }
+
+    @Test
     void putBlobWithIfNoneMatchStarOverAnExistingBlobIsBlobAlreadyExists() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
