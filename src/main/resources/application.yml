@@ -16,7 +16,7 @@ quarkus:
       origins: /.*/
   native:
     resources:
-      includes: artemis/**,azure/**
+      includes: artemis/**,azure/**,ui/**
     # Quarkus registers only the http URL protocol by default, so an https java.net.URL throws
     # MalformedURLException in the native image. AksClusterManager.isReady probes k3s over https.
     enable-https-url-handler: true
@@ -168,6 +168,16 @@ floci-az:
     log-max-size: "10m"
     log-max-file: "3"
     resource-namespace: ""
+
+  # The floci-ui web console. Nothing starts at boot: opening /_floci/ui pulls and starts the
+  # container on demand and redirects to it once it is ready.
+  ui:
+    enabled: true                     # FLOCI_AZ_UI_ENABLED
+    image: floci/floci-ui:0.7.0       # FLOCI_AZ_UI_IMAGE
+    port: 4500                        # FLOCI_AZ_UI_PORT: host port; floci-aws's console uses 4500 too, move one to run both
+    internal-port: 4500               # FLOCI_AZ_UI_INTERNAL_PORT: the console's PORT inside its container
+    # endpoint: http://floci-az:4577  # FLOCI_AZ_UI_ENDPOINT: how the console reaches floci-az (derived when unset)
+    keep-running-on-shutdown: false   # FLOCI_AZ_UI_KEEP_RUNNING_ON_SHUTDOWN
 
   services:
     signalr:

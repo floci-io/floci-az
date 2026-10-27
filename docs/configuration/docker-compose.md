@@ -298,6 +298,15 @@ All variables are optional; the default applies when unset.
 | `FLOCI_AZ_DOCKER_DOCKER_CONFIG_PATH` | _(unset)_ | Path to Docker `config.json` for private registry auth |
 | `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE` | _(unset)_ | Namespace inserted into the name of every container and volume floci-az creates (`floci-az-<ns>-...`) and added as the `floci_namespace` label, so parallel emulator instances on one Docker host don't collide |
 
+### Web console
+
+| Variable | Default | Description |
+|---|---|---|
+| `FLOCI_AZ_UI_ENABLED` | `true` | Allow `/_floci/ui` to start the [web console](../ui/index.md) |
+| `FLOCI_AZ_UI_IMAGE` | `floci/floci-ui:0.7.0` | Console image |
+| `FLOCI_AZ_UI_PORT` | `4500` | Host port the console is published on. No `ports:` entry needed |
+| `FLOCI_AZ_UI_ENDPOINT` | _(derived)_ | URL the console uses to reach floci-az |
+
 ---
 
 ## Resource Identity Labels

@@ -91,6 +91,7 @@ io.floci.az.core             : routing, registry, banner, XML utils, auth, DNS
 io.floci.az.core.auth        : auth pipeline, verifiers
 io.floci.az.core.docker      : container infrastructure
 io.floci.az.core.storage     : storage backends
+io.floci.az.core.ui          : web console sidecar (/_floci/ui), Console Contract v2 environment
 io.floci.az.services.<svc>   : per-service handlers
 ```
 

@@ -88,6 +88,14 @@ floci-az:
     log-max-file: "3"
     resource-namespace: ""            # Optional; inserted into sidecar container/volume names (floci-az-<ns>-...)
 
+  ui:                                 # The web console sidecar, started by GET /_floci/ui
+    enabled: true
+    image: floci/floci-ui:0.7.0
+    port: 4500                        # Host port; floci-aws's console uses 4500 too
+    internal-port: 4500               # The console's PORT inside its container
+    # endpoint: http://floci-az:4577  # How the console reaches floci-az (derived when unset)
+    keep-running-on-shutdown: false
+
   services:
     blob:
       enabled: true

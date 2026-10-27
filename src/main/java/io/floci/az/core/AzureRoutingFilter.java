@@ -236,6 +236,15 @@ public class AzureRoutingFilter {
     @ServerRequestFilter(preMatching = true)
     public Uni<Response> filter(ContainerRequestContext requestContext, @Context HttpHeaders httpHeaders,
                                 @Context HttpServerRequest serverRequest) {
+        if (wantsConsolePage(requestContext.getMethod(), requestContext.getUriInfo().getPath(),
+                httpHeaders.getHeaderString(HttpHeaders.ACCEPT))) {
+            // A browser opening the emulator's root gets floci-az's dashboard page, as floci-aws's root does; it
+            // does not start the console. The rewrite happens here, before resource matching, and only for a
+            // request that asks for HTML: the Cosmos SDKs read their DatabaseAccount at "/" with
+            // Accept: application/json and still get it.
+            requestContext.setRequestUri(requestContext.getUriInfo().getBaseUri().resolve(CONSOLE_PAGE_PATH));
+            return Uni.createFrom().nullItem();
+        }
         // Capture context before switching threads
         String path0 = requestContext.getUriInfo().getPath();
         String rawPath0 = serverRequest.path();
@@ -303,6 +312,20 @@ public class AzureRoutingFilter {
         }
 
         return dispatchByAccountSuffix(ctx);
+    }
+
+    /** Where a browser opening the emulator's root is served from: the dashboard, which starts nothing. */
+    static final String CONSOLE_PAGE_PATH = "_floci/ui/dashboard";
+
+    /** A browser's {@code GET /} (or {@code HEAD /}): the root path, with HTML among what it accepts. */
+    static boolean wantsConsolePage(String method, String path, String accept) {
+        if (!"GET".equals(method) && !"HEAD".equals(method)) {
+            return false;
+        }
+        if (path != null && !path.isEmpty() && !"/".equals(path)) {
+            return false;
+        }
+        return accept != null && accept.toLowerCase(Locale.ROOT).contains("text/html");
     }
 
     /** Health and admin endpoints bypass routing entirely. */

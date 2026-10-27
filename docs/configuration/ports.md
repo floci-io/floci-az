@@ -13,6 +13,10 @@ proxied through floci-az.
 
 Both ports are exposed by floci-az itself. Only publish these two in your `docker-compose.yml`.
 
+| Port | Protocol | Purpose |
+|---|---|---|
+| `4500` | HTTP | The [web console](../ui/index.md), once `/_floci/ui` has started it. Published by Docker on the console container: no `ports:` entry needed. Change it with `FLOCI_AZ_UI_PORT` |
+
 ## Path-based routing (port 4577)
 
 All services share port 4577 and are routed by URL path prefix:

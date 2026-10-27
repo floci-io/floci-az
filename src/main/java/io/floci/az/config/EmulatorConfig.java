@@ -51,6 +51,8 @@ public interface EmulatorConfig {
 
     DockerConfig docker();
 
+    UiConfig ui();
+
     CloudConfig cloud();
 
     /**
@@ -1198,5 +1200,38 @@ public interface EmulatorConfig {
             String username();
             String password();
         }
+    }
+
+    /**
+     * The floci-ui web console sidecar. Nothing starts at boot: the first {@code GET /_floci/ui} pulls and
+     * starts the container, which floci-az configures through the Floci Console Contract v2 environment.
+     */
+    interface UiConfig {
+
+        /** When false, {@code /_floci/ui} reports the console as disabled and never touches Docker. */
+        @WithDefault("true")
+        boolean enabled();
+
+        /** The console image. A {@code floci/floci-ui} image gets the built-in profile for its pre-v2 releases. */
+        @WithDefault("floci/floci-ui:0.7.0")
+        String image();
+
+        /** The host port the console is published on. floci-aws's console defaults to the same port. */
+        @WithDefault("4500")
+        int port();
+
+        /** The port the console listens on inside its container, passed to it as {@code PORT}. */
+        @WithDefault("4500")
+        int internalPort();
+
+        /**
+         * The URL the console uses to reach floci-az. Unset, floci-az derives it: its hostname-based base URL
+         * when it runs in a container with {@code hostname} set, otherwise its address as seen from Docker.
+         */
+        Optional<String> endpoint();
+
+        /** Leave the console container running when floci-az stops. */
+        @WithDefault("false")
+        boolean keepRunningOnShutdown();
     }
 }

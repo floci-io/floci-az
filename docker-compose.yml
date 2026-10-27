@@ -5,6 +5,7 @@ services:
       dockerfile: docker/Dockerfile.native
     ports:
       - "4577:4577"
+      # The web console (/_floci/ui) publishes its own port 4500: no entry needed here.
     volumes:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock

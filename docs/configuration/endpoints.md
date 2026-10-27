@@ -8,6 +8,9 @@ are not part of any Azure contract: use them for health probes, test isolation a
 | `GET` | `/_floci/health` | `200` with the health body below, or `503` when a service reports a problem |
 | `GET` | `/health` | Same as `/_floci/health` |
 | `GET` | `/ready` | `200` `{"status": "UP"}` once startup has finished, `503` `{"status": "DOWN"}` before |
+| `GET` | `/_floci/info` | `200` with the [emulator manifest](#emulator-manifest) |
+| `GET` | `/_floci/ui` | Starts the [web console](../ui/index.md) and serves the page that waits for it |
+| `GET` | `/_floci/ui/status` | `200` `{"ready", "url", "error"}`: the console's state, polled by that page |
 | `GET` | `/_floci/tls-cert` | `200` with the TLS certificate (`application/x-pem-file`), or `404` with a JSON explanation when TLS is off |
 | `POST` | `/_admin/reset` | `204`, after clearing the state of every service |
 
@@ -27,6 +30,28 @@ are not part of any Azure contract: use them for health probes, test isolation a
 
 The image's `HEALTHCHECK` (`/usr/local/bin/healthcheck.sh`) probes this path. `/health` is an alias
 with the same body. See [Health Check](docker-compose.md#health-check) for using it from Docker Compose.
+
+## Emulator manifest
+
+`GET /_floci/info` describes the running emulator: its endpoint, every service and whether it is enabled, the
+default subscription, tenant, location and storage account, and the web console settings. A console started
+by floci-az reads it; scripts can too:
+
+```bash
+curl -s http://localhost:4577/_floci/info | jq '.services | map_values(select(. == "enabled")) | keys'
+```
+
+The fields are specified in [Console Contract v2](../ui/console-contract.md#the-manifest).
+
+## Web console
+
+`GET /_floci/ui` starts the [web console](../ui/index.md) the first time it is called and serves a page that
+redirects to it once it is ready. `GET /_floci/ui/status` is what that page polls: `ready` is true once the
+console reaches floci-az, `url` is set as soon as the console has started, and `error` says why it could not
+start.
+
+A browser opening `/` gets floci-az's dashboard page. Only a `GET` or `HEAD` at `/` whose `Accept` header
+asks for `text/html` gets it, so SDKs and `curl` still get the Cosmos DB account at `/`.
 
 ## Readiness
 

@@ -84,6 +84,8 @@ docker run -d --name floci-az \
 
 All services are available at `http://localhost:4577`. Use any account name and key: SharedKey credentials are not validated.
 
+Open `http://localhost:4577/_floci/ui` in a browser for the [web console](https://floci.io/floci-az/ui/), which floci-az starts on demand.
+
 > **Azure Functions** requires access to the Docker socket so Floci AZ can spawn runtime containers on demand. Mount `/var/run/docker.sock` as shown above. If you don't use Functions, the socket mount is optional.
 
 <details>

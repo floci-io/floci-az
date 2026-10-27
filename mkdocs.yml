@@ -69,6 +69,9 @@ nav:
     - Storage Modes: configuration/storage.md
     - Advanced:
       - application.yml Reference: configuration/advanced/application-yml.md
+  - Web Console:
+    - Overview: ui/index.md
+    - Console Contract v2: ui/console-contract.md
   - Services:
     - Overview: services/index.md
     - Azure Resource Manager: services/arm.md

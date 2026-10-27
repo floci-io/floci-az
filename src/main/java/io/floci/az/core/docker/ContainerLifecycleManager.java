@@ -687,6 +687,28 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /** Whether a container exists and runs, kept apart from "Docker could not say". */
+    public enum ContainerPresence { RUNNING, STOPPED, ABSENT, UNKNOWN }
+
+    /**
+     * The container's presence. Unlike {@link #isContainerRunning}, an inspect that fails for any reason other
+     * than a missing container is {@link ContainerPresence#UNKNOWN}, so a caller that recreates a gone
+     * container does not replace a healthy one during a daemon hiccup.
+     */
+    public ContainerPresence presence(String containerId) {
+        try {
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            InspectContainerResponse.ContainerState state = inspect.getState();
+            return state != null && Boolean.TRUE.equals(state.getRunning())
+                    ? ContainerPresence.RUNNING : ContainerPresence.STOPPED;
+        } catch (NotFoundException e) {
+            return ContainerPresence.ABSENT;
+        } catch (Exception e) {
+            LOG.debugv("Could not inspect container {0}: {1}", containerId, e.getMessage());
+            return ContainerPresence.UNKNOWN;
+        }
+    }
+
     /** Runtime state of a container, read via inspect. */
     public record ContainerStateInfo(String status, Integer exitCode, String startedAt, String finishedAt) {
         public boolean isRunning() {

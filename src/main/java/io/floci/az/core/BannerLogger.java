@@ -214,6 +214,7 @@ public class BannerLogger {
             sb.append(serviceStatus("email", true, getStorageMode("email")));
         }
         LOGGER.info(sb.toString());
+        LOGGER.info(webConsoleLine(config));
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
 
@@ -261,6 +262,15 @@ public class BannerLogger {
     public static String parityHint(EmulatorConfig config) {
         return config.parity() == ParityLevel.COMPAT
                 ? "  (set FLOCI_AZ_PARITY=azure for Azure's ARM answers, strict to add its refusals)" : "";
+    }
+
+    /** Where the web console is, which starts only when that page is first opened. */
+    public static String webConsoleLine(EmulatorConfig config) {
+        if (!config.ui().enabled()) {
+            return "Web console: disabled";
+        }
+        return "Web console: open " + config.effectiveBaseUrl() + "/_floci/ui (starts " + config.ui().image()
+                + " on demand, host port " + config.ui().port() + ")";
     }
 
     private String getStorageMode(String service) {
