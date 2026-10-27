@@ -154,16 +154,44 @@ class RefreshTokenGrantIntegrationTest {
     }
 
     @Test
-    void scopesCanBeNarrowedButCannotGainNewPermissions() throws Exception {
+    void scopesCanBeNarrowedWithoutChangingTheDefaultScopes() throws Exception {
         String token = exchange(SCOPE, false).path("refresh_token");
         Response narrowed = tokenRequest(false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
                 .formParam("scope", "api://resource/read").post(TOKEN).then().statusCode(200)
                 .body("id_token", nullValue()).body("scope", is("api://resource/read")).extract().response();
         assertEquals("api://resource/read", claims(narrowed.path("access_token")).path("scp").asText());
-        tokenRequest(false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
-                .formParam("scope", "api://resource/write").post(TOKEN).then().statusCode(400)
-                .body("error", is("invalid_scope")).body("error_codes", contains(70011));
         refresh(narrowed.path("refresh_token"), false).then().statusCode(200).body("id_token", notNullValue());
+    }
+
+    @Test
+    void refreshCanRequestAnotherResourceAndKeepTheSameUserSession() throws Exception {
+        String arm = "https://management.azure.com/user_impersonation";
+        String graph = "https://graph.microsoft.com/User.Read";
+        Response original = exchange("openid profile offline_access " + arm, false);
+        String token = original.path("refresh_token");
+        Response renewed = tokenRequest(false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
+                .formParam("scope", "openid " + graph).post(TOKEN).then().statusCode(200)
+                .body("scope", is(graph)).body("id_token", notNullValue()).extract().response();
+        JsonNode before = claims(original.path("access_token"));
+        JsonNode after = claims(renewed.path("access_token"));
+        assertEquals("openid " + graph, after.path("scp").asText());
+        assertEquals(before.path("sub"), after.path("sub"));
+        assertEquals(before.path("tid"), after.path("tid"));
+        assertNotEquals(token, renewed.path("refresh_token"));
+
+        refresh(renewed.path("refresh_token"), false).then().statusCode(200).body("scope", is(arm));
+        tokenRequest(false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
+                .formParam("scope", graph).post(TOKEN).then().statusCode(200).body("scope", is(graph));
+    }
+
+    @Test
+    void refreshCanRequestAdditionalPermissionsWithoutAConsentModel() throws Exception {
+        String token = exchange(SCOPE, false).path("refresh_token");
+        String scope = "api://resource/read api://resource/write";
+        Response renewed = tokenRequest(false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
+                .formParam("scope", scope).post(TOKEN).then().statusCode(200)
+                .body("scope", is(scope)).body("id_token", nullValue()).extract().response();
+        assertEquals(scope, claims(renewed.path("access_token")).path("scp").asText());
     }
 
     @Test

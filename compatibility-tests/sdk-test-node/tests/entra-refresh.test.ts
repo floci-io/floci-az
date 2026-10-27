@@ -5,12 +5,15 @@ import {
   NetworkResponse,
   PublicClientApplication,
 } from "@azure/msal-node";
+import { Client } from "@microsoft/microsoft-graph-client";
 
 const BASE = process.env.FLOCI_AZ_ENDPOINT ?? "http://localhost:4577";
 const TENANT = "00000000-0000-0000-0000-000000000002";
 const CLIENT = "11111111-1111-1111-1111-111111111111";
 const REDIRECT = "https://app.local/callback";
-const SCOPES = ["openid", "profile", "email", "offline_access"];
+const ARM_SCOPE = "https://management.azure.com/user_impersonation";
+const GRAPH_SCOPE = "https://graph.microsoft.com/User.Read";
+const SCOPES = ["openid", "profile", "email", "offline_access", ARM_SCOPE];
 
 // MSAL requires an HTTPS authority. Its supported network adapter maps only this emulator's
 // requests to the configured local transport, as the Java compatibility suite does too.
@@ -90,4 +93,22 @@ test("MSAL renews a PKCE session from its refresh-token cache", async () => {
   await client.acquireTokenSilent({ account: renewed.account!, scopes: SCOPES, forceRefresh: true });
   expect(usedRefreshTokens).toHaveLength(2);
   expect(usedRefreshTokens[0] === usedRefreshTokens[1]).toBe(false);
+
+  const graph = await client.acquireTokenSilent({ account: renewed.account!, scopes: [GRAPH_SCOPE] });
+  expect(usedRefreshTokens).toHaveLength(3);
+  expect(graph.account?.homeAccountId).toBe(initial.account?.homeAccountId);
+  expect(graph.scopes.map((scope) => scope.toLowerCase())).toContain(GRAPH_SCOPE.toLowerCase());
+  const graphClaims = JSON.parse(Buffer.from(graph.accessToken.split(".")[1], "base64url").toString("utf8"));
+  expect(graphClaims.scp.toLowerCase()).toContain(GRAPH_SCOPE.toLowerCase());
+  const graphClient = Client.init({
+    baseUrl: BASE,
+    customHosts: new Set([new URL(BASE).host]),
+    authProvider: (done) => done(null, graph.accessToken),
+  });
+  const groups = await graphClient.api(`/users/${graphClaims.oid}/getMemberGroups`).post({ securityEnabledOnly: false });
+  expect(groups.value).toContain("44444444-4444-4444-4444-444444444444");
+
+  const arm = await client.acquireTokenSilent({ account: graph.account!, scopes: SCOPES, forceRefresh: true });
+  expect(usedRefreshTokens).toHaveLength(4);
+  expect(arm.scopes.map((scope) => scope.toLowerCase())).toContain(ARM_SCOPE.toLowerCase());
 });

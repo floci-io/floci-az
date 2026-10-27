@@ -9,7 +9,7 @@ import jakarta.ws.rs.core.Response;
 import java.time.Duration;
 import java.time.Instant;
 
-/** Redeems opaque, directory-backed refresh consent at the v2 token endpoint. */
+/** Redeems an opaque, directory-backed user session at the v2 token endpoint. */
 @ApplicationScoped
 public class RefreshTokenGrant implements GrantHandler {
     private final EntraStore store;
@@ -62,9 +62,6 @@ public class RefreshTokenGrant implements GrantHandler {
             return responses.error(AadstsError.MISSING_CLIENT_CREDENTIAL);
         }
         String scope = request.scope() == null || request.scope().isBlank() ? grant.scope() : request.scope();
-        if (!Scopes.values(grant.scope()).containsAll(Scopes.values(scope))) {
-            return responses.error(AadstsError.INVALID_SCOPE);
-        }
         DirectoryUser user = directory.user(grant.directoryTenantId(), grant.userObjectId()).orElse(null);
         if (user == null) {
             return responses.error(AadstsError.REFRESH_TOKEN_INVALID);

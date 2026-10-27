@@ -147,9 +147,11 @@ entry, binds a confidential session. Public-client sessions need no secret.
 
 The response contains a fresh access token and replacement refresh token. `openid` permits a
 fresh ID token for the same user, without repeating the authorization request's nonce. MSAL's
-`client_info=1` is supported for account caching. An optional `scope` may narrow the original
-authorization scopes; omitting it uses the original scopes. A narrowed access token does not
-remove the refresh token's original consent. New permissions require another authorization.
+`client_info=1` is supported for account caching. An optional `scope` selects the access token's
+scopes, including another resource such as Graph after an ARM sign-in. The emulator does not
+model consent, so additional scopes are accepted for the same client and user session.
+Omitting `scope` uses the original authorization scopes, even after a replacement was issued
+for a different resource. A narrowed access token does not remove those default scopes.
 
 Refresh tokens last 90 days by default, and a replacement starts a new 90-day lifetime. A redirect
 URI registered under the application's `spa.redirectUris` instead creates a 24-hour session;
@@ -158,7 +160,7 @@ matching [Microsoft's refresh-token contract](https://learn.microsoft.com/en-us/
 
 Tokens remain bound to the client and resolved tenant that authorized them, and renewal resolves
 the same user in that directory. Invalid, revoked, expired or incorrectly bound tokens return
-`invalid_grant`; extra scopes return `invalid_scope`. Expiry uses AADSTS700082, or AADSTS700084
+`invalid_grant`. Expiry uses AADSTS700082, or AADSTS700084
 for the fixed SPA lifetime. Refresh state uses the existing Entra storage mode and persists only
 token digests. Issuance removes expired records at most once a minute, including on the first
 issuance after restart. Emulator reset clears all refresh state. Cross-tenant consent, B2B sessions, password-change
