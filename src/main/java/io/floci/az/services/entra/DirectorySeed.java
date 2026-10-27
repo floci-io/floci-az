@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** The public startup seed format, translated into directory objects before anything is written. */
 final class DirectorySeed {
@@ -40,14 +42,14 @@ final class DirectorySeed {
         Map<String, List<String>> memberships = new LinkedHashMap<>();
         for (JsonNode application : array(root, "applications")) {
             fields(application, Set.of("id", "appId", "displayName", "clientSecret"));
+            String appId = required(application, "appId");
             List<ObjectNode> credentials = new ArrayList<>();
             if (application.has("clientSecret")) {
                 ObjectNode credential = MAPPER.createObjectNode();
-                credential.put("keyId", "seed");
+                credential.put("keyId", UUID.nameUUIDFromBytes(appId.getBytes(StandardCharsets.UTF_8)).toString());
                 credential.put(GraphDirectoryStore.SECRET_TEXT, required(application, "clientSecret"));
                 credentials.add(credential);
             }
-            String appId = required(application, "appId");
             objects.add(GraphDirectoryStore.application(tenant, id(application), appId,
                     optional(application, "displayName", appId), credentials));
         }

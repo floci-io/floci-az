@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,6 +16,32 @@ class DirectorySeedTest {
 
     @TempDir
     Path temp;
+
+    @Test
+    void seededSecretKeyIdsAreStableGuidsAcrossDirectoryRecreation() throws Exception {
+        Path file = temp.resolve("seed.json");
+        Files.writeString(file, """
+                {"applications":[
+                  {"id":"first","appId":"aaaaaaaa-1111-1111-1111-111111111111","clientSecret":"first-secret"},
+                  {"id":"second","appId":"bbbbbbbb-1111-1111-1111-111111111111","clientSecret":"second-secret"}
+                ]}
+                """);
+        GraphDirectoryStore original = new GraphDirectoryStore(new InMemoryStorage<>(), "tenant");
+        GraphDirectoryStore recreated = new GraphDirectoryStore(new InMemoryStorage<>(), "tenant");
+        DirectorySeed.load(file, "tenant", original);
+        DirectorySeed.load(file, "tenant", original);
+        DirectorySeed.load(file, "tenant", recreated);
+
+        String first = original.get("tenant", DirectoryEntitySet.APPLICATIONS, "first").orElseThrow()
+                .props().path("passwordCredentials").get(0).path("keyId").asText();
+        assertEquals(first, UUID.fromString(first).toString());
+        assertEquals(first, recreated.get("tenant", DirectoryEntitySet.APPLICATIONS, "first").orElseThrow()
+                .props().path("passwordCredentials").get(0).path("keyId").asText());
+        String second = original.get("tenant", DirectoryEntitySet.APPLICATIONS, "second").orElseThrow()
+                .props().path("passwordCredentials").get(0).path("keyId").asText();
+        assertEquals(second, UUID.fromString(second).toString());
+        assertNotEquals(first, second);
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {

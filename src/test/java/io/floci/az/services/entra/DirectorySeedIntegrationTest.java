@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
@@ -57,6 +58,9 @@ class DirectorySeedIntegrationTest {
         assertEquals(Set.of(GROUP), directory.memberGroupIds(TENANT, USER));
         assertTrue(directory.applicationByAppId(TENANT, CLIENT).orElseThrow()
                 .passwordCredentials().getFirst().matches(SECRET));
+        String keyId = given().get("/v1.0/applications/aaaaaaaa-0000-0000-0000-000000000001")
+                .then().statusCode(200).extract().path("passwordCredentials[0].keyId");
+        assertEquals(keyId, UUID.fromString(keyId).toString());
         storage.create("entra").scan(key -> true).forEach(entry ->
                 assertFalse(new String(entry.data(), StandardCharsets.UTF_8).contains(SECRET)));
         given().contentType("application/x-www-form-urlencoded")
