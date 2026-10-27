@@ -5,6 +5,7 @@ import com.github.dockerjava.api.command.InspectContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.ListContainersCmd;
 import com.github.dockerjava.api.command.RemoveContainerCmd;
+import com.github.dockerjava.api.command.StopContainerCmd;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Container;
 import io.floci.az.config.EmulatorConfig;
@@ -66,11 +67,27 @@ class ContainerLifecycleManagerCleanupTest {
 
         assertEquals(1, removed);
         verify(removeCmd).withForce(true);
+        verify(removeCmd).withRemoveVolumes(true);
         verify(removeCmd).exec();
         verify(dockerClient, never()).removeContainerCmd("live");
         verify(dockerClient, never()).removeContainerCmd("ownerless");
         verify(dockerClient, never()).removeContainerCmd("foreign-namespace");
         verify(dockerClient, never()).removeContainerCmd("unrelated-service");
+    }
+
+    @Test
+    void stopAndRemoveDeletesTheContainersAnonymousVolumes() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        StopContainerCmd stopCmd = mock(StopContainerCmd.class, RETURNS_SELF);
+        when(dockerClient.stopContainerCmd("sidecar")).thenReturn(stopCmd);
+        RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class, RETURNS_SELF);
+        when(dockerClient.removeContainerCmd("sidecar")).thenReturn(removeCmd);
+
+        manager(dockerClient).stopAndRemove("sidecar", null);
+
+        verify(removeCmd).withForce(true);
+        verify(removeCmd).withRemoveVolumes(true);
+        verify(removeCmd).exec();
     }
 
     @Test

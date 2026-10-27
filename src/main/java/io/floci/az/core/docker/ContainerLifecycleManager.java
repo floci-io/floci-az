@@ -274,12 +274,22 @@ public class ContainerLifecycleManager {
         }
 
         try {
-            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+            forceRemove(containerId);
             LOG.debugv("Removed container {0}", containerId);
         } catch (NotFoundException ignored) {
         } catch (Exception e) {
             LOG.warnv("Error removing container {0}: {1}", containerId, e.getMessage());
         }
+    }
+
+    /**
+     * Force-removes a container together with its anonymous volumes. Images such as Artemis
+     * declare a {@code VOLUME}, so Docker creates an anonymous volume per container; without
+     * {@code withRemoveVolumes(true)} that volume outlives the container and leaks disk on every
+     * start. Named volumes are never removed by this flag, so persistent storage is unaffected.
+     */
+    private void forceRemove(String containerIdOrName) {
+        dockerClient.removeContainerCmd(containerIdOrName).withForce(true).withRemoveVolumes(true).exec();
     }
 
     /**
@@ -391,7 +401,7 @@ public class ContainerLifecycleManager {
             LOG.infov("Initialised shared volume {0} root (cmd: {1})", volumeName, script);
         } finally {
             try {
-                dockerClient.removeContainerCmd(helperId).withForce(true).exec();
+                forceRemove(helperId);
             } catch (Exception e) {
                 // best-effort cleanup of the one-off helper
                 LOG.debugv("Could not remove shared-volume init helper {0}: {1}", helperId, e.getMessage());
@@ -520,7 +530,7 @@ public class ContainerLifecycleManager {
      */
     public boolean removeIfExistsAndConfirm(String name) {
         try {
-            dockerClient.removeContainerCmd(name).withForce(true).exec();
+            forceRemove(name);
             LOG.infov("Removed stale container {0}", name);
             return true;
         } catch (NotFoundException ignored) {
@@ -533,7 +543,7 @@ public class ContainerLifecycleManager {
 
     private boolean tryRemoveIfExists(String name) {
         try {
-            dockerClient.removeContainerCmd(name).withForce(true).exec();
+            forceRemove(name);
             LOG.infov("Removed stale container {0}", name);
             return true;
         } catch (NotFoundException ignored) {

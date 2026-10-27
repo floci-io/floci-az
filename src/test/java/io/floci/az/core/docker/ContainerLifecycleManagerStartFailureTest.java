@@ -62,11 +62,13 @@ class ContainerLifecycleManagerStartFailureTest {
         RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class);
         when(dockerClient.removeContainerCmd("container-id")).thenReturn(removeCmd);
         when(removeCmd.withForce(true)).thenReturn(removeCmd);
+        when(removeCmd.withRemoveVolumes(true)).thenReturn(removeCmd);
 
         RuntimeException thrown = assertThrows(RuntimeException.class,
                 () -> manager.createAndStart(spec));
 
         assertSame(startFailure, thrown, "original start failure must propagate");
+        verify(removeCmd).withRemoveVolumes(true);
         verify(removeCmd).exec();
     }
 
