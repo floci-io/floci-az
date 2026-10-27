@@ -47,7 +47,8 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
 - **Range download**: `Range: bytes=…` returns `206 Partial Content`
 - **Conditional download**: `If-Match` / `If-None-Match` honored; a stale ETag is rejected
 - **ETags**: sent in the quoted `0x` hex form the Blob service uses (`"0x8DC1A2B3C4D5E6F"`). List
-  Blobs reports each blob's ETag without the quotes, as Azurite does
+  Blobs reports each blob's ETag without the quotes, as Azurite does. A container keeps the ETag and
+  `Last-Modified` from Create Container, so Get Container Properties and List Containers repeat them
 - **Metadata**: `x-ms-meta-*` set on upload and returned on Get, round-tripped exactly
 - **Blob index tags**: Get and Set Blob Tags (`?comp=tags`, including on a snapshot), `x-ms-tags` on
   Put Blob and Put Block List, and `x-ms-tag-count` on Get Blob and Get Blob Properties. Tag sets

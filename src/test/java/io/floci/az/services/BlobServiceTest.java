@@ -810,6 +810,68 @@ public class BlobServiceTest {
     }
 
     @Test
+    void getContainerPropertiesKeepsTheEtagAndLastModifiedFromCreateContainer() {
+        io.restassured.response.Response created = given()
+            .put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        created.then().statusCode(201);
+        String etag = created.header("ETag");
+        String lastModified = created.header("Last-Modified");
+
+        for (int i = 0; i < 2; i++) {
+            given()
+                .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+                .then()
+                .statusCode(200)
+                .header("ETag", equalTo(etag))
+                .header("Last-Modified", equalTo(lastModified));
+        }
+        given()
+            .when().head("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void listContainersKeepsTheEtagFromCreateContainer() {
+        String etag = given()
+            .put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        for (int i = 0; i < 2; i++) {
+            given()
+                .when().get("/{account}?comp=list&prefix={prefix}", ACCOUNT, CONTAINER)
+                .then()
+                .statusCode(200)
+                .body("EnumerationResults.Containers.Container.Properties.Etag", equalTo(etag));
+        }
+    }
+
+    @Test
+    void recreatingAContainerGivesItANewEtag() {
+        String first = given()
+            .put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+        given().delete("/{account}/{container}?restype=container", ACCOUNT, CONTAINER).then().statusCode(202);
+        String second = given()
+            .put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(201)
+            .extract().header("ETag");
+
+        assertThat(second, not(equalTo(first)));
+        given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(second));
+    }
+
+    @Test
     void putBlobWithIfNoneMatchStarOverAnExistingBlobIsBlobAlreadyExists() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()

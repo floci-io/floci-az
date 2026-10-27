@@ -484,13 +484,15 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         if (authFailure != null) {
             return authFailure;
         }
-        if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+        String key = nsKey(request.accountName(), containerName);
+        Optional<StoredObject> container = store.get(key);
+        if (container.isEmpty()) {
             return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
                     .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
         }
         return Response.ok()
-                .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                .header("ETag", etags.next())
+                .header("Last-Modified", RFC1123_DATE_TIME.format(effectiveLastModified(container.get())))
+                .header("ETag", effectiveEtag(container.get(), key))
                 // Get Container Properties always reports the lease state, and strict SDK clients
                 // read it unconditionally. Leases are not modelled, so a container is always available.
                 .header("x-ms-lease-state", "available")
@@ -515,10 +517,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 return new AzureErrorResponse("ContainerAlreadyExists", "The specified container already exists.")
                         .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
             }
-            store.put(key, NS_SENTINEL);
+            StoredObject container = newContainerRecord();
+            store.put(key, container);
             return Response.status(Response.Status.CREATED)
-                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
-                    .header("ETag", etags.next())
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(container.lastModified()))
+                    .header("ETag", container.etag())
                     .build();
         });
     }
@@ -583,11 +586,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
 
         List<BlobModels.ContainerItem> containers = store.keys().stream()
                 .filter(k -> k.startsWith(nsFilter))
-                .map(k -> k.substring(NS_PREFIX.length() + request.accountName().length() + 1))
-                .map(name -> new BlobModels.ContainerItem(name, new BlobModels.ContainerProperties(
-                        RFC1123_DATE_TIME.format(Instant.now()),
-                        etags.next()
-                )))
+                .flatMap(k -> store.get(k).map(container -> new BlobModels.ContainerItem(
+                        k.substring(NS_PREFIX.length() + request.accountName().length() + 1),
+                        new BlobModels.ContainerProperties(
+                                RFC1123_DATE_TIME.format(effectiveLastModified(container)),
+                                effectiveEtag(container, k)))).stream())
                 .collect(Collectors.toList());
 
         BlobModels.ContainerListResponse response = new BlobModels.ContainerListResponse(
@@ -3593,7 +3596,12 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     public void ensureContainer(String accountName, String containerName) {
-        leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), NS_SENTINEL));
+        leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), newContainerRecord()));
+    }
+
+    /** A container's stored record: the ETag and Last-Modified it keeps until the container changes. */
+    private StoredObject newContainerRecord() {
+        return new StoredObject("", new byte[0], Map.of(), Instant.now(), etags.next());
     }
 
     /**
