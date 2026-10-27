@@ -6,7 +6,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.util.Comparator;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,6 +36,8 @@ public class SqlProvisioningService {
     private final ExecutorService executor;
     private final Map<String, SqlProvisioningOperation> operations = new ConcurrentHashMap<>();
     private final Map<String, String> activeOperations = new ConcurrentHashMap<>();
+    /** Terminal operation ids, oldest first; guarded by itself. */
+    private final Deque<String> terminalOrder = new ArrayDeque<>();
     private final Map<String, Future<?>> futures = new ConcurrentHashMap<>();
 
     @Inject
@@ -93,14 +96,14 @@ public class SqlProvisioningService {
         if (future != null) {
             future.cancel(true);
         }
-        operations.computeIfPresent(operationId,
-            (id, operation) -> operation.complete("Canceled", "OperationCanceled",
-                "SQL server provisioning was canceled."));
-        pruneTerminalOperations();
+        finish(operationId, "Canceled", "OperationCanceled", "SQL server provisioning was canceled.");
     }
 
     public synchronized void clear() {
         List.copyOf(activeOperations.keySet()).forEach(this::cancel);
+        synchronized (terminalOrder) {
+            terminalOrder.clear();
+        }
         operations.clear();
         futures.clear();
     }
@@ -156,23 +159,32 @@ public class SqlProvisioningService {
     }
 
     private void complete(String operationId, String status, String code, String message) {
-        SqlProvisioningOperation completed = operations.computeIfPresent(operationId,
-            (id, operation) -> operation.complete(status, code, message));
+        SqlProvisioningOperation completed = finish(operationId, status, code, message);
         if (completed != null) {
             activeOperations.remove(key(completed.serverName()), operationId);
-            pruneTerminalOperations();
         }
     }
 
-    private void pruneTerminalOperations() {
-        List<SqlProvisioningOperation> terminal = operations.values().stream()
-            .filter(operation -> !operation.inProgress())
-            .sorted(Comparator.comparing(SqlProvisioningOperation::endTime))
-            .toList();
-        for (int index = 0; index < terminal.size() - MAX_TERMINAL_OPERATIONS; index++) {
-            SqlProvisioningOperation operation = terminal.get(index);
-            operations.remove(operation.id(), operation);
+    /**
+     * Marks an operation terminal and records it in completion order. Eviction follows that
+     * order rather than {@code endTime}: operations finishing within one clock tick share an
+     * {@code endTime}, and ties would leave the evicted operation to map iteration order.
+     */
+    private SqlProvisioningOperation finish(String operationId, String status, String code, String message) {
+        boolean[] becameTerminal = {false};
+        SqlProvisioningOperation finished = operations.computeIfPresent(operationId, (id, operation) -> {
+            becameTerminal[0] = operation.inProgress();
+            return operation.complete(status, code, message);
+        });
+        if (becameTerminal[0]) {
+            synchronized (terminalOrder) {
+                terminalOrder.addLast(operationId);
+                while (terminalOrder.size() > MAX_TERMINAL_OPERATIONS) {
+                    operations.remove(terminalOrder.removeFirst());
+                }
+            }
         }
+        return finished;
     }
 
     private boolean isActive(String operationId, String serverName) {
