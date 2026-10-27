@@ -352,15 +352,21 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     /**
-     * {@code CommunicationServices_CheckNameAvailability}: a communication service name the name registry holds, in
-     * any subscription, is {@code AlreadyExists}; the reasons and messages are the spec's examples. Only a
-     * communication service name is global, so a body naming another type is always available.
+     * {@code CommunicationServices_CheckNameAvailability}: a communication service name outside the
+     * {@code communicationServiceName} rule is {@code Invalid}, and one the name registry holds, in any
+     * subscription, is {@code AlreadyExists}; the reasons are the common-types v5 enum and the other messages the
+     * spec's examples. Only a communication service name is global, so a body naming another type is always
+     * available.
      */
     private Response checkNameAvailability(AzureRequest req) {
         Map<String, Object> body = ArmJson.parseBodyLenient(req);
         String name = ArmJson.string(body, "name", "");
         String type = ArmJson.string(body, "type", COMMUNICATION_SERVICES);
         boolean global = type.equalsIgnoreCase(COMMUNICATION_SERVICES) || type.equalsIgnoreCase("communicationServices");
+        if (global && !EmailArmSurface.COMMUNICATION_SERVICE_NAME.accepts(name)) {
+            return Response.ok(Map.of("nameAvailable", false, "reason", "Invalid",
+                    "message", EmailArmSurface.COMMUNICATION_SERVICE_NAME.message(name))).build();
+        }
         if (global && names.owner(cloud(req), CloudSuffix.COMMUNICATION, name).isPresent()) {
             return Response.ok(Map.of("nameAvailable", false, "reason", "AlreadyExists",
                     "message", "Requested name is unavailable for the requested type")).build();

@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.lessThan;
@@ -151,6 +152,17 @@ class EmailResourceStoreTest {
         given().contentType("application/json").body(BODY)
             .when().put("/subscriptions/sub-norg/providers/Microsoft.Communication/emailServices/norg" + API)
             .then().statusCode(404);
+    }
+
+    @Test
+    void checkNameAvailabilityRejectsANameOutsideTheCommunicationServiceNameRule() {
+        // Azure refuses the name, as the PUT here does under parity-overrides.strict-names, so it is not available.
+        given().contentType("application/json")
+            .body("{\"name\":\"has.dot\",\"type\":\"Microsoft.Communication/CommunicationServices\"}")
+            .when().post("/subscriptions/sub-invalid/providers/Microsoft.Communication/checkNameAvailability" + API)
+            .then().statusCode(200)
+            .body("nameAvailable", equalTo(false)).body("reason", equalTo("Invalid"))
+            .body("message", containsString("has.dot"));
     }
 
     @Test

@@ -136,7 +136,9 @@ floci-az:
   `{name}.communication.azure.com`: the first subscription to create a name owns it, a create of
   the same name from another subscription or resource group answers `409 Conflict`, and the name is
   free again once the owner deletes it. `checkNameAvailability` answers from the same owners, in any
-  subscription, with the reasons and messages of the spec examples (`AlreadyExists`, `NameAvailable`);
+  subscription, with the reasons and messages of the spec examples (`AlreadyExists`, `NameAvailable`), and
+  answers `Invalid` for a name outside the communication service name rule (1 to 63 letters, digits,
+  underscores and hyphens);
   a body whose `type` names another resource type is always available. Email services and domains are scoped to their resource
   group. A path that differs from the creating one only in case addresses the same resource, which
   keeps the casing of its first PUT.
