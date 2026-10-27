@@ -16,23 +16,30 @@ class ConsoleRootRoutingTest {
 
     @Test
     void aBrowserOpeningTheRootGetsTheConsolePage() {
-        assertTrue(AzureRoutingFilter.wantsConsolePage("GET", "/", BROWSER_ACCEPT));
-        assertTrue(AzureRoutingFilter.wantsConsolePage("GET", "", BROWSER_ACCEPT));
-        assertTrue(AzureRoutingFilter.wantsConsolePage("HEAD", "/", "TEXT/HTML"));
+        assertTrue(AzureRoutingFilter.wantsConsolePage("GET", "/", null, BROWSER_ACCEPT, false));
+        assertTrue(AzureRoutingFilter.wantsConsolePage("GET", "", null, BROWSER_ACCEPT, false));
+        assertTrue(AzureRoutingFilter.wantsConsolePage("HEAD", "/", null, "TEXT/HTML", false));
     }
 
     @Test
     void anSdkReadingTheRootKeepsTheAzureAnswer() {
-        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", "application/json"));
-        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", "*/*"));
-        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", null));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", null, "application/json", false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", null, "*/*", false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", null, null, false));
     }
 
     @Test
     void onlyTheRootAndOnlyReadsAreRedirected() {
-        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/devstoreaccount1", BROWSER_ACCEPT));
-        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "devstoreaccount1/container", BROWSER_ACCEPT));
-        assertFalse(AzureRoutingFilter.wantsConsolePage("POST", "/", BROWSER_ACCEPT));
-        assertFalse(AzureRoutingFilter.wantsConsolePage("PUT", "/", BROWSER_ACCEPT));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/devstoreaccount1", null, BROWSER_ACCEPT, false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "devstoreaccount1/container", null, BROWSER_ACCEPT, false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("POST", "/", null, BROWSER_ACCEPT, false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("PUT", "/", null, BROWSER_ACCEPT, false));
+    }
+
+    @Test
+    void aBrowsersAzureCallAtTheRootKeepsTheAzureAnswer() {
+        // Host-style List Containers (devstoreaccount1.blob.localhost/?comp=list) opened in a browser.
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", "comp=list", BROWSER_ACCEPT, false));
+        assertFalse(AzureRoutingFilter.wantsConsolePage("GET", "/", null, BROWSER_ACCEPT, true));
     }
 }

@@ -248,9 +248,6 @@ public class FlociUiManager {
             LOG.warnv("docker.endpoint-mode is published: a console on a remote Docker daemon may not reach "
                     + "floci-az at a derived address; set FLOCI_AZ_UI_ENDPOINT to the URL it should use");
         }
-        if (containerDetector.isRunningInContainer() && config.hostname().isPresent()) {
-            return config.effectiveBaseUrl();
-        }
         return "http://" + HostLiterals.forUrl(dockerHostResolver.resolve()) + ":" + config.port();
     }
 

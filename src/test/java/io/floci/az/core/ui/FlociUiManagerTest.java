@@ -138,14 +138,15 @@ class FlociUiManagerTest {
     }
 
     @Test
-    void inAContainerWithAHostnameTheConsoleUsesTheBaseUrl() {
+    void aClientFacingHostnameIsNotWhereTheConsoleReachesFlociAz() {
         when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(config.hostname()).thenReturn(Optional.of("floci-az"));
-        when(config.effectiveBaseUrl()).thenReturn("http://floci-az:4577");
+        when(config.hostname()).thenReturn(Optional.of("azure.example.test"));
+        when(config.effectiveBaseUrl()).thenReturn("http://azure.example.test:4577");
+        when(dockerHostResolver.resolve()).thenReturn("172.18.0.5");
 
         manager().ensureStarted();
 
-        verify(builder).withEnv("FLOCI_AZURE_ENDPOINT", "http://floci-az:4577");
+        verify(builder).withEnv("FLOCI_AZURE_ENDPOINT", "http://172.18.0.5:4577");
         verify(builder, never()).withHostDockerInternalOnLinux();
     }
 

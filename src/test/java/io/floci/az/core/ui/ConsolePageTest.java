@@ -49,6 +49,16 @@ class ConsolePageTest {
     }
 
     @Test
+    void aConsoleThatRunsButCannotReachFlociAzCanStillBeOpened() throws IOException {
+        String page = page();
+
+        assertTrue(page.contains("s.error, s.url)"), "the launch page must pass the console URL to its failure view");
+        assertTrue(page.contains("id=\"open-anyway\""));
+        assertTrue(page.contains("(ui.url ? ' <a href=\"' + escapeHtml(ui.url)"),
+                "the dashboard must offer the console URL alongside the error");
+    }
+
+    @Test
     void serviceNamesAreEscapedBeforeTheyBecomeMarkup() throws IOException {
         assertTrue(page().contains("escapeHtml(s.name)"));
     }

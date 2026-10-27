@@ -422,6 +422,7 @@
     <pre class="error" id="launch-error" hidden></pre>
     <div class="actions" id="launch-actions" hidden>
       <button class="btn" id="retry">Try again</button>
+      <a class="btn btn-quiet" id="open-anyway" hidden>Open Floci UI anyway</a>
       <a class="btn btn-quiet home" href="/">Back to dashboard</a>
     </div>
   </div>
@@ -554,6 +555,7 @@
       if (info && info.endpoint) { $("f-endpoint").textContent = info.endpoint; }
       if (ui) {
         $("r-ui").innerHTML = ui.error ? "Failed to start: " + escapeHtml(ui.error)
+                        + (ui.url ? ' <a href="' + escapeHtml(ui.url) + '">Open it anyway</a>' : "")
                 : ui.ready && ui.url ? 'Running at <a href="' + escapeHtml(ui.url) + '">' + escapeHtml(ui.url) + "</a>"
                         : "Not started. Opens as a sidecar container the first time you use it.";
         if (ui.ready && ui.url) { $("ui-link").href = ui.url; }
@@ -796,7 +798,7 @@
         $("elapsed").textContent = s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s";
       }, 1000);
 
-      function fail(heading, text, detail) {
+      function fail(heading, text, detail, url) {
         clearInterval(timer);
         setStatus("failed", "Not running");
         $("progress").className = "progress stopped";
@@ -806,6 +808,8 @@
         $("launch-facts").hidden = true;
         $("launch-error").hidden = !detail;
         $("launch-error").textContent = detail || "";
+        $("open-anyway").hidden = !url;
+        if (url) { $("open-anyway").href = url; }
         $("launch-actions").hidden = false;
         $("retry").focus();
       }
@@ -830,7 +834,7 @@
                   $("last").textContent = "Container not ready yet";
                   if (s.ready && s.url) { open(s.url); return; }
                   if (s.error) {
-                    fail("Floci UI couldn't start", "The emulator reported this error while launching the UI container:", s.error);
+                    fail("Floci UI couldn't start", "The emulator reported this error while launching the UI container:", s.error, s.url);
                     return;
                   }
                   if (attempts > MAX_ATTEMPTS) {

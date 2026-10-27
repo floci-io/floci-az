@@ -12,7 +12,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -74,10 +76,28 @@ public class EmulatorInfoController {
     private Map<String, String> services() {
         Map<String, String> services = new TreeMap<>();
         for (AzureServiceHandler handler : registry.handlers()) {
-            String type = handler.getServiceType();
-            services.put(type, registry.isEnabled(type) ? "enabled" : "disabled");
+            for (String type : serviceTypes(handler)) {
+                services.put(type, registry.isEnabled(type) ? "enabled" : "disabled");
+            }
         }
         return services;
+    }
+
+    /**
+     * The service types a handler answers for. A handler whose account routes name other types and never its
+     * own (the Cosmos engines: {@code -cosmos-mongo} is {@code cosmos-mongo}) is listed by those types, since
+     * its own type routes nothing and each engine is enabled on its own.
+     */
+    static Set<String> serviceTypes(AzureServiceHandler handler) {
+        String own = handler.getServiceType();
+        Set<String> routed = new LinkedHashSet<>();
+        for (ServiceRoutes.SuffixRoute route : handler.routes().accountSuffixes()) {
+            routed.add(route.serviceType());
+        }
+        if (routed.isEmpty() || routed.contains(own)) {
+            return Set.of(own);
+        }
+        return routed;
     }
 
     private Map<String, Object> defaults() {

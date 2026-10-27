@@ -61,10 +61,13 @@ The console joins the network in `FLOCI_AZ_SERVICES_DOCKER_NETWORK`, like every 
 
 Unless `FLOCI_AZ_UI_ENDPOINT` is set, floci-az derives the address:
 
-- **floci-az in Docker Compose with `FLOCI_AZ_HOSTNAME` set:** floci-az's base URL, for example
-  `http://floci-az:4577`, reachable over the shared network.
-- **Otherwise:** the Docker host as seen from a container (`host.docker.internal` on Docker Desktop) and
-  floci-az's port, for example `http://host.docker.internal:4577`.
+- **floci-az in Docker:** floci-az's own address on the shared network and its port, for example
+  `http://172.18.0.5:4577`.
+- **floci-az on the host:** the Docker host as seen from a container (`host.docker.internal` on Docker Desktop)
+  and floci-az's port, for example `http://host.docker.internal:4577`.
+
+`FLOCI_AZ_HOSTNAME` is not used for this: it names floci-az as clients see it, which behind a reverse proxy is
+not an address the console container can reach.
 
 Set `FLOCI_AZ_UI_ENDPOINT` when neither works, for example with `FLOCI_AZ_DOCKER_ENDPOINT_MODE=published` on a
 remote Docker daemon. floci-az logs a warning in that mode.
@@ -74,7 +77,7 @@ remote Docker daemon. floci-az logs a warning in that mode.
 | What you see | Cause and fix |
 |---|---|
 | "Host port 4500 is already in use" | Another console, often floci-aws's, holds the port. Set `FLOCI_AZ_UI_PORT` |
-| "Floci UI couldn't start" with a connection error | The console runs but cannot reach floci-az at the derived address. Set `FLOCI_AZ_UI_ENDPOINT` to a URL the console container can reach |
+| "Floci UI couldn't start" with a connection error | The console runs but cannot reach floci-az at the derived address. Set `FLOCI_AZ_UI_ENDPOINT` to a URL the console container can reach. **Open Floci UI anyway** still opens the running console |
 | "The web console is disabled" | `FLOCI_AZ_UI_ENABLED=false` |
 | "Floci UI is taking too long" | The page gives up after 5 minutes. Check that Docker is running and the image can be pulled, and read `docker logs floci-az-ui` |
 

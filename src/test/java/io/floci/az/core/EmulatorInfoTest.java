@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 
 /** {@code GET /_floci/info}, the Floci Console Contract v2 emulator manifest. */
@@ -39,6 +41,18 @@ class EmulatorInfoTest {
             .body("services.blob", is("enabled"))
             .body("services.queue", is("enabled"))
             .body("services.keyvault", is("enabled"));
+    }
+
+    @Test
+    void eachCosmosEngineIsListedOnItsOwn() {
+        given()
+            .when().get("/_floci/info")
+            .then()
+            .statusCode(200)
+            .body("services", hasKey("cosmos-mongo"))
+            .body("services", hasKey("cosmos-table"))
+            .body("services", hasKey("cosmos-nosql"))
+            .body("services", not(hasKey("cosmos-engine")));
     }
 
     @Test

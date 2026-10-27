@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -236,8 +237,10 @@ public class AzureRoutingFilter {
     @ServerRequestFilter(preMatching = true)
     public Uni<Response> filter(ContainerRequestContext requestContext, @Context HttpHeaders httpHeaders,
                                 @Context HttpServerRequest serverRequest) {
+        URI requestUri = requestContext.getUriInfo().getRequestUri();
         if (wantsConsolePage(requestContext.getMethod(), requestContext.getUriInfo().getPath(),
-                httpHeaders.getHeaderString(HttpHeaders.ACCEPT))) {
+                requestUri.getRawQuery(), httpHeaders.getHeaderString(HttpHeaders.ACCEPT),
+                isAccountHost(requestUri.getHost()))) {
             // A browser opening the emulator's root gets floci-az's dashboard page, as floci-aws's root does; it
             // does not start the console. The rewrite happens here, before resource matching, and only for a
             // request that asks for HTML: the Cosmos SDKs read their DatabaseAccount at "/" with
@@ -317,15 +320,33 @@ public class AzureRoutingFilter {
     /** Where a browser opening the emulator's root is served from: the dashboard, which starts nothing. */
     static final String CONSOLE_PAGE_PATH = "_floci/ui/dashboard";
 
-    /** A browser's {@code GET /} (or {@code HEAD /}): the root path, with HTML among what it accepts. */
-    static boolean wantsConsolePage(String method, String path, String accept) {
+    /**
+     * A browser's {@code GET /} (or {@code HEAD /}) of the emulator itself: the root path with no query, on a
+     * host that names no account, with HTML among what it accepts. {@code devstoreaccount1.blob.localhost/?comp=list}
+     * is List Containers whatever the browser accepts.
+     */
+    static boolean wantsConsolePage(String method, String path, String query, String accept, boolean accountHost) {
         if (!"GET".equals(method) && !"HEAD".equals(method)) {
             return false;
         }
         if (path != null && !path.isEmpty() && !"/".equals(path)) {
             return false;
         }
+        if (query != null && !query.isEmpty()) {
+            return false;
+        }
+        if (accountHost) {
+            return false;
+        }
         return accept != null && accept.toLowerCase(Locale.ROOT).contains("text/html");
+    }
+
+    /** Whether host-style routing reads this host as an account: a host suffix, or a service marker label. */
+    private boolean isAccountHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        return matchSuffix(hostRoutes, host) != null || hostServiceMarkerType(host) != null;
     }
 
     /** Health and admin endpoints bypass routing entirely. */
@@ -403,20 +424,25 @@ public class AzureRoutingFilter {
         if (host == null) {
             return Fallthrough.TO_NEXT_STAGE;
         }
-        int firstDot = host.indexOf('.');
-        if (firstDot <= 0) {
-            return Fallthrough.TO_NEXT_STAGE;
-        }
-        int secondDot = host.indexOf('.', firstDot + 1);
-        if (secondDot < 0 || secondDot == host.length() - 1) {
-            return Fallthrough.TO_NEXT_STAGE; // need {account}.{marker}.{at least one more label}
-        }
-        String serviceType = hostServiceMarkers.get(host.substring(firstDot + 1, secondDot));
+        String serviceType = hostServiceMarkerType(host);
         if (serviceType == null) {
             return Fallthrough.TO_NEXT_STAGE;
         }
-        String account = host.substring(0, firstDot);
+        String account = host.substring(0, host.indexOf('.'));
         return dispatchOrServiceDisabled(ctx, account, serviceType, ctx.path());
+    }
+
+    /** The service type of {@code {account}.{marker}.{at least one more label}}, or null. */
+    private String hostServiceMarkerType(String host) {
+        int firstDot = host.indexOf('.');
+        if (firstDot <= 0) {
+            return null;
+        }
+        int secondDot = host.indexOf('.', firstDot + 1);
+        if (secondDot < 0 || secondDot == host.length() - 1) {
+            return null;
+        }
+        return hostServiceMarkers.get(host.substring(firstDot + 1, secondDot));
     }
 
     /**
