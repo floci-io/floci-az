@@ -1,10 +1,14 @@
 package io.floci.az.services.policyinsights;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusTestProfile;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -16,8 +20,17 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
+@TestProfile(PolicyInsightsTest.MockedRedis.class)
 @DisplayName("Policy Insights: compliance states from evaluations and scans, queries, summaries, trigger evaluation")
 class PolicyInsightsTest {
+
+    /** The scans need Redis records, not Valkey containers. */
+    public static class MockedRedis implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of("floci-az.services.redis.mocked", "true");
+        }
+    }
 
     private static final String SUB = "aaaaaaaa-4444-4444-4444-000000000001";
     private static final String SUB_SCOPE = "/subscriptions/" + SUB;

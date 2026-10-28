@@ -713,8 +713,22 @@ public class AksHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .type("application/json").build();
     }
 
-    /** Wipes all AKS data — used by {@code POST /_admin/reset}. */
+    /**
+     * Removes every cluster's k3s container and data volume, then wipes all AKS data. Used by
+     * {@code POST /_admin/reset}: a record dropped without its container leaves the container running, and nothing
+     * removes it later. {@code keepRunningOnShutdown} does not apply, since no record is left to reach it.
+     */
     public void clear() {
+        if (!config.services().aks().mocked()) {
+            scanAll().forEach(cluster -> {
+                try {
+                    clusterManager.removeCluster(cluster);
+                } catch (Exception e) {
+                    LOG.warnv("Error removing k3s container for AKS cluster {0} during reset: {1}", cluster.getName(),
+                            e.getMessage());
+                }
+            });
+        }
         store.clear();
     }
 

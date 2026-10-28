@@ -732,8 +732,15 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .type("application/json").build();
     }
 
-    /** Wipes all ACR data — used by {@code POST /_admin/reset}. */
+    /**
+     * Removes the shared registry container, then wipes all ACR data. Used by {@code POST /_admin/reset}: the images
+     * pushed to any registry live in that one container, so keeping it would hand them to the next registry created.
+     * The next create starts a fresh container.
+     */
     public void clear() {
+        if (!config.services().acr().mocked()) {
+            registryManager.shutdown();
+        }
         store.clear();
     }
 

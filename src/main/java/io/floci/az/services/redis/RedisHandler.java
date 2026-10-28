@@ -589,8 +589,14 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
                 .type("application/json").build();
     }
 
-    /** Wipes all Redis data — used by {@code POST /_admin/reset}. */
+    /**
+     * Removes every cache's container, then wipes all Redis data. Used by {@code POST /_admin/reset}: a record
+     * dropped without its container leaves the container running, and nothing removes it later.
+     */
     public void clear() {
+        if (!config.services().redis().mocked()) {
+            scanAll().forEach(this::stopQuietly);
+        }
         store.clear();
     }
 

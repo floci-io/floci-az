@@ -8,6 +8,7 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.redis.RedisModels.RedisCache;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
+@TestProfile(RedisHandlerTest.MockedProfile.class)
 @DisplayName("Redis: one store keyed by canonical id, and the global name registry")
 class RedisGlobalNameTest {
 

@@ -19,7 +19,9 @@ class RedisStrictNamesTest {
     public static class StrictNames implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.strict-names", "true");
+            return Map.of(
+                    "floci-az.parity-overrides.strict-names", "true",
+                    "floci-az.services.redis.mocked", "true");
         }
     }
 

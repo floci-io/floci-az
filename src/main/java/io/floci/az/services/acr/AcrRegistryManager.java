@@ -150,12 +150,16 @@ public class AcrRegistryManager {
         }
     }
 
-    /** Stops and removes the shared registry container (emulator shutdown). */
+    /** Stops and removes the shared registry container (emulator shutdown, admin reset) and releases its port. */
     public synchronized void shutdown() {
         if (started && containerId != null) {
             lifecycleManager.stopAndRemove(containerId, null);
             started = false;
             containerId = null;
+        }
+        if (publishedPort > 0) {
+            portAllocator.release(publishedPort);
+            publishedPort = 0;
         }
     }
 }
