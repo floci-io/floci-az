@@ -2236,7 +2236,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             return authFailure;
         }
         Optional<StoredObject> object = blobName.equals("/") && isHierarchicalNamespaceEnabled(request.accountName())
-                ? store.get(nsKey(request.accountName(), containerName))
+                ? readContainer(nsKey(request.accountName(), containerName))
                 : findBlob(request, containerName, blobName);
         if (object.isEmpty() && isHierarchicalNamespaceEnabled(request.accountName())) {
             DataLakePathState state = resolveDataLakePath(request.accountName(), containerName, blobName);

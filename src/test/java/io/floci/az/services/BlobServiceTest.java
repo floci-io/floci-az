@@ -938,6 +938,25 @@ public class BlobServiceTest {
             .header("ETag", equalTo(etag));
     }
 
+    @Test
+    void aBlobReadOfTheHierarchicalRootGivesAContainerStoredWithoutAnEtagOne() {
+        storeLegacyContainer();
+
+        String etag = given()
+            .urlEncodingEnabled(false)
+            .when().head("/" + ACCOUNT + "/" + CONTAINER + "/%2F")
+            .then()
+            .statusCode(200)
+            .header("ETag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .header("Last-Modified", not(equalTo("Thu, 01 Jan 1970 00:00:00 GMT")))
+            .extract().header("ETag");
+        given()
+            .when().get("/{account}/{container}?restype=container", ACCOUNT, CONTAINER)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
     /** Stores a container the way versions before stored container ETags did: no ETag, Last-Modified at the epoch. */
     private String storeLegacyContainer() {
         String key = "__ns__:" + ACCOUNT + "/" + CONTAINER;
