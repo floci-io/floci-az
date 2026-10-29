@@ -879,24 +879,43 @@ public class ContainerLifecycleManager {
 
     /** Copies arbitrary binary content into a container via the Docker archive API. */
     public void copyBytesToContainer(String containerId, byte[] bytes, String targetPath) {
-        String entryName = targetPath.startsWith("/") ? targetPath.substring(1) : targetPath;
+        copyFilesToContainer(containerId, Map.of(targetPath, bytes));
+    }
+
+    /**
+     * Copies several files into a created container in a single archive upload, keyed by absolute
+     * target path. A caller injecting more than one file before start must use this rather than
+     * one {@link #copyBytesToContainer} call per file.
+     * <p>
+     * Podman writes an archive into the container's own filesystem even beneath a volume mount
+     * point, and fills an empty volume from that directory once, on the second archive upload it
+     * receives (or at start if there was only one). A file uploaded by that second call or later
+     * is then hidden under the volume when the container starts. One upload defers the fill to
+     * start, so every file reaches the volume. Docker writes uploads straight into the volume
+     * either way.
+     */
+    public void copyFilesToContainer(String containerId, Map<String, byte[]> files) {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (TarArchiveOutputStream tar = new TarArchiveOutputStream(baos)) {
                 tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
-                TarArchiveEntry entry = new TarArchiveEntry(entryName);
-                entry.setSize(bytes.length);
-                tar.putArchiveEntry(entry);
-                tar.write(bytes);
-                tar.closeArchiveEntry();
+                for (Map.Entry<String, byte[]> file : files.entrySet()) {
+                    String targetPath = file.getKey();
+                    String entryName = targetPath.startsWith("/") ? targetPath.substring(1) : targetPath;
+                    TarArchiveEntry entry = new TarArchiveEntry(entryName);
+                    entry.setSize(file.getValue().length);
+                    tar.putArchiveEntry(entry);
+                    tar.write(file.getValue());
+                    tar.closeArchiveEntry();
+                }
             }
             dockerClient.copyArchiveToContainerCmd(containerId)
                     .withRemotePath("/")
                     .withTarInputStream(new ByteArrayInputStream(baos.toByteArray()))
                     .exec();
-            LOG.debugv("Copied {0} ({1} bytes) into container {2}", targetPath, bytes.length, containerId);
+            LOG.debugv("Copied {0} into container {1}", files.keySet(), containerId);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to copy file to container: " + targetPath, e);
+            throw new RuntimeException("Failed to copy files to container: " + files.keySet(), e);
         }
     }
 

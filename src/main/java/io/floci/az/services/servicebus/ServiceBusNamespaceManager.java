@@ -207,18 +207,18 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
 
             createAttempted = true;
             containerId = lifecycleManager.create(spec);
-            lifecycleManager.copyFileToContainer(containerId, brokerXml,
-                    "/var/lib/artemis-instance/etc-override/broker.xml");
-            lifecycleManager.copyFileToContainer(containerId, MANAGEMENT_XML,
-                    "/var/lib/artemis-instance/etc-override/management.xml");
-            lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
-                    "/var/lib/artemis-instance/etc-override/artemis.p12");
-            lifecycleManager.copyBytesToContainer(containerId, loadArtemisExtension(),
-                    ARTEMIS_EXTENSION_PATH);
-            lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
-                    PROTON_J_PATH);
-            lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
-                    ARTEMIS_AMQP_PATH);
+            // One upload, not one per file: the instance directory is the image's volume, and Podman
+            // hides a file under it from the second upload on (see copyFilesToContainer).
+            Map<String, byte[]> files = new LinkedHashMap<>();
+            files.put("/var/lib/artemis-instance/etc-override/broker.xml",
+                    brokerXml.getBytes(StandardCharsets.UTF_8));
+            files.put("/var/lib/artemis-instance/etc-override/management.xml",
+                    MANAGEMENT_XML.getBytes(StandardCharsets.UTF_8));
+            files.put("/var/lib/artemis-instance/etc-override/artemis.p12", tls.pkcs12Bytes());
+            files.put(ARTEMIS_EXTENSION_PATH, loadArtemisExtension());
+            files.put(PROTON_J_PATH, loadResource(PROTON_PATCH_RESOURCE));
+            files.put(ARTEMIS_AMQP_PATH, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE));
+            lifecycleManager.copyFilesToContainer(containerId, files);
 
             startAttempted = true;
             ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);

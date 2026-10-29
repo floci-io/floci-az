@@ -164,12 +164,15 @@ public class AciContainerGroupManager {
         if (secretMounts.isEmpty()) {
             return lifecycleManager.createAndStart(spec).containerId();
         }
-        // Secret volumes need content injected between create and start (docker-cp semantics).
+        // Secret volumes need content injected between create and start (docker-cp semantics),
+        // in one upload: Podman hides a file in a volume from the second upload on.
         String containerId = lifecycleManager.create(spec);
         try {
+            Map<String, byte[]> files = new LinkedHashMap<>();
             for (Map.Entry<String, Map<String, Object>> mount : secretMounts.entrySet()) {
-                copySecretFiles(containerId, mount.getKey(), mount.getValue());
+                addSecretFiles(files, mount.getKey(), mount.getValue());
             }
+            lifecycleManager.copyFilesToContainer(containerId, files);
             lifecycleManager.startCreated(containerId, spec);
             return containerId;
         } catch (Exception e) {
@@ -211,7 +214,7 @@ public class AciContainerGroupManager {
         return secretMounts;
     }
 
-    private void copySecretFiles(String containerId, String mountPath, Map<String, Object> entries) {
+    private static void addSecretFiles(Map<String, byte[]> files, String mountPath, Map<String, Object> entries) {
         for (Map.Entry<String, Object> entry : entries.entrySet()) {
             byte[] content;
             try {
@@ -220,8 +223,7 @@ public class AciContainerGroupManager {
                 // Azure secret volume values are base64; tolerate raw text rather than failing the group.
                 content = String.valueOf(entry.getValue()).getBytes(StandardCharsets.UTF_8);
             }
-            lifecycleManager.copyBytesToContainer(containerId, content,
-                    mountPath + "/" + entry.getKey());
+            files.put(mountPath + "/" + entry.getKey(), content);
         }
     }
 

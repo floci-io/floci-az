@@ -8,12 +8,14 @@ import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
@@ -28,8 +30,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -240,6 +244,63 @@ class ServiceBusNamespaceManagerStartupTest {
         manager.startMockedNamespace("default");
 
         assertTrue(manager.problems().isEmpty());
+    }
+
+    @Test
+    void everyBrokerFileIsUploadedInOneArchiveBeforeStart() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("upload")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate("floci-az-servicebus-upload"))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec)).thenReturn("container-id");
+        when(lifecycleManager.startCreated("container-id", spec))
+                .thenThrow(new IllegalStateException("stop after the upload"));
+        when(lifecycleManager.logs("container-id", 200, true)).thenReturn("");
+        when(lifecycleManager.removeIfExistsAndConfirm(anyString())).thenReturn(true);
+
+        ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+        assertThrows(ServiceBusNamespaceManager.NamespaceStartException.class,
+                () -> manager.startNamespace("upload", 5672, 5671));
+
+        // Podman hides a file uploaded into the instance volume from the second upload on (#472).
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, byte[]>> files = ArgumentCaptor.forClass(Map.class);
+        InOrder order = inOrder(lifecycleManager);
+        order.verify(lifecycleManager).copyFilesToContainer(eq("container-id"), files.capture());
+        order.verify(lifecycleManager).startCreated("container-id", spec);
+        verify(lifecycleManager, never()).copyBytesToContainer(anyString(), any(), anyString());
+        verify(lifecycleManager, never()).copyFileToContainer(anyString(), anyString(), anyString());
+        assertEquals(Set.of(
+                "/var/lib/artemis-instance/etc-override/broker.xml",
+                "/var/lib/artemis-instance/etc-override/management.xml",
+                "/var/lib/artemis-instance/etc-override/artemis.p12",
+                "/var/lib/artemis-instance/lib/floci-az-servicebus-extension.jar",
+                ArtemisPatchVersions.PROTON_J_CONTAINER_PATH,
+                ArtemisPatchVersions.ARTEMIS_AMQP_CONTAINER_PATH),
+                files.getValue().keySet());
     }
 
     private static final class CapturedLogs extends Handler {

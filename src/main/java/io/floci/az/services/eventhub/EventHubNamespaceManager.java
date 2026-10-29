@@ -22,6 +22,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,23 +142,23 @@ public class EventHubNamespaceManager {
                 .build();
 
         String containerId = lifecycleManager.create(spec);
-        lifecycleManager.copyFileToContainer(containerId, brokerXml,
-                "/var/lib/artemis-instance/etc-override/broker.xml");
-        lifecycleManager.copyBytesToContainer(containerId, tls.pkcs12Bytes(),
-                "/var/lib/artemis-instance/etc-override/artemis.p12");
+        // One upload, not one per file: the instance directory is the image's volume, and Podman
+        // hides a file under it from the second upload on (see copyFilesToContainer).
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put("/var/lib/artemis-instance/etc-override/broker.xml",
+                brokerXml.getBytes(StandardCharsets.UTF_8));
+        files.put("/var/lib/artemis-instance/etc-override/artemis.p12", tls.pkcs12Bytes());
         // The same two library patches the Service Bus broker gets. Artemis never
         // advertises max-message-size on ATTACH (spec-legal: unset means "no limit"),
         // but the Azure SDKs read the absent field as a zero-byte limit and reject
         // every send — so the patched proton-j sets it. The patched amqp-protocol
         // carries the MSSBCBS SASL mechanism the acceptors offer.
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(PROTON_PATCH_RESOURCE),
-                PROTON_J_PATH);
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE),
-                ARTEMIS_AMQP_PATH);
+        files.put(PROTON_J_PATH, loadResource(PROTON_PATCH_RESOURCE));
+        files.put(ARTEMIS_AMQP_PATH, loadResource(ARTEMIS_AMQP_PATCH_RESOURCE));
         // Carries EventHubPartitionPlugin, which stamps the partition each message belongs to;
         // the generated partition diverts filter on what it sets.
-        lifecycleManager.copyBytesToContainer(containerId, loadResource(ARTEMIS_EXTENSION_RESOURCE),
-                ARTEMIS_EXTENSION_PATH);
+        files.put(ARTEMIS_EXTENSION_PATH, loadResource(ARTEMIS_EXTENSION_RESOURCE));
+        lifecycleManager.copyFilesToContainer(containerId, files);
 
         ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
 
