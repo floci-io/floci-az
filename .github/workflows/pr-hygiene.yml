@@ -154,8 +154,12 @@ jobs:
           # a person turned away by a linter. So anything this cannot resolve
           # is allowed through, and a GitHub API failure never fails the build.
           #
-          # Merge commits are skipped via --no-merges, matching the other commit
-          # steps.
+          # The commit's own author is checked the same way as each co-author.
+          #
+          # Unlike the other commit steps, merge commits are checked too: an
+          # agent that syncs a branch by merging the base leaves its trailers on
+          # the merge commit, and the squash merge carries its author into main
+          # as a co-author.
 
           # Bot accounts that may legitimately co-author. Keep this short.
           ALLOWED_BOTS='dependabot[bot]'
@@ -216,9 +220,35 @@ jobs:
             return 0
           }
 
-          for sha in $(git log --no-merges --format=%H "$BASE_SHA".."$HEAD_SHA"); do
+          # Prints why an address is not a person, nothing when it may be one.
+          reject_reason() {
+            local verdict login
+            verdict=$(classify "$1")
+            case "$verdict" in
+              bot\ *)
+                login=${verdict#bot }
+                # -F because a login like dependabot[bot] is not a pattern.
+                if ! printf '%s\n' "$ALLOWED_BOTS" | grep -Fxq "$login"; then
+                  printf '%s is a bot account' "$login"
+                fi
+                ;;
+              noreply)
+                printf 'noreply address, not a contactable person'
+                ;;
+            esac
+            return 0
+          }
+
+          for sha in $(git log --format=%H "$BASE_SHA".."$HEAD_SHA"); do
             subject=$(git show -s --format=%s "$sha")
             offending=""
+
+            author=$(git show -s --format='%an <%ae>' "$sha")
+            author_email=$(git show -s --format=%ae "$sha" | tr '[:upper:]' '[:lower:]')
+            reason=$(reject_reason "$author_email")
+            if [ -n "$reason" ]; then
+              offending="Author: ${author}    <- ${reason}"$'\n'
+            fi
 
             while IFS= read -r line; do
               lower=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
@@ -228,19 +258,10 @@ jobs:
                   email=$(printf '%s' "$lower" | sed -n 's/.*<\(.*\)>.*/\1/p')
                   [ -z "$email" ] && continue
 
-                  verdict=$(classify "$email")
-                  case "$verdict" in
-                    bot\ *)
-                      login=${verdict#bot }
-                      # -F because a login like dependabot[bot] is not a pattern.
-                      if ! printf '%s\n' "$ALLOWED_BOTS" | grep -Fxq "$login"; then
-                        offending="${offending}${line}    <- ${login} is a bot account"$'\n'
-                      fi
-                      ;;
-                    noreply)
-                      offending="${offending}${line}    <- noreply address, not a contactable person"$'\n'
-                      ;;
-                  esac
+                  reason=$(reject_reason "$email")
+                  if [ -n "$reason" ]; then
+                    offending="${offending}${line}    <- ${reason}"$'\n'
+                  fi
                   ;;
                 *)
                   offending="${offending}${line}"$'\n'
@@ -277,6 +298,11 @@ jobs:
             echo ""
             echo "  To fix several:"
             echo "    git rebase --root -x 'git commit --amend --no-edit'"
+            echo ""
+            echo "  A flagged author is fixed with git commit --amend --reset-author. A flagged"
+            echo "  merge commit goes away by rebasing on the base branch instead of merging it:"
+            echo "    git rebase origin/main"
+            echo "    git push --force-with-lease"
             echo ""
             echo "  Configure your agent not to add them in the first place. For Claude Code,"
             echo "  set includeCoAuthoredBy: false in .claude/settings.json."
