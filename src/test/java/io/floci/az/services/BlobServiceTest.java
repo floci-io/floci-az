@@ -4405,6 +4405,361 @@ public class BlobServiceTest {
             .then().statusCode(200).body(containsString("<Value>source</Value>"));
     }
 
+    // ── Put Blob From URL and Put Block From URL ─────────────────────────────
+
+    private static final String SOURCE_URL = "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/source.txt";
+
+    /** Creates the container and {@code source.txt} holding {@code content}; returns the source's ETag. */
+    private String createCopySource(String content) {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER).then().statusCode(201);
+        return given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-blob-cache-control", "no-cache")
+            .header("x-ms-meta-color", "red")
+            .header("x-ms-tags", "origin=source")
+            .contentType("text/plain")
+            .body(content)
+            .when().put("/{account}/{container}/source.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201)
+            .extract().header("ETag");
+    }
+
+    private static String blockId(String name) {
+        return Base64.getEncoder().encodeToString(name.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String md5Of(String content) throws Exception {
+        return Base64.getEncoder().encodeToString(
+            MessageDigest.getInstance("MD5").digest(content.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String sha256Base64(byte[] bytes) throws Exception {
+        return Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    @Test
+    void putBlockFromUrlStagesTheSourceRangeItNames() throws Exception {
+        createCopySource("0123456789");
+
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-range", "bytes=0-3")
+            .when().put("/{account}/{container}/joined.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("head"))
+            .then().statusCode(201)
+            .header("Content-MD5", md5Of("0123"));
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-range", "bytes=4-")
+            .when().put("/{account}/{container}/joined.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("tail"))
+            .then().statusCode(201);
+        given()
+            .body("<BlockList><Latest>" + blockId("tail") + "</Latest><Latest>" + blockId("head")
+                + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/joined.txt?comp=blocklist", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+
+        given().when().get("/{account}/{container}/joined.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo("4567890123"));
+    }
+
+    @Test
+    void putBlockFromUrlWithoutARangeStagesTheWholeSource() {
+        createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .when().put("/{account}/{container}/whole.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("only"))
+            .then().statusCode(201);
+        given()
+            .body("<BlockList><Latest>" + blockId("only") + "</Latest></BlockList>")
+            .when().put("/{account}/{container}/whole.txt?comp=blocklist", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+
+        given().when().get("/{account}/{container}/whole.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void putBlockFromUrlRejectsARangeThatIsMalformedReversedOrPastTheEnd() {
+        createCopySource("0123456789");
+        String path = "/{account}/{container}/ranged.txt?comp=block&blockid={id}";
+
+        for (String range : new String[] {"5-", "bytes=5-2", "bytes=-3"}) {
+            given()
+                .header("x-ms-copy-source", SOURCE_URL)
+                .header("x-ms-source-range", range)
+                .when().put(path, ACCOUNT, CONTAINER, blockId("r"))
+                .then().statusCode(400)
+                .header("x-ms-error-code", "InvalidHeaderValue");
+        }
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-range", "bytes=10-20")
+            .when().put(path, ACCOUNT, CONTAINER, blockId("r"))
+            .then().statusCode(416)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+    }
+
+    @Test
+    void putBlockFromUrlChecksTheSourceContentMd5() throws Exception {
+        createCopySource(BLOB_CONTENT);
+        String path = "/{account}/{container}/checked.txt?comp=block&blockid={id}";
+
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-content-md5", md5Of("something else"))
+            .when().put(path, ACCOUNT, CONTAINER, blockId("m"))
+            .then().statusCode(400)
+            .header("x-ms-error-code", "Md5Mismatch");
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-content-md5", md5Of(BLOB_CONTENT))
+            .when().put(path, ACCOUNT, CONTAINER, blockId("m"))
+            .then().statusCode(201);
+    }
+
+    @Test
+    void fromUrlOperationsTakeNoBodyOfTheirOwn() {
+        createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .body("unexpected")
+            .when().put("/{account}/{container}/bodied.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("b"))
+            .then().statusCode(400)
+            .header("x-ms-error-code", "InvalidHeaderValue");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .body("unexpected")
+            .when().put("/{account}/{container}/bodied.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(400)
+            .header("x-ms-error-code", "InvalidHeaderValue");
+    }
+
+    @Test
+    void aFromUrlSourceThatDoesNotExistCannotBeVerified() {
+        createCopySource(BLOB_CONTENT);
+        String missing = "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/missing.txt";
+
+        given()
+            .header("x-ms-copy-source", missing)
+            .when().put("/{account}/{container}/target.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("x"))
+            .then().statusCode(404)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", missing)
+            .when().put("/{account}/{container}/target.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(404)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+    }
+
+    @Test
+    void aFailedSourceConditionStopsEveryCopy() {
+        String sourceEtag = createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-if-match", "\"0x8D0000000000000\"")
+            .when().put("/{account}/{container}/block-target.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("c"))
+            .then().statusCode(412)
+            .header("x-ms-error-code", "SourceConditionNotMet");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-if-none-match", sourceEtag)
+            .when().put("/{account}/{container}/blob-target.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(412)
+            .header("x-ms-error-code", "SourceConditionNotMet");
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-if-unmodified-since", "Mon, 01 Jan 2001 00:00:00 GMT")
+            .when().put("/{account}/{container}/copy-target.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(412)
+            .header("x-ms-error-code", "SourceConditionNotMet");
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-if-match", sourceEtag)
+            .header("x-ms-source-if-modified-since", "Mon, 01 Jan 2001 00:00:00 GMT")
+            .when().put("/{account}/{container}/copy-target.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(202);
+
+        given().when().get("/{account}/{container}/blob-target.txt", ACCOUNT, CONTAINER).then().statusCode(404);
+        given().when().get("/{account}/{container}/copy-target.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void putBlobFromUrlCopiesTheSourceContentPropertiesMetadataAndNotItsTags() throws Exception {
+        createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .when().put("/{account}/{container}/copied.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201)
+            .header("ETag", notNullValue())
+            .header("Last-Modified", notNullValue())
+            .header("Content-MD5", md5Of(BLOB_CONTENT));
+
+        given().when().get("/{account}/{container}/copied.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200)
+            .body(equalTo(BLOB_CONTENT))
+            .header("Content-Type", startsWith("text/plain"))
+            .header("Cache-Control", "no-cache")
+            .header("Content-MD5", md5Of(BLOB_CONTENT))
+            .header("x-ms-meta-color", "red")
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-tag-count", nullValue());
+    }
+
+    @Test
+    void putBlobFromUrlRequestPropertiesAndMetadataReplaceTheSources() {
+        createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-copy-source-blob-properties", "false")
+            .header("x-ms-blob-content-language", "fr")
+            .header("x-ms-meta-size", "large")
+            .when().put("/{account}/{container}/own.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-blob-content-type", "application/json")
+            .when().put("/{account}/{container}/retyped.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+
+        given().when().get("/{account}/{container}/own.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200)
+            .header("Cache-Control", nullValue())
+            .header("Content-Language", "fr")
+            .header("x-ms-meta-size", "large")
+            .header("x-ms-meta-color", nullValue());
+        given().when().get("/{account}/{container}/retyped.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200)
+            .header("Content-Type", startsWith("application/json"))
+            .header("Cache-Control", "no-cache");
+    }
+
+    @Test
+    void putBlobFromUrlTakesTheSourceTagsOnlyWhenAskedAndNeverAlongsideItsOwn() {
+        createCopySource(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-copy-source-tag-option", "COPY")
+            .when().put("/{account}/{container}/kept-tags.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-tags", "origin=request")
+            .when().put("/{account}/{container}/own-tags.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-copy-source-tag-option", "COPY")
+            .header("x-ms-tags", "origin=request")
+            .when().put("/{account}/{container}/both-tags.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(400)
+            .header("x-ms-error-code", "BothUserTagsAndSourceTagsCopyPresentException");
+
+        given().when().get("/{account}/{container}/kept-tags.txt?comp=tags", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(containsString("<Value>source</Value>"));
+        given().when().get("/{account}/{container}/own-tags.txt?comp=tags", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(containsString("<Value>request</Value>"));
+    }
+
+    @Test
+    void aSourceWrittenWithACustomerProvidedKeyIsCopiedOnlyWithThatKey() throws Exception {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER).then().statusCode(201);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-encryption-algorithm", "AES256")
+            .body(BLOB_CONTENT)
+            .when().put("/{account}/{container}/source.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        String otherKey = Base64.getEncoder().encodeToString(new byte[32]);
+
+        // Without the source's key, or with another one, neither copy reads the protected bytes.
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .when().put("/{account}/{container}/unkeyed.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(409)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+        given()
+            .header("x-ms-copy-source", SOURCE_URL)
+            .when().put("/{account}/{container}/unkeyed.txt?comp=block&blockid={id}", ACCOUNT, CONTAINER,
+                blockId("k"))
+            .then().statusCode(409)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-encryption-key", otherKey)
+            .header("x-ms-source-encryption-key-sha256", sha256Base64(new byte[32]))
+            .header("x-ms-source-encryption-algorithm", "AES256")
+            .when().put("/{account}/{container}/unkeyed.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(409)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+        given().when().get("/{account}/{container}/unkeyed.txt", ACCOUNT, CONTAINER).then().statusCode(404);
+
+        // With it, the copy reads the source; the destination is written as the request asks, here without a key.
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("x-ms-source-encryption-key", CUSTOMER_PROVIDED_KEY)
+            .header("x-ms-source-encryption-key-sha256", CUSTOMER_PROVIDED_KEY_SHA256)
+            .header("x-ms-source-encryption-algorithm", "AES256")
+            .when().put("/{account}/{container}/keyed.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+        given().when().get("/{account}/{container}/keyed.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo(BLOB_CONTENT));
+    }
+
+    @Test
+    void putBlobFromUrlKeepsPutBlobsDestinationRules() {
+        createCopySource(BLOB_CONTENT);
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .body("existing")
+            .when().put("/{account}/{container}/taken.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(201);
+
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", SOURCE_URL)
+            .header("If-None-Match", "*")
+            .when().put("/{account}/{container}/taken.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(409)
+            .header("x-ms-error-code", "BlobAlreadyExists");
+        given()
+            .header("x-ms-blob-type", "BlockBlob")
+            .header("x-ms-copy-source", "http://localhost:8081/" + ACCOUNT + "/" + CONTAINER + "/source.txt?"
+                + urlEncoded(sas("w", "b", CONTAINER, "source.txt")))
+            .when().put("/{account}/{container}/taken.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(403)
+            .header("x-ms-error-code", "CannotVerifyCopySource");
+
+        given().when().get("/{account}/{container}/taken.txt", ACCOUNT, CONTAINER)
+            .then().statusCode(200).body(equalTo("existing"));
+    }
+
     /**
      * {@code sas} with each value percent-encoded, as a client builds a source URL: the signature is base64, and an
      * unencoded {@code +} in it would be read back as a space.

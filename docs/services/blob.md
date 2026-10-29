@@ -71,8 +71,22 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   are the request's `x-ms-tags`, never the source's, except that Copy Blob From URL with
   `x-ms-copy-source-tag-option: COPY` keeps the source's.
   A SAS on the source URL is checked as a read of the source, as Azurite checks it, and a failed check
-  is `CannotVerifyCopySource` with the status the read got. Both answer `202` with
-  `x-ms-copy-status: success`
+  is `CannotVerifyCopySource` with the status the read got. The `x-ms-source-if-match`,
+  `-if-none-match`, `-if-modified-since` and `-if-unmodified-since` conditions are checked against the
+  source (`412 SourceConditionNotMet`). Both answer `202` with `x-ms-copy-status: success`
+- **Put Blob From URL and Put Block From URL**: `PUT` with `x-ms-copy-source` and
+  `x-ms-blob-type: BlockBlob` writes a block blob holding the source's bytes, and `?comp=block` with
+  `x-ms-copy-source` stages the source, or its `x-ms-source-range`, as a block. Sources are found, SAS-checked
+  and conditioned as for Copy Blob; a missing source is `404 CannotVerifyCopySource`, a range starting past
+  the source's end is `416 CannotVerifyCopySource`, a malformed range or a request body is
+  `400 InvalidHeaderValue`, and an `x-ms-source-content-md5` that does not match is `400 Md5Mismatch`.
+  A source written with a customer-provided key is read only with that key in `x-ms-source-encryption-key`
+  (and its `-sha256`); a missing or different key is `409 CannotVerifyCopySource`.
+  Put Blob From URL keeps Put Blob's destination rules (conditions, leases, `If-None-Match: *`); its content
+  properties are the source's unless `x-ms-copy-source-blob-properties: false`, an `x-ms-blob-*` header
+  sets its own property either way, request metadata replaces the source's, and tags are the request's or,
+  with `x-ms-copy-source-tag-option: COPY`, the source's (`400` when both are sent). Both answer `201`
+  with the copied bytes' `Content-MD5`
 - **ARM containers and queues**: `.../blobServices/default/containers/{name}` and
   `.../queueServices/default/queues/{name}` answer from the data plane's own containers and queues, so a
   container or queue made on either plane is read on the other, and an ARM delete removes it with its blobs or
@@ -182,10 +196,10 @@ floci-az:
   tokens issued by a previous emulator process are invalid after restart.
 - **Copies complete at once and stay inside the emulator.** Copy Blob reports `success` in its
   `202`, so there is no pending state to poll and Abort Copy Blob is not served. A source outside
-  the emulator, the `x-ms-source-if-*` conditions, `x-ms-copy-source-authorization`, and Get Blob
+  the emulator, `x-ms-source-if-tags`, `x-ms-copy-source-authorization`, `x-ms-content-crc64`, and Get Blob
   Properties' `x-ms-copy-*` fields are not modeled. A source without a SAS is read like any other
-  request, since the emulator enforces only SAS tokens. Put Blob From URL (`x-ms-blob-type` with `x-ms-copy-source`)
-  answers `501`.
+  request, since the emulator enforces only SAS tokens. Append Block From URL (`?comp=appendblock` with
+  `x-ms-copy-source`) answers `501`, as does a copy source with any `x-ms-blob-type` other than `BlockBlob`.
 - **Blob snapshots are modeled.** They capture immutable blob state and support creation, reads,
   and deletion. Listing snapshots with `include=snapshots` on List Blobs is not modeled. Deleting a
   base blob with snapshots requires `x-ms-delete-snapshots: include` or `only`; mutations other than

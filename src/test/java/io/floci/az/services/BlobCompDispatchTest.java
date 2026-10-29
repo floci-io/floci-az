@@ -6,6 +6,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
@@ -138,17 +141,74 @@ public class BlobCompDispatchTest {
     }
 
     @Test
-    void putBlobFromUrlIsNeitherCopiedNorMistakenForPutBlob() {
+    void putBlobFromUrlIsNotMistakenForPutBlob() {
         given()
                 .header("x-ms-blob-type", "BlockBlob")
                 .header("x-ms-copy-source",
                         "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
                 .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "from-url.txt")
+                .then().statusCode(201);
+
+        // The new blob holds the source's bytes: Put Blob would have stored the empty request body.
+        assertBlobIntact();
+        given()
+                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "from-url.txt")
+                .then().statusCode(200).body(equalTo(CONTENT));
+    }
+
+    @Test
+    void aCopySourceWithANonBlockBlobTypeIsNotMistakenForPutBlob() {
+        given()
+                .header("x-ms-blob-type", "AppendBlob")
+                .header("x-ms-copy-source",
+                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+                .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "appended.txt")
                 .then().statusCode(501);
 
         given()
-                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "from-url.txt")
+                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "appended.txt")
                 .then().statusCode(404);
+    }
+
+    @Test
+    void putBlockFromUrlStagesTheSourceRatherThanTheEmptyBody() {
+        String blockId = Base64.getEncoder().encodeToString("only".getBytes(StandardCharsets.UTF_8));
+        given()
+                .header("x-ms-copy-source",
+                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+                .when().put("/{account}/{container}/{blob}?comp=block&blockid={id}",
+                        ACCOUNT, CONTAINER, "staged.txt", blockId)
+                .then().statusCode(201);
+        given()
+                .body("<BlockList><Latest>" + blockId + "</Latest></BlockList>")
+                .when().put("/{account}/{container}/{blob}?comp=blocklist", ACCOUNT, CONTAINER, "staged.txt")
+                .then().statusCode(201);
+
+        given()
+                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "staged.txt")
+                .then().statusCode(200).body(equalTo(CONTENT));
+    }
+
+    @Test
+    void appendBlockFromUrlIsNotMistakenForAnAppend() {
+        given()
+                .header("x-ms-blob-type", "AppendBlob")
+                .when().put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "log.txt")
+                .then().statusCode(201);
+        given()
+                .body("first")
+                .when().put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, "log.txt")
+                .then().statusCode(201);
+
+        given()
+                .header("x-ms-copy-source",
+                        "http://127.0.0.1:4577/" + ACCOUNT + "/" + CONTAINER + "/" + BLOB)
+                .when().put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, "log.txt")
+                .then().statusCode(501);
+
+        given()
+                .when().get("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, "log.txt")
+                .then().statusCode(200).body(equalTo("first"));
     }
 
     @Test

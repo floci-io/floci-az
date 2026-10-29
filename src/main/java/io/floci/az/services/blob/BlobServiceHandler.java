@@ -28,9 +28,11 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -335,16 +337,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         && "metadata".equals(comp)) {
                     response = getBlobMetadata(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "block".equals(comp)) {
-                    response = putBlock(request, containerName, blobName);
+                    response = hasCopySource(request)
+                            ? putBlockFromUrl(request, containerName, blobName)
+                            : putBlock(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "blocklist".equals(comp)) {
                     response = putBlockList(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "appendblock".equals(comp)) {
-                    response = appendBlock(request, containerName, blobName);
+                    // Append Block From URL names its source instead of sending a body; appending the
+                    // empty body would answer 201 while nothing from the source arrives.
+                    response = hasCopySource(request)
+                            ? notImplemented()
+                            : appendBlock(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "blocklist".equals(comp)) {
                     response = getBlockList(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && isCopyBlob(request, comp)) {
                     response = copyBlob(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && isPutBlobFromUrl(request, comp)) {
+                    response = putBlobFromUrl(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && isPutBlob(request, comp)) {
                     response = putBlob(request, containerName, blobName);
                 } else if (dataLakeRequest && "GET".equalsIgnoreCase(method)) {
@@ -426,20 +436,10 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
-     * True only for a genuine PutBlob.
-     *
-     * <p>Azure multiplexes many operations onto {@code PUT /{container}/{blob}}: the {@code comp}
-     * values this handler does not implement (lease, snapshot, properties, tier, tags, page, ...),
-     * plus CopyBlob and the Data Lake rename, which carry no {@code comp} at all
-     * and are discriminated by a header. Routing any of those to {@code putBlob} replaces the blob
-     * with the request body — usually empty — and answers 201, so the caller sees success while the
-     * content is destroyed. Only an unqualified PUT is a PutBlob.
-     */
-    /**
      * Copy Blob ({@code Blob_StartCopyFromURL}) or Copy Blob From URL ({@code Blob_CopyFromURL}, with
      * {@code x-ms-requires-sync: true}): an unqualified PUT naming {@code x-ms-copy-source}. Put Blob From URL
      * ({@code BlockBlob_PutBlobFromUrl}) sends the same header with {@code x-ms-blob-type} and is a different
-     * operation (201, content headers), so it is left to the not-implemented answer rather than copied.
+     * operation (201, content headers), served by {@link #putBlobFromUrl}.
      */
     private boolean isCopyBlob(AzureRequest request, String comp) {
         return comp == null
@@ -447,6 +447,31 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 && request.headers().getHeaderString("x-ms-blob-type") == null;
     }
 
+    /**
+     * Put Blob From URL ({@code BlockBlob_PutBlobFromUrl}): an unqualified PUT naming {@code x-ms-copy-source} with
+     * {@code x-ms-blob-type: BlockBlob}. A copy source with any other blob type has no such operation and stays
+     * not implemented.
+     */
+    private boolean isPutBlobFromUrl(AzureRequest request, String comp) {
+        return comp == null
+                && hasCopySource(request)
+                && "BlockBlob".equalsIgnoreCase(request.headers().getHeaderString("x-ms-blob-type"));
+    }
+
+    private static boolean hasCopySource(AzureRequest request) {
+        return request.headers().getHeaderString("x-ms-copy-source") != null;
+    }
+
+    /**
+     * True only for a genuine PutBlob.
+     *
+     * <p>Azure multiplexes many operations onto {@code PUT /{container}/{blob}}: the {@code comp}
+     * values this handler does not implement (lease, snapshot, properties, tier, tags, page, ...),
+     * plus CopyBlob and the Data Lake rename, which carry no {@code comp} at all
+     * and are discriminated by a header. Routing any of those to {@code putBlob} replaces the blob
+     * with the request body (usually empty) and answers 201, so the caller sees success while the
+     * content is destroyed. Only an unqualified PUT is a PutBlob.
+     */
     private boolean isPutBlob(AzureRequest request, String comp) {
         return comp == null
                 && request.headers().getHeaderString("x-ms-copy-source") == null
@@ -621,23 +646,9 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                             .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
                 }
 
-                // A create-only write (If-None-Match of *) answers 409 after the lease check, as Azure does.
-                String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
-                boolean createOnly = existing.isPresent() && ifNoneMatch != null && "*".equals(ifNoneMatch.trim());
-                if (!createOnly) {
-                    Response conditionFailure = validateBlobConditions(request, existing);
-                    if (conditionFailure != null) {
-                        return conditionFailure;
-                    }
-                }
-                Response leaseFailure = leaseService.validateWrite(request,
-                        objKey(request.accountName(), containerName, blobName));
-                if (leaseFailure != null) {
-                    return leaseFailure;
-                }
-                if (createOnly) {
-                    return new AzureErrorResponse("BlobAlreadyExists", "The specified blob already exists.")
-                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                Response destinationFailure = validateBlobDestination(request, containerName, blobName, existing);
+                if (destinationFailure != null) {
+                    return destinationFailure;
                 }
 
                 Map<String, String> metadata = new HashMap<>();
@@ -685,6 +696,151 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     /**
+     * The destination checks Put Blob and Put Blob From URL share, under the lease monitor: the request's
+     * conditions, then the lease, then the create-only conflict. A create-only write ({@code If-None-Match: *})
+     * over an existing blob answers 409 after the lease check, as Azure does.
+     */
+    private Response validateBlobDestination(AzureRequest request, String containerName, String blobName,
+                                             Optional<StoredObject> existing) {
+        String ifNoneMatch = request.headers().getHeaderString(HttpHeaders.IF_NONE_MATCH);
+        boolean createOnly = existing.isPresent() && ifNoneMatch != null && "*".equals(ifNoneMatch.trim());
+        if (!createOnly) {
+            Response conditionFailure = validateBlobConditions(request, existing);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+        }
+        Response leaseFailure = leaseService.validateWrite(request,
+                objKey(request.accountName(), containerName, blobName));
+        if (leaseFailure != null) {
+            return leaseFailure;
+        }
+        if (createOnly) {
+            return new AzureErrorResponse("BlobAlreadyExists", "The specified blob already exists.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        return null;
+    }
+
+    /**
+     * PUT /{container}/{blob} with {@code x-ms-copy-source} and {@code x-ms-blob-type: BlockBlob}: Put Blob From URL
+     * ({@code BlockBlob_PutBlobFromUrl}). Writes a block blob holding the source's bytes, with Put Blob's
+     * destination rules, and answers 201. As Azurite does: the content properties are the source's unless
+     * {@code x-ms-copy-source-blob-properties: false}, and an {@code x-ms-blob-*} request header sets its own
+     * property either way, the request's {@code Content-Type} being only a fallback; metadata on the request
+     * replaces the source's, and none copies it; tags are the request's, or the source's with
+     * {@code x-ms-copy-source-tag-option: COPY}.
+     */
+    private Response putBlobFromUrl(AzureRequest request, String containerName, String blobName) {
+        if (hasBody(request)) {
+            return invalidHeaderValue();
+        }
+        boolean copySourceTags = "COPY".equalsIgnoreCase(
+                request.headers().getHeaderString("x-ms-copy-source-tag-option"));
+        if (copySourceTags && request.headers().getHeaderString(BlobTags.HEADER) != null) {
+            return new AzureErrorResponse("BothUserTagsAndSourceTagsCopyPresentException",
+                    "x-ms-tags header must not be present with x-ms-copy-source-tag-option as COPY.")
+                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        }
+        return leaseService.exclusively(() -> {
+            Optional<StoredObject> existing = store.get(objKey(request.accountName(), containerName, blobName));
+            Response authFailure = existing.isPresent()
+                    ? authorizeWrite(request, containerName, blobName)
+                    : authorizeCreate(request, containerName, blobName);
+            if (authFailure != null) {
+                return authFailure;
+            }
+            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            CopySourceRead read = readCopySource(request);
+            if (read.failure() != null) {
+                return read.failure();
+            }
+            StoredObject source = read.source();
+            byte[] data = Arrays.copyOf(source.data(), source.data().length);
+            String contentMd5 = md5Base64(data);
+            String expectedMd5 = request.headers().getHeaderString("x-ms-source-content-md5");
+            if (expectedMd5 == null) {
+                expectedMd5 = request.headers().getHeaderString("x-ms-blob-content-md5");
+            }
+            Response md5Failure = validateMd5(expectedMd5, contentMd5);
+            if (md5Failure != null) {
+                return md5Failure;
+            }
+            Response destinationFailure = validateBlobDestination(request, containerName, blobName, existing);
+            if (destinationFailure != null) {
+                return destinationFailure;
+            }
+
+            Map<String, String> metadata = new HashMap<>();
+            metadata.put("BlobType", "BlockBlob");
+            boolean copyProperties = !"false".equalsIgnoreCase(
+                    request.headers().getHeaderString("x-ms-copy-source-blob-properties"));
+            Map<String, String> sourceProperties = copyProperties ? source.metadata() : Map.of();
+            String contentType = request.headers().getHeaderString("x-ms-blob-content-type");
+            if (contentType == null) {
+                contentType = sourceProperties.get("Content-Type");
+            }
+            if (contentType == null) {
+                contentType = request.headers().getHeaderString(HttpHeaders.CONTENT_TYPE);
+            }
+            metadata.put("Content-Type", usableContentType(contentType));
+            BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, property) -> {
+                String value = request.headers().getHeaderString(requestHeader);
+                if (value == null) {
+                    value = sourceProperties.get(property);
+                }
+                if (value != null) {
+                    metadata.put(property, value);
+                }
+            });
+            // The stored MD5 is the one computed over the copied bytes, which the check above matched.
+            metadata.put("Content-MD5", contentMd5);
+            metadata.put("Name", blobName);
+            metadata.put(CREATION_TIME_KEY, createdOn(existing).toString());
+            Map<String, String> requestMetadata = readUserMetadata(request);
+            if (requestMetadata.isEmpty()) {
+                source.metadata().forEach((key, value) -> {
+                    if (key.startsWith(USER_METADATA_PREFIX)) {
+                        metadata.put(key, value);
+                    }
+                });
+            } else {
+                metadata.putAll(requestMetadata);
+            }
+            if (copySourceTags) {
+                BlobTags.store(metadata, BlobTags.of(source.metadata()));
+            } else {
+                Response tagFailure = applyRequestTags(request, metadata);
+                if (tagFailure != null) {
+                    return tagFailure;
+                }
+            }
+            String customerProvidedKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
+            if (customerProvidedKeySha256 != null) {
+                metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
+            }
+
+            Instant now = Instant.now();
+            String etag = etags.next();
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(blobName, data, metadata, now, etag));
+            // As Copy Blob does: appends staged against the old blob must not be flushed into the new one.
+            clearDataLakeAppendChunks(request.accountName(), containerName, blobName);
+
+            return Response.status(Response.Status.CREATED)
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(now))
+                    .header("ETag", etag)
+                    .header("Content-MD5", contentMd5)
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0)
+                    .build();
+        });
+    }
+
+    /**
      * PUT /{container}/{blob} with {@code x-ms-copy-source}: Copy Blob, or Copy Blob From URL when
      * {@code x-ms-requires-sync: true} is sent. Both answer {@code 202 Accepted}, the only status the spec
      * declares for either; the emulator copies at once, so the copy status is already {@code success}.
@@ -696,9 +852,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         Optional<CopySource> parsedSource =
                 CopySource.parse(request.headers().getHeaderString("x-ms-copy-source"));
         if (parsedSource.isEmpty()) {
-            return new AzureErrorResponse("InvalidHeaderValue",
-                    "The value for one of the HTTP headers is not in the correct format.")
-                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            return invalidHeaderValue();
         }
         CopySource copySource = parsedSource.get();
         Response sourceAccess = authorizeCopySource(request, copySource);
@@ -724,15 +878,15 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
             }
 
-            // Validate source blob exists
-            Optional<StoredObject> sourceObject = store.get(copySource.snapshot() == null
-                    ? objKey(copySource.account(), copySource.container(), copySource.blob())
-                    : snapshotKey(copySource.account(), copySource.container(), copySource.blob(),
-                            copySource.snapshot()));
+            Optional<StoredObject> sourceObject = storedCopySource(copySource);
             if (sourceObject.isEmpty()) {
                 return new AzureErrorResponse("BlobNotFound",
                         "The specified blob does not exist.")
                         .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response sourceConditionFailure = validateSourceConditions(request, sourceObject.get());
+            if (sourceConditionFailure != null) {
+                return sourceConditionFailure;
             }
 
             // Validate conditions on the destination
@@ -807,6 +961,106 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     .header("Content-Length", 0);
             return rb.build();
         });
+    }
+
+    /**
+     * Reads the source of Put Blob From URL or Put Block From URL, under the lease monitor: the source must be a
+     * blob, or a snapshot of one, held by this handler, and the request's {@code x-ms-source-if-*} conditions must
+     * hold for it. Failures take the answers Azurite gives these two operations: a source that cannot be read is
+     * {@code CannotVerifyCopySource} with the status the read got, a failed source condition is
+     * {@code 412 SourceConditionNotMet}.
+     */
+    private CopySourceRead readCopySource(AzureRequest request) {
+        Optional<CopySource> parsedSource =
+                CopySource.parse(request.headers().getHeaderString("x-ms-copy-source"));
+        if (parsedSource.isEmpty()) {
+            return CopySourceRead.failed(invalidHeaderValue());
+        }
+        CopySource copySource = parsedSource.get();
+        Response sourceAccess = authorizeCopySource(request, copySource);
+        if (sourceAccess != null) {
+            return CopySourceRead.failed(sourceAccess);
+        }
+        Optional<StoredObject> sourceObject = storedCopySource(copySource);
+        if (sourceObject.isEmpty()) {
+            return CopySourceRead.failed(cannotVerifyCopySource(Response.Status.NOT_FOUND.getStatusCode(),
+                    "The specified resource does not exist."));
+        }
+        // A source written with a customer-provided key is read only with that key, which these operations take in
+        // x-ms-source-encryption-key (service version 2026-02-06 on). The read it fails is the source's, so a refusal
+        // is CannotVerifyCopySource with that read's status; a malformed key is the request's own header error.
+        Response sourceKeyFailure = validateCustomerProvidedKey(sourceObject.get(),
+                request.headers().getHeaderString("x-ms-source-encryption-key"),
+                request.headers().getHeaderString("x-ms-source-encryption-key-sha256"));
+        if (sourceKeyFailure != null) {
+            return CopySourceRead.failed(sourceKeyFailure.getStatus() == Response.Status.CONFLICT.getStatusCode()
+                    ? cannotVerifyCopySource(sourceKeyFailure.getStatus(),
+                            "The customer specified encryption on the request does not match the copy source's.")
+                    : sourceKeyFailure);
+        }
+        Response sourceConditionFailure = validateSourceConditions(request, sourceObject.get());
+        if (sourceConditionFailure != null) {
+            return CopySourceRead.failed(sourceConditionFailure);
+        }
+        return new CopySourceRead(sourceObject.get(), null);
+    }
+
+    /** The blob or snapshot a copy source names, if this handler holds it. */
+    private Optional<StoredObject> storedCopySource(CopySource copySource) {
+        return store.get(copySource.snapshot() == null
+                ? objKey(copySource.account(), copySource.container(), copySource.blob())
+                : snapshotKey(copySource.account(), copySource.container(), copySource.blob(),
+                        copySource.snapshot()));
+    }
+
+    /** A copy source looked up for a copy: the stored source, or the answer that ends the request. */
+    private record CopySourceRead(StoredObject source, Response failure) {
+        static CopySourceRead failed(Response failure) {
+            return new CopySourceRead(null, failure);
+        }
+    }
+
+    /**
+     * The {@code x-ms-source-if-*} conditions of a copy, evaluated against its source. A date that does not parse
+     * is ignored, as HTTP ignores an invalid conditional date; the comparison is to the second, the precision of
+     * the {@code Last-Modified} the source is served with.
+     */
+    private static Response validateSourceConditions(AzureRequest request, StoredObject source) {
+        String ifMatch = request.headers().getHeaderString("x-ms-source-if-match");
+        String ifNoneMatch = request.headers().getHeaderString("x-ms-source-if-none-match");
+        Instant lastModified = source.lastModified().truncatedTo(ChronoUnit.SECONDS);
+        Optional<Instant> ifModifiedSince = httpDate(request.headers().getHeaderString("x-ms-source-if-modified-since"));
+        Optional<Instant> ifUnmodifiedSince =
+                httpDate(request.headers().getHeaderString("x-ms-source-if-unmodified-since"));
+        boolean met = (ifMatch == null || etagMatches(ifMatch, source.etag()))
+                && (ifNoneMatch == null || !etagMatches(ifNoneMatch, source.etag()))
+                && ifModifiedSince.map(lastModified::isAfter).orElse(true)
+                && ifUnmodifiedSince.map(since -> !lastModified.isAfter(since)).orElse(true);
+        return met ? null : new AzureErrorResponse("SourceConditionNotMet",
+                "The source condition specified using HTTP conditional header(s) is not met.")
+                .toXmlResponse(Response.Status.PRECONDITION_FAILED.getStatusCode());
+    }
+
+    private static Optional<Instant> httpDate(String value) {
+        if (value == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Instant.from(RFC1123_DATE_TIME.parse(value.trim())));
+        } catch (DateTimeException ignored) {
+            // An unparseable conditional date is not a condition (RFC 9110 13.1.3), so the request proceeds.
+            return Optional.empty();
+        }
+    }
+
+    private static Response cannotVerifyCopySource(int status, String message) {
+        return new AzureErrorResponse("CannotVerifyCopySource", message).toXmlResponse(status);
+    }
+
+    private static Response invalidHeaderValue() {
+        return new AzureErrorResponse("InvalidHeaderValue",
+                "The value for one of the HTTP headers is not in the correct format.")
+                .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
     }
 
     /**
@@ -2256,30 +2510,11 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         StoredObject so = object.get();
-        String customerProvidedKeySha256 = so.metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
-        if (customerProvidedKeySha256 != null) {
-            String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
-            if (customerProvidedKey == null) {
-                return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
-                        "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
-                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-            }
-            String requestKeySha256 = request.headers().getHeaderString("x-ms-encryption-key-sha256");
-            String calculatedKeySha256 = customerProvidedKeySha256(customerProvidedKey);
-            if (calculatedKeySha256 == null || !calculatedKeySha256.equals(requestKeySha256)) {
-                return new AzureErrorResponse("InvalidHeaderValue",
-                        "The value for one of the HTTP headers is not in the correct format.")
-                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
-            }
-            if (!customerProvidedKeySha256.equals(requestKeySha256)) {
-                return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
-                        "The given customer specified encryption does not match the encryption used to encrypt the blob.")
-                        .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-            }
-        } else if (request.headers().getHeaderString("x-ms-encryption-key") != null) {
-            return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
-                    "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
-                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        Response keyFailure = validateCustomerProvidedKey(so,
+                request.headers().getHeaderString("x-ms-encryption-key"),
+                request.headers().getHeaderString("x-ms-encryption-key-sha256"));
+        if (keyFailure != null) {
+            return keyFailure;
         }
         long totalSize = so.data().length;
         String rangeHeader = request.headers().getHeaderString("x-ms-range");
@@ -2330,6 +2565,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 // they are absent.
                 .header("x-ms-creation-time", RFC1123_DATE_TIME.format(creationTime(so)))
                 .header("x-ms-server-encrypted", "true");
+        String customerProvidedKeySha256 = so.metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
         if (customerProvidedKeySha256 != null) {
             rb.header("x-ms-encryption-key-sha256", customerProvidedKeySha256);
         }
@@ -3157,71 +3393,198 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             }
             String blockId = request.queryParams().get("blockid");
             if (blockId == null || blockId.isBlank()) {
-                return new AzureErrorResponse("InvalidQueryParameterValue",
-                        "Value for one of the query parameters specified in the request URI is invalid.")
-                        .toXmlResponse(400);
+                return invalidBlockId();
             }
-            byte[] data = request.bodyStream().readAllBytes();
-            return leaseService.exclusively(() -> {
-                if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
-                    return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
-                            .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-                }
-                Response leaseFailure = leaseService.validateWrite(request,
-                        objKey(request.accountName(), containerName, blobName));
-                if (leaseFailure != null) {
-                    return leaseFailure;
-                }
-                String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
-                String customerProvidedKeySha256 =
-                        request.headers().getHeaderString("x-ms-encryption-key-sha256");
-                String calculatedKeySha256 = customerProvidedKey == null
-                        ? null
-                        : customerProvidedKeySha256(customerProvidedKey);
-                if (customerProvidedKey != null
-                        && (calculatedKeySha256 == null || !calculatedKeySha256.equals(customerProvidedKeySha256))) {
-                    return new AzureErrorResponse("InvalidHeaderValue",
-                            "The value for one of the HTTP headers is not in the correct format.")
-                            .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
-                }
-                List<StoredObject> stagedBlocks = store.scan(key -> key.startsWith(
-                        blockStagingPrefix(request.accountName(), containerName, blobName)));
-                if (!stagedBlocks.isEmpty()) {
-                    String stagedCustomerProvidedKeySha256 =
-                            stagedBlocks.getFirst().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
-                    if (stagedCustomerProvidedKeySha256 == null && customerProvidedKey != null) {
-                        return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
-                                "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
-                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-                    }
-                    if (stagedCustomerProvidedKeySha256 != null && customerProvidedKey == null) {
-                        return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
-                                "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
-                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-                    }
-                    if (stagedCustomerProvidedKeySha256 != null
-                            && !stagedCustomerProvidedKeySha256.equals(customerProvidedKeySha256)) {
-                        return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
-                                "The given customer specified encryption does not match the encryption used to encrypt the blob.")
-                                .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
-                    }
-                }
-                Map<String, String> metadata = new HashMap<>();
-                metadata.put("BlockId", blockId);
-                if (customerProvidedKey != null) {
-                    metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
-                }
-                store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
-                        new StoredObject(blockId, data, metadata, Instant.now(),
-                                etags.next()));
-                return Response.status(Response.Status.CREATED)
-                        .header("x-ms-request-server-encrypted", "true")
-                        .header("Content-Length", 0)
-                        .build();
-            });
+            return stageBlock(request, containerName, blobName, blockId, request.bodyStream().readAllBytes());
         } catch (IOException e) {
             LOGGER.errorf(e, "putBlock I/O error: container=%s blob=%s", containerName, blobName);
             return Response.serverError().build();
+        }
+    }
+
+    /**
+     * PUT /{container}/{blob}?comp=block&blockid={BASE64} with {@code x-ms-copy-source}: Put Block From URL
+     * ({@code BlockBlob_StageBlockFromURL}). Stages the source's bytes, or the {@code x-ms-source-range} of them,
+     * the way {@link #putBlock} stages a body. The request carries no body of its own.
+     */
+    private Response putBlockFromUrl(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeWrite(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        if (hasBody(request)) {
+            return invalidHeaderValue();
+        }
+        String blockId = request.queryParams().get("blockid");
+        if (blockId == null || blockId.isBlank()) {
+            return invalidBlockId();
+        }
+        String sourceRangeHeader = request.headers().getHeaderString("x-ms-source-range");
+        Optional<SourceRange> sourceRange = SourceRange.parse(sourceRangeHeader);
+        if (sourceRangeHeader != null && sourceRange.isEmpty()) {
+            return invalidHeaderValue();
+        }
+        return leaseService.exclusively(() -> {
+            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            CopySourceRead read = readCopySource(request);
+            if (read.failure() != null) {
+                return read.failure();
+            }
+            byte[] source = read.source().data();
+            byte[] data;
+            if (sourceRange.isPresent()) {
+                // A range starting past the end fails the source read with 416, as a ranged Get Blob does.
+                if (sourceRange.get().start() >= source.length) {
+                    return cannotVerifyCopySource(416,
+                            "The range specified is invalid for the current size of the resource.");
+                }
+                data = sourceRange.get().of(source);
+            } else {
+                data = Arrays.copyOf(source, source.length);
+            }
+            String contentMd5 = md5Base64(data);
+            Response md5Failure = validateMd5(request.headers().getHeaderString("x-ms-source-content-md5"), contentMd5);
+            if (md5Failure != null) {
+                return md5Failure;
+            }
+            Response staged = stageBlock(request, containerName, blobName, blockId, data);
+            return staged.getStatus() == Response.Status.CREATED.getStatusCode()
+                    ? Response.fromResponse(staged).header("Content-MD5", contentMd5).build()
+                    : staged;
+        });
+    }
+
+    /**
+     * Stages {@code data} as block {@code blockId} of the blob, after the container, lease and customer-provided
+     * key checks that Put Block and Put Block From URL share.
+     */
+    private Response stageBlock(AzureRequest request, String containerName, String blobName, String blockId,
+                                byte[] data) {
+        return leaseService.exclusively(() -> {
+            if (store.get(nsKey(request.accountName(), containerName)).isEmpty()) {
+                return new AzureErrorResponse("ContainerNotFound", "The specified container does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+            String customerProvidedKey = request.headers().getHeaderString("x-ms-encryption-key");
+            String customerProvidedKeySha256 =
+                    request.headers().getHeaderString("x-ms-encryption-key-sha256");
+            String calculatedKeySha256 = customerProvidedKey == null
+                    ? null
+                    : customerProvidedKeySha256(customerProvidedKey);
+            if (customerProvidedKey != null
+                    && (calculatedKeySha256 == null || !calculatedKeySha256.equals(customerProvidedKeySha256))) {
+                return new AzureErrorResponse("InvalidHeaderValue",
+                        "The value for one of the HTTP headers is not in the correct format.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            List<StoredObject> stagedBlocks = store.scan(key -> key.startsWith(
+                    blockStagingPrefix(request.accountName(), containerName, blobName)));
+            if (!stagedBlocks.isEmpty()) {
+                String stagedCustomerProvidedKeySha256 =
+                        stagedBlocks.getFirst().metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+                if (stagedCustomerProvidedKeySha256 == null && customerProvidedKey != null) {
+                    return new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
+                            "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
+                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+                if (stagedCustomerProvidedKeySha256 != null && customerProvidedKey == null) {
+                    return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                            "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+                if (stagedCustomerProvidedKeySha256 != null
+                        && !stagedCustomerProvidedKeySha256.equals(customerProvidedKeySha256)) {
+                    return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                            "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                            .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+                }
+            }
+            Map<String, String> metadata = new HashMap<>();
+            metadata.put("BlockId", blockId);
+            if (customerProvidedKey != null) {
+                metadata.put(CUSTOMER_PROVIDED_KEY_SHA256, customerProvidedKeySha256);
+            }
+            store.put(blockStagingKey(request.accountName(), containerName, blobName, blockId),
+                    new StoredObject(blockId, data, metadata, Instant.now(),
+                            etags.next()));
+            return Response.status(Response.Status.CREATED)
+                    .header("x-ms-request-server-encrypted", "true")
+                    .header("Content-Length", 0)
+                    .build();
+        });
+    }
+
+    private static Response invalidBlockId() {
+        return new AzureErrorResponse("InvalidQueryParameterValue",
+                "Value for one of the query parameters specified in the request URI is invalid.")
+                .toXmlResponse(400);
+    }
+
+    /**
+     * True when a request that must carry no body declares one. Put Blob From URL and Put Block From URL take
+     * their content from the source; Azurite answers a non-zero {@code Content-Length} on them with
+     * {@code InvalidHeaderValue}.
+     */
+    private static boolean hasBody(AzureRequest request) {
+        String contentLength = request.headers().getHeaderString(HttpHeaders.CONTENT_LENGTH);
+        return contentLength != null && !"0".equals(contentLength.trim());
+    }
+
+    /** {@code null} when no MD5 was supplied or it matches; {@code 400 Md5Mismatch} otherwise. */
+    private static Response validateMd5(String expectedBase64, String actualBase64) {
+        if (expectedBase64 == null || expectedBase64.equals(actualBase64)) {
+            return null;
+        }
+        return new AzureErrorResponse("Md5Mismatch",
+                "The MD5 value specified in the request did not match with the MD5 value calculated by the server.")
+                .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+    }
+
+    private static String md5Base64(byte[] data) {
+        try {
+            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("MD5").digest(data));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 is a required JDK algorithm", e);
+        }
+    }
+
+    /**
+     * An {@code x-ms-source-range} of a copy: {@code bytes=<start>-<end>}, both inclusive, or {@code bytes=<start>-}
+     * for the rest of the source. An end before the start does not parse.
+     */
+    private record SourceRange(long start, Long end) {
+        private static final Pattern FORMAT = Pattern.compile("bytes=(\\d+)-(\\d*)");
+
+        static Optional<SourceRange> parse(String header) {
+            if (header == null) {
+                return Optional.empty();
+            }
+            Matcher matcher = FORMAT.matcher(header.trim());
+            if (!matcher.matches()) {
+                return Optional.empty();
+            }
+            try {
+                long start = Long.parseLong(matcher.group(1));
+                Long end = matcher.group(2).isEmpty() ? null : Long.parseLong(matcher.group(2));
+                return end != null && end < start ? Optional.empty() : Optional.of(new SourceRange(start, end));
+            } catch (NumberFormatException e) {
+                // Digits too long for a long are not a valid offset.
+                return Optional.empty();
+            }
+        }
+
+        /** The range of {@code source}, clamped to its end; {@code start} must be within it. */
+        byte[] of(byte[] source) {
+            long last = end == null ? source.length - 1L : Math.min(end, source.length - 1L);
+            return Arrays.copyOfRange(source, (int) start, (int) last + 1);
         }
     }
 
@@ -3560,6 +3923,34 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
             ids.add(m.group(1).trim());
         }
         return ids;
+    }
+
+    /**
+     * The customer-provided key check a read of {@code object} makes: a blob written with a key is read only with
+     * that key, and a blob written without one refuses a key.
+     */
+    private static Response validateCustomerProvidedKey(StoredObject object, String key, String keySha256) {
+        String storedKeySha256 = object.metadata().get(CUSTOMER_PROVIDED_KEY_SHA256);
+        if (storedKeySha256 == null) {
+            return key == null ? null : new AzureErrorResponse("BlobDoesNotUseCustomerSpecifiedEncryption",
+                    "The blob does not use customer specified encryption, but customer specified encryption was provided in the request.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        if (key == null) {
+            return new AzureErrorResponse("BlobUsesCustomerSpecifiedEncryption",
+                    "The blob is encrypted with customer specified encryption, but it was not provided in the request.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        String calculatedKeySha256 = customerProvidedKeySha256(key);
+        if (calculatedKeySha256 == null || !calculatedKeySha256.equals(keySha256)) {
+            return invalidHeaderValue();
+        }
+        if (!storedKeySha256.equals(keySha256)) {
+            return new AzureErrorResponse("BlobCustomerSpecifiedEncryptionMismatch",
+                    "The given customer specified encryption does not match the encryption used to encrypt the blob.")
+                    .toXmlResponse(Response.Status.CONFLICT.getStatusCode());
+        }
+        return null;
     }
 
     private static String customerProvidedKeySha256(String customerProvidedKey) {

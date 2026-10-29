@@ -1083,4 +1083,35 @@ class BlobCompatibilityTest {
 
         container.delete();
     }
+
+    @Test
+    @DisplayName("put blob and put block from url: a SAS source is copied whole, or block by block from ranges")
+    void putBlobAndPutBlockFromUrl() {
+        BlobContainerClient container = client.createBlobContainer(containerName());
+        BlobClient source = container.getBlobClient("source.txt");
+        source.upload(BinaryData.fromString("0123456789"));
+        // The source URL a copying client builds: the blob's URL with a read SAS, as s3proxy signs it.
+        String sourceUrl = source.getBlobUrl() + "?" + source.generateSas(new BlobServiceSasSignatureValues(
+                OffsetDateTime.now().plusHours(1), new BlobSasPermission().setReadPermission(true)));
+
+        // Put Blob From URL: the SDK accepts only 201.
+        BlockBlobClient whole = container.getBlobClient("whole.txt").getBlockBlobClient();
+        assertNotNull(whole.uploadFromUrl(sourceUrl).getETag());
+        assertEquals("0123456789", whole.downloadContent().toString());
+
+        // Put Block From URL with ranges, committed in another order: a multipart copy.
+        BlockBlobClient parts = container.getBlobClient("parts.txt").getBlockBlobClient();
+        String head = Base64.getEncoder().encodeToString("head".getBytes(StandardCharsets.UTF_8));
+        String tail = Base64.getEncoder().encodeToString("tail".getBytes(StandardCharsets.UTF_8));
+        parts.stageBlockFromUrl(head, sourceUrl, new BlobRange(0, 4L));
+        parts.stageBlockFromUrl(tail, sourceUrl, new BlobRange(4));
+        parts.commitBlockList(List.of(tail, head));
+        assertEquals("4567890123", parts.downloadContent().toString());
+
+        BlobStorageException missing = assertThrows(BlobStorageException.class,
+            () -> parts.stageBlockFromUrl(head, container.getBlobClient("missing.txt").getBlobUrl(), null));
+        assertEquals(BlobErrorCode.CANNOT_VERIFY_COPY_SOURCE, missing.getErrorCode());
+
+        container.delete();
+    }
 }
