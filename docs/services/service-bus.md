@@ -190,8 +190,13 @@ endpoint up front; there is no dynamic port to discover. Two more pieces complet
   namespace floci-az was configured to start (start-on-boot or the topology file) failed to start,
   for example because Docker could not bind its AMQP host port. They return to `UP` once that
   namespace starts.
-- **`GET /{account}-servicebus/namespaces`** reports each running namespace's actual
-  `amqpPort`/`amqpsPort`, for tooling that wants to verify or discover the endpoint at runtime.
+- **`GET /{account}-servicebus/namespaces`** reports each running namespace's ports, for tooling
+  that wants to verify or discover the endpoint at runtime. `amqpHostPort`/`amqpsHostPort` are the
+  host ports Docker published the broker on, which is what a client on the host connects to, and
+  are the ports to read back when `amqp-port`/`amqp-tls-port` is `0` and Docker picks them.
+  `amqpPort`/`amqpsPort` are the ports floci-az itself reaches the broker on: the same host ports
+  when floci-az runs on the host or in published endpoint mode, but the broker's container ports
+  (`5672`/`5671`) when floci-az runs in a container, for clients on the same Docker network.
 
 This is what hosting integrations (e.g. .NET Aspire) should rely on: pass
 `FLOCI_AZ_SERVICES_SERVICE_BUS_AMQP_PORT` (with `..._MOCKED=false` and `..._START_ON_BOOT=true`),
