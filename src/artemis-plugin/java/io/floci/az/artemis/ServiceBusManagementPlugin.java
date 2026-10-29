@@ -207,6 +207,7 @@ public final class ServiceBusManagementPlugin implements ActiveMQServerPlugin {
 
     private static byte[] encodePeekedMessage(
             AMQPMessage source, MessageReference reference, boolean omitMessageBody) {
+        // Proton's Message: the Artemis Message this file imports is a different type.
         org.apache.qpid.proton.message.Message peeked = Proton.message();
         peeked.setHeader(peekHeader(source, reference));
         peeked.setProperties(source.getProperties());

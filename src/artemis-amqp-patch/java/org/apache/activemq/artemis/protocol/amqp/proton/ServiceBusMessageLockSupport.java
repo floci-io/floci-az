@@ -1,27 +1,28 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.nio.ByteBuffer;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-
-import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.apache.qpid.proton.amqp.messaging.Outcome;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
+import org.apache.qpid.proton.amqp.transport.AmqpError;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Delivery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.ByteBuffer;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /** Per-delivery Service Bus locks. All state changes run on the connection's event loop. */
 public final class ServiceBusMessageLockSupport {
@@ -159,7 +160,7 @@ public final class ServiceBusMessageLockSupport {
          // a newer delivery to this consumer. Connection teardown releases its remaining references.
          locks.keySet().forEach(pending -> pending.setContext(EXPIRED));
          close();
-         connection.close(new ErrorCondition(org.apache.qpid.proton.amqp.transport.AmqpError.INTERNAL_ERROR,
+         connection.close(new ErrorCondition(AmqpError.INTERNAL_ERROR,
             "Could not release an expired message lock"));
          connection.destroy();
       }

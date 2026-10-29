@@ -6,6 +6,7 @@ import org.apache.activemq.artemis.core.config.impl.ConfigurationImpl;
 import org.apache.activemq.artemis.core.deployers.impl.FileConfigurationParser;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
 import org.apache.activemq.artemis.core.settings.impl.HierarchicalObjectRepository;
+import org.apache.activemq.artemis.protocol.amqp.sasl.ServerSASLFactory;
 import org.apache.activemq.artemis.utils.XMLUtil;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Element;
@@ -14,9 +15,10 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
 import java.util.List;
 import java.util.ServiceLoader;
@@ -115,20 +117,20 @@ class ServiceBusConfigGeneratorTest {
                 ServiceBusNamespaceManager.ARTEMIS_EXTENSION_RESOURCE)) {
             assertNotNull(stream, "Artemis extension JAR must be embedded in the application");
             Path jar = Files.createTempFile("floci-az-servicebus-artemis-", ".jar");
-            Files.copy(stream, jar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(stream, jar, StandardCopyOption.REPLACE_EXISTING);
             extensionJar = jar.toUri().toURL();
         }
 
         try (URLClassLoader loader = new URLClassLoader(new URL[]{extensionJar}, getClass().getClassLoader())) {
             Object factory = ServiceLoader.load(
-                            org.apache.activemq.artemis.protocol.amqp.sasl.ServerSASLFactory.class, loader)
+                            ServerSASLFactory.class, loader)
                     .stream()
                     .filter(provider -> provider.get().getMechanism().equals("MSSBCBS"))
                     .findFirst()
                     .orElseThrow()
                     .get();
 
-            assertTrue(factory instanceof org.apache.activemq.artemis.protocol.amqp.sasl.ServerSASLFactory);
+            assertTrue(factory instanceof ServerSASLFactory);
         }
     }
 

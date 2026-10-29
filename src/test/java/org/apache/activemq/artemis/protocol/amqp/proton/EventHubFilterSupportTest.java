@@ -8,6 +8,7 @@ import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.activemq.artemis.utils.collections.TypedProperties;
 import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
+import org.apache.qpid.proton.message.Message;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -130,8 +131,7 @@ class EventHubFilterSupportTest {
 
     /** An event as the partition plugin leaves it: its stream position in broker properties only. */
     private static AMQPMessage event(long sequence, long enqueuedTime) {
-        // Proton's Message: Artemis has a Message type of its own.
-        org.apache.qpid.proton.message.Message message = Proton.message();
+        Message message = Proton.message();
         message.setApplicationProperties(new ApplicationProperties(Map.of("testId", "abc")));
         byte[] buffer = new byte[1024];
         int size = message.encode(buffer, 0, buffer.length);

@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -91,7 +92,7 @@ public class AcrHandlerTest {
 
         given().when().get(registries() + API)
                 .then().statusCode(200)
-                .body("value.name", org.hamcrest.Matchers.hasItem("acrget"));
+                .body("value.name", Matchers.hasItem("acrget"));
     }
 
     @Test

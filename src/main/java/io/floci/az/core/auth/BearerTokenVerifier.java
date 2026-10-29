@@ -4,6 +4,7 @@ import io.floci.az.core.AuthContext;
 import io.floci.az.core.AuthType;
 import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
+
 import java.util.Optional;
 
 @ApplicationScoped

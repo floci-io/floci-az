@@ -1,11 +1,13 @@
 package io.floci.az.services.monitor.activitylog;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -33,7 +35,7 @@ public class ActivityLogEndpoint {
     private final int pageSize;
 
     @Inject
-    public ActivityLogEndpoint(ActivityLog log, io.floci.az.config.EmulatorConfig config) {
+    public ActivityLogEndpoint(ActivityLog log, EmulatorConfig config) {
         this(log, config.services().monitor().activityLog().pageSize());
     }
 
@@ -111,7 +113,7 @@ public class ActivityLogEndpoint {
         for (String param : List.of("$filter", "$select")) {
             String value = req.queryParams().get(param);
             if (value != null) {
-                link.append('&').append(param).append('=').append(java.net.URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20"));
+                link.append('&').append(param).append('=').append(URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20"));
             }
         }
         link.append("&$skiptoken=").append(encode(lastSequence));

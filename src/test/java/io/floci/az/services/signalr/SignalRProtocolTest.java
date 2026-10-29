@@ -1,11 +1,13 @@
 package io.floci.az.services.signalr;
 
 import org.junit.jupiter.api.Test;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class SignalRProtocolTest {

@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One Activity Log entry, in the {@code EventData} shape the Activity Logs REST API returns.
@@ -52,7 +53,7 @@ public record ActivityLogEvent(String eventDataId, String operationId, String co
     }
 
     /** The entry as the REST API serialises it; {@code select} narrows it to the named properties when non-empty. */
-    public Map<String, Object> toJson(java.util.Set<String> select) {
+    public Map<String, Object> toJson(Set<String> select) {
         Map<String, Object> json = new LinkedHashMap<>();
         put(json, select, "authorization", authorization());
         put(json, select, "caller", caller);
@@ -105,7 +106,7 @@ public record ActivityLogEvent(String eventDataId, String operationId, String co
         return request;
     }
 
-    private static void put(Map<String, Object> json, java.util.Set<String> select, String name, Object value) {
+    private static void put(Map<String, Object> json, Set<String> select, String name, Object value) {
         if (select.isEmpty() || select.contains(name.toLowerCase(Locale.ROOT))) {
             json.put(name, value);
         }

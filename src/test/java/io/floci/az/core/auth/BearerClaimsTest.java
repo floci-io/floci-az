@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -67,7 +68,7 @@ class BearerClaimsTest {
     @Test
     void keepsTheJsonTypeOfEveryClaim() {
         BearerClaims claims = BearerClaims.parse(token("{\"oid\": \"o1\", \"acrs\": [\"c1\", \"c2\"], \"n\": 3}"));
-        assertEquals(java.util.List.of("c1", "c2"), claims.values().get("acrs"));
+        assertEquals(List.of("c1", "c2"), claims.values().get("acrs"));
         assertEquals(3, claims.values().get("n"));
         assertEquals("[\"c1\",\"c2\"]", claims.claims().get("acrs"));
         assertEquals("3", claims.claims().get("n"));

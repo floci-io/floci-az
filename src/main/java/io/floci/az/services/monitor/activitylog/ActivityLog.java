@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,7 +70,7 @@ public class ActivityLog implements Resettable {
                 out.add(entry);
             }
         }
-        java.util.Collections.reverse(out);
+        Collections.reverse(out);
         return out;
     }
 

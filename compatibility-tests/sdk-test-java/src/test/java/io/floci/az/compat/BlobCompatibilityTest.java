@@ -34,7 +34,10 @@ import com.azure.storage.blob.specialized.BlobLeaseClientBuilder;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import com.azure.storage.common.StorageSharedKeyCredential;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -100,7 +103,7 @@ class BlobCompatibilityTest {
         BlobClient blob = container.getBlobClient("hello.txt");
 
         byte[] content = "Hello from Azure SDK Java!".getBytes();
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
 
         byte[] downloaded = blob.downloadContent().toBytes();
         assertArrayEquals(content, downloaded);
@@ -122,7 +125,7 @@ class BlobCompatibilityTest {
         BlobContainerClient container = client.createBlobContainer(name);
         BlobClient blob = container.getBlobClient("props.txt");
         byte[] content = "header check".getBytes(StandardCharsets.UTF_8);
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
 
         BlobProperties props = blob.getProperties();
         assertNotNull(props.getCreationTime(), "x-ms-creation-time must be returned");
@@ -354,7 +357,7 @@ class BlobCompatibilityTest {
             .setContentMd5(md5);
 
         blob.getBlockBlobClient().uploadWithResponse(
-            new java.io.ByteArrayInputStream(content),
+            new ByteArrayInputStream(content),
             content.length,
             headers,
             null,
@@ -384,7 +387,7 @@ class BlobCompatibilityTest {
         for (int i = 0; i < 5; i++) {
             byte[] data = ("content-" + i).getBytes();
             container.getBlobClient("file-" + i + ".txt")
-                .upload(new java.io.ByteArrayInputStream(data), data.length, true);
+                .upload(new ByteArrayInputStream(data), data.length, true);
         }
 
         long count = container.listBlobs().stream().count();
@@ -400,9 +403,9 @@ class BlobCompatibilityTest {
         BlobContainerClient container = client.createBlobContainer(name);
 
         byte[] data = "data".getBytes(StandardCharsets.UTF_8);
-        container.getBlobClient("level0/file1.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
-        container.getBlobClient("level0/file2.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
-        container.getBlobClient("root.txt").upload(new java.io.ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("level0/file1.txt").upload(new ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("level0/file2.txt").upload(new ByteArrayInputStream(data), data.length, true);
+        container.getBlobClient("root.txt").upload(new ByteArrayInputStream(data), data.length, true);
 
         List<BlobItem> items = container.listBlobsByHierarchy("/", new ListBlobsOptions(), null).stream().toList();
         assertEquals(List.of("level0/", "root.txt"), items.stream().map(BlobItem::getName).sorted().toList());
@@ -421,7 +424,7 @@ class BlobCompatibilityTest {
         for (int i = 0; i < 5; i++) {
             byte[] data = ("content-" + i).getBytes(StandardCharsets.UTF_8);
             container.getBlobClient("file-" + i + ".txt")
-                .upload(new java.io.ByteArrayInputStream(data), data.length, true);
+                .upload(new ByteArrayInputStream(data), data.length, true);
         }
 
         var pages = container.listBlobs(new ListBlobsOptions().setMaxResultsPerPage(2), null)
@@ -502,7 +505,7 @@ class BlobCompatibilityTest {
         BlobClient blob = container.getBlobClient("sas.txt");
 
         byte[] content = "sas".getBytes(StandardCharsets.UTF_8);
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
 
         BlobClient sasBlob = new BlobClientBuilder()
                 .endpoint(EmulatorConfig.httpBase() + "/" + EmulatorConfig.ACCOUNT + "/" + name
@@ -686,8 +689,8 @@ class BlobCompatibilityTest {
 
         byte[] v1 = "original".getBytes();
         byte[] v2 = "updated".getBytes();
-        blob.upload(new java.io.ByteArrayInputStream(v1), v1.length, true);
-        blob.upload(new java.io.ByteArrayInputStream(v2), v2.length, true);
+        blob.upload(new ByteArrayInputStream(v1), v1.length, true);
+        blob.upload(new ByteArrayInputStream(v2), v2.length, true);
 
         assertArrayEquals(v2, blob.downloadContent().toBytes());
 
@@ -703,7 +706,7 @@ class BlobCompatibilityTest {
 
         byte[] content = "metadata".getBytes(StandardCharsets.UTF_8);
         blob.getBlockBlobClient().uploadWithResponse(
-            new java.io.ByteArrayInputStream(content),
+            new ByteArrayInputStream(content),
             content.length,
             null,
             Map.of("owner", "compat"),
@@ -732,7 +735,7 @@ class BlobCompatibilityTest {
         BlobClient blob = container.getBlobClient("range.txt");
 
         byte[] content = "0123456789".getBytes(StandardCharsets.UTF_8);
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         blob.downloadStreamWithResponse(out, new BlobRange(2, 4L), null, null, false, null, Context.NONE);
@@ -748,7 +751,7 @@ class BlobCompatibilityTest {
         BlobContainerClient container = client.createBlobContainer(name);
         BlobClient blob = container.getBlobClient("empty-range.txt");
 
-        blob.upload(new java.io.ByteArrayInputStream(new byte[0]), 0, true);
+        blob.upload(new ByteArrayInputStream(new byte[0]), 0, true);
 
         BlobStorageException ex = assertThrows(BlobStorageException.class,
             () -> blob.downloadStreamWithResponse(new ByteArrayOutputStream(), new BlobRange(0, 1L), null, null, false, null, Context.NONE));
@@ -837,9 +840,9 @@ class BlobCompatibilityTest {
         String id3 = Base64.getEncoder().encodeToString("block-003".getBytes(StandardCharsets.UTF_8));
 
         // Stage blocks
-        blockBlob.stageBlock(id1, new java.io.ByteArrayInputStream(part1), part1.length);
-        blockBlob.stageBlock(id2, new java.io.ByteArrayInputStream(part2), part2.length);
-        blockBlob.stageBlock(id3, new java.io.ByteArrayInputStream(part3), part3.length);
+        blockBlob.stageBlock(id1, new ByteArrayInputStream(part1), part1.length);
+        blockBlob.stageBlock(id2, new ByteArrayInputStream(part2), part2.length);
+        blockBlob.stageBlock(id3, new ByteArrayInputStream(part3), part3.length);
 
         // Commit in order
         blockBlob.commitBlockList(List.of(id1, id2, id3));
@@ -867,8 +870,8 @@ class BlobCompatibilityTest {
         String id1 = Base64.getEncoder().encodeToString("blk1".getBytes(StandardCharsets.UTF_8));
         String id2 = Base64.getEncoder().encodeToString("blk2".getBytes(StandardCharsets.UTF_8));
 
-        blockBlob.stageBlock(id1, new java.io.ByteArrayInputStream(data), data.length);
-        blockBlob.stageBlock(id2, new java.io.ByteArrayInputStream(data), data.length);
+        blockBlob.stageBlock(id1, new ByteArrayInputStream(data), data.length);
+        blockBlob.stageBlock(id2, new ByteArrayInputStream(data), data.length);
 
         // Before commit: both blocks are uncommitted
         var beforeCommit = blockBlob.listBlocks(BlockListType.ALL);
@@ -905,7 +908,7 @@ class BlobCompatibilityTest {
         BlobClient blob = container.getBlobClient("conditional.txt");
 
         byte[] content = "condition".getBytes(StandardCharsets.UTF_8);
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
         String etag = blob.getProperties().getETag();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -935,7 +938,7 @@ class BlobCompatibilityTest {
     private BlobClient leasedBlob(BlobContainerClient container, String blobName) {
         BlobClient blob = container.getBlobClient(blobName);
         byte[] content = "lock".getBytes(StandardCharsets.UTF_8);
-        blob.upload(new java.io.ByteArrayInputStream(content), content.length, true);
+        blob.upload(new ByteArrayInputStream(content), content.length, true);
         return blob;
     }
 

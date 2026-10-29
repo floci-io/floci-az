@@ -1,9 +1,5 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
@@ -11,6 +7,10 @@ import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.UnsignedInteger;
 import org.apache.qpid.proton.amqp.messaging.Header;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Projects broker metadata onto outgoing Service Bus messages, independently of message locks. */
 public final class ServiceBusMessageMetadataSupport {

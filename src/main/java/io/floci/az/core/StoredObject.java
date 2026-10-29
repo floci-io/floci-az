@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.time.Instant;
 import java.util.Map;
 

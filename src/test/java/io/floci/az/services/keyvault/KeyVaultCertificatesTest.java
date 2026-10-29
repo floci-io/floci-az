@@ -2,12 +2,15 @@ package io.floci.az.services.keyvault;
 
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
+
 import java.io.ByteArrayInputStream;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -100,7 +103,7 @@ class KeyVaultCertificatesTest {
         pfx.load(new ByteArrayInputStream(Base64.getDecoder().decode(secret)), new char[0]);
         String alias = pfx.aliases().nextElement();
         assertFalse(pfx.isKeyEntry(alias));
-        var certificate = (java.security.cert.X509Certificate) pfx.getCertificate(alias);
+        var certificate = (X509Certificate) pfx.getCertificate(alias);
         assertEquals("EC", certificate.getPublicKey().getAlgorithm());
         assertTrue(certificate.getKeyUsage()[0]);
         assertTrue(certificate.getSubjectAlternativeNames().stream().anyMatch(entry -> entry.get(1).equals("test.local")));

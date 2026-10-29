@@ -1,11 +1,11 @@
 package io.floci.az.services.vm;
 
 import io.floci.az.config.EmulatorConfig;
-import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerInfo;
 import io.floci.az.core.docker.ContainerSpec;
+import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

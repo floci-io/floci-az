@@ -4,8 +4,17 @@ import com.azure.messaging.servicebus.ServiceBusMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
 
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -44,8 +53,8 @@ class ServiceBusLazyStartTest {
         try {
             String url = System.getenv().getOrDefault("FLOCI_AZ_ENDPOINT", "http://localhost:4577")
                     + "/" + EmulatorConfig.ACCOUNT + "-servicebus/" + queueName;
-            java.net.HttpURLConnection conn =
-                    (java.net.HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+            HttpURLConnection conn =
+                    (HttpURLConnection) URI.create(url).toURL().openConnection();
             conn.setRequestMethod("DELETE");
             conn.setConnectTimeout(5_000);
             conn.setReadTimeout(10_000);

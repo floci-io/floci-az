@@ -7,6 +7,7 @@ import org.apache.activemq.artemis.core.filter.Filter;
 import org.apache.activemq.artemis.core.filter.impl.FilterImpl;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.qpid.proton.Proton;
+import org.apache.qpid.proton.message.Message;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -209,8 +210,7 @@ class ArtemisConfigGeneratorTest {
 
     /** An event as the partition plugin leaves it: its partition in a broker property only. */
     private static AMQPStandardMessage event(int partition) {
-        // Proton's Message: Artemis has a Message type of its own.
-        org.apache.qpid.proton.message.Message message = Proton.message();
+        Message message = Proton.message();
         message.setMessageId("event-1");
         byte[] buffer = new byte[1024];
         int size = message.encode(buffer, 0, buffer.length);

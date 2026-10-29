@@ -4,6 +4,8 @@ import io.floci.az.services.entra.EntraStore;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
@@ -55,7 +57,7 @@ class GraphServiceHandlerTest {
 
     @Test
     void addAndRemoveGroupMemberRoundTrips() {
-        String memberId = "test-member-" + java.util.UUID.randomUUID();
+        String memberId = "test-member-" + UUID.randomUUID();
 
         given()
           .contentType("application/json")

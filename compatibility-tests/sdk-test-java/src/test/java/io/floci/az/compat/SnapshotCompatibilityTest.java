@@ -2,8 +2,18 @@ package io.floci.az.compat;
 
 import com.azure.core.exception.HttpResponseException;
 import com.azure.data.appconfiguration.ConfigurationClient;
-import com.azure.data.appconfiguration.models.*;
-import org.junit.jupiter.api.*;
+import com.azure.data.appconfiguration.models.ConfigurationSetting;
+import com.azure.data.appconfiguration.models.ConfigurationSettingsFilter;
+import com.azure.data.appconfiguration.models.ConfigurationSnapshot;
+import com.azure.data.appconfiguration.models.ConfigurationSnapshotStatus;
+import com.azure.data.appconfiguration.models.SnapshotComposition;
+import com.azure.data.appconfiguration.models.SnapshotSelector;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
 
 import java.time.Duration;
 import java.util.List;

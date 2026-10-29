@@ -9,6 +9,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +48,7 @@ class FunctionsExecutorServiceTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             receivedPath.set(exchange.getRequestURI().getPath());
-            byte[] body = "ok".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (var output = exchange.getResponseBody()) {
                 output.write(body);

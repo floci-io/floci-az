@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -397,6 +398,6 @@ class AzureRoutingFilterTest {
         given().when().get("/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/"
                         + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
                 .then().statusCode(404)
-                .body(org.hamcrest.Matchers.not(containsString("Policy")));
+                .body(Matchers.not(containsString("Policy")));
     }
 }

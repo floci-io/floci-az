@@ -1,6 +1,7 @@
 package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -56,11 +57,11 @@ public class CosmosContainerIndexingTest {
                 + conversationId + "\",\"sequence\":" + sequence + "}");
     }
 
-    private io.restassured.response.Response query(String coll, String sql) {
+    private Response query(String coll, String sql) {
         return queryRaw(coll, "{\"query\":\"" + sql + "\",\"parameters\":[]}");
     }
 
-    private io.restassured.response.Response queryRaw(String coll, String bodyJson) {
+    private Response queryRaw(String coll, String bodyJson) {
         return given().contentType("application/query+json")
                 .header("x-ms-documentdb-isquery", "True")
                 .body(bodyJson)

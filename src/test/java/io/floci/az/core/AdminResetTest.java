@@ -7,6 +7,8 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
@@ -24,7 +26,7 @@ class AdminResetTest {
 
     @Test
     void resetClearsGraphMembershipWrittenThroughTheDirectoryStore() {
-        String userId = "reset-user-" + java.util.UUID.randomUUID();
+        String userId = "reset-user-" + UUID.randomUUID();
         directoryStore.put(GraphDirectoryStore.user(directoryStore.defaultTenantId(), userId,
                 userId + "@floci-az.local", "reset test user", null));
 

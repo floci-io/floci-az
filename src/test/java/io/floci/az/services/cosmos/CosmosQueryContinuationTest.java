@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -112,7 +113,7 @@ class CosmosQueryContinuationTest {
     void resumesLegacyOffsetTokens() {
         String sql = "SELECT c.id FROM c ORDER BY c.rank, c.id DESC";
         List<String> expected = ids(query(sql, null, -1));
-        String token = Base64.getEncoder().encodeToString("{\"skip\":2}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String token = Base64.getEncoder().encodeToString("{\"skip\":2}".getBytes(StandardCharsets.UTF_8));
         Response page = query(sql, token, 2);
         assertEquals(expected.subList(2, 4), ids(page));
         assertEquals(expected.subList(4, 7), ids(query(sql, page.header("x-ms-continuation"), -1)));
@@ -123,7 +124,7 @@ class CosmosQueryContinuationTest {
             "{\"skip\":9223372036854775808}", "{\"skip\":\"2\"}",
             "{\"skip\":2,\"rid\":\"bookmark\",\"orderValues\":[]}"})
     void rejectsInvalidContinuationWithoutRestartingQuery(String json) {
-        String token = Base64.getEncoder().encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String token = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
         given().contentType("application/query+json").header("x-ms-documentdb-isquery", "true")
                 .header("x-ms-continuation", token)
                 .body(Map.of("query", "SELECT c.id FROM c ORDER BY c.rank"))
@@ -134,7 +135,7 @@ class CosmosQueryContinuationTest {
     @ValueSource(longs = {2147483648L, 4294967296L, Long.MAX_VALUE})
     void acceptsLongLegacyOffsetsWithoutWrapping(long offset) {
         String token = Base64.getEncoder().encodeToString(
-                ("{\"skip\":" + offset + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                ("{\"skip\":" + offset + "}").getBytes(StandardCharsets.UTF_8));
         query("SELECT c.id FROM c", token, 2).then().body("_count", is(0))
                 .header("x-ms-continuation", nullValue());
     }

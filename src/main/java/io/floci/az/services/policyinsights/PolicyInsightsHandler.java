@@ -13,6 +13,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -420,7 +422,7 @@ public class PolicyInsightsHandler implements AzureServiceHandler {
             String value = req.queryParams().get(param);
             if (value != null) {
                 link.append('&').append(param).append('=')
-                    .append(java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20"));
+                    .append(URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20"));
             }
         }
         return link.append("&$skiptoken=").append(offset).toString();

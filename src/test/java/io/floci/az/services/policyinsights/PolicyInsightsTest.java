@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -112,7 +113,7 @@ class PolicyInsightsTest {
                 .body("value[0].results.nonCompliantPolicies", equalTo(1))
                 .body("value[0].results.resourceDetails.find { it.complianceState == 'noncompliant' }.count", equalTo(1))
                 .body("value[0].results.resourceDetails.find { it.complianceState == 'compliant' }.count", equalTo(1))
-                .body("value[0].results.resourceDetails.complianceState", equalTo(java.util.List.of("noncompliant", "compliant", "exempt")))
+                .body("value[0].results.resourceDetails.complianceState", equalTo(List.of("noncompliant", "compliant", "exempt")))
                 .body("value[0].results.policyDetails[0].complianceState", equalTo("noncompliant"))
                 .body("value[0].results.policyDetails[0].count", equalTo(1))
                 .body("value[0].policyAssignments", hasSize(1))

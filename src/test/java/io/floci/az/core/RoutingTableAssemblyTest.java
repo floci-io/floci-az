@@ -1,8 +1,9 @@
 package io.floci.az.core;
 
-import io.quarkus.test.junit.QuarkusTest;
 import io.floci.az.core.ServiceRoutes.SuffixRoute;
+import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -200,7 +201,7 @@ class RoutingTableAssemblyTest {
             new SuffixRoute("-queue", "queue"),
             new SuffixRoute("-queue", "someOtherService")
         );
-        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException failure = Assertions.assertThrows(
             IllegalStateException.class,
             () -> AzureRoutingFilter.rejectDuplicateSuffixes("account", clashing));
         assertTrue(failure.getMessage().contains("-queue"), failure.getMessage());
@@ -226,7 +227,7 @@ class RoutingTableAssemblyTest {
             new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
             new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "someOtherService", always)
         );
-        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException failure = Assertions.assertThrows(
             IllegalStateException.class,
             () -> ArmRouter.rejectDuplicateProviders(clashing));
         assertTrue(failure.getMessage().contains("Microsoft.Cache"), failure.getMessage());

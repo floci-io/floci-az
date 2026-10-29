@@ -5,7 +5,9 @@ import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
+import org.apache.qpid.proton.amqp.messaging.Received;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
+import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Delivery;
 import org.junit.jupiter.api.Test;
 
@@ -58,7 +60,7 @@ class ServiceBusMessageLockSupportTest {
             fixture.track(false);
             fixture.expiry.get().run();
             assertFalse(fixture.settle());
-            verify(fixture.connection).close(any(org.apache.qpid.proton.amqp.transport.ErrorCondition.class));
+            verify(fixture.connection).close(any(ErrorCondition.class));
             verify(fixture.connection).destroy();
         }
     }
@@ -68,7 +70,7 @@ class ServiceBusMessageLockSupportTest {
         try (Fixture fixture = new Fixture()) {
             var message = fixture.reference.getMessage();
             fixture.track(false);
-            when(fixture.delivery.getRemoteState()).thenReturn(new org.apache.qpid.proton.amqp.messaging.Received());
+            when(fixture.delivery.getRemoteState()).thenReturn(new Received());
             assertTrue(fixture.settle());
             fixture.expiry.get().run();
             verify(fixture.session).cancel(fixture.consumer, message, true);

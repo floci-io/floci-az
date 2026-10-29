@@ -3,6 +3,7 @@ package io.floci.az.services.resourcegraph.kql;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -457,9 +458,9 @@ class KqlEngineTest {
         assertNull(row.get("nan"));
         assertEquals("A", row.get("u"));
         assertEquals("a 'b'", row.get("v"));
-        assertEquals(java.time.Duration.ofMinutes(90), row.get("span"));
+        assertEquals(Duration.ofMinutes(90), row.get("span"));
         Map<String, Object> spans = run("resources | take 1 | project neg = -90m, micro = 7microseconds, ticks = 7ticks, one = 1tick").getFirst();
-        assertEquals(java.time.Duration.ofMinutes(-90), spans.get("neg"));
+        assertEquals(Duration.ofMinutes(-90), spans.get("neg"));
         Map<String, Object> fn = run("""
                 resources | take 1
                 | project suffix = substring('abcdef', -2), middle = substring('abcdef', 1, 3),
@@ -475,9 +476,9 @@ class KqlEngineTest {
         assertEquals("2026-01-02", fn.get("day"));
         assertEquals("03:04:05.678", fn.get("stamp"));
         assertEquals("2026-01-02T03:04:05Z", fn.get("raw"));
-        assertEquals(java.time.Duration.ofNanos(7_000), spans.get("micro"));
-        assertEquals(java.time.Duration.ofNanos(700), spans.get("ticks"));
-        assertEquals(java.time.Duration.ofNanos(100), spans.get("one"));
+        assertEquals(Duration.ofNanos(7_000), spans.get("micro"));
+        assertEquals(Duration.ofNanos(700), spans.get("ticks"));
+        assertEquals(Duration.ofNanos(100), spans.get("one"));
         // now(-7d) is seven days ago, not the current time.
         assertEquals(1, run("resources | where todatetime(properties.creationTime) < now(-7d)").size());
         assertEquals(0, run("resources | where todatetime(properties.creationTime) > now(-7d)").size());

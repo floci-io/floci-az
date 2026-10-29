@@ -2,6 +2,8 @@ package io.floci.az.services.policy.evaluation;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
+import org.hamcrest.Matcher;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -318,7 +320,7 @@ class PolicyEvaluationTest {
                 .body("[0].policyDefinitionReferenceId", equalTo("audit-only"))
                 .body("[0].claims.idtyp", equalTo("app"))
                 .body("[0].claims.appid", equalTo("eval-app"))
-                .body("[0].caller", org.hamcrest.Matchers.notNullValue());
+                .body("[0].caller", Matchers.notNullValue());
     }
 
     // ── Exemptions, scopes and enforcement mode ────────────────────────────────
@@ -530,8 +532,8 @@ class PolicyEvaluationTest {
     }
 
     /** A write the gate let through: 201 on create, 200 on update. */
-    private static org.hamcrest.Matcher<Integer> admitted() {
-        return org.hamcrest.Matchers.isOneOf(200, 201);
+    private static Matcher<Integer> admitted() {
+        return Matchers.isOneOf(200, 201);
     }
 
     private static ValidatableResponse putJson(String path, String body, String api) {

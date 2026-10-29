@@ -1,6 +1,7 @@
 package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -101,7 +102,7 @@ class CosmosTransactionalBatchTest {
                 .body("counter", is(2));
     }
 
-    private io.restassured.response.Response read(String id) {
+    private Response read(String id) {
         return given().header("x-ms-documentdb-partitionkey", PARTITION_KEY)
                 .get(DOCS + "/" + id);
     }

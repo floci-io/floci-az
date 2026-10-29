@@ -5,10 +5,13 @@ import io.floci.az.core.XmlParser;
 import io.floci.az.core.auth.UserDelegationKeyMaterial;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -21,8 +24,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -811,7 +812,7 @@ public class BlobServiceTest {
 
     @Test
     void getContainerPropertiesKeepsTheEtagAndLastModifiedFromCreateContainer() {
-        io.restassured.response.Response created = given()
+        Response created = given()
             .put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         created.then().statusCode(201);
         String etag = created.header("ETag");
@@ -1897,7 +1898,7 @@ public class BlobServiceTest {
 
         createAndFlushDataLakeFile(child, "parquet-bytes");
 
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/" + source, StandardCharsets.UTF_8);
 
         given()
@@ -1938,7 +1939,7 @@ public class BlobServiceTest {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         createAndFlushDataLakeFile("source.txt", "source-data");
 
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
 
         given()
@@ -1969,7 +1970,7 @@ public class BlobServiceTest {
             createAndFlushDataLakeFile(path, path);
         }
 
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
 
         given()
@@ -1995,7 +1996,7 @@ public class BlobServiceTest {
         createAndFlushDataLakeFile("source.txt", "new-data");
         createAndFlushDataLakeFile("destination.txt", "old-data");
 
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
 
         given()
@@ -2017,7 +2018,7 @@ public class BlobServiceTest {
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
             .when().put("/{container}/source.txt?resource=file", CONTAINER)
             .then().statusCode(201);
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
 
         given()
@@ -2035,7 +2036,7 @@ public class BlobServiceTest {
     @Test
     void dataLakeRenameMissingSourceReturnsSourcePathNotFound() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/missing", StandardCharsets.UTF_8);
 
         given()
@@ -2057,7 +2058,7 @@ public class BlobServiceTest {
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
             .when().put("/{container}/source.txt?resource=file", CONTAINER)
             .then().statusCode(201);
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source.txt", StandardCharsets.UTF_8);
 
         given()
@@ -2079,7 +2080,7 @@ public class BlobServiceTest {
             .header("Host", ACCOUNT + ".dfs.core.windows.net")
             .when().put("/{container}/source?resource=directory", CONTAINER)
             .then().statusCode(201);
-        String encodedSource = java.net.URLEncoder.encode(
+        String encodedSource = URLEncoder.encode(
                 "/" + CONTAINER + "/source", StandardCharsets.UTF_8);
 
         given()
@@ -3456,8 +3457,8 @@ public class BlobServiceTest {
     @Test
     void committedBlockBlobReportsCreationTime() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
-        String blockId = java.util.Base64.getEncoder()
-            .encodeToString("block-1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String blockId = Base64.getEncoder()
+            .encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
 
         given()
             .body("chunk")
@@ -3481,7 +3482,7 @@ public class BlobServiceTest {
     @Test
     void committedBlockBlobPersistsBlobHttpHeaders() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
-        String blockId = java.util.Base64.getEncoder()
+        String blockId = Base64.getEncoder()
             .encodeToString("block-1".getBytes(StandardCharsets.UTF_8));
 
         given()

@@ -16,6 +16,7 @@ import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -1652,7 +1653,7 @@ public class CosmosHandler implements AzureServiceHandler, Resettable {
                         .map(object -> liveDoc(Optional.of(object), defaultTtl))
                         .flatMap(Optional::stream).findFirst().orElse(null);
             } catch (IllegalArgumentException e) {
-                throw new jakarta.ws.rs.WebApplicationException(errorResponse(400, "BadRequest", e.getMessage()));
+                throw new WebApplicationException(errorResponse(400, "BadRequest", e.getMessage()));
             }
         }
         // Fast path: construct exact key using partition key from header

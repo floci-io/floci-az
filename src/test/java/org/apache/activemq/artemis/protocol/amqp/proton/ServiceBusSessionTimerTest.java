@@ -5,10 +5,12 @@ import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.qpid.proton.engine.Sender;
 import org.junit.jupiter.api.Test;
+
 import java.util.Arrays;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+
 import static org.mockito.Mockito.*;
 
 class ServiceBusSessionTimerTest {

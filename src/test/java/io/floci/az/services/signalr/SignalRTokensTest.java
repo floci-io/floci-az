@@ -2,12 +2,14 @@ package io.floci.az.services.signalr;
 
 import io.vertx.core.json.JsonObject;
 import org.junit.jupiter.api.Test;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class SignalRTokensTest {

@@ -1,6 +1,7 @@
 package io.floci.az.services.network;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -450,7 +451,7 @@ class NetworkHandlerTest {
                         equalTo("/subscriptions/test-sub-net/resourceGroups/test-rg-net/providers/Microsoft.Network/privateEndpoints/pe1/privateLinkServiceConnections/conn1"))
                 .body("properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.status", equalTo("Approved"))
                 .body("properties.privateLinkServiceConnections[0].properties.privateLinkServiceConnectionState.actionsRequired", equalTo("None"))
-                .body("properties.networkInterfaces[0].id", org.hamcrest.Matchers.notNullValue())
+                .body("properties.networkInterfaces[0].id", Matchers.notNullValue())
                 .extract().path("properties.networkInterfaces[0].id");
 
         // Synthesized NIC is retrievable and carries a private IP
@@ -480,7 +481,7 @@ class NetworkHandlerTest {
                 .then().statusCode(201)
                 .body("type", equalTo("Microsoft.Network/privateEndpoints/privateDnsZoneGroups"))
                 .body("properties.provisioningState", equalTo("Succeeded"))
-                .body("properties.privateDnsZoneConfigs[0].properties.privateDnsZoneId", org.hamcrest.Matchers.notNullValue());
+                .body("properties.privateDnsZoneConfigs[0].properties.privateDnsZoneId", Matchers.notNullValue());
 
         given().when().get(BASE + "/privateEndpoints/pe1/privateDnsZoneGroups" + API)
                 .then().statusCode(200)
@@ -516,7 +517,7 @@ class NetworkHandlerTest {
                 .body("name", equalTo("pls1"))
                 .body("type", equalTo("Microsoft.Network/privateLinkServices"))
                 .body("properties.provisioningState", equalTo("Succeeded"))
-                .body("properties.alias", org.hamcrest.Matchers.notNullValue());
+                .body("properties.alias", Matchers.notNullValue());
 
         given().when().get(BASE + "/privateLinkServices" + API)
                 .then().statusCode(200)

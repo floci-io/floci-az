@@ -1,12 +1,18 @@
 package io.floci.az.services.policy;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.JsonPath;
 import io.restassured.response.ValidatableResponse;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -601,7 +607,7 @@ class PolicyTest {
         String userToken = token("password", "eval-app");
         String userName = claim(userToken, "preferred_username");
         String userOid = claim(userToken, "oid");
-        org.junit.jupiter.api.Assertions.assertEquals("user@floci.local", userName);
+        Assertions.assertEquals("user@floci.local", userName);
         given().header("Authorization", "Bearer " + userToken).contentType("application/json").body(DEFINITION_BODY)
                 .when().put(DEFINITIONS + "/by-app" + API)
                 .then().statusCode(201)
@@ -624,8 +630,8 @@ class PolicyTest {
         String miBody = given().header("Metadata", "true")
                 .when().get("/metadata/identity/oauth2/token?resource=https://management.azure.com/&api-version=2018-02-01")
                 .then().statusCode(200).extract().asString();
-        String miToken = io.restassured.path.json.JsonPath.from(miBody).getString("access_token");
-        String miClientId = io.restassured.path.json.JsonPath.from(miBody).getString("client_id");
+        String miToken = JsonPath.from(miBody).getString("access_token");
+        String miClientId = JsonPath.from(miBody).getString("client_id");
         given().header("Authorization", "Bearer " + miToken).contentType("application/json").body(DEFINITION_BODY)
                 .when().put(DEFINITIONS + "/by-identity" + API)
                 .then().statusCode(201)
@@ -657,8 +663,8 @@ class PolicyTest {
     }
 
     private static String claim(String token, String name) {
-        String payload = new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]), java.nio.charset.StandardCharsets.UTF_8);
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + name + "\":\"([^\"]+)\"").matcher(payload);
+        String payload = new String(Base64.getUrlDecoder().decode(token.split("\\.")[1]), StandardCharsets.UTF_8);
+        Matcher m = Pattern.compile("\"" + name + "\":\"([^\"]+)\"").matcher(payload);
         if (!m.find()) {
             throw new AssertionError("claim " + name + " missing in " + payload);
         }

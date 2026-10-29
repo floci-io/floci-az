@@ -1,11 +1,11 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-import java.util.UUID;
-
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.qpid.proton.engine.Record;
+
+import java.util.UUID;
 
 /**
  * Sends the reply to a CBS or management request to the connection that sent the request, and to

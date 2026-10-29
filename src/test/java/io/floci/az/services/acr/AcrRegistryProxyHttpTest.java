@@ -1,5 +1,6 @@
 package io.floci.az.services.acr;
 
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import io.floci.az.core.AzureRequest;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -391,13 +393,13 @@ class AcrRegistryProxyHttpTest {
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /** A started stand-in registry answering every path with {@code handler}. */
-    private static HttpServer server(com.sun.net.httpserver.HttpHandler handler) {
+    private static HttpServer server(HttpHandler handler) {
         try {
             HttpServer registry = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             registry.createContext("/", handler);
             registry.start();
             return registry;
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalStateException("could not start the stand-in registry", e);
         }
     }

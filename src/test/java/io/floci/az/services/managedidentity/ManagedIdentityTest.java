@@ -2,6 +2,7 @@ package io.floci.az.services.managedidentity;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.common.mapper.TypeRef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -267,7 +268,7 @@ class ManagedIdentityTest {
         Map<String, Object> tokenBody = given().header("Metadata", "true")
                 .when().get(IMDS + "?resource=https://management.azure.com/&api-version=2018-02-01")
                 .then().statusCode(200)
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
 
         assertEquals(armProps.get("clientId"), tokenBody.get("client_id"));
         Map<?, ?> claims = mapper.readValue(
@@ -309,7 +310,7 @@ class ManagedIdentityTest {
                 .then().statusCode(200)
                 .body("token_type", equalTo("Bearer"))
                 .body("resource", equalTo("https://management.azure.com/"))
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
 
         // Per imds spec 2023-07-01 every value in the token response is a string.
         for (String field : List.of("access_token", "client_id", "expires_in", "expires_on",
@@ -355,7 +356,7 @@ class ManagedIdentityTest {
         // Signature verifies against the Entra JWKS the emulator already serves.
         Map<String, Object> jwks = given().when().get("/common/discovery/v2.0/keys")
                 .then().statusCode(200)
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
         @SuppressWarnings("unchecked")
         Map<String, Object> key = ((List<Map<String, Object>>) jwks.get("keys")).get(0);
         BigInteger n = new BigInteger(1, URL_DECODER.decode((String) key.get("n")));
@@ -379,7 +380,7 @@ class ManagedIdentityTest {
                 .then().statusCode(200)
                 .body("token_type", equalTo("Bearer"))
                 .body("resource", equalTo("https://vault.azure.net"))
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
 
         // expires_on must be a quoted string: the Rust azure_identity SDK rejects a JSON number.
         for (String field : List.of("access_token", "expires_on", "token_type", "resource", "client_id")) {
@@ -428,7 +429,7 @@ class ManagedIdentityTest {
                         + "&client_id=" + clientId)
                 .then().statusCode(200)
                 .body("client_id", equalTo(clientId))
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
 
         Map<?, ?> claims = mapper.readValue(
                 URL_DECODER.decode(((String) body.get("access_token")).split("\\.")[1]), Map.class);
@@ -454,7 +455,7 @@ class ManagedIdentityTest {
                 .when().get(APP_SERVICE)
                 .then().statusCode(200)
                 .body("client_id", equalTo(clientId))
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
 
         Map<?, ?> claims = mapper.readValue(
                 URL_DECODER.decode(((String) body.get("access_token")).split("\\.")[1]), Map.class);
@@ -500,7 +501,7 @@ class ManagedIdentityTest {
 
         Map<String, Object> jwks = given().when().get("/common/discovery/v2.0/keys")
                 .then().statusCode(200)
-                .extract().as(new io.restassured.common.mapper.TypeRef<Map<String, Object>>() {});
+                .extract().as(new TypeRef<Map<String, Object>>() {});
         @SuppressWarnings("unchecked")
         Map<String, Object> key = ((List<Map<String, Object>>) jwks.get("keys")).get(0);
         BigInteger n = new BigInteger(1, URL_DECODER.decode((String) key.get("n")));

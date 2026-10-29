@@ -19,6 +19,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -172,7 +173,7 @@ class ManagedIdentityCompatibilityTest {
                 .block(Duration.ofSeconds(30));
 
         assertNotNull(token, "SDK must acquire a token from the emulator IMDS endpoint");
-        assertTrue(token.getExpiresAt().isAfter(java.time.OffsetDateTime.now()),
+        assertTrue(token.getExpiresAt().isAfter(OffsetDateTime.now()),
                 "token must not be expired");
         JsonNode claims = decodeJwtPayload(token.getToken());
         assertEquals(clientId, claims.get("appid").asText());

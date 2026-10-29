@@ -125,7 +125,7 @@ class SqlProvisioningServiceTest {
         when(manager.startServer(any())).thenAnswer(invocation ->
             ((SqlState.SqlServerEntry) invocation.getArgument(0))
                 .withContainer("container-id", 14330, "localhost"));
-        var executor = mock(java.util.concurrent.ExecutorService.class);
+        var executor = mock(ExecutorService.class);
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(0)).run();
             return null;

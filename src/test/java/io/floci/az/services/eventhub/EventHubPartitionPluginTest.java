@@ -12,6 +12,7 @@ import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
 import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.apache.qpid.proton.codec.ReadableBuffer;
+import org.apache.qpid.proton.message.Message;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -132,8 +133,7 @@ class EventHubPartitionPluginTest {
     }
 
     private static AMQPMessage send(String address, Map<String, Object> applicationProperties) throws Exception {
-        // Proton's Message: Artemis has a Message type of its own.
-        org.apache.qpid.proton.message.Message message = Proton.message();
+        Message message = Proton.message();
         message.setMessageId("message-1");
         message.setApplicationProperties(new ApplicationProperties(new HashMap<>(applicationProperties)));
         byte[] buffer = new byte[1024];
@@ -145,11 +145,11 @@ class EventHubPartitionPluginTest {
     }
 
     /** The message as its receiver decodes it: from the bytes the broker sends. */
-    private static org.apache.qpid.proton.message.Message onTheWire(AMQPMessage message) {
+    private static Message onTheWire(AMQPMessage message) {
         ReadableBuffer data = message.getSendBuffer(1, null);
         byte[] bytes = new byte[data.remaining()];
         data.get(bytes);
-        org.apache.qpid.proton.message.Message decoded = Proton.message();
+        Message decoded = Proton.message();
         decoded.decode(bytes, 0, bytes.length);
         return decoded;
     }

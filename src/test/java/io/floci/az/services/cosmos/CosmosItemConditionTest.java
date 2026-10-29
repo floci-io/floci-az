@@ -1,6 +1,7 @@
 package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -188,7 +189,7 @@ class CosmosItemConditionTest {
                 .post(DOCS).then().statusCode(201).extract().header("ETag");
     }
 
-    private io.restassured.response.Response readDocument() {
+    private Response readDocument() {
         return given().header("x-ms-documentdb-partitionkey", PARTITION_KEY)
                 .get(DOCS + "/one");
     }

@@ -6,6 +6,7 @@ import io.floci.az.core.AzureRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+
 import java.util.Optional;
 
 @ApplicationScoped

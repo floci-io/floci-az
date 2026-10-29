@@ -6,8 +6,18 @@ import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
-import org.junit.jupiter.api.*;
+import com.azure.messaging.servicebus.models.SubQueue;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -63,8 +73,8 @@ class ServiceBusCompatibilityTest {
 
     // ── Queue tests ───────────────────────────────────────────────────────────
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @DisplayName("received broker metadata matches peek for standard and large messages")
     void receivedMetadataMatchesPeek(boolean large) throws Exception {
         String queue = uniqueQueue();
@@ -165,7 +175,7 @@ class ServiceBusCompatibilityTest {
         try (ServiceBusReceiverClient dlqReceiver = EmulatorConfig.serviceBusClientBuilder()
                 .receiver()
                 .queueName(queue)
-                .subQueue(com.azure.messaging.servicebus.models.SubQueue.DEAD_LETTER_QUEUE)
+                .subQueue(SubQueue.DEAD_LETTER_QUEUE)
                 .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                 .buildClient()) {
             ServiceBusReceivedMessage dlqMsg = dlqReceiver.receiveMessages(1, RECV_TIMEOUT)
@@ -210,7 +220,7 @@ class ServiceBusCompatibilityTest {
         try (ServiceBusReceiverClient dlqReceiver = EmulatorConfig.serviceBusClientBuilder()
                 .receiver()
                 .queueName(queue)
-                .subQueue(com.azure.messaging.servicebus.models.SubQueue.DEAD_LETTER_QUEUE)
+                .subQueue(SubQueue.DEAD_LETTER_QUEUE)
                 .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                 .buildClient()) {
             ServiceBusReceivedMessage dlqMsg = dlqReceiver.receiveMessages(1, RECV_TIMEOUT)

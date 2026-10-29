@@ -16,6 +16,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URI;
@@ -159,7 +163,7 @@ public class AksClusterManager {
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
-            if (conn instanceof javax.net.ssl.HttpsURLConnection https) {
+            if (conn instanceof HttpsURLConnection https) {
                 disableSslVerification(https);
             }
             int code = conn.getResponseCode();
@@ -287,16 +291,16 @@ public class AksClusterManager {
     }
 
     @SuppressWarnings("java:S4830")
-    private void disableSslVerification(javax.net.ssl.HttpsURLConnection conn) {
+    private void disableSslVerification(HttpsURLConnection conn) {
         try {
-            javax.net.ssl.TrustManager[] trustAll = new javax.net.ssl.TrustManager[]{
-                new javax.net.ssl.X509TrustManager() {
+            TrustManager[] trustAll = new TrustManager[]{
+                new X509TrustManager() {
                     public X509Certificate[] getAcceptedIssuers() { return null; }
                     public void checkClientTrusted(X509Certificate[] c, String a) {}
                     public void checkServerTrusted(X509Certificate[] c, String a) {}
                 }
             };
-            javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS");
+            SSLContext sc = SSLContext.getInstance("TLS");
             sc.init(null, trustAll, new SecureRandom());
             conn.setSSLSocketFactory(sc.getSocketFactory());
             conn.setHostnameVerifier((h, s) -> true);

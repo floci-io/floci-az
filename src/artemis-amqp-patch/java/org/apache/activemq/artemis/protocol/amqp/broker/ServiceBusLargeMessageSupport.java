@@ -1,7 +1,5 @@
 package org.apache.activemq.artemis.protocol.amqp.broker;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.activemq.artemis.protocol.amqp.util.NettyWritable;
@@ -12,6 +10,8 @@ import org.apache.qpid.proton.amqp.messaging.MessageAnnotations;
 import org.apache.qpid.proton.amqp.messaging.Properties;
 import org.apache.qpid.proton.codec.EncoderImpl;
 import org.apache.qpid.proton.codec.WritableBuffer;
+
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Preserves in-memory broker metadata when routing or dead-lettering a streamed message. */
 public final class ServiceBusLargeMessageSupport {

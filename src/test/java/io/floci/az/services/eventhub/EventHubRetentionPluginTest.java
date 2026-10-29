@@ -13,6 +13,7 @@ import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPStandardMessage;
 import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
+import org.apache.qpid.proton.message.Message;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -114,8 +115,7 @@ class EventHubRetentionPluginTest {
 
     /** A queued event stamped with its enqueued time, which the filter reads like any other property. */
     private static MessageReference event(long messageId, long enqueuedTime) {
-        // Proton's Message: Artemis has a Message type of its own.
-        org.apache.qpid.proton.message.Message message = Proton.message();
+        Message message = Proton.message();
         message.setApplicationProperties(new ApplicationProperties(Map.of("floci_enqueued_time", enqueuedTime)));
         byte[] buffer = new byte[1024];
         int size = message.encode(buffer, 0, buffer.length);

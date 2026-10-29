@@ -6,7 +6,12 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,7 +22,7 @@ class EntraStoreTest {
 
     @Test
     void authorizationCodeIsSingleUse() {
-        var code = new AuthorizationCode("code-" + java.util.UUID.randomUUID(), "tenant-a", "client-id",
+        var code = new AuthorizationCode("code-" + UUID.randomUUID(), "tenant-a", "client-id",
             "https://app.local/callback", "challenge", "S256", "openid", EntraStore.DEV_USER_OBJECT_ID,
             "nonce-1", "state-1", Instant.now().plusSeconds(300));
         store.putAuthorizationCode(code);
@@ -28,17 +33,17 @@ class EntraStoreTest {
 
     @Test
     void concurrentConsumptionOfSameCodeSucceedsExactlyOnce() throws Exception {
-        var code = new AuthorizationCode("code-" + java.util.UUID.randomUUID(), "tenant-a", "client-id",
+        var code = new AuthorizationCode("code-" + UUID.randomUUID(), "tenant-a", "client-id",
             "https://app.local/callback", null, "plain", "openid", EntraStore.DEV_USER_OBJECT_ID,
             "nonce-1", "state-1", Instant.now().plusSeconds(300));
         store.putAuthorizationCode(code);
 
         int attempts = 16;
-        var ready = new java.util.concurrent.CountDownLatch(attempts);
-        var go = new java.util.concurrent.CountDownLatch(1);
-        var executor = java.util.concurrent.Executors.newFixedThreadPool(attempts);
+        var ready = new CountDownLatch(attempts);
+        var go = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(attempts);
         try {
-            List<java.util.concurrent.Future<Boolean>> results = new java.util.ArrayList<>();
+            List<Future<Boolean>> results = new ArrayList<>();
             for (int i = 0; i < attempts; i++) {
                 results.add(executor.submit(() -> {
                     ready.countDown();

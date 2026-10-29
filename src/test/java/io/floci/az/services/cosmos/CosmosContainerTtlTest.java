@@ -1,6 +1,7 @@
 package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +35,7 @@ public class CosmosContainerTtlTest {
                 .when().post(BASE + "/dbs").then().statusCode(201);
     }
 
-    private io.restassured.response.Response createContainer(String id, String defaultTtlJson) {
+    private Response createContainer(String id, String defaultTtlJson) {
         String body = "{\"id\":\"" + id + "\","
                 + "\"partitionKey\":{\"paths\":[\"/category\"],\"kind\":\"Hash\"}"
                 + (defaultTtlJson == null ? "" : ",\"defaultTtl\":" + defaultTtlJson)
@@ -43,7 +44,7 @@ public class CosmosContainerTtlTest {
                 .when().post(BASE + "/dbs/" + DB + "/colls");
     }
 
-    private io.restassured.response.Response replaceContainer(String id, String defaultTtlJson) {
+    private Response replaceContainer(String id, String defaultTtlJson) {
         String body = "{\"id\":\"" + id + "\","
                 + "\"partitionKey\":{\"paths\":[\"/category\"],\"kind\":\"Hash\"}"
                 + (defaultTtlJson == null ? "" : ",\"defaultTtl\":" + defaultTtlJson)
@@ -52,7 +53,7 @@ public class CosmosContainerTtlTest {
                 .when().put(BASE + "/dbs/" + DB + "/colls/" + id);
     }
 
-    private io.restassured.response.Response insertDoc(String coll, String docJson) {
+    private Response insertDoc(String coll, String docJson) {
         return given().contentType("application/json")
                 .header("x-ms-documentdb-partitionkey", "[\"x\"]")
                 .body(docJson)

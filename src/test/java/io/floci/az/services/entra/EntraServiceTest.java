@@ -7,6 +7,7 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
@@ -357,7 +358,7 @@ class EntraServiceTest {
         for (String pair : URI.create(url).getRawQuery().split("&")) {
             int eq = pair.indexOf('=');
             if (pair.substring(0, eq).equals(name)) {
-                return java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
             }
         }
         throw new IllegalArgumentException("query param not found: " + name);

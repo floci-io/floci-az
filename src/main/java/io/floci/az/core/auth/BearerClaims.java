@@ -6,6 +6,7 @@ import io.floci.az.core.AzureRequest;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -70,7 +71,7 @@ public record BearerClaims(String oid, String appId, String upn, String idtyp, b
             for (Map.Entry<?, ?> entry : claims.entrySet()) {
                 if (entry.getValue() != null) {
                     all.put(String.valueOf(entry.getKey()), entry.getValue() instanceof String text ? text
-                        : entry.getValue() instanceof Map<?, ?> || entry.getValue() instanceof java.util.List<?>
+                        : entry.getValue() instanceof Map<?, ?> || entry.getValue() instanceof List<?>
                             ? MAPPER.writeValueAsString(entry.getValue()) : String.valueOf(entry.getValue()));
                     typed.put(String.valueOf(entry.getKey()), entry.getValue());
                 }

@@ -3,6 +3,7 @@ package io.floci.az.services.servicebus;
 import io.floci.az.config.EmulatorConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
@@ -87,7 +88,7 @@ class ServiceBusContainerManagerTest {
     @Test
     void topologyLoadFailureDoesNotFailApplicationStartup() {
         when(serviceBus.mocked()).thenReturn(true);
-        org.mockito.Mockito.doThrow(new IllegalStateException("boom")).when(topologyLoader).load();
+        Mockito.doThrow(new IllegalStateException("boom")).when(topologyLoader).load();
 
         assertDoesNotThrow(
                 () -> new ServiceBusContainerManager(config, namespaceManager, topologyLoader).onStart(null));

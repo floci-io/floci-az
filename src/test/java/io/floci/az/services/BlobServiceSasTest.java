@@ -1,6 +1,7 @@
 package io.floci.az.services;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -71,7 +72,7 @@ class BlobServiceSasTest {
         given().header("Host", "devstoreaccount1.dfs.core.windows.net")
                 .queryParams(sas).queryParam("resource", "filesystem").queryParam("recursive", "true")
                 .queryParam("directory", "dir").get("/service-sas").then().statusCode(200)
-                .body("paths.name", org.hamcrest.Matchers.containsInAnyOrder("dir/file", "dir/sub/leaf"));
+                .body("paths.name", Matchers.containsInAnyOrder("dir/file", "dir/sub/leaf"));
         for (String path : new String[] {"sibling/file", "directory/file", "file"}) {
             given().queryParams(sas).get(BASE + "/" + path).then().statusCode(403);
         }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,7 +45,7 @@ class PolicyRuleEvaluatorTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> parsed = MAPPER.readValue(condition, Map.class);
             return PolicyRuleEvaluator.evaluate(parsed, ctx, new ArrayList<>());
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException(e);
         }
     }
@@ -196,7 +197,7 @@ class PolicyRuleEvaluatorTest {
     private static boolean inspectsTags(String condition, EvaluationContext ctx) {
         try {
             return PolicyRuleEvaluator.inspectsTags(MAPPER.readValue(condition, Map.class), ctx);
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalArgumentException(e);
         }
     }

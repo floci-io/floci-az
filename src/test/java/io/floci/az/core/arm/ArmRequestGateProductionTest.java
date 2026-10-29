@@ -1,9 +1,8 @@
 package io.floci.az.core.arm;
 
 import io.floci.az.services.managedidentity.UserAssignedIdentityRule;
-import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
 import io.floci.az.services.monitor.activitylog.ActivityLogRule;
-
+import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;

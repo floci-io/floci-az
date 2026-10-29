@@ -1,6 +1,8 @@
 package io.floci.az.services.servicebus;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.activemq.artemis.api.core.QueueConfiguration;
+import org.apache.activemq.artemis.api.core.RoutingType;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -15,9 +17,9 @@ class ServiceBusNamespaceManagerTest {
     @Test
     void brokerQueueConfigurationDisablesGroupingForNonSessionEntities() {
         for (boolean requiresSession : List.of(false, true)) {
-            var configuration = org.apache.activemq.artemis.api.core.QueueConfiguration.fromJSON(
+            var configuration = QueueConfiguration.fromJSON(
                     ServiceBusNamespaceManager.messageQueueConfiguration("orders", requiresSession));
-            assertEquals(org.apache.activemq.artemis.api.core.RoutingType.ANYCAST, configuration.getRoutingType());
+            assertEquals(RoutingType.ANYCAST, configuration.getRoutingType());
             assertEquals(requiresSession ? -1 : 0, configuration.getGroupBuckets());
         }
     }

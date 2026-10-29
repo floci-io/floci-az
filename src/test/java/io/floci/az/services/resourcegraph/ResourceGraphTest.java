@@ -6,10 +6,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.isOneOf;
 import static org.hamcrest.Matchers.notNullValue;
@@ -139,7 +142,7 @@ class ResourceGraphTest {
                 """)
                 .statusCode(200)
                 .body("totalRecords", equalTo(1))
-                .body("data[0].chain.name", equalTo(java.util.List.of("corp", "platform", TENANT)))
+                .body("data[0].chain.name", equalTo(List.of("corp", "platform", TENANT)))
                 .body("data[0].chain[0].displayName", equalTo("Corp"));
     }
 
@@ -260,7 +263,7 @@ class ResourceGraphTest {
                 .body("name", equalTo("MyQuery"))
                 .body("id", containsString("/queries/MyQuery"));
         query("resources | where type =~ 'microsoft.resourcegraph/queries' | project name | order by name asc")
-                .statusCode(200).body("data.name", equalTo(java.util.List.of("MyQuery", "all-storage")));
+                .statusCode(200).body("data.name", equalTo(List.of("MyQuery", "all-storage")));
         given().when().delete(query.replace("all-storage", "MyQuery")).then().statusCode(200);
         given().when().delete(query).then().statusCode(200);
         given().when().get(query).then().statusCode(404).body("error.code", equalTo("ResourceNotFound"));
@@ -281,7 +284,7 @@ class ResourceGraphTest {
                 .body("{\"query\": \"resources | where name == 'nothing' | project name, type\", \"options\": {\"resultFormat\": \"table\"}}")
                 .when().post(GRAPH)
                 .then().statusCode(200)
-                .body("data.columns.name", equalTo(java.util.List.of("name", "type")))
+                .body("data.columns.name", equalTo(List.of("name", "type")))
                 .body("data.rows", hasSize(0));
         // Names are checked against the published schema even when a table is empty.
         query("authorizationresources | project misspelledColumn")
@@ -324,12 +327,12 @@ class ResourceGraphTest {
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     private static ValidatableResponse query(String kql) {
-        return given().contentType("application/json").body(java.util.Map.of("query", kql)).when().post(GRAPH).then();
+        return given().contentType("application/json").body(Map.of("query", kql)).when().post(GRAPH).then();
     }
 
     private static ValidatableResponse scopedQuery(String subscription, String kql) {
         return given().contentType("application/json")
-                .body(java.util.Map.of("query", kql, "subscriptions", java.util.List.of(subscription)))
+                .body(Map.of("query", kql, "subscriptions", List.of(subscription)))
                 .when().post(GRAPH).then();
     }
 

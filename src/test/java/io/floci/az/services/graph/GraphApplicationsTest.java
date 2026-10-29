@@ -2,9 +2,14 @@ package io.floci.az.services.graph;
 
 import io.floci.az.services.entra.EntraStore;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -113,8 +118,8 @@ class GraphApplicationsTest {
 
     /** The {@code oid} claim of an unverified JWT. */
     static String oidOf(String token) {
-        String payload = new String(java.util.Base64.getUrlDecoder().decode(token.split("\\.")[1]), java.nio.charset.StandardCharsets.UTF_8);
-        return io.restassured.path.json.JsonPath.from(payload).getString("oid");
+        String payload = new String(Base64.getUrlDecoder().decode(token.split("\\.")[1]), StandardCharsets.UTF_8);
+        return JsonPath.from(payload).getString("oid");
     }
 
     @Test
@@ -130,14 +135,14 @@ class GraphApplicationsTest {
                 .then().statusCode(201)
                 .body("signInAudience", equalTo("AzureADMultipleOrgs"))
                 .body("api.requestedAccessTokenVersion", equalTo(2))
-                .body("identifierUris", equalTo(java.util.List.of("api://registered")))
-                .body("web.redirectUris", equalTo(java.util.List.of("https://registered.example/callback")))
-                .body("tags", equalTo(java.util.List.of("managed")))
+                .body("identifierUris", equalTo(List.of("api://registered")))
+                .body("web.redirectUris", equalTo(List.of("https://registered.example/callback")))
+                .body("tags", equalTo(List.of("managed")))
                 .extract().path("id");
         given().when().get("/v1.0/applications/" + objectId)
                 .then().statusCode(200)
                 .body("api.requestedAccessTokenVersion", equalTo(2))
-                .body("web.redirectUris", equalTo(java.util.List.of("https://registered.example/callback")))
+                .body("web.redirectUris", equalTo(List.of("https://registered.example/callback")))
                 .body("spa.redirectUris", hasSize(0))
                 .body("requiredResourceAccess", hasSize(0));
 
@@ -149,7 +154,7 @@ class GraphApplicationsTest {
                 .then().statusCode(200)
                 .body("displayName", equalTo("registered"))
                 .body("api.requestedAccessTokenVersion", equalTo(2))
-                .body("identifierUris", equalTo(java.util.List.of("api://registered")))
+                .body("identifierUris", equalTo(List.of("api://registered")))
                 .body("web.homePageUrl", equalTo("https://registered.example"))
                 .body("web.redirectUris", nullValue())
                 .body("tags", hasSize(0))

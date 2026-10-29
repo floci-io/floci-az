@@ -3,11 +3,14 @@ package io.floci.az.services.functions;
 import io.floci.az.config.EmulatorConfig;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import java.io.ByteArrayOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,7 +80,7 @@ class FunctionCodeStoreTest {
             Path stored = store.storeCode("account", "app", "hello", decoratedPythonV2Zip());
             FunctionModels.FunctionDefinition legacy = new FunctionModels.FunctionDefinition(
                     "app", "hello", "account", "python", "Python|3.12", "function_app.greet",
-                    60, null, stored.toString(), java.time.Instant.now(), false, null, null);
+                    60, null, stored.toString(), Instant.now(), false, null, null);
 
             FunctionModels.FunctionDefinition normalized = store.normalize(legacy);
 
@@ -172,7 +175,7 @@ class FunctionCodeStoreTest {
 
     private static void addEntry(ZipOutputStream zip, String name, String content) throws Exception {
         zip.putNextEntry(new ZipEntry(name));
-        zip.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        zip.write(content.getBytes(StandardCharsets.UTF_8));
         zip.closeEntry();
     }
 
@@ -188,7 +191,7 @@ class FunctionCodeStoreTest {
 
     private static void deleteRecursively(Path root) throws Exception {
         try (var paths = Files.walk(root)) {
-            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
                 try {
                     Files.delete(path);
                 } catch (Exception e) {

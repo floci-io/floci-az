@@ -1,10 +1,9 @@
 package io.floci.az.core;
 
-import org.jboss.resteasy.reactive.server.ServerResponseFilter;
-
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.core.HttpHeaders;
+import org.jboss.resteasy.reactive.server.ServerResponseFilter;
 
 /**
  * Strips {@code Content-Type} from error responses that cannot carry a body.

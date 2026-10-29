@@ -1,6 +1,7 @@
 package io.floci.az.services.arm;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -62,6 +63,6 @@ class ArmStrictBodyTest {
         given()
             .contentType("application/json")
             .when().put(RG + "/providers/Microsoft.EventGrid/topics/topic-empty?api-version=2022-06-15")
-            .then().statusCode(org.hamcrest.Matchers.not(400));
+            .then().statusCode(Matchers.not(400));
     }
 }

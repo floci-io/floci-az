@@ -1,6 +1,7 @@
 package io.floci.az.core;
 
 import io.floci.az.core.auth.StorageSasToken;
+
 import java.util.Optional;
 
 public record AuthContext(

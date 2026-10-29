@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -27,7 +28,7 @@ public record PolicyState(Instant timestamp, String resourceId, String resourceT
     /** The key one record replaces: the same resource under the same definition of the same assignment. */
     public String key() {
         return (resourceId + "|" + policyAssignmentId + "|" + policyDefinitionId + "|"
-            + (policyDefinitionReferenceId == null ? "" : policyDefinitionReferenceId)).toLowerCase(java.util.Locale.ROOT);
+            + (policyDefinitionReferenceId == null ? "" : policyDefinitionReferenceId)).toLowerCase(Locale.ROOT);
     }
 
     public boolean isCompliant() {

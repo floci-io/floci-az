@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.InetAddress;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -193,7 +194,7 @@ class ContainerLifecycleManagerEndpointModeTest {
         lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
         ContainerLifecycleManager.EndpointInfo ep = resolve();
         assertEquals(new ContainerLifecycleManager.EndpointInfo("[::1]", HOST_PORT), ep);
-        assertEquals("https://[::1]:" + HOST_PORT, java.net.URI.create("https://" + ep.host() + ":" + ep.port()).toString());
+        assertEquals("https://[::1]:" + HOST_PORT, URI.create("https://" + ep.host() + ":" + ep.port()).toString());
         assertTrue(InetAddress.getByName(ep.host()).isLoopbackAddress());
     }
 

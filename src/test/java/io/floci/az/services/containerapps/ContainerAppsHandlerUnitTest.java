@@ -15,6 +15,7 @@ import io.floci.az.services.containerapps.ContainerAppsModels.RevisionState;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -86,7 +87,7 @@ class ContainerAppsHandlerUnitTest {
         List<ObjectNode> revisions = (List<ObjectNode>) ((Map<String, ?>) revisionsResponse.getEntity()).get("value");
         assertTrue(revisions.get(0).path("properties").path("active").asBoolean());
         assertFalse(revisions.get(1).path("properties").path("active").asBoolean());
-        verify(runtimeManager, never()).stopRevision(any(), org.mockito.ArgumentMatchers.eq("app--v1"));
+        verify(runtimeManager, never()).stopRevision(any(), ArgumentMatchers.eq("app--v1"));
     }
 
     @Test

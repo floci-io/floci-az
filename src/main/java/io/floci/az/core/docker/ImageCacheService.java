@@ -4,6 +4,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.exception.InternalServerErrorException;
+import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.AuthConfig;
 import io.floci.az.config.EmulatorConfig;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -121,7 +122,7 @@ public class ImageCacheService {
         try {
             dockerClient.inspectImageCmd(imageUri).exec();
             return true;
-        } catch (com.github.dockerjava.api.exception.NotFoundException e) {
+        } catch (NotFoundException e) {
             return false;
         } catch (Exception e) {
             LOG.debugv("Could not check local image presence for {0}: {1}", imageUri, e.getMessage());

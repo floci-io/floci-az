@@ -1,15 +1,27 @@
 package io.floci.az.compat;
 
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.Timeout;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -61,7 +73,7 @@ class SqlCompatibilityTest {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @BeforeAll
-    @Timeout(value = 10, unit = java.util.concurrent.TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     static void createServer() throws Exception {
         EmulatorConfig.assumeEmulatorRunning();
 

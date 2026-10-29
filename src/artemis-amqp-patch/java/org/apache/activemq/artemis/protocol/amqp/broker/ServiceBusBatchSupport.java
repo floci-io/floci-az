@@ -1,9 +1,5 @@
 package org.apache.activemq.artemis.protocol.amqp.broker;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 import org.apache.activemq.artemis.core.persistence.CoreMessageObjectPools;
 import org.apache.activemq.artemis.protocol.amqp.util.TLSEncode;
 import org.apache.qpid.proton.amqp.Binary;
@@ -14,6 +10,10 @@ import org.apache.qpid.proton.amqp.messaging.Footer;
 import org.apache.qpid.proton.amqp.messaging.Section;
 import org.apache.qpid.proton.codec.DecoderImpl;
 import org.apache.qpid.proton.codec.ReadableBuffer;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /** Decodes Azure Service Bus batched-message-format transfers into individual AMQP messages. */
 public final class ServiceBusBatchSupport {

@@ -1,13 +1,13 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
-import java.util.Date;
-import java.util.Map;
-
 import org.apache.activemq.artemis.api.core.ActiveMQPropertyConversionException;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
+
+import java.util.Date;
+import java.util.Map;
 
 /** Applies Azure dead-letter outcome metadata to the message before Artemis reroutes it. */
 public final class ServiceBusDeadLetterSupport {

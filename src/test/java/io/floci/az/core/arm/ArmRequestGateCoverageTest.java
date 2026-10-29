@@ -1,13 +1,12 @@
 package io.floci.az.core.arm;
 
-import io.floci.az.services.monitor.activitylog.ActivityLogRule;
-
 import io.floci.az.core.ArmRouter;
 import io.floci.az.core.AzureRequest;
-import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
 import io.floci.az.core.cloud.ScopeSource;
 import io.floci.az.services.arm.ArmHandler;
 import io.floci.az.services.managedidentity.UserAssignedIdentityRule;
+import io.floci.az.services.monitor.activitylog.ActivityLogRule;
+import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;

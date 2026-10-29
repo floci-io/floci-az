@@ -2,6 +2,7 @@ package io.floci.az.services;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -167,7 +168,7 @@ public class ServiceBusRulesTest {
                 .body(not(containsString("RuleDescription")))
                 .extract().response();
         long entries = resp.asString().split("<entry", -1).length - 1;
-        org.junit.jupiter.api.Assertions.assertEquals(1, entries,
+        Assertions.assertEquals(1, entries,
                 "subscription feed must contain exactly the one subscription");
     }
 
@@ -453,7 +454,7 @@ public class ServiceBusRulesTest {
             String feed = given().when().get(path)
                     .then().statusCode(200).extract().asString();
             long prologs = feed.split("<\\?xml", -1).length - 1;
-            org.junit.jupiter.api.Assertions.assertEquals(1, prologs,
+            Assertions.assertEquals(1, prologs,
                     "feed at " + path + " must contain exactly one XML prolog");
         }
     }

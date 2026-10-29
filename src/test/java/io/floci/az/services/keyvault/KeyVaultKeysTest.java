@@ -1,5 +1,6 @@
 package io.floci.az.services.keyvault;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
@@ -8,8 +9,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.SecureRandom;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
@@ -570,7 +573,7 @@ class KeyVaultKeysTest {
         badName.put("name", "bad/name");
         badName.put("versions", new ArrayList<>());
         String badNameValue = URL.encodeToString(
-                toJson(badName).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                toJson(badName).getBytes(StandardCharsets.UTF_8));
         given().header("Authorization", AUTH)
                 .contentType(ContentType.JSON)
                 .body("{\"value\":\"" + badNameValue + "\"}")
@@ -590,7 +593,7 @@ class KeyVaultKeysTest {
         badJwk.put("name", "badkey1");
         badJwk.put("versions", badJwkVersions);
         String badJwkValue = URL.encodeToString(
-                toJson(badJwk).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                toJson(badJwk).getBytes(StandardCharsets.UTF_8));
         given().header("Authorization", AUTH)
                 .contentType(ContentType.JSON)
                 .body("{\"value\":\"" + badJwkValue + "\"}")
@@ -614,7 +617,7 @@ class KeyVaultKeysTest {
         tooMany.put("name", "badkey2");
         tooMany.put("versions", manyVersions);
         String tooManyValue = URL.encodeToString(
-                toJson(tooMany).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                toJson(tooMany).getBytes(StandardCharsets.UTF_8));
         given().header("Authorization", AUTH)
                 .contentType(ContentType.JSON)
                 .body("{\"value\":\"" + tooManyValue + "\"}")
@@ -742,7 +745,7 @@ class KeyVaultKeysTest {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("name", "orphan1");
         snapshot.put("versions", versions);
-        String value = URL.encodeToString(toJson(snapshot).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String value = URL.encodeToString(toJson(snapshot).getBytes(StandardCharsets.UTF_8));
 
         given().header("Authorization", AUTH).contentType(ContentType.JSON)
                 .body("{\"value\":\"" + value + "\"}")
@@ -808,7 +811,7 @@ class KeyVaultKeysTest {
     @DisplayName("rotating a key with an unsupported stored size returns 400")
     void rotateUnsupportedKeySize400() {
         byte[] k = new byte[20];
-        new java.security.SecureRandom().nextBytes(k);
+        new SecureRandom().nextBytes(k);
         given().header("Authorization", AUTH).contentType(ContentType.JSON)
                 .body("{\"key\":{\"kty\":\"oct\",\"k\":\"" + URL.encodeToString(k) + "\"}}")
                 .when().put(BASE + "/keys/weirdoct" + API)
@@ -887,7 +890,7 @@ class KeyVaultKeysTest {
         snapshot.put("name", "wsexp");
         snapshot.put("latestVersion", "v1");
         snapshot.put("versions", versions);
-        String value = URL.encodeToString(toJson(snapshot).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String value = URL.encodeToString(toJson(snapshot).getBytes(StandardCharsets.UTF_8));
 
         given().header("Authorization", AUTH).contentType(ContentType.JSON)
                 .body("{\"value\":\"" + value + "\"}")
@@ -919,7 +922,7 @@ class KeyVaultKeysTest {
         snapshot.put("name", "mismatch");
         snapshot.put("latestVersion", "v999");
         snapshot.put("versions", versions);
-        String value = URL.encodeToString(toJson(snapshot).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String value = URL.encodeToString(toJson(snapshot).getBytes(StandardCharsets.UTF_8));
 
         given().header("Authorization", AUTH).contentType(ContentType.JSON)
                 .body("{\"value\":\"" + value + "\"}")
@@ -1015,7 +1018,7 @@ class KeyVaultKeysTest {
     private static final Base64.Encoder URL = Base64.getUrlEncoder().withoutPadding();
 
     private static String b64Url(String value) {
-        return URL.encodeToString(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return URL.encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Builds a full RSA JWK map (private CRT fields included) from a fresh JDK keypair. */
@@ -1054,7 +1057,7 @@ class KeyVaultKeysTest {
 
     private static String toJson(Object obj) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(obj);
+            return new ObjectMapper().writeValueAsString(obj);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

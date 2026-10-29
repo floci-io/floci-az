@@ -1,6 +1,7 @@
 package io.floci.az.services.cosmos;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -105,7 +106,7 @@ class CosmosPatchSystemFieldsTest {
                 .then().statusCode(200).body("value", is(42));
     }
 
-    private io.restassured.response.Response patch(String body) {
+    private Response patch(String body) {
         return given().contentType("application/json")
                 .header("x-ms-documentdb-partitionkey", PARTITION_KEY)
                 .body(body)
