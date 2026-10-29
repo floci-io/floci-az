@@ -16,11 +16,20 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -110,5 +119,54 @@ class AdminResetContainersTest {
         given().post("/_admin/reset").then().statusCode(204);
 
         verify(registryManager).shutdown();
+    }
+
+    @Test
+    void aResetWaitsForAnAcrPollSoThePollCannotRestartTheRegistryAfterIt() throws Exception {
+        CountDownLatch pollHeld = new CountDownLatch(1);
+        CountDownLatch releasePoll = new CountDownLatch(1);
+        List<String> order = new CopyOnWriteArrayList<>();
+        // Held in isReady(), between one registry and the next: ensureStarted() and shutdown() are synchronized on
+        // the manager, so only a poll paused outside them can carry its pre-reset snapshot past the reset.
+        doAnswer(invocation -> {
+            if (onPoller() && pollHeld.getCount() > 0) {
+                pollHeld.countDown();
+                releasePoll.await(10, TimeUnit.SECONDS);
+            }
+            return false;
+        }).when(registryManager).isReady();
+        doAnswer(invocation -> {
+            if (onPoller()) {
+                order.add("poll starts the registry");
+            }
+            return null;
+        }).when(registryManager).ensureStarted();
+        doAnswer(invocation -> {
+            order.add("reset removes the registry");
+            return null;
+        }).when(registryManager).shutdown();
+
+        // Two registries that never report ready, so one poll visits both.
+        for (String name : List.of("pollacrone", "pollacrtwo")) {
+            given().contentType("application/json")
+                    .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Basic\"},\"properties\":{\"adminUserEnabled\":true}}")
+                    .when().put(RG + "/Microsoft.ContainerRegistry/registries/" + name + "?api-version=2025-11-01")
+                    .then().statusCode(201);
+        }
+        assertTrue(pollHeld.await(10, TimeUnit.SECONDS), "the readiness poller never polled a registry");
+
+        CompletableFuture<Integer> reset = CompletableFuture.supplyAsync(
+                () -> given().post("/_admin/reset").then().extract().statusCode());
+        assertThrows(TimeoutException.class, () -> reset.get(500, TimeUnit.MILLISECONDS),
+                "the reset must wait for the poll in progress");
+        releasePoll.countDown();
+
+        assertEquals(204, reset.get(10, TimeUnit.SECONDS));
+        assertEquals("reset removes the registry", order.get(order.size() - 1),
+                "nothing may start the registry after the reset removed it: " + order);
+    }
+
+    private static boolean onPoller() {
+        return Thread.currentThread().getName().equals("acr-readiness-poller");
     }
 }

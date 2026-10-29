@@ -125,6 +125,11 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
         t.setDaemon(true);
         return t;
     });
+    /**
+     * Held by a poll's read-and-start and by {@link #clear()}. Without it a poll that read a {@code Creating} registry
+     * before a reset would start the shared container after the reset removed it and every registry record.
+     */
+    private final Object pollResetLock = new Object();
 
     private final CloudDefaults defaults;
 
@@ -540,17 +545,19 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     private void startReadinessPoller() {
         poller.scheduleAtFixedRate(() -> {
             try {
-                store.all().stream().map(ArmResourceStore.Stored::value).forEach(reg -> {
-                    if ("Creating".equals(reg.getProvisioningState())) {
-                        // Recovers the shared registry if it died after its initial start,
-                        // so a pending registry cannot stay Creating forever.
-                        registryManager.ensureStarted();
-                        if (registryManager.isReady()) {
-                            updateIfSameInstance(reg, current -> current.setProvisioningState("Succeeded"))
-                                    .ifPresent(ready -> LOG.infov("ACR registry {0} is now ready", ready.getName()));
+                synchronized (pollResetLock) {
+                    store.all().stream().map(ArmResourceStore.Stored::value).forEach(reg -> {
+                        if ("Creating".equals(reg.getProvisioningState())) {
+                            // Recovers the shared registry if it died after its initial start,
+                            // so a pending registry cannot stay Creating forever.
+                            registryManager.ensureStarted();
+                            if (registryManager.isReady()) {
+                                updateIfSameInstance(reg, current -> current.setProvisioningState("Succeeded"))
+                                        .ifPresent(ready -> LOG.infov("ACR registry {0} is now ready", ready.getName()));
+                            }
                         }
-                    }
-                });
+                    });
+                }
             } catch (Exception e) {
                 LOG.error("Error in ACR readiness poller", e);
             }
@@ -735,13 +742,16 @@ public class AcrHandler implements AzureServiceHandler, Resettable, ResourceInde
     /**
      * Removes the shared registry container, then wipes all ACR data. Used by {@code POST /_admin/reset}: the images
      * pushed to any registry live in that one container, so keeping it would hand them to the next registry created.
-     * The next create starts a fresh container.
+     * The next create starts a fresh container. A poll already starting the container finishes first, so the
+     * shutdown here removes what it started.
      */
     public void clear() {
-        if (!config.services().acr().mocked()) {
-            registryManager.shutdown();
+        synchronized (pollResetLock) {
+            if (!config.services().acr().mocked()) {
+                registryManager.shutdown();
+            }
+            store.clear();
         }
-        store.clear();
     }
 
     // ── ResourceIndexContributor ────────────────────────────────────────────────
