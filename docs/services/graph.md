@@ -23,6 +23,9 @@ group) is available here too.
 | `POST /v1.0/applications` | Create a registration from the `application` object sent (`displayName` required; every writable property is stored and read back); a service principal is created with it |
 | `POST /v1.0/applications/{id}/addPassword` | Add a client secret: answers the `passwordCredential` with its `secretText` once |
 | `POST /v1.0/applications/{id}/removePassword` | Remove a client secret by `keyId` |
+| `GET /v1.0/applications/{id}/owners` | The registration's owners, typed `#microsoft.graph.user` or `#microsoft.graph.servicePrincipal` |
+| `POST /v1.0/applications/{id}/owners/$ref` | Add an owner from `{"@odata.id": ".../directoryObjects/{id}"}`; a user or service principal of the tenant |
+| `DELETE /v1.0/applications/{id}/owners/{id}/$ref` | Remove an owner |
 
 `{id}` in `users/{id}` accepts either the user's object id or its userPrincipalName, as real Graph
 does. Only **direct** membership is modeled: there is no nested-group transitivity.
@@ -118,7 +121,10 @@ dates, refusing one past its `endDateTime` with `AADSTS7000222` and one before i
 object id, the same value the app's tokens carry as `oid`. A supplied `passwordCredential` field must be
 valid (an object, string dates in order, a string `displayName`); defaults stand in for omitted fields
 only, and a `PATCH` `displayName` must be a non-empty string. A path segment after an action
-(`.../removePassword/extra`) answers `400` without touching credentials.
+(`.../removePassword/extra`) answers `400` without touching credentials. On create, the principal the
+caller's token names (`oid`, when it is a user or service principal of the tenant) becomes the first owner,
+as Graph makes the signed-in principal one; a client that then sets its own owners, as the Terraform
+`azuread_application` resource does, removes it the same way.
 
 ## Out of scope
 
