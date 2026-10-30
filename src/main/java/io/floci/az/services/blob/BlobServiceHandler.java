@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -3986,9 +3987,27 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         });
     }
 
-    public void ensureContainer(String accountName, String containerName) {
-        leaseService.exclusively(() -> store.put(nsKey(accountName, containerName), newContainerRecord()));
+    /**
+     * Creates the container when it does not exist, for the ARM container resource. An existing container
+     * keeps its record, so its ETag, Last-Modified and Data Lake properties stay as they are.
+     */
+    public ContainerVersion ensureContainer(String accountName, String containerName) {
+        String key = nsKey(accountName, containerName);
+        AtomicReference<ContainerVersion> version = new AtomicReference<>();
+        leaseService.exclusively(() -> {
+            Optional<StoredObject> existing = readContainer(key);
+            StoredObject container = existing.orElseGet(this::newContainerRecord);
+            if (existing.isEmpty()) {
+                store.put(key, container);
+            }
+            version.set(new ContainerVersion(effectiveEtag(container, key), effectiveLastModified(container),
+                    existing.isEmpty()));
+        });
+        return version.get();
     }
+
+    /** A container's ETag and Last-Modified, and whether the call that answered them created it. */
+    public record ContainerVersion(String etag, Instant lastModified, boolean created) {}
 
     /**
      * Reads a container's record. A record stored without an ETag or Last-Modified gets both once, here, so

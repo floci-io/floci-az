@@ -1,13 +1,24 @@
 package io.floci.az.services.arm;
 
+import io.floci.az.core.StoredObject;
+import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
@@ -17,6 +28,11 @@ class ArmStorageChildResourcesTest {
     private static final String ACCOUNT = "/subscriptions/sub-children/resourceGroups/rg-children"
         + "/providers/Microsoft.Storage/storageAccounts/childacct";
     private static final String API = "?api-version=2023-01-01";
+    private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter
+        .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).withZone(ZoneOffset.UTC);
+
+    @Inject
+    StorageFactory storageFactory;
 
     @BeforeEach
     void account() {
@@ -47,6 +63,63 @@ class ArmStorageChildResourcesTest {
         given().when().put("/childacct/dataplane?restype=container").then().statusCode(201);
 
         given().when().get(ACCOUNT + "/blobServices/default/containers/dataplane" + API).then().statusCode(200);
+    }
+
+    @Test
+    void aContainerPutAnswersTheEtagAndLastModifiedTheDataPlaneStores() {
+        String container = ACCOUNT + "/blobServices/default/containers/versioned" + API;
+
+        Response first = given().contentType("application/json").body("{}")
+            .when().put(container);
+        first.then().statusCode(201)
+            .body("etag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .body("properties.lastModifiedTime", matchesPattern("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"));
+        String etag = first.path("etag");
+        String lastModified = first.path("properties.lastModifiedTime");
+
+        given().when().get("/childacct/versioned?restype=container").then().statusCode(200)
+            .header("ETag", equalTo(etag))
+            .header("Last-Modified", equalTo(HTTP_DATE.format(Instant.parse(lastModified))));
+
+        given().contentType("application/json").body("{}")
+            .when().put(container).then().statusCode(200)
+            .body("etag", equalTo(etag))
+            .body("properties.lastModifiedTime", equalTo(lastModified));
+        given().when().get("/childacct/versioned?restype=container").then().statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void aContainerPutOverAContainerStoredWithoutAnEtagAnswersTheEtagItGivesIt() {
+        storageFactory.create("blob").put("__ns__:childacct/legacy", new StoredObject("", new byte[0],
+                Map.of(), Instant.EPOCH, ""));
+
+        String etag = given().contentType("application/json").body("{}")
+            .when().put(ACCOUNT + "/blobServices/default/containers/legacy" + API).then().statusCode(200)
+            .body("etag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .body("properties.lastModifiedTime", not(equalTo("1970-01-01T00:00:00Z")))
+            .extract().path("etag");
+
+        given().when().get("/childacct/legacy?restype=container").then().statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void aRepeatedContainerPutKeepsTheFilesystemProperties() {
+        given().header("Host", "childacct.dfs.core.windows.net").header("x-ms-properties", "a2V5PXZhbHVl")
+            .when().put("/withprops?resource=filesystem").then().statusCode(201);
+        String etag = given().header("Host", "childacct.dfs.core.windows.net")
+            .when().head("/withprops?resource=filesystem").then().statusCode(200)
+            .extract().header("ETag");
+
+        given().contentType("application/json").body("{}")
+            .when().put(ACCOUNT + "/blobServices/default/containers/withprops" + API).then().statusCode(200)
+            .body("etag", equalTo(etag));
+
+        given().header("Host", "childacct.dfs.core.windows.net")
+            .when().head("/withprops?resource=filesystem").then().statusCode(200)
+            .header("ETag", equalTo(etag))
+            .header("x-ms-properties", equalTo("a2V5PXZhbHVl"));
     }
 
     @Test
