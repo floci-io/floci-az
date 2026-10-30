@@ -100,12 +100,21 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     /**
      * Immutable snapshot of a running namespace.
      *
-     * @param mocked       true when no real broker is running (management API only)
-     * @param jolokiaHost  hostname/IP to reach Jolokia from floci-az
-     * @param jolokiaPort  host-side port for the Artemis Jolokia console
+     * @param amqpPort      port floci-az reaches plain AMQP on: the published host port, or the
+     *                      container port when floci-az runs in a container in {@code auto} endpoint
+     *                      mode (0 when mocked)
+     * @param amqpsPort     the same for TLS AMQP (0 when mocked)
+     * @param amqpHostPort  host port Docker published plain AMQP on, whatever the endpoint mode
+     *                      (0 when mocked)
+     * @param amqpsHostPort host port Docker published TLS AMQP on (0 when mocked)
+     * @param mocked        true when no real broker is running (management API only)
+     * @param jolokiaHost   hostname/IP to reach Jolokia from floci-az
+     * @param jolokiaPort   port floci-az reaches the Artemis Jolokia console on
      */
     public record NamespaceState(
             String containerId,
+            int amqpPort,
+            int amqpsPort,
             int amqpHostPort,
             int amqpsHostPort,
             String tlsCertPem,
@@ -239,6 +248,11 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                     containerId,
                     amqpEndpoint.port(),
                     amqpsEndpoint.port(),
+                    // Every broker port is bound, so these are present; a 0 here would mean
+                    // the broker is not reachable from the host, not that it is on the
+                    // container port.
+                    info.publishedHostPort(AMQP_PORT).orElse(0),
+                    info.publishedHostPort(AMQPS_PORT).orElse(0),
                     tls.certPem(),
                     jolokiaEndpoint.host(),
                     jolokiaEndpoint.port(),
@@ -335,7 +349,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
 
     /** Registers a mocked namespace with no backing broker — management API only. */
     public NamespaceState startMockedNamespace(String namespaceName) {
-        NamespaceState state = new NamespaceState(null, 0, 0, "", "", 0, true);
+        NamespaceState state = new NamespaceState(null, 0, 0, 0, 0, "", "", 0, true);
         register(namespaceName, state);
         LOG.infov("Registered mocked Service Bus namespace ''{0}'' (no AMQP broker)", namespaceName);
         return state;

@@ -11,6 +11,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -224,6 +226,63 @@ class ServiceBusNamespaceManagerStartupTest {
 
         assertTrue(error.portsReleased());
         verify(lifecycleManager).stopAndRemove("container-id", null);
+    }
+
+    @Test
+    void aStartedNamespaceKeepsTheConnectPortsApartFromThePublishedHostPorts() throws Exception {
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ServiceBusConfig serviceBus = mock(EmulatorConfig.ServiceBusConfig.class);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class);
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        ServiceBusConfigGenerator configGenerator = mock(ServiceBusConfigGenerator.class);
+        ArtemisTlsGenerator tlsGenerator = mock(ArtemisTlsGenerator.class);
+        ContainerSpec spec = new ContainerSpec("artemis");
+
+        when(config.services()).thenReturn(services);
+        when(services.serviceBus()).thenReturn(serviceBus);
+        when(services.dockerNetwork()).thenReturn(Optional.empty());
+        when(serviceBus.artemisImage()).thenReturn("artemis");
+        when(configGenerator.generate("default")).thenReturn("<configuration/>");
+        when(tlsGenerator.generate("floci-az-servicebus-default"))
+                .thenReturn(new ArtemisTlsGenerator.TlsBundle(new byte[0], "certificate"));
+        when(containerBuilder.newContainer("artemis")).thenReturn(builder);
+        when(builder.withName(anyString())).thenReturn(builder);
+        when(builder.withEnv(anyString(), anyString())).thenReturn(builder);
+        when(builder.withLabels(anyMap())).thenReturn(builder);
+        when(builder.withPortBinding(anyInt(), anyInt())).thenReturn(builder);
+        when(builder.withDynamicPort(anyInt())).thenReturn(builder);
+        when(builder.withDockerNetwork(any())).thenReturn(builder);
+        when(builder.withLogRotation()).thenReturn(builder);
+        when(builder.build()).thenReturn(spec);
+        when(lifecycleManager.create(spec)).thenReturn("container-id");
+        when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-default"))
+                .thenReturn(true);
+
+        try (ServerSocket broker = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            // As floci-az resolves the sidecar when it runs in a container: the endpoint carries
+            // the container port, and Docker published the broker on other host ports.
+            ContainerLifecycleManager.EndpointInfo resolved =
+                    new ContainerLifecycleManager.EndpointInfo("127.0.0.1", broker.getLocalPort());
+            when(lifecycleManager.startCreated("container-id", spec))
+                    .thenReturn(new ContainerLifecycleManager.ContainerInfo("container-id",
+                            Map.of(5672, resolved, 5671, resolved, 8161, resolved),
+                            Map.of(5672, 49175, 5671, 49176, 8161, 49177)));
+            ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
+                    config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+
+            try {
+                ServiceBusNamespaceManager.NamespaceState state = manager.startNamespace("default", 0, 0);
+
+                assertEquals(broker.getLocalPort(), state.amqpPort());
+                assertEquals(broker.getLocalPort(), state.amqpsPort());
+                assertEquals(49175, state.amqpHostPort());
+                assertEquals(49176, state.amqpsHostPort());
+            } finally {
+                manager.stopNamespace("default");
+            }
+        }
     }
 
     @Test

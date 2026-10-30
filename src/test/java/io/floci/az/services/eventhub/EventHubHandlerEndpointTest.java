@@ -79,19 +79,36 @@ class EventHubHandlerEndpointTest {
     }
 
     @Test
-    void connectionInfoKeepsLocalhostWhenTheBrokerIsResolvedAtAContainerIp() {
-        NamespaceState state = new NamespaceState("c1", "172.17.0.6", "localhost", 5672, 5671, "", false);
+    void connectionInfoPairsLocalhostWithThePublishedPortsWhenTheBrokerIsResolvedAtAContainerIp() {
+        // floci-az in a container reaches the broker at its container IP and container ports; a
+        // client on the host reaches it at localhost and the ports Docker published.
+        NamespaceState state = new NamespaceState(
+                "c1", "172.17.0.6", "localhost", 5672, 5671, 49175, 49176, "", false);
         when(namespaceManager.getNamespace("myns")).thenReturn(Optional.of(state));
 
         String body = handle("GET", "namespaces/myns/connection").getEntity().toString();
 
-        assertThat(body, containsString("\"amqpEndpoint\":\"amqp://localhost:5672\""));
-        assertThat(body, containsString("\"amqpsEndpoint\":\"amqps://localhost:5671\""));
+        assertThat(body, containsString("\"amqpEndpoint\":\"amqp://localhost:49175\""));
+        assertThat(body, containsString("\"amqpsEndpoint\":\"amqps://localhost:49176\""));
+        assertThat(body, containsString("\"amqpPort\":5672,\"amqpsPort\":5671"));
+        assertThat(body, containsString("\"amqpHostPort\":49175,\"amqpsHostPort\":49176"));
+    }
+
+    @Test
+    void namespaceReportsThePublishedPortsBesideTheContainerPorts() {
+        NamespaceState state = new NamespaceState(
+                "c1", "172.17.0.6", "localhost", 5672, 5671, 49175, 49176, "", false);
+        when(namespaceManager.getNamespace("myns")).thenReturn(Optional.of(state));
+
+        String body = handle("GET", "namespaces/myns").getEntity().toString();
+
+        assertThat(body, containsString("\"amqpPort\":5672,\"amqpsPort\":5671"));
+        assertThat(body, containsString("\"amqpHostPort\":49175,\"amqpsHostPort\":49176"));
     }
 
     @Test
     void connectionInfoNamesTheDaemonHostInPublishedMode() {
-        NamespaceState state = new NamespaceState("c1", "docker", "docker", 47123, 47124, "", false);
+        NamespaceState state = new NamespaceState("c1", "docker", "docker", 47123, 47124, 47123, 47124, "", false);
         when(namespaceManager.getNamespace("myns")).thenReturn(Optional.of(state));
 
         String body = handle("GET", "namespaces/myns/connection").getEntity().toString();
@@ -102,7 +119,7 @@ class EventHubHandlerEndpointTest {
 
     @Test
     void connectionInfoBracketsAnIpv6DaemonHost() {
-        NamespaceState state = new NamespaceState("c1", "::1", "::1", 5672, 5671, "", false);
+        NamespaceState state = new NamespaceState("c1", "::1", "::1", 5672, 5671, 5672, 5671, "", false);
         when(namespaceManager.getNamespace("myns")).thenReturn(Optional.of(state));
 
         assertThat(handle("GET", "namespaces/myns/connection").getEntity().toString(),
@@ -115,8 +132,10 @@ class EventHubHandlerEndpointTest {
     }
 
     private void brokerAt(String host, int port) {
+        // The published host ports point at nothing: the probe runs from floci-az, so it must use
+        // the ports the broker was resolved at.
         when(namespaceManager.listNamespaces()).thenReturn(Map.of(
-                "emulatorNs1", new NamespaceState("c1", host, "localhost", port, port, "", false)));
+                "emulatorNs1", new NamespaceState("c1", host, "localhost", port, port, 1, 1, "", false)));
     }
 
     private Response handle(String method, String path) {

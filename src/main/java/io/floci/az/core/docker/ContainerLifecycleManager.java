@@ -179,8 +179,7 @@ public class ContainerLifecycleManager {
             }
         }
 
-        Map<Integer, EndpointInfo> endpoints = resolveEndpoints(containerId, spec);
-        return new ContainerInfo(containerId, endpoints);
+        return resolveContainerInfo(containerId, spec);
     }
 
     /** Returns IP addresses assigned to a container's Docker network namespace. */
@@ -1006,14 +1005,19 @@ public class ContainerLifecycleManager {
         return hostConfig;
     }
 
-    private Map<Integer, EndpointInfo> resolveEndpoints(String containerId, ContainerSpec spec) {
-        if (spec.exposedPorts() == null || spec.exposedPorts().isEmpty()) return Map.of();
+    private ContainerInfo resolveContainerInfo(String containerId, ContainerSpec spec) {
+        if (spec.exposedPorts() == null || spec.exposedPorts().isEmpty()) {
+            return new ContainerInfo(containerId, Map.of());
+        }
         InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
         Map<Integer, EndpointInfo> endpoints = new HashMap<>();
+        Map<Integer, Integer> publishedHostPorts = new HashMap<>();
         for (int containerPort : spec.exposedPorts()) {
             endpoints.put(containerPort, resolveEndpoint(inspect, containerPort, spec.networkMode()));
+            readPublishedHostPort(inspect, containerPort)
+                    .ifPresent(hostPort -> publishedHostPorts.put(containerPort, hostPort));
         }
-        return endpoints;
+        return new ContainerInfo(containerId, endpoints, publishedHostPorts);
     }
 
     private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort) {

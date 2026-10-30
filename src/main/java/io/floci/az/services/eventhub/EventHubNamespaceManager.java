@@ -53,13 +53,19 @@ public class EventHubNamespaceManager {
      * @param clientHost   host reported to clients for those ports: the Docker daemon's host in
      *                     published mode, otherwise localhost. Never the container IP, which the
      *                     broker certificate does not name (null when mocked)
-     * @param amqpHostPort host-side port for plain AMQP (0 when mocked)
-     * @param amqpsHostPort host-side port for TLS AMQP (0 when mocked)
+     * @param amqpPort     port plain AMQP is reached on at {@code amqpHost}: the published host
+     *                     port, or the container port when floci-az runs in a container (0 when
+     *                     mocked)
+     * @param amqpsPort    the same for TLS AMQP (0 when mocked)
+     * @param amqpHostPort host port Docker published plain AMQP on, whatever the endpoint mode;
+     *                     the port that pairs with {@code clientHost} (0 when mocked)
+     * @param amqpsHostPort host port Docker published TLS AMQP on (0 when mocked)
      * @param tlsCertPem   PEM-encoded self-signed cert for TLS AMQP (empty when mocked)
      * @param mocked       true when no real Artemis broker is backing this namespace
      */
-    public record NamespaceState(String containerId, String amqpHost, String clientHost, int amqpHostPort,
-                                 int amqpsHostPort, String tlsCertPem, boolean mocked) {}
+    public record NamespaceState(String containerId, String amqpHost, String clientHost,
+                                 int amqpPort, int amqpsPort, int amqpHostPort, int amqpsHostPort,
+                                 String tlsCertPem, boolean mocked) {}
 
     // Artemis library patches, shared with the Service Bus broker — see where they are
     // copied in below for why each is needed.
@@ -189,7 +195,11 @@ public class EventHubNamespaceManager {
 
         NamespaceState state = new NamespaceState(
                 containerId, amqpEndpoint.host(), clientHost(amqpEndpoint.host()),
-                amqpEndpoint.port(), amqpsEndpoint.port(), tls.certPem(), false);
+                amqpEndpoint.port(), amqpsEndpoint.port(),
+                // Every broker port is bound, so these are present; a 0 here would mean the
+                // broker is not reachable from the host, not that it is on the container port.
+                info.publishedHostPort(AMQP_PORT).orElse(0), info.publishedHostPort(AMQPS_PORT).orElse(0),
+                tls.certPem(), false);
         namespaces.put(namespaceName, state);
 
         LOG.infov("Event Hubs namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
@@ -199,7 +209,7 @@ public class EventHubNamespaceManager {
 
     /** Registers a mocked namespace with no backing broker — management API only. */
     public NamespaceState registerMockedNamespace(String namespaceName) {
-        NamespaceState state = new NamespaceState(null, null, null, 0, 0, "", true);
+        NamespaceState state = new NamespaceState(null, null, null, 0, 0, 0, 0, "", true);
         namespaces.put(namespaceName, state);
         LOG.infov("Registered mocked Event Hubs namespace ''{0}'' (no AMQP broker)", namespaceName);
         return state;

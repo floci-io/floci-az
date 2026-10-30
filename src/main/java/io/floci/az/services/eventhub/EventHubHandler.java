@@ -233,11 +233,15 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
         }
         if ("connection".equals(sub)) {
             String host = HostLiterals.forUrl(ns.clientHost() != null ? ns.clientHost() : "localhost");
+            // The endpoints are for clients on the host, so they pair the client host with the
+            // published ports, not with the ports floci-az itself reaches the broker on.
             String json = String.format(
                     "{\"namespace\":\"%s\",\"amqpPort\":%d,\"amqpsPort\":%d,"
+                    + "\"amqpHostPort\":%d,\"amqpsHostPort\":%d,"
                     + "\"amqpEndpoint\":\"amqp://%s:%d\","
                     + "\"amqpsEndpoint\":\"amqps://%s:%d\"}",
-                    namespaceName, ns.amqpHostPort(), ns.amqpsHostPort(),
+                    namespaceName, ns.amqpPort(), ns.amqpsPort(),
+                    ns.amqpHostPort(), ns.amqpsHostPort(),
                     host, ns.amqpHostPort(), host, ns.amqpsHostPort());
             return Response.ok(json).type("application/json").build();
         }
@@ -301,9 +305,9 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
         Optional<EventHubNamespaceManager.NamespaceState> broker = healthProbeTarget();
         String probeHost = broker.map(EventHubNamespaceManager.NamespaceState::amqpHost).orElse("localhost");
         boolean amqpUp = isTcpOpen(probeHost,
-                broker.map(EventHubNamespaceManager.NamespaceState::amqpHostPort).orElse(amqpPort));
+                broker.map(EventHubNamespaceManager.NamespaceState::amqpPort).orElse(amqpPort));
         boolean amqpsUp = isTcpOpen(probeHost,
-                broker.map(EventHubNamespaceManager.NamespaceState::amqpsHostPort).orElse(amqpsPort));
+                broker.map(EventHubNamespaceManager.NamespaceState::amqpsPort).orElse(amqpsPort));
 
         String body = String.format(
                 "{\"amqp\":{\"port\":%d,\"status\":\"%s\"},\"amqps\":{\"port\":%d,\"status\":\"%s\"},\"kafka\":{\"running\":%b}}",
@@ -344,8 +348,10 @@ public class EventHubHandler implements AzureServiceHandler, Resettable {
     private static void appendNamespaceJson(StringBuilder sb, String name,
                                              EventHubNamespaceManager.NamespaceState state) {
         sb.append("{\"name\":\"").append(name).append("\"")
-          .append(",\"amqpPort\":").append(state.amqpHostPort())
-          .append(",\"amqpsPort\":").append(state.amqpsHostPort())
+          .append(",\"amqpPort\":").append(state.amqpPort())
+          .append(",\"amqpsPort\":").append(state.amqpsPort())
+          .append(",\"amqpHostPort\":").append(state.amqpHostPort())
+          .append(",\"amqpsHostPort\":").append(state.amqpsHostPort())
           .append(",\"mocked\":").append(state.mocked())
           .append("}");
     }

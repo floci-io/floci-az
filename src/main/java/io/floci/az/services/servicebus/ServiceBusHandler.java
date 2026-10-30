@@ -1304,8 +1304,10 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 ? state.tlsCertPem().replace("\r", "").replace("\n", "\\n").replace("\"", "\\\"")
                 : "";
         sb.append("{\"name\":\"").append(name).append("\"")
-          .append(",\"amqpPort\":").append(state.amqpHostPort())
-          .append(",\"amqpsPort\":").append(state.amqpsHostPort())
+          .append(",\"amqpPort\":").append(state.amqpPort())
+          .append(",\"amqpsPort\":").append(state.amqpsPort())
+          .append(",\"amqpHostPort\":").append(state.amqpHostPort())
+          .append(",\"amqpsHostPort\":").append(state.amqpsHostPort())
           .append(",\"tlsCertPem\":\"").append(certPem).append("\"")
           .append(",\"mocked\":").append(state.mocked())
           .append("}");

@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,6 +108,26 @@ class ContainerLifecycleManagerPortBindingTest {
         assertEquals(manager.daemonHost(), info.getEndpoint(8080).host());
     }
 
+    @Test
+    void inAContainerTheCallerStillGetsThePublishedHostPort() {
+        lenient().when(dockerConfig.endpointMode()).thenReturn(EmulatorConfig.DockerEndpointMode.AUTO);
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        stubCreate();
+        StartContainerCmd startCmd = mock(StartContainerCmd.class);
+        when(dockerClient.startContainerCmd("container-id")).thenReturn(startCmd);
+        NetworkSettings networkSettings = stubInspectWithPublishedPort(8080, 49153);
+        when(networkSettings.getIpAddress()).thenReturn("172.17.0.5");
+
+        ContainerLifecycleManager.ContainerInfo info =
+                new ContainerLifecycleManager(dockerClient, imageCacheService, containerDetector, config)
+                        .createAndStart(spec(Map.of(8080, 0)));
+
+        // floci-az connects from inside the Docker network, at the container IP and port; a client
+        // on the host needs the port Docker published, which the endpoint no longer carries.
+        assertEquals(new ContainerLifecycleManager.EndpointInfo("172.17.0.5", 8080), info.getEndpoint(8080));
+        assertEquals(OptionalInt.of(49153), info.publishedHostPort(8080));
+    }
+
     private void stubCreate() {
         CreateContainerCmd createCmd = mock(CreateContainerCmd.class, RETURNS_SELF);
         when(dockerClient.createContainerCmd("busybox:stable")).thenReturn(createCmd);
@@ -115,7 +136,7 @@ class ContainerLifecycleManagerPortBindingTest {
         when(createCmd.exec()).thenReturn(response);
     }
 
-    private void stubInspectWithPublishedPort(int containerPort, int hostPort) {
+    private NetworkSettings stubInspectWithPublishedPort(int containerPort, int hostPort) {
         Ports ports = new Ports();
         ports.bind(ExposedPort.tcp(containerPort), Ports.Binding.bindPort(hostPort));
         NetworkSettings networkSettings = mock(NetworkSettings.class);
@@ -125,6 +146,7 @@ class ContainerLifecycleManagerPortBindingTest {
         InspectContainerCmd inspectCmd = mock(InspectContainerCmd.class);
         when(inspectCmd.exec()).thenReturn(inspect);
         when(dockerClient.inspectContainerCmd("container-id")).thenReturn(inspectCmd);
+        return networkSettings;
     }
 
     private static ContainerSpec spec(Map<Integer, Integer> portBindings) {

@@ -167,7 +167,7 @@ curl -X PUT http://localhost:4577/devstoreaccount1-eventhub/namespaces/myns \
 
 Response `201`:
 ```json
-{"name":"myns","amqpPort":47123,"amqpsPort":47124}
+{"name":"myns","amqpPort":47123,"amqpsPort":47124,"amqpHostPort":47123,"amqpsHostPort":47124,"mocked":false}
 ```
 
 #### Get connection info
@@ -181,12 +181,14 @@ curl http://localhost:4577/devstoreaccount1-eventhub/namespaces/myns/connection
   "namespace": "myns",
   "amqpPort": 47123,
   "amqpsPort": 47124,
+  "amqpHostPort": 47123,
+  "amqpsHostPort": 47124,
   "amqpEndpoint": "amqp://localhost:47123",
   "amqpsEndpoint": "amqps://localhost:47124"
 }
 ```
 
-`amqpEndpoint` and `amqpsEndpoint` name `localhost`, or the Docker daemon's host in published endpoint mode (`floci-az.docker.endpoint-mode=published`). The broker certificate covers both.
+`amqpEndpoint` and `amqpsEndpoint` name `localhost`, or the Docker daemon's host in published endpoint mode (`floci-az.docker.endpoint-mode=published`), with the host ports Docker published (`amqpHostPort`/`amqpsHostPort`). The broker certificate covers both hosts. `amqpPort`/`amqpsPort` are the ports floci-az itself reaches the broker on: the same host ports when floci-az runs on the host or in published mode, but the broker's container ports (`5672`/`5671`) when floci-az runs in a container, for clients on the same Docker network.
 
 Connect with the Python SDK using the dynamically allocated port:
 
