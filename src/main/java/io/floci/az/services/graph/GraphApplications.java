@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.core.AzureRequest;
+import io.floci.az.core.auth.BearerClaims;
 import io.floci.az.services.entra.DirectoryEntitySet;
 import io.floci.az.services.entra.DirectoryObject;
 import io.floci.az.services.entra.GraphDirectoryStore;
@@ -35,7 +36,9 @@ import java.util.regex.Pattern;
  * {@code $filter=appId eq '...'}, {@code displayName eq '...'} or {@code startswith(...)}),
  * {@code GET /v1.0/applications(appId='...')}, {@code GET} / {@code PATCH} / {@code DELETE}
  * {@code /v1.0/applications/{id}}, {@code POST /v1.0/applications}, and the {@code addPassword} /
- * {@code removePassword} actions. A registration is the full Graph {@code application} object: a create
+ * {@code removePassword} actions, and {@code owners} ({@code GET}, {@code POST owners/$ref},
+ * {@code DELETE owners/{id}/$ref}): the caller the token names becomes the first owner on create, as Graph
+ * makes the signed-in principal one. A registration is the full Graph {@code application} object: a create
  * stores every writable property it is sent and an update replaces the properties it names and keeps
  * the rest, so clients that write {@code api}, {@code web}, {@code identifierUris} and the like read
  * them back as sent. A created registration gets a service principal too, so the emulator's token
@@ -78,10 +81,16 @@ final class GraphApplications {
                 return app.map(a -> method.equals("GET") ? json(application(a, true)) : methodNotAllowed())
                     .orElseGet(() -> notFound(byAppId.group(1)));
             }
+            if (app.isEmpty()) {
+                return notFound(byAppId.group(1));
+            }
+            if (segments[1].equalsIgnoreCase("owners")) {
+                return owners(request, method, app.get(), segments, 1);
+            }
             if (segments.length > 2) {
                 return unknownSegment(segments[2]);
             }
-            return app.isEmpty() ? notFound(byAppId.group(1)) : action(request, method, app.get(), segments[1]);
+            return action(request, method, app.get(), segments[1]);
         }
         if (!head.equalsIgnoreCase("applications")) {
             return null;
@@ -105,10 +114,104 @@ final class GraphApplications {
                 default -> methodNotAllowed();
             };
         }
+        if (segments[2].equalsIgnoreCase("owners")) {
+            return owners(request, method, app.get(), segments, 2);
+        }
         if (segments.length > 3) {
             return unknownSegment(segments[3]);
         }
         return action(request, method, app.get(), segments[2]);
+    }
+
+    // ── Owners ──────────────────────────────────────────────────────────────────
+
+    /** {@code owners} at {@code segments[at]}: the listing, {@code owners/$ref} to add, {@code owners/{id}/$ref} to remove. */
+    private Response owners(AzureRequest request, String method, DirectoryObject app, String[] segments, int at) {
+        int rest = segments.length - at;
+        if (rest == 1) {
+            return method.equals("GET") ? listOwners(app) : methodNotAllowed();
+        }
+        if (rest == 2 && segments[at + 1].equals("$ref")) {
+            return method.equals("POST") ? addOwner(request, app) : methodNotAllowed();
+        }
+        if (rest == 3 && segments[at + 2].equals("$ref")) {
+            return method.equals("DELETE") ? removeOwner(app, segments[at + 1]) : methodNotAllowed();
+        }
+        return unknownSegment(segments[Math.min(segments.length - 1, at + (rest == 2 ? 1 : 2))]);
+    }
+
+    private Response listOwners(DirectoryObject app) {
+        List<Map<String, Object>> value = new ArrayList<>();
+        for (String ownerId : store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS)) {
+            principal(ownerId).ifPresent(value::add);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("@odata.context", baseContext + "$metadata#directoryObjects");
+        body.put("value", value);
+        return json(body);
+    }
+
+    private Response addOwner(AzureRequest request, DirectoryObject app) {
+        Map<String, Object> body = readJson(request);
+        if (body == null) {
+            return graphError(400, "Request_BadRequest", "The request body is not valid JSON.");
+        }
+        String ownerId = body.get("@odata.id") instanceof String s ? lastSegment(s) : null;
+        if (ownerId == null) {
+            return graphError(400, "Request_BadRequest", "@odata.id is required.");
+        }
+        if (principal(ownerId).isEmpty()) {
+            return notFound(ownerId);
+        }
+        synchronized (store) {
+            if (store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS).stream().anyMatch(ownerId::equalsIgnoreCase)) {
+                return graphError(400, "Request_BadRequest",
+                    "One or more added object references already exist for the following modified properties: 'owners'.");
+            }
+            store.addLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, ownerId);
+        }
+        return Response.status(204).build();
+    }
+
+    private Response removeOwner(DirectoryObject app, String ownerId) {
+        synchronized (store) {
+            Optional<String> owner = store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS).stream()
+                .filter(ownerId::equalsIgnoreCase).findFirst();
+            if (owner.isEmpty()) {
+                return notFound(ownerId);
+            }
+            store.removeLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, owner.get());
+        }
+        return Response.status(204).build();
+    }
+
+    /** A user or service principal of the tenant as a {@code directoryObject}, typed the way Graph lists owners. */
+    private Optional<Map<String, Object>> principal(String id) {
+        Optional<DirectoryObject> user = store.get(tenantId, DirectoryEntitySet.USERS, id);
+        if (user.isPresent()) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("@odata.type", "#microsoft.graph.user");
+            out.put("id", user.get().id());
+            out.put("displayName", user.get().text("displayName"));
+            out.put("userPrincipalName", user.get().text("userPrincipalName"));
+            out.put("mail", user.get().text("mail"));
+            return Optional.of(out);
+        }
+        return store.get(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, id).map(sp -> {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("@odata.type", "#microsoft.graph.servicePrincipal");
+            out.put("id", sp.id());
+            out.put("appId", sp.text("appId"));
+            out.put("displayName", sp.text("displayName"));
+            return out;
+        });
+    }
+
+    /** The trailing id of an {@code @odata.id}, which points at real Graph's {@code directoryObjects/{id}}. */
+    private static String lastSegment(String odataId) {
+        String trimmed = odataId.endsWith("/") ? odataId.substring(0, odataId.length() - 1) : odataId;
+        String id = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+        return id.isBlank() ? null : id;
     }
 
     private Response unknownSegment(String segment) {
@@ -187,9 +290,14 @@ final class GraphApplications {
         String objectId = UUID.randomUUID().toString();
         DirectoryObject app = GraphDirectoryStore.application(tenantId, objectId, appId, name, List.of());
         writeProperties(app.props(), body);
+        String caller = BearerClaims.of(request).oid();
         synchronized (store) {
             store.put(app);
             store.put(GraphDirectoryStore.servicePrincipal(tenantId, TokenIssuer.deterministicGuid("sp:" + appId), appId, name));
+            // The principal the token names owns what it registers, as Graph makes the signed-in principal the first owner.
+            if (caller != null && principal(caller).isPresent()) {
+                store.addLink(tenantId, objectId, GraphDirectoryStore.OWNERS, caller);
+            }
         }
         return Response.status(201).entity(write(application(app, true))).type(MediaType.APPLICATION_JSON).build();
     }
@@ -280,6 +388,9 @@ final class GraphApplications {
 
     private Response delete(DirectoryObject app) {
         synchronized (store) {
+            for (String ownerId : store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS)) {
+                store.removeLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, ownerId);
+            }
             store.delete(tenantId, DirectoryEntitySet.APPLICATIONS, app.id());
             store.findByAlternateKey(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, "appId", app.text("appId"))
                 .ifPresent(sp -> store.delete(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, sp.id()));

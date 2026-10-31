@@ -74,6 +74,8 @@ public class GraphDirectoryStore implements Resettable {
 
     /** The group navigation that holds direct members. */
     public static final String MEMBERS = "members";
+    /** Navigation from an application to its owners (users and service principals). */
+    public static final String OWNERS = "owners";
 
     /** Application property holding the client secrets. */
     public static final String PASSWORD_CREDENTIALS = "passwordCredentials";
