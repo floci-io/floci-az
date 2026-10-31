@@ -209,6 +209,8 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                             config.services().serviceBus().artemisImage())
                     .withName(containerName)
                     .withEnv("ANONYMOUS_LOGIN", "true")
+                    // broker.xml is replaced below, so disk tuning only delays AMQP readiness.
+                    .withEnv("EXTRA_ARGS", "--http-host 0.0.0.0 --relax-jolokia --no-autotune")
                     .withLabels(serviceContainerLabels(namespaceName))
                     .withPortBinding(AMQP_PORT, amqpHostPort)
                     .withPortBinding(AMQPS_PORT, amqpsHostPort)
