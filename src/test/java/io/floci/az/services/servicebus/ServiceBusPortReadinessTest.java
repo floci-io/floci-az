@@ -51,7 +51,8 @@ class ServiceBusPortReadinessTest {
         try (MockedConstruction<Socket> sockets = mockConstruction(Socket.class, (socket, context) ->
                 doAnswer(invocation -> {
                     if (context.getCount() > 1) {
-                        Thread.sleep(400);
+                        int timeoutMillis = invocation.getArgument(1);
+                        Thread.sleep(Math.min(400, timeoutMillis));
                     }
                     throw new SocketTimeoutException("endpoint no longer replies");
                 }).when(socket).connect(any(), anyInt()))) {
