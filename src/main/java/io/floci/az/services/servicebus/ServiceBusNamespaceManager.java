@@ -20,6 +20,8 @@ import org.jboss.logging.Logger;
 import javax.management.ObjectName;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -34,6 +36,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Manages one Artemis container per Service Bus namespace.
@@ -1011,14 +1014,25 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     }
 
     private void waitForPort(EndpointInfo endpoint, String label) {
-        long deadline = System.currentTimeMillis() + 60_000;
-        while (System.currentTimeMillis() < deadline) {
-            try (Socket s = new Socket(endpoint.host(), endpoint.port())) {
+        waitForPort(endpoint, label, 60);
+    }
+
+    static void waitForPort(EndpointInfo endpoint, String label, int timeoutSeconds) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (System.nanoTime() < deadline) {
+            try (Socket socket = new Socket()) {
+                long remainingMillis = Math.max(1L,
+                        TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
+                socket.connect(new InetSocketAddress(InetAddress.getByName(endpoint.host()), endpoint.port()),
+                        Math.toIntExact(Math.min(1_000L, remainingMillis)));
                 return;
             } catch (IOException ignored) {
+                // An unready or terminated sidecar is expected until the readiness deadline.
             }
             try {
-                Thread.sleep(500);
+                long remainingMillis = Math.max(0L,
+                        TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
+                Thread.sleep(Math.min(500L, remainingMillis));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(
@@ -1026,6 +1040,6 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
             }
         }
         throw new RuntimeException(
-                "Artemis did not open " + label + " port " + endpoint + " within 60s");
+                "Artemis did not open " + label + " port " + endpoint + " within " + timeoutSeconds + "s");
     }
 }
