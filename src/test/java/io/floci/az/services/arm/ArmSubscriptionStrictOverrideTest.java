@@ -32,6 +32,8 @@ class ArmSubscriptionStrictOverrideTest {
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                 "floci-az.parity", "strict",
+                // StrictTokensTest covers the token check; these requests carry no token.
+                "floci-az.parity-overrides.strict-tokens", "false",
                 "floci-az.parity-overrides.strict-subscriptions", "false",
                 "floci-az.cloud.default", "AzureChinaCloud");
         }

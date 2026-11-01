@@ -81,6 +81,33 @@ class StrictTokensTest {
     }
 
     @Test
+    void namingGraphAsTheHostDoesNotMakeAGraphTokenAnArmToken() {
+        given().auth().oauth2(tokenFor("https://graph.microsoft.com"))
+            .header("Host", "graph.microsoft.com")
+            .header("X-Forwarded-Proto", "https")
+            .when().get("/subscriptions" + API)
+            .then().statusCode(401)
+            .body("error.code", equalTo("InvalidAuthenticationTokenAudience"));
+    }
+
+    @Test
+    void aHostNameTheEmulatorIsReachedThroughStaysAnAudience() {
+        given().auth().oauth2(tokenFor("http://floci-az:4577"))
+            .header("Host", "floci-az:4577")
+            .when().get("/subscriptions" + API)
+            .then().statusCode(200);
+    }
+
+    @Test
+    void anArmTokenStillWorksWhenTheEmulatorAnswersForTheArmHost() {
+        given().auth().oauth2(tokenFor("https://management.azure.com"))
+            .header("Host", "management.azure.com")
+            .header("X-Forwarded-Proto", "https")
+            .when().get("/subscriptions" + API)
+            .then().statusCode(200);
+    }
+
+    @Test
     void aRefusedWriteDoesNotReachItsHandler() {
         String body = "{\"location\":\"eastus\"}";
         given().contentType("application/json").body(body).when().put(GROUP + API).then().statusCode(401);

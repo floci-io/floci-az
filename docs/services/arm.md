@@ -269,7 +269,9 @@ request must carry a Bearer token this emulator issued. It is checked before any
 - a `tid`, and an `iss` of the form `<scheme>://<host>/<tid>/v2.0` or `<scheme>://<host>/<tid>/`. The host is not
   compared, because an issuer's host is the one the client signed in through. With `entra.issuer` set, `iss` must
   equal it
-- an `aud` of one of the cloud's two ARM audiences or the emulator's own base URL, with or without a trailing slash
+- an `aud` of one of the cloud's two ARM audiences or the emulator's own base URL, with or without a trailing slash.
+  The base URL is the one the request addressed, since the emulator can be reached under any name, so it does not count
+  when its host belongs to a real Azure or Microsoft domain such as `graph.microsoft.com`
 
 | Refused because | Status | `error.code` |
 |---|---|---|

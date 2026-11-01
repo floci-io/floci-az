@@ -30,7 +30,9 @@ import java.util.stream.Stream;
  * ones in the gate with {@link SyntheticHttpHeaders}; a client's headers never are.
  *
  * <p>The accepted audiences are the scope's cloud's two ARM audiences and the emulator's own base URL, which is the
- * audience the 2022-09-01 metadata advertises, each with or without a trailing slash.
+ * audience the 2022-09-01 metadata advertises, each with or without a trailing slash. The base URL follows the caller's
+ * {@code Host}, because the emulator's reachable names are not a known list, so it does not count when that host is a
+ * real Azure or Microsoft one: otherwise a Graph token plus {@code Host: graph.microsoft.com} would pass as ARM.
  *
  * <p>The status, codes and messages have no local source apart from the {@code WWW-Authenticate} wording for a
  * missing header, which the Java, .NET and C++ SDK challenge parsers carry as their ARM fixture: they are an emulator
@@ -71,7 +73,9 @@ public class TokenRule implements ArmRequestRule {
             return ArmVerdict.proceed();
         }
         String baseUrl = RequestUrls.resolveBaseUrl(request, config);
-        List<String> audiences = Stream.concat(cloud(call).audiences().stream(), Stream.of(baseUrl)).toList();
+        List<String> audiences = CloudCatalog.isAzureHost(RequestUrls.resolveAuthority(request))
+            ? cloud(call).audiences()
+            : Stream.concat(cloud(call).audiences().stream(), Stream.of(baseUrl)).toList();
         String authorization = request.headers() == null ? null
             : request.headers().getHeaderString(HttpHeaders.AUTHORIZATION);
         Optional<TokenValidator.Rejection> rejection = validator.validate(authorization,
