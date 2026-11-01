@@ -63,8 +63,8 @@ provider "azurerm" {
 
   subscription_id = "00000000-0000-0000-0000-000000000001"
   tenant_id       = "00000000-0000-0000-0000-000000000002"
-  client_id       = "00000000-0000-0000-0000-000000000003"
-  client_secret   = "fake-secret"    # credentials are not validated
+  client_id       = "11111111-1111-1111-1111-111111111111"   # the seeded dev app
+  client_secret   = "floci-az-dev-secret"   # checked only when entra.validate-client-credentials is on
 }
 ```
 
