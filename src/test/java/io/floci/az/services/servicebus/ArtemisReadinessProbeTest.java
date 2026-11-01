@@ -18,6 +18,8 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.security.KeyStore;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import javax.net.ssl.KeyManagerFactory;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -122,6 +125,67 @@ class ArtemisReadinessProbeTest {
         try (FakeListener listener = FakeListener.tls(served)) {
             assertThrows(RuntimeException.class, () ->
                     ArtemisReadinessProbe.awaitAmqps(listener.endpoint(), expected.certPem(), 1));
+        }
+    }
+
+    @Test
+    void aPeerThatAcceptsButNeverAnswersTheProtocolHeaderReachesTheDeadline() throws Exception {
+        try (SilentListener listener = new SilentListener()) {
+            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(4), () ->
+                    assertThrows(RuntimeException.class, () ->
+                            ArtemisReadinessProbe.awaitAmqp(listener.endpoint(), 2)));
+            assertTrue(failure.getMessage().contains("within 2s"));
+            assertTrue(listener.accepted() >= 1, "the probe must have connected");
+        }
+    }
+
+    @Test
+    void aPeerThatAcceptsButNeverAnswersTheTlsHandshakeReachesTheDeadline() throws Exception {
+        TlsBundle tls = new ArtemisTlsGenerator().generate();
+        try (SilentListener listener = new SilentListener()) {
+            RuntimeException failure = assertTimeoutPreemptively(Duration.ofSeconds(4), () ->
+                    assertThrows(RuntimeException.class, () ->
+                            ArtemisReadinessProbe.awaitAmqps(listener.endpoint(), tls.certPem(), 2)));
+            assertTrue(failure.getMessage().contains("within 2s"));
+            assertTrue(listener.accepted() >= 1, "the probe must have connected");
+        }
+    }
+
+    /** A loopback listener that accepts connections and holds them open without ever writing a byte. */
+    private static final class SilentListener implements AutoCloseable {
+
+        private final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        private final List<Socket> held = new CopyOnWriteArrayList<>();
+        private final Thread acceptor = Thread.ofVirtual().start(this::serve);
+
+        SilentListener() throws IOException {
+        }
+
+        EndpointInfo endpoint() {
+            return new EndpointInfo(server.getInetAddress().getHostAddress(), server.getLocalPort());
+        }
+
+        int accepted() {
+            return held.size();
+        }
+
+        private void serve() {
+            while (!server.isClosed()) {
+                try {
+                    held.add(server.accept());
+                } catch (IOException expected) {
+                    // Closing the server socket ends the loop.
+                }
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            server.close();
+            for (Socket socket : held) {
+                socket.close();
+            }
+            acceptor.join(Duration.ofSeconds(5));
         }
     }
 
