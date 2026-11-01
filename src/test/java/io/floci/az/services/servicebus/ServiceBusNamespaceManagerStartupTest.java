@@ -10,6 +10,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.mockito.MockedStatic;
 
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -35,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -260,7 +262,9 @@ class ServiceBusNamespaceManagerStartupTest {
         when(lifecycleManager.removeIfExistsAndConfirm("floci-az-servicebus-default"))
                 .thenReturn(true);
 
-        try (ServerSocket broker = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+        // The listener below only accepts connections; it is not a broker, so readiness is not under test here.
+        try (ServerSocket broker = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+             MockedStatic<ArtemisReadinessProbe> readiness = mockStatic(ArtemisReadinessProbe.class)) {
             // As floci-az resolves the sidecar when it runs in a container: the endpoint carries
             // the container port, and Docker published the broker on other host ports.
             ContainerLifecycleManager.EndpointInfo resolved =

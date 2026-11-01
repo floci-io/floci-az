@@ -7,6 +7,7 @@ import io.floci.az.core.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.services.servicebus.ArtemisPatchVersions;
+import io.floci.az.services.servicebus.ArtemisReadinessProbe;
 import io.floci.az.services.servicebus.ServiceBusCbsResponder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -14,7 +15,6 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -41,6 +41,7 @@ public class EventHubNamespaceManager {
     /** Container-internal ports — always the same inside every Artemis container. */
     private static final int AMQP_PORT = 5672;
     private static final int AMQPS_PORT = 5671;
+    private static final int READINESS_TIMEOUT_SECONDS = 60;
     private static final int JOLOKIA_PORT = 8161;
 
     /**
@@ -169,9 +170,9 @@ public class EventHubNamespaceManager {
         ContainerLifecycleManager.ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
 
         EndpointInfo amqpEndpoint = info.getEndpoint(AMQP_PORT);
-        waitForPort(amqpEndpoint, "AMQP");
+        ArtemisReadinessProbe.awaitAmqp(amqpEndpoint, READINESS_TIMEOUT_SECONDS);
         EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
-        waitForPort(amqpsEndpoint, "AMQPS");
+        ArtemisReadinessProbe.awaitAmqps(amqpsEndpoint, tls.certPem(), READINESS_TIMEOUT_SECONDS);
 
         // Answers the CBS put-token every Azure SDK sends before opening entity links;
         // the broker.xml divert routes those requests to the intercept queue this
@@ -295,25 +296,6 @@ public class EventHubNamespaceManager {
 
     String containerName(String namespaceName) {
         return ContainerStorageHelper.dockerName(config, "artemis-" + namespaceName);
-    }
-
-    private void waitForPort(EndpointInfo endpoint, String label) {
-        long deadline = System.currentTimeMillis() + 60_000;
-        while (System.currentTimeMillis() < deadline) {
-            try (Socket s = new Socket(endpoint.host(), endpoint.port())) {
-                return;
-            } catch (IOException ignored) {
-            }
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(
-                        "Interrupted waiting for Artemis " + label + " port", e);
-            }
-        }
-        throw new RuntimeException(
-                "Artemis did not open " + label + " port " + endpoint + " within 60s");
     }
 
     private static byte[] loadResource(String resource) {
