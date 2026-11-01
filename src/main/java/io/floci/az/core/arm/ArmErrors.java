@@ -24,6 +24,20 @@ public final class ArmErrors {
                 .build();
     }
 
+    /**
+     * {@code 401} for a refused Bearer token: the ARM error envelope and a {@code WWW-Authenticate} challenge in the
+     * form the SDK challenge parsers carry as their ARM fixture, pointing at the emulator's own login endpoint.
+     * {@code description} goes into the header, so it must be a fixed text with no client-supplied value in it.
+     */
+    public static Response unauthorized(String code, String message, String authorizationUri, String description) {
+        return Response.status(401)
+                .entity(Map.of("error", Map.of("code", code, "message", message)))
+                .type(MediaType.APPLICATION_JSON)
+                .header("WWW-Authenticate", "Bearer authorization_uri=\"" + authorizationUri
+                    + "/\", error=\"invalid_token\", error_description=\"" + description + "\"")
+                .build();
+    }
+
     public static Response notFound(String message) {
         return error(404, "ResourceNotFound", message);
     }
