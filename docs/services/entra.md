@@ -246,7 +246,7 @@ floci-az:
       default-tenant-id: "00000000-0000-0000-0000-000000000002"
       # issuer:                     # optional override; default {baseUrl}/{tenant}/v2.0
       token-lifetime-seconds: 3599
-      validate-tokens: false        # reserved: not enforced yet, any Bearer token is accepted
+      validate-tokens: false        # true: ARM requests must carry a valid token (same as parity-overrides.strict-tokens)
       validate-client-credentials: false   # true: reject unregistered clients and wrong secrets
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
 ```
@@ -261,9 +261,8 @@ floci-az:
 | `validate-client-credentials` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS` | `false` |
 | `signing-key-path` | `FLOCI_AZ_SERVICES_ENTRA_SIGNING_KEY_PATH` | `{storage.persistent-path}/entra` |
 
-> `validate-tokens` is reserved and currently has no effect: every service accepts any Bearer
-> token whatever its value. Token *enforcement* against the local signing key becomes opt-in in a
-> later phase.
+> `validate-tokens: true` turns on [token verification](arm.md#token-verification) for ARM requests. Data planes
+> still accept any Bearer token whatever its value.
 
 > **Keep `enabled: true` unless you have a reason not to.** The OAuth2 token endpoint
 > (`/{tenant}/oauth2/v2.0/token`) is served by this service. Disabling Entra makes that endpoint

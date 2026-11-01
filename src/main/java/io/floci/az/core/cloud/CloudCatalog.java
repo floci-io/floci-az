@@ -9,15 +9,18 @@ import io.floci.az.core.cloud.CloudProfile.UnsettledField;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The Azure clouds floci-az serves (public, US Government, China), read once from the bundled
@@ -62,6 +65,16 @@ public final class CloudCatalog {
      */
     public static Optional<DnsSuffixMatch> stripKnownDnsSuffix(String host) {
         return Bundled.CATALOG.stripKnownDnsSuffix(host);
+    }
+
+    /**
+     * Whether {@code host} belongs to a domain real Azure or Microsoft services answer on in any cloud, such as
+     * {@code graph.microsoft.com}, {@code storage.azure.com} or {@code x.vault.usgovcloudapi.net}. The domains are
+     * the last two labels of every endpoint, audience and suffix in the catalog. A port and a trailing dot are
+     * ignored and the comparison is case-insensitive. False for a null host.
+     */
+    public static boolean isAzureHost(String host) {
+        return Bundled.CATALOG.isAzureHost(host);
     }
 
     /**
@@ -235,10 +248,11 @@ public final class CloudCatalog {
     }
 
     /** The parsed catalog with its lookup tables. */
-    record Catalog(List<CloudProfile> clouds, Map<String, CloudProfile> byName, List<DnsSuffixMatch> suffixes) {
+    record Catalog(List<CloudProfile> clouds, Map<String, CloudProfile> byName, List<DnsSuffixMatch> suffixes,
+                   Set<String> azureDomains) {
 
         Catalog(List<CloudProfile> clouds) {
-            this(List.copyOf(clouds), indexByName(clouds), indexSuffixes(clouds));
+            this(List.copyOf(clouds), indexByName(clouds), indexSuffixes(clouds), indexAzureDomains(clouds));
         }
 
         Optional<CloudProfile> forName(String name) {
@@ -258,6 +272,14 @@ public final class CloudCatalog {
                 }
             }
             return Optional.empty();
+        }
+
+        boolean isAzureHost(String host) {
+            if (host == null) {
+                return false;
+            }
+            String bare = bareHost(host);
+            return azureDomains.stream().anyMatch(domain -> bare.equals(domain) || bare.endsWith("." + domain));
         }
 
         private static String bareHost(String host) {
@@ -280,6 +302,36 @@ public final class CloudCatalog {
                 throw new IllegalStateException(RESOURCE + ": the public cloud " + PUBLIC_CLOUD + " is missing");
             }
             return Map.copyOf(byName);
+        }
+
+        private static Set<String> indexAzureDomains(List<CloudProfile> clouds) {
+            Set<String> domains = new HashSet<>();
+            for (CloudProfile cloud : clouds) {
+                Endpoints endpoints = cloud.endpoints();
+                for (String url : List.of(endpoints.resourceManager(), endpoints.activeDirectory(),
+                        endpoints.microsoftGraph(), endpoints.portal())) {
+                    domains.add(domainOf(URI.create(url).getHost()));
+                }
+                for (String audience : cloud.audiences()) {
+                    domains.add(domainOf(URI.create(audience).getHost()));
+                }
+                for (String authorityHost : endpoints.authorityHosts()) {
+                    domains.add(domainOf(authorityHost));
+                }
+                for (Sourced<String> suffix : cloud.suffixes().values()) {
+                    if (suffix.value() != null) {
+                        domains.add(domainOf(suffix.value()));
+                    }
+                }
+            }
+            return Set.copyOf(domains);
+        }
+
+        /** The last two labels: every domain in the catalog is registered directly under its top-level domain. */
+        private static String domainOf(String host) {
+            String lower = host.toLowerCase(Locale.ROOT);
+            int last = lower.lastIndexOf('.');
+            return lower.substring(lower.lastIndexOf('.', last - 1) + 1);
         }
 
         /** Every settled suffix of every cloud, longest first, so the most specific suffix wins a match. */

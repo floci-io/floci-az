@@ -146,6 +146,16 @@ public interface EmulatorConfig {
     }
 
     /**
+     * Whether an ARM request whose Bearer token is missing, not signed by the Entra signing key, expired, or issued
+     * for another audience is refused with {@code 401}. On from {@code parity: strict} or
+     * {@code entra.validate-tokens}; {@code parity-overrides.strict-tokens} overrides both either way.
+     */
+    default boolean strictTokens() {
+        return parityOverrides().strictTokens()
+            .orElse(parity().includes(ParityLevel.STRICT) || services().entra().validateTokens());
+    }
+
+    /**
      * Whether ARM locations are canonical, as Azure stores them: a PUT or PATCH body's {@code location} is
      * normalized for the subscription's cloud ({@code "East US"} becomes {@code eastus}) before its handler runs,
      * so it is stored and echoed that way and every name built from it (ACI and AKS FQDNs, the AKS node resource
@@ -182,6 +192,9 @@ public interface EmulatorConfig {
      * Later phases add their own switches here.
      */
     interface ParityOverridesConfig {
+        /** Default: on from {@code parity: strict} or {@code entra.validate-tokens}. Read through {@link EmulatorConfig#strictTokens()}. */
+        Optional<Boolean> strictTokens();
+
         /** Default: on from {@code parity: azure}. Read through {@link EmulatorConfig#subscriptionListing()}. */
         Optional<Boolean> subscriptionListing();
 
@@ -536,9 +549,8 @@ public interface EmulatorConfig {
         long tokenLifetimeSeconds();
 
         /**
-         * When {@code true}, {@code BearerTokenVerifier} validates the token signature and
-         * claims against the local signing key. Default {@code false} preserves the permissive
-         * dev behaviour so existing service tests keep working.
+         * Another way to turn on {@link EmulatorConfig#strictTokens()}, which checks tokens on ARM requests.
+         * {@code parity-overrides.strict-tokens} wins when both are set.
          */
         @WithDefault("false")
         boolean validateTokens();

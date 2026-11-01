@@ -234,18 +234,20 @@ public class BannerLogger {
         overrides.put("location-normalize", config.locationNormalize());
         overrides.put("strict-locations", config.strictLocations());
         overrides.put("strict-names", config.strictNames());
+        overrides.put("strict-tokens", config.strictTokens());
         overrides.put("tenant-scoping", config.tenantScoping());
-        Map<String, Boolean> levelDefaults = Map.of(
-                "subscription-listing", level.includes(ParityLevel.AZURE),
-                "strict-subscriptions", level.includes(ParityLevel.STRICT),
-                "resource-group-semantics", level.includes(ParityLevel.AZURE),
-                "resource-group-delete", level.includes(ParityLevel.AZURE),
-                "strict-resource-groups", level.includes(ParityLevel.STRICT),
-                "strict-providers", level.includes(ParityLevel.STRICT),
-                "location-normalize", level.includes(ParityLevel.AZURE),
-                "strict-locations", level.includes(ParityLevel.STRICT),
-                "strict-names", level.includes(ParityLevel.STRICT),
-                "tenant-scoping", level.includes(ParityLevel.AZURE));
+        Map<String, Boolean> levelDefaults = Map.ofEntries(
+                Map.entry("subscription-listing", level.includes(ParityLevel.AZURE)),
+                Map.entry("strict-subscriptions", level.includes(ParityLevel.STRICT)),
+                Map.entry("resource-group-semantics", level.includes(ParityLevel.AZURE)),
+                Map.entry("resource-group-delete", level.includes(ParityLevel.AZURE)),
+                Map.entry("strict-resource-groups", level.includes(ParityLevel.STRICT)),
+                Map.entry("strict-providers", level.includes(ParityLevel.STRICT)),
+                Map.entry("location-normalize", level.includes(ParityLevel.AZURE)),
+                Map.entry("strict-locations", level.includes(ParityLevel.STRICT)),
+                Map.entry("strict-names", level.includes(ParityLevel.STRICT)),
+                Map.entry("strict-tokens", level.includes(ParityLevel.STRICT)),
+                Map.entry("tenant-scoping", level.includes(ParityLevel.AZURE)));
         StringBuilder line = new StringBuilder("parity: ").append(level.name().toLowerCase(Locale.ROOT));
         overrides.forEach((name, value) -> {
             if (!value.equals(levelDefaults.get(name))) {
