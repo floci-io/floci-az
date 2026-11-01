@@ -21,7 +21,7 @@
         <artemis.version>2.44.0</artemis.version>
         <proton-j.version>0.34.1</proton-j.version>
         <skipITs>true</skipITs>
-        <surefire-plugin.version>3.6.0</surefire-plugin.version>
+        <surefire-plugin.version>3.6.1</surefire-plugin.version>
     </properties>
 
     <dependencyManagement>
