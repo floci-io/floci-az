@@ -3,6 +3,7 @@ package io.floci.az.core.arm;
 import io.floci.az.services.managedidentity.UserAssignedIdentityRule;
 import io.floci.az.services.monitor.activitylog.ActivityLogRule;
 import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
+import io.floci.az.services.entra.TokenRule;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
@@ -22,10 +23,10 @@ class ArmRequestGateProductionTest {
 
     @Test
     void theProductionRulesRunInTheirDeclaredOrder() {
-        List<Class<?>> expected = List.of(SubscriptionRule.class, ActivityLogRule.class, ProviderRule.class,
+        List<Class<?>> expected = List.of(TokenRule.class, SubscriptionRule.class, ActivityLogRule.class, ProviderRule.class,
             ResourceGroupRule.class, LocationRule.class, ResourceNameRule.class, GlobalNameRule.class,
             PolicyEvaluationRule.class, AppendedLocationRule.class, UserAssignedIdentityRule.class);
-        List<Integer> orders = List.of(SubscriptionRule.ORDER, ActivityLogRule.ORDER, ProviderRule.ORDER,
+        List<Integer> orders = List.of(TokenRule.ORDER, SubscriptionRule.ORDER, ActivityLogRule.ORDER, ProviderRule.ORDER,
             ResourceGroupRule.ORDER, LocationRule.ORDER, ResourceNameRule.ORDER, GlobalNameRule.ORDER,
             PolicyEvaluationRule.ORDER, AppendedLocationRule.ORDER, UserAssignedIdentityRule.ORDER);
         List<ArmRequestRule> rules = gate.rules();

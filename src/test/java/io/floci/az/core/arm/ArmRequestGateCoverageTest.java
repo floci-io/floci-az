@@ -8,6 +8,7 @@ import io.floci.az.services.managedidentity.UserAssignedIdentityRule;
 import io.floci.az.services.monitor.activitylog.ActivityLogRule;
 import io.floci.az.services.policy.evaluation.PolicyEvaluationRule;
 import io.quarkus.test.junit.QuarkusTest;
+import io.floci.az.services.entra.TokenRule;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.specification.RequestSpecification;
@@ -83,18 +84,19 @@ class ArmRequestGateCoverageTest {
 
     @Test
     void theRecordingRuleRunsAheadOfTheProductionRules() {
-        assertEquals(11, gate.rules().size(), "rules: " + gate.rules());
+        assertEquals(12, gate.rules().size(), "rules: " + gate.rules());
         assertInstanceOf(RecordingArmRequestRule.class, gate.rules().getFirst());
-        assertInstanceOf(SubscriptionRule.class, gate.rules().get(1));
-        assertInstanceOf(ActivityLogRule.class, gate.rules().get(2));
-        assertInstanceOf(ProviderRule.class, gate.rules().get(3));
-        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(4));
-        assertInstanceOf(LocationRule.class, gate.rules().get(5));
-        assertInstanceOf(ResourceNameRule.class, gate.rules().get(6));
-        assertInstanceOf(GlobalNameRule.class, gate.rules().get(7));
-        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(8));
-        assertInstanceOf(AppendedLocationRule.class, gate.rules().get(9));
-        assertInstanceOf(UserAssignedIdentityRule.class, gate.rules().get(10));
+        assertInstanceOf(TokenRule.class, gate.rules().get(1));
+        assertInstanceOf(SubscriptionRule.class, gate.rules().get(2));
+        assertInstanceOf(ActivityLogRule.class, gate.rules().get(3));
+        assertInstanceOf(ProviderRule.class, gate.rules().get(4));
+        assertInstanceOf(ResourceGroupRule.class, gate.rules().get(5));
+        assertInstanceOf(LocationRule.class, gate.rules().get(6));
+        assertInstanceOf(ResourceNameRule.class, gate.rules().get(7));
+        assertInstanceOf(GlobalNameRule.class, gate.rules().get(8));
+        assertInstanceOf(PolicyEvaluationRule.class, gate.rules().get(9));
+        assertInstanceOf(AppendedLocationRule.class, gate.rules().get(10));
+        assertInstanceOf(UserAssignedIdentityRule.class, gate.rules().get(11));
     }
 
     // ── Requests floci-az makes to itself ───────────────────────────────────────

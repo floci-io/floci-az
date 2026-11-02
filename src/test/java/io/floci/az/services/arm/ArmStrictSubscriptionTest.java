@@ -43,6 +43,8 @@ class ArmStrictSubscriptionTest {
         public Map<String, String> getConfigOverrides() {
             return Map.ofEntries(
                 Map.entry("floci-az.parity", "strict"),
+                // StrictTokensTest covers the token check; these requests carry no token.
+                Map.entry("floci-az.parity-overrides.strict-tokens", "false"),
                 Map.entry("floci-az.tenants[0].id", GOV_TENANT),
                 Map.entry("floci-az.tenants[0].display-name", "Gov tenant"),
                 Map.entry("floci-az.tenants[0].default-domain", "gov.example"),

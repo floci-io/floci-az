@@ -314,4 +314,30 @@ class CloudCatalogTest {
     private static InputStream stream(JsonNode document) throws IOException {
         return new ByteArrayInputStream(MAPPER.writeValueAsBytes(document));
     }
+
+    @Test
+    void realServiceHostsOfEveryCloudAreAzureHosts() {
+        for (String host : List.of("graph.microsoft.com", "login.microsoftonline.com", "management.azure.com",
+                "storage.azure.com", "vault.azure.net", "x.vault.azure.net", "x.blob.core.windows.net",
+                "graph.windows.net", "management.usgovcloudapi.net", "graph.microsoft.us",
+                "microsoftgraph.chinacloudapi.cn", "login.partner.microsoftonline.cn", "x.azurecr.io")) {
+            assertTrue(CloudCatalog.isAzureHost(host), host);
+        }
+    }
+
+    @Test
+    void portCaseAndTrailingDotDoNotHideAnAzureHost() {
+        assertTrue(CloudCatalog.isAzureHost("graph.microsoft.com:443"));
+        assertTrue(CloudCatalog.isAzureHost("GRAPH.Microsoft.COM"));
+        assertTrue(CloudCatalog.isAzureHost("graph.microsoft.com."));
+    }
+
+    @Test
+    void emulatorStyleAndLookalikeHostsAreNotAzureHosts() {
+        for (String host : List.of("localhost", "localhost:4577", "floci-az", "floci-az:4577", "127.0.0.1:4577",
+                "[::1]:4577", "floci.internal", "notazure.com", "azure.com.example.test", "com")) {
+            assertFalse(CloudCatalog.isAzureHost(host), host);
+        }
+        assertFalse(CloudCatalog.isAzureHost(null));
+    }
 }

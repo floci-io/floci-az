@@ -29,7 +29,7 @@ public class RecordingArmRequestRule implements ArmRequestRule {
 
     @Override
     public int order() {
-        return 0;
+        return -1;
     }
 
     @Override

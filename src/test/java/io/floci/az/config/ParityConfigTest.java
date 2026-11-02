@@ -27,17 +27,18 @@ import static org.mockito.Mockito.when;
 class ParityConfigTest {
 
     /** Every override the config declares, with the lowest level that turns it on. */
-    private static final Map<String, ParityLevel> ON_FROM = Map.of(
-        "subscription-listing", ParityLevel.AZURE,
-        "strict-subscriptions", ParityLevel.STRICT,
-        "resource-group-semantics", ParityLevel.AZURE,
-        "resource-group-delete", ParityLevel.AZURE,
-        "strict-resource-groups", ParityLevel.STRICT,
-        "strict-providers", ParityLevel.STRICT,
-        "location-normalize", ParityLevel.AZURE,
-        "strict-locations", ParityLevel.STRICT,
-        "strict-names", ParityLevel.STRICT,
-        "tenant-scoping", ParityLevel.AZURE);
+    private static final Map<String, ParityLevel> ON_FROM = Map.ofEntries(
+        Map.entry("subscription-listing", ParityLevel.AZURE),
+        Map.entry("strict-subscriptions", ParityLevel.STRICT),
+        Map.entry("resource-group-semantics", ParityLevel.AZURE),
+        Map.entry("resource-group-delete", ParityLevel.AZURE),
+        Map.entry("strict-resource-groups", ParityLevel.STRICT),
+        Map.entry("strict-providers", ParityLevel.STRICT),
+        Map.entry("location-normalize", ParityLevel.AZURE),
+        Map.entry("strict-locations", ParityLevel.STRICT),
+        Map.entry("strict-names", ParityLevel.STRICT),
+        Map.entry("strict-tokens", ParityLevel.STRICT),
+        Map.entry("tenant-scoping", ParityLevel.AZURE));
 
     private record Override(String name, Predicate<EmulatorConfig> resolver) {
     }
@@ -52,10 +53,21 @@ class ParityConfigTest {
         new Override("location-normalize", EmulatorConfig::locationNormalize),
         new Override("strict-locations", EmulatorConfig::strictLocations),
         new Override("strict-names", EmulatorConfig::strictNames),
+        new Override("strict-tokens", EmulatorConfig::strictTokens),
         new Override("tenant-scoping", EmulatorConfig::tenantScoping));
 
     private static EmulatorConfig config(ParityLevel level, Map<String, Boolean> explicit, String authMode) {
+        return config(level, explicit, authMode, false);
+    }
+
+    private static EmulatorConfig config(ParityLevel level, Map<String, Boolean> explicit, String authMode,
+                                         boolean validateTokens) {
         EmulatorConfig config = mock(EmulatorConfig.class, CALLS_REAL_METHODS);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.EntraConfig entra = mock(EmulatorConfig.EntraConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.entra()).thenReturn(entra);
+        when(entra.validateTokens()).thenReturn(validateTokens);
         EmulatorConfig.ParityOverridesConfig overrides = mock(EmulatorConfig.ParityOverridesConfig.class);
         EmulatorConfig.AuthConfig auth = mock(EmulatorConfig.AuthConfig.class);
         when(config.parity()).thenReturn(level);
@@ -73,12 +85,20 @@ class ParityConfigTest {
         when(overrides.locationNormalize()).thenReturn(Optional.ofNullable(explicit.get("location-normalize")));
         when(overrides.strictLocations()).thenReturn(Optional.ofNullable(explicit.get("strict-locations")));
         when(overrides.strictNames()).thenReturn(Optional.ofNullable(explicit.get("strict-names")));
+        when(overrides.strictTokens()).thenReturn(Optional.ofNullable(explicit.get("strict-tokens")));
         when(overrides.tenantScoping()).thenReturn(Optional.ofNullable(explicit.get("tenant-scoping")));
         return config;
     }
 
     private static EmulatorConfig config(ParityLevel level) {
         return config(level, Map.of(), "dev");
+    }
+
+    @Test
+    void validateTokensTurnsStrictTokensOnUnlessTheOverrideSaysOtherwise() {
+        assertTrue(config(ParityLevel.COMPAT, Map.of(), "dev", true).strictTokens());
+        assertFalse(config(ParityLevel.COMPAT, Map.of("strict-tokens", false), "dev", true).strictTokens());
+        assertFalse(config(ParityLevel.COMPAT).strictTokens());
     }
 
     @Test
