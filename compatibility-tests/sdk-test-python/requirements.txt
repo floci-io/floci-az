@@ -1,14 +1,14 @@
 # Exact pins: a range lets every image build pick up the newest SDK, so an upstream release
 # turns unrelated PRs red. Dependabot proposes upgrades as their own PRs (.github/dependabot.yml).
-pytest==9.1.1
+pytest==9.2.0
 azure-storage-blob==12.31.0
 azure-storage-queue==12.18.0
 azure-data-tables==12.7.0
 azure-cosmos==4.17.1
 azure-appconfiguration==1.10.0
-azure-keyvault-secrets==4.11.3
+azure-keyvault-secrets==4.12.0
 azure-keyvault-keys==4.11.3
-azure-identity==1.26.0
+azure-identity==1.27.0
 azure-core==1.41.0
 # 7.15.0 decodes AMQP frames with omitted trailing fields (as Artemis sends them); earlier releases can't connect. Pre-release until 7.15.0 ships.
 azure-servicebus==7.15.0
