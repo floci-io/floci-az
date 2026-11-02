@@ -584,16 +584,22 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         try {
-            QueueModels.QueueMessageRequest msgReq = xmlMapper.readValue(request.bodyStream(), QueueModels.QueueMessageRequest.class);
+            // The message body is optional (Azure, x-ms-version 2011-08-18 and later): an update
+            // without one keeps the message text and only moves the visibility timeout, which is
+            // how SDK clients extend a lease (updateMessage(id, popReceipt, undefined, timeout)).
+            byte[] body = request.bodyStream() == null ? new byte[0] : request.bodyStream().readAllBytes();
+            String messageText = new String(body, StandardCharsets.UTF_8).isBlank()
+                    ? existing.get().metadata().get("MessageText")
+                    : xmlMapper.readValue(body, QueueModels.QueueMessageRequest.class).MessageText();
             Instant visibleAt = Instant.now().plusSeconds(visibilityTimeoutSecs);
             String newPopReceipt = UUID.randomUUID().toString();
             Map<String, String> meta = new HashMap<>(existing.get().metadata());
-            meta.put("MessageText", msgReq.MessageText());
+            meta.put("MessageText", messageText);
             meta.put("PopReceipt", newPopReceipt);
             meta.put("_visibleAt", String.valueOf(visibleAt.toEpochMilli()));
 
             store.put(objKey(request.accountName(), queueName, existing.get().key()),
-                    new StoredObject(existing.get().key(), msgReq.MessageText().getBytes(), meta,
+                    new StoredObject(existing.get().key(), messageText.getBytes(), meta,
                             Instant.now(), existing.get().etag()));
 
             return Response.status(Response.Status.NO_CONTENT)
