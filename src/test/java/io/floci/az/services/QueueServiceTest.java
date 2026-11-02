@@ -313,6 +313,57 @@ public class QueueServiceTest {
     }
 
     @Test
+    void updateMessageWithoutBodyKeepsTextAndMovesVisibility() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>keep-me</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages", ACCOUNT, QUEUE);
+
+        Response dequeue = given()
+            .get("/{account}/{queue}/messages?visibilitytimeout=30", ACCOUNT, QUEUE);
+        String messageId = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.MessageId");
+        String popReceipt = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.PopReceipt");
+
+        // A visibility-only update (no body), as SDKs send to extend a lease.
+        String extended = given()
+            .when().put("/{account}/{queue}/messages/{id}?popreceipt={receipt}&visibilitytimeout=60",
+                    ACCOUNT, QUEUE, messageId, popReceipt)
+            .then()
+            .statusCode(204)
+            .header("x-ms-popreceipt", not(isEmptyOrNullString()))
+            .header("x-ms-time-next-visible", not(isEmptyOrNullString()))
+            .extract().header("x-ms-popreceipt");
+
+        given()
+            .when().get("/{account}/{queue}/messages?peekonly=true", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body(not(containsString("keep-me")));
+
+        String visible = given()
+            .when().put("/{account}/{queue}/messages/{id}?popreceipt={receipt}&visibilitytimeout=0",
+                    ACCOUNT, QUEUE, messageId, extended)
+            .then()
+            .statusCode(204)
+            .extract().header("x-ms-popreceipt");
+
+        given()
+            .when().get("/{account}/{queue}/messages?peekonly=true", ACCOUNT, QUEUE)
+            .then()
+            .statusCode(200)
+            .body(containsString("keep-me"));
+
+        given()
+            .when().delete("/{account}/{queue}/messages/{id}?popreceipt={receipt}", ACCOUNT, QUEUE, messageId, extended)
+            .then().statusCode(400);
+
+        given()
+            .when().delete("/{account}/{queue}/messages/{id}?popreceipt={receipt}", ACCOUNT, QUEUE, messageId, visible)
+            .then().statusCode(204);
+    }
+
+    @Test
     void messageTtlExpiresMessages() throws Exception {
         given().put("/{account}/{queue}", ACCOUNT, QUEUE);
         given()
