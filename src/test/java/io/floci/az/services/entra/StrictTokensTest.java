@@ -22,21 +22,32 @@ class StrictTokensTest {
     public static class StrictTokens implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci-az.parity-overrides.strict-tokens", "true");
+            return Map.of("floci-az.parity-overrides.strict-tokens", "true",
+                "floci-az.tenants[0].id", OTHER_TENANT,
+                "floci-az.tenants[0].display-name", "Other tenant",
+                "floci-az.tenants[0].default-domain", "other.example",
+                "floci-az.subscriptions[0].id", OTHER_SUBSCRIPTION,
+                "floci-az.subscriptions[0].tenant-id", OTHER_TENANT);
         }
     }
 
     private static final String TENANT = "00000000-0000-0000-0000-000000000002";
     private static final String SUBSCRIPTION = "00000000-0000-0000-0000-000000000001";
+    private static final String OTHER_TENANT = "77777777-0000-0000-0000-000000000000";
+    private static final String OTHER_SUBSCRIPTION = "77777777-1111-0000-0000-000000000000";
     private static final String GROUP = "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/strict-tokens-rg";
     private static final String API = "?api-version=2024-03-01";
 
     private static String tokenFor(String resource) {
+        return tokenFor(TENANT, resource);
+    }
+
+    private static String tokenFor(String tenant, String resource) {
         return given().formParam("grant_type", "client_credentials")
             .formParam("client_id", EntraStore.DEV_CLIENT_ID)
             .formParam("client_secret", EntraStore.DEV_CLIENT_SECRET)
             .formParam("scope", resource + "/.default")
-            .when().post("/" + TENANT + "/oauth2/v2.0/token")
+            .when().post("/" + tenant + "/oauth2/v2.0/token")
             .then().statusCode(200).extract().path("access_token");
     }
 
@@ -135,6 +146,53 @@ class StrictTokensTest {
         given().auth().oauth2(token)
             .when().get(group + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/strict-tokens-id"
                 + "?api-version=2023-01-31")
+            .then().statusCode(200);
+    }
+
+    @Test
+    void aTokenFromAnotherTenantIsRefusedAndPointedAtTheSubscriptionsTenant() {
+        given().auth().oauth2(tokenFor("https://management.azure.com"))
+            .when().get("/subscriptions/" + OTHER_SUBSCRIPTION + "/resourcegroups" + API)
+            .then().statusCode(401)
+            .body("error.code", equalTo("InvalidAuthenticationTokenTenant"))
+            .body("error.message", containsString("It must match the tenant '" + ownBaseUrl() + "/" + OTHER_TENANT))
+            .header("WWW-Authenticate", startsWith("Bearer authorization_uri=\"" + ownBaseUrl() + "/" + OTHER_TENANT + "\""))
+            .header("WWW-Authenticate", containsString("error=\"invalid_token\""));
+    }
+
+    @Test
+    void theSubscriptionsOwnTenantIsServedAndTheDefaultSubscriptionRefusesIt() {
+        String token = tokenFor(OTHER_TENANT, "https://management.azure.com");
+        given().auth().oauth2(token).when().get("/subscriptions/" + OTHER_SUBSCRIPTION + "/resourcegroups" + API)
+            .then().statusCode(200);
+        given().auth().oauth2(token).when().get("/subscriptions/" + SUBSCRIPTION + "/resourcegroups" + API)
+            .then().statusCode(401).body("error.code", equalTo("InvalidAuthenticationTokenTenant"));
+    }
+
+    @Test
+    void aRequestNamingNoSubscriptionHasNoTenantToMatch() {
+        given().auth().oauth2(tokenFor(OTHER_TENANT, "https://management.azure.com"))
+            .when().get("/subscriptions" + API).then().statusCode(200);
+    }
+
+    @Test
+    void aFirstUseBelongsToTheCallersTenantAndAnUnknownTenantRegistersNothing() {
+        String fresh = "/subscriptions/77777777-2222-0000-0000-000000000000/resourcegroups" + API;
+        String armToken = tokenFor("99999999-9999-0000-0000-000000000000", "https://management.azure.com");
+        given().auth().oauth2(armToken).when().get(fresh)
+            .then().statusCode(401).body("error.code", equalTo("InvalidAuthenticationTokenTenant"));
+
+        String mine = tokenFor(OTHER_TENANT, "https://management.azure.com");
+        given().auth().oauth2(mine).when().get(fresh).then().statusCode(200);
+        // Registered under the first caller's tenant, not the default one the refused request resolved to.
+        given().auth().oauth2(tokenFor("https://management.azure.com")).when().get(fresh)
+            .then().statusCode(401).body("error.code", equalTo("InvalidAuthenticationTokenTenant"));
+    }
+
+    @Test
+    void aTokenFromACommonAuthorityMatchesTheDefaultSubscription() {
+        given().auth().oauth2(tokenFor("common", "https://management.azure.com"))
+            .when().get("/subscriptions/" + SUBSCRIPTION + "/resourcegroups" + API)
             .then().statusCode(200);
     }
 
