@@ -5,8 +5,13 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 public class QueueServiceTest {
@@ -325,15 +330,20 @@ public class QueueServiceTest {
         String messageId = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.MessageId");
         String popReceipt = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.PopReceipt");
 
-        // A visibility-only update (no body), as SDKs send to extend a lease.
-        String extended = given()
+        // A visibility-only update (no body), as SDKs send to extend a lease. The new deadline
+        // must be the requested 60 s, past the 30 s the dequeue set.
+        Response update = given()
             .when().put("/{account}/{queue}/messages/{id}?popreceipt={receipt}&visibilitytimeout=60",
                     ACCOUNT, QUEUE, messageId, popReceipt)
             .then()
             .statusCode(204)
             .header("x-ms-popreceipt", not(isEmptyOrNullString()))
-            .header("x-ms-time-next-visible", not(isEmptyOrNullString()))
-            .extract().header("x-ms-popreceipt");
+            .extract().response();
+        String extended = update.header("x-ms-popreceipt");
+        Instant nextVisible = ZonedDateTime.parse(update.header("x-ms-time-next-visible"),
+                DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+        assertTrue(nextVisible.isAfter(Instant.now().plusSeconds(45)),
+                "visibility not extended to ~60 s: next visible " + nextVisible);
 
         given()
             .when().get("/{account}/{queue}/messages?peekonly=true", ACCOUNT, QUEUE)
