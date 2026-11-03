@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -358,6 +359,7 @@ public class AciContainerGroupManager {
      * @return true when every container reached the expected state
      */
     public boolean startGroupContainers(ContainerGroup group) {
+        Map<String, String> startedBefore = startTimes(group);
         // The recorded ids may be stale rather than absent: containers removed out of band, or by a
         // shutdown whose ARM record outlived them, leave ids pointing at nothing. Starting those
         // ids silently does nothing, so recreate instead. Starting a group that has no containers
@@ -379,7 +381,7 @@ public class AciContainerGroupManager {
         } else {
             forEachContainerId(group, false, lifecycleManager::start);
         }
-        return isRunning(group);
+        return everyContainerStarted(group, startedBefore);
     }
 
     /** stop action: secondaries first, the netns owner last. */
@@ -393,8 +395,35 @@ public class AciContainerGroupManager {
      * secondary bounces so it rejoins the fresh namespace.
      */
     public boolean restartGroupContainers(ContainerGroup group) {
+        Map<String, String> startedBefore = startTimes(group);
         forEachContainerId(group, false, id -> lifecycleManager.restart(id, STOP_TIMEOUT_SECONDS));
-        return isRunning(group);
+        return everyContainerStarted(group, startedBefore);
+    }
+
+    /** Each container's last start time, by container id, to tell afterwards whether an action started it. */
+    private Map<String, String> startTimes(ContainerGroup group) {
+        Map<String, String> times = new LinkedHashMap<>();
+        Map<String, String> ids = group.getContainerIds();
+        if (ids != null) {
+            for (String id : ids.values()) {
+                lifecycleManager.containerState(id).ifPresent(state -> times.put(id, state.startedAt()));
+            }
+        }
+        return times;
+    }
+
+    /**
+     * Every container is running, or ran and exited during this action: a short-lived command can finish before
+     * anything looks, whatever its exit code, and that is the workload's outcome rather than the action's. An exit code
+     * alone does not show that: Docker reports one for a container it never started, and a container whose start failed
+     * keeps the code of its previous run. Only a changed start time does, and it needs no clock shared with the daemon.
+     */
+    private boolean everyContainerStarted(ContainerGroup group, Map<String, String> startedBefore) {
+        Map<String, String> ids = group.getContainerIds();
+        return ids != null && !ids.isEmpty() && ids.values().stream().allMatch(id -> lifecycleManager.containerState(id)
+                .filter(state -> state.isRunning() || ("exited".equalsIgnoreCase(state.status())
+                        && !Objects.equals(state.startedAt(), startedBefore.get(id))))
+                .isPresent());
     }
 
     /** No container of the group is running: the post-condition of a successful stop. */

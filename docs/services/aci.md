@@ -135,7 +135,9 @@ floci-az:
 - An action whose containers do not reach the expected state answers **409**
   `ContainerGroupActionFailed` on the POST, for `start`, `stop` and `restart` alike. Actions run to
   completion before the response, so there is nothing left to poll, and an error here reaches every
-  client. The status and code are an emulator choice: no source documents what real ACI returns.
+  client. The status and code are an emulator choice: no source documents what real ACI returns. A
+  container that starts and exits during the action counts as started, whatever its exit code: that
+  outcome shows in the instance view.
 - `exec` and `attach` return an honest **501**: they hand out a live websocket in real Azure,
   which the emulator does not provide.
 - `azureFile` and `gitRepo` volumes are rejected with a **400**; `emptyDir` and `secret` volumes

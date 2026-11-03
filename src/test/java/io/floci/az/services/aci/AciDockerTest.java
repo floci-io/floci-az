@@ -236,6 +236,10 @@ class AciDockerTest {
             // restartPolicy Never plus a clean exit is a group that succeeded, not one that stopped.
             given().when().get(path + API).then().statusCode(200)
                     .body("properties.instanceView.state", equalTo("Succeeded"));
+
+            // A command that exits before the action looks has still been started by it.
+            given().when().post(path + "/start" + API).then().statusCode(202);
+            given().when().post(path + "/restart" + API).then().statusCode(204);
         } finally {
             given().delete(path + API);
         }
