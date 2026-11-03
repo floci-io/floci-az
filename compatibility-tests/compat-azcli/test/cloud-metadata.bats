@@ -37,7 +37,7 @@ discovered_az() {
 
 @test "ARM_CLOUD_METADATA_URL: az signs in and lists resource groups through the discovered cloud" {
     discovered_az config set core.instance_discovery=false -o none
-    run discovered_az login --service-principal -u "$CLIENT_ID" -p "${AZURE_CLIENT_SECRET:-fake-secret}" \
+    run discovered_az login --service-principal -u "$CLIENT_ID" -p "${AZURE_CLIENT_SECRET:-floci-az-dev-secret}" \
         --tenant "$TENANT_ID" -o json
     assert_success
     run discovered_az group list -o json

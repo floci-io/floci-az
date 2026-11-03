@@ -31,6 +31,6 @@ provider "azurerm" {
 
   subscription_id = var.subscription_id
   tenant_id       = var.tenant_id
-  client_id       = "00000000-0000-0000-0000-000000000003"
-  client_secret   = "fake-secret"
+  client_id       = "11111111-1111-1111-1111-111111111111"
+  client_secret   = "floci-az-dev-secret"
 }

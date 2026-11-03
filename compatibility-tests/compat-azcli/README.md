@@ -38,8 +38,8 @@ make compat-docker
 | `FLOCI_AZ_ENDPOINT`       | `http://localhost:4577`                  | Floci AZ emulator endpoint        |
 | `AZURE_SUBSCRIPTION_ID`   | `00000000-0000-0000-0000-000000000001`   | Dev subscription                  |
 | `AZURE_TENANT_ID`         | `00000000-0000-0000-0000-000000000002`   | Dev tenant                        |
-| `AZURE_CLIENT_ID`         | `00000000-0000-0000-0000-000000000003`   | Dev service principal             |
-| `AZURE_CLIENT_SECRET`     | `fake-secret`                            | Dev service principal secret      |
+| `AZURE_CLIENT_ID`         | `11111111-1111-1111-1111-111111111111`   | Seeded dev app (client id)        |
+| `AZURE_CLIENT_SECRET`     | `floci-az-dev-secret`                    | Seeded dev app secret             |
 
 `az vm create` is skipped gracefully where the emulator does not yet resolve marketplace image versions.
 
