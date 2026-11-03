@@ -20,9 +20,6 @@ import org.jboss.logging.Logger;
 import javax.management.ObjectName;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,7 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Manages one Artemis container per Service Bus namespace.
@@ -85,6 +81,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
             """;
     private static final int AMQP_PORT = 5672;
     private static final int AMQPS_PORT = 5671;
+    private static final int READINESS_TIMEOUT_SECONDS = 60;
     private static final int JOLOKIA_PORT = 8161;
     private static final Duration MESSAGE_COUNT_TIMEOUT = Duration.ofSeconds(3);
     private static final String MANAGEMENT_SUFFIX = "/$management";
@@ -242,8 +239,8 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
             EndpointInfo amqpsEndpoint = info.getEndpoint(AMQPS_PORT);
             EndpointInfo jolokiaEndpoint = info.getEndpoint(JOLOKIA_PORT);
 
-            waitForPort(amqpEndpoint, "AMQP");
-            waitForPort(amqpsEndpoint, "AMQPS");
+            ArtemisReadinessProbe.awaitAmqp(amqpEndpoint, READINESS_TIMEOUT_SECONDS);
+            ArtemisReadinessProbe.awaitAmqps(amqpsEndpoint, tls.certPem(), READINESS_TIMEOUT_SECONDS);
 
             cbs = new ServiceBusCbsResponder(amqpEndpoint.host(), amqpEndpoint.port());
             cbs.start();
@@ -1013,35 +1010,5 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
             }
         }
         return sb.append("]").toString();
-    }
-
-    private void waitForPort(EndpointInfo endpoint, String label) {
-        waitForPort(endpoint, label, 60);
-    }
-
-    static void waitForPort(EndpointInfo endpoint, String label, int timeoutSeconds) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
-        while (System.nanoTime() < deadline) {
-            try (Socket socket = new Socket()) {
-                long remainingMillis = Math.max(1L,
-                        TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
-                socket.connect(new InetSocketAddress(InetAddress.getByName(endpoint.host()), endpoint.port()),
-                        Math.toIntExact(Math.min(1_000L, remainingMillis)));
-                return;
-            } catch (IOException ignored) {
-                // An unready or terminated sidecar is expected until the readiness deadline.
-            }
-            try {
-                long remainingMillis = Math.max(0L,
-                        TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
-                Thread.sleep(Math.min(500L, remainingMillis));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(
-                        "Interrupted waiting for Service Bus Artemis " + label + " port", e);
-            }
-        }
-        throw new RuntimeException(
-                "Artemis did not open " + label + " port " + endpoint + " within " + timeoutSeconds + "s");
     }
 }
