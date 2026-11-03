@@ -140,6 +140,8 @@ public class EventHubNamespaceManager {
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
                         "eventhub", namespaceName, null, null, null))
                 .withEnv("ANONYMOUS_LOGIN", "true")
+                // broker.xml is replaced below, so disk tuning only delays AMQP readiness.
+                .withEnv("EXTRA_ARGS", "--http-host 0.0.0.0 --relax-jolokia --no-autotune")
                 .withPortBinding(AMQP_PORT, amqpHostPort)
                 .withPortBinding(AMQPS_PORT, amqpsHostPort)
                 .withDynamicPort(JOLOKIA_PORT)
