@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.AzureServiceHandler;
+import io.floci.az.core.RequestUrls;
 import io.floci.az.core.Resettable;
 import io.floci.az.core.ServiceRoutes;
 import io.floci.az.core.arm.ArmErrors;
@@ -204,7 +205,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         // ── Power actions ───────────────────────────────────────────────────────
         if (tail.matches("virtualMachines/[^/]+/(start|powerOff|deallocate|restart|redeploy|reapply)(?:[?].*)?")
                 && "POST".equals(method)) {
-            return handlePowerAction(sub, rg, segment(tail, 1), segment(tail, 2));
+            return handlePowerAction(sub, rg, segment(tail, 1), segment(tail, 2), req);
         }
 
         // ── Single VM CRUD ────────────────────────────────────────────────────────
@@ -363,14 +364,14 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
                 .orElseGet(() -> armNotFound("Virtual machine '" + vmName + "' not found."));
     }
 
-    private Response handlePowerAction(String sub, String rg, String vmName, String action) {
+    private Response handlePowerAction(String sub, String rg, String vmName, String action, AzureRequest req) {
         ArmResourceId id = vmId(sub, rg, vmName);
         synchronized (lockFor(id)) {
-            return applyPowerAction(id, sub, vmName, action);
+            return applyPowerAction(id, sub, vmName, action, req);
         }
     }
 
-    private Response applyPowerAction(ArmResourceId id, String sub, String vmName, String action) {
+    private Response applyPowerAction(ArmResourceId id, String sub, String vmName, String action, AzureRequest req) {
         Optional<VirtualMachine> found = getVm(id);
         if (found.isEmpty()) {
             return armNotFound("Virtual machine '" + vmName + "' not found.");
@@ -383,7 +384,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         };
 
         if (!config.services().vm().mocked() && lacksContainer(vm)) {
-            return handlePowerActionWithoutContainer(vm, target);
+            return handlePowerActionWithoutContainer(vm, target, req);
         }
 
         if (!config.services().vm().mocked()) {
@@ -403,7 +404,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         vm.setPowerState(target.code());
         vm.setProvisioningState("Succeeded");
         store.put(vm);
-        return acceptedWithAsync(sub, vm.getLocation());
+        return acceptedWithAsync(sub, vm.getLocation(), req);
     }
 
     /** A VM whose provisioning failed has no backing container for a power action to act on. */
@@ -416,12 +417,12 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
      * running VM that has no container and hide the failure from the next PUT. An action that
      * powers the VM on retries provisioning instead; one that powers it off leaves it as it is.
      */
-    private Response handlePowerActionWithoutContainer(VirtualMachine vm, PowerState target) {
+    private Response handlePowerActionWithoutContainer(VirtualMachine vm, PowerState target, AzureRequest req) {
         if (target == PowerState.RUNNING) {
             provisionContainer(vm);
             store.put(vm);
         }
-        return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation());
+        return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation(), req);
     }
 
     // ── ARM response builders ────────────────────────────────────────────────────
@@ -494,9 +495,9 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         return vm.getName();
     }
 
-    private Response acceptedWithAsync(String sub, String location) {
+    private Response acceptedWithAsync(String sub, String location, AzureRequest req) {
         String loc = (location == null || location.isBlank()) ? defaults.defaultLocation() : location;
-        String url = config.effectiveBaseUrl() + "/subscriptions/" + sub
+        String url = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
                 + "/providers/Microsoft.Compute/locations/" + loc
                 + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION + "&monitor=true";
         return Response.status(202)
