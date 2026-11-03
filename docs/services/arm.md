@@ -278,11 +278,22 @@ request must carry a Bearer token this emulator issued. It is checked before any
 | No `Authorization` header | `401` | `AuthenticationFailed` |
 | Not a Bearer token, malformed, bad signature, outside its lifetime, wrong issuer | `401` | `InvalidAuthenticationToken` |
 | Wrong audience | `401` | `InvalidAuthenticationTokenAudience` |
+| Token's `tid` is not the tenant of the subscription in the path | `401` | `InvalidAuthenticationTokenTenant` |
 
 Each response also carries `WWW-Authenticate: Bearer authorization_uri="<base URL>/", error="invalid_token",
 error_description="..."`. These statuses, codes and messages are an emulator choice: no recording of real ARM refusing
 a token was available to match, only the shape of that header. Requests floci-az makes to itself, such as a template
 deployment's resources, are not checked again, since a deployment can outlive the token that started it.
+
+A wrong-tenant refusal names the subscription's tenant: `authorization_uri` is `<base URL>/<tenant>`, and the message
+gives the same authority to sign in through. A subscription nobody has used yet belongs to the tenant its first use would
+register it under, so a token from a tenant in the directory is served, and a refused request registers nothing. If two tenants
+first use one subscription at the same moment, the one that registers it is served and the other is refused. With
+`strict-tokens` off, a mismatch is served and logged as a warning whenever the token's `tid` was read
+(`tenant-scoping`, on from `azure`).
+
+The code `InvalidAuthenticationTokenTenant` is Azure's. Its status, its challenge and the message after the first sentence
+are an emulator choice, like the refusals above.
 
 Only ARM requests are checked. Data planes (Storage, Key Vault, App Configuration, ACR and others) still accept any
 Bearer token.

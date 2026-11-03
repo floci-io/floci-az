@@ -42,7 +42,7 @@ import java.util.function.Supplier;
  * Signal 4 waits for the global-name registry.
  *
  * <p>The token's {@code tid} ({@link ScopeContext#tokenTenantId()}) is read only under
- * {@link EmulatorConfig#tenantScoping()}, unverified, as a hint of the caller's tenant ({@link TokenTenantHint});
+ * {@link EmulatorConfig#tenantScoping()} or {@link EmulatorConfig#strictTokens()}, unverified here, as a hint of the caller's tenant ({@link TokenTenantHint});
  * otherwise it stays null and every caller is the default tenant, as floci-az has always answered.
  */
 @ApplicationScoped
@@ -66,7 +66,7 @@ public class ScopeResolver {
     @Inject
     public ScopeResolver(AzureDirectory directory, EmulatorConfig config) {
         this(directory::tenantOfSubscription, directory::cloudOfTenant, directory.defaultCloud(),
-            config.tenantScoping());
+            config.tenantScoping() || config.strictTokens());
     }
 
     /** One tenant in one cloud: every subscription is {@code defaultTenantId}'s, every tenant is in {@code defaultCloud}. */

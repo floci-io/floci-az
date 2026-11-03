@@ -42,7 +42,7 @@ import java.util.stream.Stream;
 public class TokenRule implements ArmRequestRule {
 
     /** Position in the gate: first, since no later rule should act for an unauthenticated caller. */
-    public static final int ORDER = 0;
+    public static final int ORDER = -1;
 
     private static final Logger LOG = Logger.getLogger(TokenRule.class);
 
@@ -104,11 +104,11 @@ public class TokenRule implements ArmRequestRule {
 
     private static Response refusal(TokenValidator.Rejection rejection, String baseUrl) {
         return switch (rejection.reason()) {
-            case MISSING -> ArmErrors.unauthorized("AuthenticationFailed", rejection.message(), baseUrl,
+            case MISSING -> ArmErrors.unauthorized("AuthenticationFailed", rejection.message(), baseUrl + "/",
                 rejection.message());
-            case INVALID -> ArmErrors.unauthorized("InvalidAuthenticationToken", rejection.message(), baseUrl,
+            case INVALID -> ArmErrors.unauthorized("InvalidAuthenticationToken", rejection.message(), baseUrl + "/",
                 "The access token is invalid.");
-            case AUDIENCE -> ArmErrors.unauthorized("InvalidAuthenticationTokenAudience", rejection.message(), baseUrl,
+            case AUDIENCE -> ArmErrors.unauthorized("InvalidAuthenticationTokenAudience", rejection.message(), baseUrl + "/",
                 "The access token audience is invalid.");
         };
     }

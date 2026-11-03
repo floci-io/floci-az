@@ -34,7 +34,7 @@ public final class ArmErrors {
                 .entity(Map.of("error", Map.of("code", code, "message", message)))
                 .type(MediaType.APPLICATION_JSON)
                 .header("WWW-Authenticate", "Bearer authorization_uri=\"" + authorizationUri
-                    + "/\", error=\"invalid_token\", error_description=\"" + description + "\"")
+                    + "\", error=\"invalid_token\", error_description=\"" + description + "\"")
                 .build();
     }
 
