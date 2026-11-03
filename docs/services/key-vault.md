@@ -93,6 +93,12 @@ SANs, so clients only need to trust the generated CA at
 `arm-keyvault` store, so a vault created through ARM survives a restart under `persistent` or `hybrid` as its
 secrets and keys do. The data plane does not consult them: it serves any vault name it is addressed by.
 
+A vault PUT stores `sku`, `tags` and the settings `enabledForDeployment`, `enabledForDiskEncryption`,
+`enabledForTemplateDeployment`, `enableSoftDelete` (`true` when omitted), `softDeleteRetentionInDays`,
+`enableRbacAuthorization`, `enablePurgeProtection`, `networkAcls` and `publicNetworkAccess`, and GET returns them.
+`PATCH` merges a partial update over them. They are stored only: nothing enforces them, so `publicNetworkAccess:
+Disabled` does not block traffic, and `enablePurgeProtection` can be turned off again.
+
 A vault or managed HSM name is a global DNS name: the first subscription to create it owns it, and another
 subscription's create is refused (`409 VaultAlreadyExists` for a vault, `409 Conflict` for a managed HSM) until the
 owner deletes it. floci-az serves every vault on `{name}.vault.azure.net` and every HSM on

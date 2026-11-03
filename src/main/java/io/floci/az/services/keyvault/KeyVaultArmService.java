@@ -74,6 +74,15 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
 
     private static final String ACCESS_POLICY_TYPE = VAULT_TYPE + "/accessPolicies";
 
+    /**
+     * The {@code VaultProperties} a client sets and reads back as they are. Stored only: the data plane enforces none
+     * of them. {@code createMode} is left out because the spec's example responses do not return it.
+     */
+    private static final List<String> STORED_VAULT_SETTINGS = List.of(
+        "enabledForDeployment", "enabledForDiskEncryption", "enabledForTemplateDeployment", "enableSoftDelete",
+        "softDeleteRetentionInDays", "enableRbacAuthorization", "enablePurgeProtection", "networkAcls",
+        "publicNetworkAccess");
+
     private final ArmResourceStore<Map<String, Object>> vaults;
     private final ArmResourceStore<Map<String, Object>> hsms;
     private final GlobalNameRegistry names;
@@ -192,6 +201,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     private Response vault(AzureRequest req, String method, ArmResourceId id, String vaultName) {
         return switch (method) {
             case "PUT"    -> createOrUpdateVault(req, id);
+            case "PATCH"  -> updateVault(req, id);
             case "GET"    -> get(vaults, id, "vaults/" + vaultName);
             case "DELETE" -> {
                 vaults.delete(id);
@@ -304,19 +314,67 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             ? ArmJson.cast(body.get("properties")) : Map.of();
         String tenantId = ArmJson.string(bodyProps, "tenantId", directory.defaultTenantId());
 
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("vaultUri", vaultUri(vaultName));
+        properties.put("tenantId", tenantId);
+        properties.put("sku", bodyProps.get("sku") instanceof Map<?, ?> sku
+            ? ArmJson.cast(sku) : Map.of("family", "A", "name", "standard"));
+        properties.put("provisioningState", "Succeeded");
+        properties.put("enableSoftDelete", true);
+        properties.put("accessPolicies", accessPolicies);
+        copyStoredSettings(bodyProps, properties);
+
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("id", id);
         resource.put("name", vaultName);
         resource.put("type", VAULT_TYPE);
         resource.put("location", location);
-        resource.put("properties", Map.of(
-            "vaultUri", vaultUri(vaultName),
-            "tenantId", tenantId,
-            "sku", Map.of("family", "A", "name", "standard"),
-            "provisioningState", "Succeeded",
-            "enableSoftDelete", false,
-            "accessPolicies", accessPolicies));
+        if (body.get("tags") instanceof Map<?, ?> tags) {
+            resource.put("tags", ArmJson.cast(tags));
+        }
+        resource.put("properties", properties);
         return resource;
+    }
+
+    private static void copyStoredSettings(Map<String, Object> from, Map<String, Object> to) {
+        for (String setting : STORED_VAULT_SETTINGS) {
+            if (from.get(setting) != null) {
+                to.put(setting, from.get(setting));
+            }
+        }
+    }
+
+    /**
+     * {@code Vaults_Update}: merges the {@code VaultPatchParameters} into the stored vault and answers 200 with it.
+     * What the body omits stays as it is, {@code tags} replace the stored tags whole, and the properties the service
+     * generates are never taken from the body. The vault must exist in the request's own scope.
+     */
+    private Response updateVault(AzureRequest req, ArmResourceId id) {
+        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> patch = body.get("properties") instanceof Map<?, ?> map ? ArmJson.cast(map) : Map.of();
+        Optional<List<Map<String, Object>>> listed = VaultAccessPolicies.listed(body);
+        Optional<Stored<Map<String, Object>>> updated = vaults.update(id, vault -> {
+            Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(vault.get("properties")));
+            copyStoredSettings(patch, properties);
+            if (patch.get("tenantId") instanceof String tenantId) {
+                properties.put("tenantId", tenantId);
+            }
+            if (patch.get("sku") instanceof Map<?, ?> sku) {
+                properties.put("sku", ArmJson.cast(sku));
+            }
+            listed.ifPresent(accessPolicies -> properties.put("accessPolicies", accessPolicies));
+            Map<String, Object> document = new LinkedHashMap<>(vault);
+            document.put("properties", properties);
+            if (body.get("tags") instanceof Map<?, ?> tags) {
+                document.put("tags", ArmJson.cast(tags));
+            }
+            return document;
+        });
+        if (updated.isEmpty()) {
+            return armNotFound("vaults/" + id.name());
+        }
+        LOG.infov("ARM: updated key vault {0}", updated.get().value().get("name"));
+        return Response.ok(updated.get().value()).build();
     }
 
     /** As {@link #createOrUpdateVault}: the gate owns the name, and a re-PUT keeps the original id and name. */

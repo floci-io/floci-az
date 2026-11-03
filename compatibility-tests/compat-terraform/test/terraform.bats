@@ -133,6 +133,14 @@ setup() {
     assert_output --partial "${KV_NAME}.vault.azure.net"
 }
 
+@test "Terraform: key vault reads back what the provider wrote" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${KV_NAME}"
+    assert_success
+    assert_output --partial '"softDeleteRetentionInDays":7'
+    assert_output --partial '"enableSoftDelete":true'
+    assert_output --partial '"env":"compat"'
+}
+
 @test "Terraform: key vault secret readable via data plane" {
     run kv_get "secrets/${SECRET_NAME}"
     assert_success

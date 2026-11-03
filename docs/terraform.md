@@ -105,3 +105,16 @@ provider. Re-do step 2, or point `SSL_CERT_FILE` at the downloaded `floci-az.crt
 **`GET /_floci/tls-cert` returns `"tlsEnabled": false`**
 
 → Confirms TLS is off. Enable it as in step 1.
+
+**`azurerm_key_vault` hangs, then `retrieving contact for KeyVault` or `context deadline exceeded`**
+
+→ azurerm calls the vault's data plane at `https://{name}.vault.azure.net/`, on port 443, and that
+name does not reach floci-az by default. A vault with public network access (the provider's default)
+polls that URL after creating it and fails if it cannot read the certificate contacts there.
+**Fix:** make the vault's name resolve to floci-az, for example with an `/etc/hosts` entry or a
+Docker network alias, and publish or forward port 443. The self-signed certificate already covers
+`*.vault.azure.net`. See [Key Vault](services/key-vault.md) for the details.
+
+With `public_network_access_enabled = false` the provider skips the poll and ignores a failed
+contacts read, though that read may still wait for its timeout. floci-az stores this setting but
+does not enforce it, so the vault stays reachable.

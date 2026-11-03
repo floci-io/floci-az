@@ -2191,7 +2191,7 @@
       "name" : "golden-kv-0001",
       "properties" : {
         "accessPolicies" : [ ],
-        "enableSoftDelete" : false,
+        "enableSoftDelete" : true,
         "provisioningState" : "Succeeded",
         "sku" : {
           "family" : "A",
