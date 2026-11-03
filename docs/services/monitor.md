@@ -42,6 +42,7 @@ Management operations use ARM paths; ingestion and query use the Monitor data-pl
 PUT    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces
 GET    /subscriptions/{sub}/providers/Microsoft.OperationalInsights/workspaces
+GET    /subscriptions/{sub}[/resourceGroups/{rg}]/providers/Microsoft.OperationalInsights/deletedWorkspaces
 GET    /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 DELETE /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}
 POST   /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}/sharedKeys
@@ -217,6 +218,8 @@ restarts in `persistent`/`hybrid`/`wal` modes.
 
 ## Notes & limitations
 
+- **Workspaces are not soft-deleted.** A delete removes the workspace outright, so it cannot be recovered and
+  `deletedWorkspaces` always lists nothing. Real Azure keeps a deleted workspace recoverable for a period.
 - **KQL is a subset.** `summarize`, `extend`, `join`, `order by`, `parse`, scalar functions, and
   aggregations are not implemented: only `where` / `project` / `take` / `limit` plus `timespan`
   filtering.
