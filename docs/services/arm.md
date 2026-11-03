@@ -287,7 +287,8 @@ deployment's resources, are not checked again, since a deployment can outlive th
 
 A wrong-tenant refusal names the subscription's tenant: `authorization_uri` is `<base URL>/<tenant>`, and the message
 gives the same authority to sign in through. A subscription nobody has used yet belongs to the tenant its first use would
-register it under, so a token from a tenant in the directory is served, and a refused request registers nothing. With
+register it under, so a token from a tenant in the directory is served, and a refused request registers nothing. If two tenants
+first use one subscription at the same moment, the one that registers it is served and the other is refused. With
 `strict-tokens` off, a mismatch is served and logged as a warning whenever the token's `tid` was read
 (`tenant-scoping`, on from `azure`).
 

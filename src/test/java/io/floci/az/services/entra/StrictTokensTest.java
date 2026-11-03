@@ -13,6 +13,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestProfile(StrictTokensTest.StrictTokens.class)
@@ -37,6 +38,19 @@ class StrictTokensTest {
     private static final String OTHER_SUBSCRIPTION = "77777777-1111-0000-0000-000000000000";
     private static final String GROUP = "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/strict-tokens-rg";
     private static final String API = "?api-version=2024-03-01";
+
+    /** A deployment answers 201 and runs afterwards, so its resources exist only once it has ended. */
+    private static String awaitDeployment(String token, String deployment) throws InterruptedException {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            String state = given().auth().oauth2(token).when().get(deployment + API)
+                .then().statusCode(200).extract().path("properties.provisioningState");
+            if (!state.equals("Accepted") && !state.equals("Running")) {
+                return state;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("the deployment did not finish: " + deployment);
+    }
 
     private static String tokenFor(String resource) {
         return tokenFor(TENANT, resource);
@@ -127,7 +141,7 @@ class StrictTokensTest {
     }
 
     @Test
-    void aValidTokenRunsTheWholeRequestIncludingItsInternalCalls() {
+    void aValidTokenRunsTheWholeRequestIncludingItsInternalCalls() throws InterruptedException {
         String token = tokenFor("https://management.azure.com");
         String template = "{\"properties\":{\"mode\":\"Incremental\",\"template\":{"
             + "\"$schema\":\"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#\","
@@ -135,12 +149,14 @@ class StrictTokensTest {
             + "\"type\":\"Microsoft.ManagedIdentity/userAssignedIdentities\",\"apiVersion\":\"2023-01-31\","
             + "\"name\":\"strict-tokens-id\",\"location\":\"eastus\"}]}}}";
         String group = "/subscriptions/" + SUBSCRIPTION + "/resourceGroups/strict-tokens-deploy-rg";
+        String deployment = group + "/providers/Microsoft.Resources/deployments/strict-tokens";
         given().auth().oauth2(token).contentType("application/json").body("{\"location\":\"eastus\"}")
             .when().put(group + API).then().statusCode(201);
 
         given().auth().oauth2(token).contentType("application/json").body(template)
-            .when().put(group + "/providers/Microsoft.Resources/deployments/strict-tokens" + API)
+            .when().put(deployment + API)
             .then().statusCode(201);
+        assertEquals("Succeeded", awaitDeployment(token, deployment));
 
         // The deployment's resource goes through ArmRouter.dispatchInternal, so it exists only if that call passed.
         given().auth().oauth2(token)
