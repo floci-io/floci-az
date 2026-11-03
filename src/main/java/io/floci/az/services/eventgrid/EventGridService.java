@@ -50,6 +50,7 @@ public class EventGridService {
     private static final String SUBSCRIPTION_TYPE = "Microsoft.EventGrid/eventSubscriptions";
     private static final String ES_MARKER = "/providers/Microsoft.EventGrid/eventSubscriptions";
     private static final String EG_MARKER = "/providers/Microsoft.EventGrid/";
+    private static final String ENDPOINT_TYPE_WEBHOOK = "WebHook";
 
     /**
      * Topics and event subscriptions share the {@code eventgrid} backend, each store owning its own type's canonical
@@ -212,6 +213,11 @@ public class EventGridService {
         Map<String, Object> properties = cast(body.get("properties"));
 
         Map<String, Object> destination = cast(properties.get("destination"));
+        String endpointType = stringOr(destination.get("endpointType"), ENDPOINT_TYPE_WEBHOOK);
+        if (!ENDPOINT_TYPE_WEBHOOK.equalsIgnoreCase(endpointType)) {
+            return badRequest("Event subscription '" + name + "' has destination endpointType '" + endpointType
+                    + "', which floci-az does not deliver to. Supported endpoint types: " + ENDPOINT_TYPE_WEBHOOK);
+        }
         Map<String, Object> destProps = cast(destination.get("properties"));
         String endpointUrl = stringOr(destProps.get("endpointUrl"), null);
         if (endpointUrl == null) {
@@ -345,7 +351,7 @@ public class EventGridService {
         Map<String, Object> destProps = new LinkedHashMap<>();
         destProps.put("endpointUrl", s.endpointUrl());
         Map<String, Object> destination = new LinkedHashMap<>();
-        destination.put("endpointType", "WebHook");
+        destination.put("endpointType", ENDPOINT_TYPE_WEBHOOK);
         destination.put("properties", destProps);
 
         Map<String, Object> filter = new LinkedHashMap<>();

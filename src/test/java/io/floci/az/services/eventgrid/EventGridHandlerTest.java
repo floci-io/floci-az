@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -163,6 +164,49 @@ class EventGridHandlerTest {
         assertEquals(1, validations.size(), "subscriber should receive exactly one validation event");
         assertEquals("Microsoft.EventGrid.SubscriptionValidationEvent",
                 validations.get(0).path("eventType").asText());
+    }
+
+    @Test
+    @DisplayName("every destination type floci-az cannot deliver to is refused by name, and nothing is created")
+    void aDestinationTypeThatCannotBeDeliveredToIsRefusedByName() {
+        createTopic();
+        List<String> undeliverable = List.of("EventHub", "StorageQueue", "HybridConnection", "ServiceBusQueue",
+                "ServiceBusTopic", "AzureFunction", "MonitorAlert", "NamespaceTopic");
+
+        for (String endpointType : undeliverable) {
+            String path = TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/refused-" + endpointType + API;
+            given().contentType("application/json")
+                .body("{\"properties\":{\"destination\":{\"endpointType\":\"" + endpointType
+                        + "\",\"properties\":{\"resourceId\":\"" + STORAGE_ACCOUNT_ID + "\",\"queueName\":\"q1\"}}}}")
+                .when().put(path)
+                .then().statusCode(400)
+                .body("error.code", equalTo("InvalidRequest"))
+                .body("error.message", containsString("'" + endpointType + "'"))
+                .body("error.message", containsString("Supported endpoint types: WebHook"));
+
+            given().when().get(path).then().statusCode(404);
+        }
+        assertTrue(validations.isEmpty(), "a refused subscription must not run the validation handshake");
+    }
+
+    @Test
+    @DisplayName("an endpointUrl does not turn another destination type into a webhook, nor replace a subscription")
+    void anEndpointUrlDoesNotTurnAnotherDestinationTypeIntoAWebhook() {
+        createTopic();
+        createSubscription("sub-kept", null);
+        String path = TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/sub-kept" + API;
+
+        given().contentType("application/json")
+            .body("{\"properties\":{\"destination\":{\"endpointType\":\"StorageQueue\","
+                    + "\"properties\":{\"endpointUrl\":\"http://127.0.0.1:1/not-a-queue\"}}}}")
+            .when().put(path)
+            .then().statusCode(400)
+            .body("error.message", containsString("'StorageQueue'"));
+
+        given().when().get(path)
+            .then().statusCode(200)
+            .body("properties.destination.endpointType", equalTo("WebHook"))
+            .body("properties.destination.properties.endpointUrl", equalTo(webhookUrl()));
     }
 
     @Test
