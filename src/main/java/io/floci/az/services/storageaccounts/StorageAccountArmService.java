@@ -427,31 +427,34 @@ public class StorageAccountArmService
             // BlobContainers_Create: 201 when it created the container, 200 when it already existed.
             case "PUT" -> {
                 BlobServiceHandler.ContainerVersion version = blobHandler.ensureContainer(account, container);
-                Map<String, Object> props = Map.of(
-                        "publicAccess",      "None",
-                        "leaseStatus",       "Unlocked",
-                        "leaseState",        "Available",
-                        "lastModifiedTime",  version.lastModified().truncatedTo(ChronoUnit.SECONDS).toString());
-                yield Response.status(version.created() ? 201 : 200).entity(Map.of(
-                        "id",         path,
-                        "name",       container,
-                        "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
-                        "etag",       version.etag(),
-                        "properties", props
-                )).build();
+                yield Response.status(version.created() ? 201 : 200)
+                        .entity(blobContainer(path, container, version)).build();
             }
-            case "GET" -> blobHandler.containerExists(account, container)
-                    ? Response.ok(Map.of(
-                            "id",         path,
-                            "name",       container,
-                            "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
-                            "properties", Map.of("publicAccess", "None")
-                    )).build()
-                    : ArmErrors.error(404, "ContainerNotFound", "The specified container does not exist.");
+            // BlobContainers_Get: the same ETag and Last-Modified the PUT and the data plane answer.
+            case "GET" -> blobHandler.containerVersion(account, container)
+                    .map(version -> Response.ok(blobContainer(path, container, version)).build())
+                    .orElseGet(() -> ArmErrors.error(404, "ContainerNotFound",
+                            "The specified container does not exist."));
             // BlobContainers_Delete: 200 when it deleted the container, 204 when there was none.
             case "DELETE" -> Response.status(blobHandler.deleteContainer(account, container) ? 200 : 204).build();
             default -> Response.status(405).build();
         };
+    }
+
+    /** A BlobContainer resource with the container's stored ETag and Last-Modified. */
+    private static Map<String, Object> blobContainer(String path, String container,
+                                                     BlobServiceHandler.ContainerVersion version) {
+        Map<String, Object> props = Map.of(
+                "publicAccess",      "None",
+                "leaseStatus",       "Unlocked",
+                "leaseState",        "Available",
+                "lastModifiedTime",  version.lastModified().truncatedTo(ChronoUnit.SECONDS).toString());
+        return Map.of(
+                "id",         path,
+                "name",       container,
+                "type",       "Microsoft.Storage/storageAccounts/blobServices/containers",
+                "etag",       version.etag(),
+                "properties", props);
     }
 
     // ── Queue Resource (via ARM) ──────────────────────────────────────────────

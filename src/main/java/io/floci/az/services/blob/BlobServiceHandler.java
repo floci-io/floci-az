@@ -4006,6 +4006,13 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         return version.get();
     }
 
+    /** The container's ETag and Last-Modified, for the ARM container resource; empty when it does not exist. */
+    public Optional<ContainerVersion> containerVersion(String accountName, String containerName) {
+        String key = nsKey(accountName, containerName);
+        return readContainer(key).map(container ->
+                new ContainerVersion(effectiveEtag(container, key), effectiveLastModified(container), false));
+    }
+
     /** A container's ETag and Last-Modified, and whether the call that answered them created it. */
     public record ContainerVersion(String etag, Instant lastModified, boolean created) {}
 

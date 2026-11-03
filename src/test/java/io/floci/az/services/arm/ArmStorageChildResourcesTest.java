@@ -20,6 +20,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @DisplayName("ARM storage child resources: blob containers and queues answer from the data plane's state")
@@ -101,6 +102,51 @@ class ArmStorageChildResourcesTest {
             .extract().path("etag");
 
         given().when().get("/childacct/legacy?restype=container").then().statusCode(200)
+            .header("ETag", equalTo(etag));
+    }
+
+    @Test
+    void aContainerGetAnswersTheEtagAndLastModifiedOfItsPut() {
+        String container = ACCOUNT + "/blobServices/default/containers/readback" + API;
+        Response put = given().contentType("application/json").body("{}").when().put(container);
+        put.then().statusCode(201);
+
+        given().when().get(container).then().statusCode(200)
+            .body("etag", equalTo(put.path("etag")))
+            .body("properties.lastModifiedTime", equalTo(put.path("properties.lastModifiedTime")))
+            .body("properties.publicAccess", equalTo("None"))
+            .body("properties.leaseStatus", equalTo("Unlocked"))
+            .body("properties.leaseState", equalTo("Available"));
+    }
+
+    @Test
+    void aContainerGetOfAContainerMadeOnTheDataPlaneAnswersTheDataPlanesEtag() {
+        String lastModified = given().when().put("/childacct/dataplane-etag?restype=container")
+            .then().statusCode(201).extract().header("Last-Modified");
+        String etag = given().when().get("/childacct/dataplane-etag?restype=container")
+            .then().statusCode(200).extract().header("ETag");
+
+        String armLastModified = given()
+            .when().get(ACCOUNT + "/blobServices/default/containers/dataplane-etag" + API)
+            .then().statusCode(200)
+            .body("etag", equalTo(etag))
+            .extract().path("properties.lastModifiedTime");
+        assertEquals(lastModified,
+            HTTP_DATE.format(Instant.parse(armLastModified)));
+    }
+
+    @Test
+    void aContainerGetOverAContainerStoredWithoutAnEtagAnswersTheEtagItGivesIt() {
+        storageFactory.create("blob").put("__ns__:childacct/legacy-get", new StoredObject("", new byte[0],
+                Map.of(), Instant.EPOCH, ""));
+
+        String etag = given().when().get(ACCOUNT + "/blobServices/default/containers/legacy-get" + API)
+            .then().statusCode(200)
+            .body("etag", matchesPattern("^\"0x[A-F0-9]{15,}\"$"))
+            .body("properties.lastModifiedTime", not(equalTo("1970-01-01T00:00:00Z")))
+            .extract().path("etag");
+
+        given().when().get("/childacct/legacy-get?restype=container").then().statusCode(200)
             .header("ETag", equalTo(etag));
     }
 
