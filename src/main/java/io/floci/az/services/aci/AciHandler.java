@@ -33,11 +33,13 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -70,7 +72,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * LRO header, so azurerm's provisioningState poller re-GETs the resource; DELETE is a synchronous
  * 204 (a 202 with no operation endpoint makes azurerm poll forever); {@code start} is 202 and
  * {@code restart} 204, both with a {@code Location} operation URL; {@code stop} is a bare 204,
- * the only synchronous action in the spec.</p>
+ * the only synchronous action in the spec. An action that fails answers 409 on the POST.</p>
  *
  * <h2>Mocked mode</h2>
  * <p>When {@code floci-az.services.aci.mocked=true} (default), no Docker container is started.
@@ -96,12 +98,12 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     private static final String MOCKED_IP = "10.0.0.4";
     private static final int MAX_TRACKED_OPERATIONS = 1024;
 
-    private final Map<String, String> operationOutcomes = new LinkedHashMap<>() {
+    private final Set<String> issuedOperations = Collections.newSetFromMap(new LinkedHashMap<>() {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
             return size() > MAX_TRACKED_OPERATIONS;
         }
-    };
+    });
 
     private final EmulatorConfig config;
     private final AciContainerGroupManager containerManager;
@@ -234,12 +236,11 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         LOG.debugf("AciHandler: %s %s (tail=%s)", method, fullPath, tail);
 
         // ── LRO operation status ───────────────────────────────────────────────
-        // Terminal immediately: every action this handler issues has already run by the time the
-        // Location header is returned, so its outcome is known. handleAction is the only thing that
-        // issues an operation URL here (PUT returns a body with no LRO header, DELETE is
-        // synchronous), so an id this handler does not know is one it never issued: 404, not a
-        // guess. Answering an unknown id Succeeded would turn an evicted failure back into a
-        // success, which is the whole point of recording outcomes.
+        // Terminal immediately: an action has already run by the time its Location header is
+        // returned, and a failed one answers with an error instead of issuing a URL. handleAction
+        // is the only thing that issues an operation URL here (PUT returns a body with no LRO
+        // header, DELETE is synchronous), so an id this handler does not know is one it never
+        // issued or has evicted: 404, not a guess.
         if (tail.matches("locations/[^/]+/operations/[^/?]+.*")) {
             return operationStatusResponse(segment(tail, 3));
         }
@@ -440,7 +441,7 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         if (!mocked()) {
             // Map the action onto the backing containers. The shared lifecycle helpers log and
             // swallow Docker errors, so each call reports the state the containers actually
-            // reached; that outcome is what the operation status below must tell the client.
+            // reached.
             succeeded = switch (action) {
                 case "stop"    -> containerManager.stopGroupContainers(group);
                 case "restart" -> containerManager.restartGroupContainers(group);
@@ -453,13 +454,19 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
             // start may have recreated the containers, giving the group new ids and host ports.
             store.put(group);
         }
+        if (!succeeded) {
+            // The action has already finished, so the POST itself reports it. No poll could: the
+            // Java SDK treats an initial 204 as done without polling, and stop has no LRO at all.
+            return ArmErrors.error(409, "ContainerGroupActionFailed", "The '" + action
+                    + "' action on container group '" + group.getName() + "' did not reach its expected state.");
+        }
         return switch (action) {
             // The spec's only synchronous action: bare 204, no LRO headers.
             case "stop"    -> Response.status(204).build();
             // Async per spec, final-state-via: location. start → 202, restart → 204 (the spec
             // signals restart's LRO on a 204 — unusual but per ContainerGroup.tsp).
-            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation(), succeeded);
-            default        -> asyncActionResponse(req, 204, sub, group.getLocation(), succeeded);
+            case "start"   -> asyncActionResponse(req, 202, sub, group.getLocation());
+            default        -> asyncActionResponse(req, 204, sub, group.getLocation());
         };
     }
 
@@ -760,11 +767,10 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
         return MAPPER.convertValue(MAPPER.valueToTree(source), Map.class);
     }
 
-    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location,
-                                         boolean succeeded) {
+    private Response asyncActionResponse(AzureRequest req, int status, String sub, String location) {
         String loc = (location == null || location.isBlank()) ? defaults.defaultLocation(req.scope()) : location;
         String operationId = UUID.randomUUID().toString();
-        recordOperation(operationId, succeeded);
+        recordOperation(operationId);
         // Built from the caller's own scheme and host, not the configured base URL: the az CLI
         // refuses to send credentials to a non-HTTPS URL, so an http:// operation URL handed to a
         // client that reached us over TLS fails the poll with an authentication error.
@@ -778,26 +784,26 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
     }
 
     /**
-     * Records the outcome of an action LRO, keeping the newest {@value #MAX_TRACKED_OPERATIONS}.
-     * The cap bounds memory in a long-running emulator; it is not a correctness knob, because an
-     * evicted id is answered 404 rather than assumed to have succeeded.
+     * Records an issued action LRO, keeping the newest {@value #MAX_TRACKED_OPERATIONS}. The cap
+     * bounds memory in a long-running emulator; an evicted id is answered 404 rather than assumed
+     * to have succeeded.
      */
-    private void recordOperation(String operationId, boolean succeeded) {
-        synchronized (operationOutcomes) {
-            operationOutcomes.put(operationId, succeeded ? "Succeeded" : "Failed");
+    private void recordOperation(String operationId) {
+        synchronized (issuedOperations) {
+            issuedOperations.add(operationId);
         }
     }
 
-    /** 200 with the recorded status, or 404 for an id this handler never issued or has evicted. */
+    /** 200 Succeeded, the only outcome an issued operation has, or 404 for an id not held. */
     private Response operationStatusResponse(String operationId) {
-        String status;
-        synchronized (operationOutcomes) {
-            status = operationOutcomes.get(operationId);
+        boolean issued;
+        synchronized (issuedOperations) {
+            issued = issuedOperations.contains(operationId);
         }
-        if (status == null) {
+        if (!issued) {
             return ArmErrors.notFound("The operation '" + operationId + "' was not found.");
         }
-        return Response.ok(Map.of("status", status)).type("application/json").build();
+        return Response.ok(Map.of("status", "Succeeded")).type("application/json").build();
     }
 
     private Response groupNotFound(String rg, String name) {

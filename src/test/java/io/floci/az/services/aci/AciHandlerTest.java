@@ -339,8 +339,7 @@ class AciHandlerTest {
     @DisplayName("An operation that was never issued is 404, not an assumed success")
     void operationsEndpointRejectsAnUnknownId() {
         // handleAction is the only issuer of operation URLs, so an id the handler does not hold is
-        // one it never issued. Answering Succeeded here would turn an evicted failure back into a
-        // success, which is exactly what recording outcomes exists to prevent.
+        // one it never issued or has evicted, and neither is a known success.
         given().when().get(SUB_BASE + "/locations/eastus/operations/" + UUID.randomUUID() + API)
                 .then().statusCode(404);
     }

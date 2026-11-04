@@ -4,6 +4,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerPresence;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
@@ -21,7 +22,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 /**
@@ -358,6 +361,7 @@ public class AciContainerGroupManager {
      * @return true when every container reached the expected state
      */
     public boolean startGroupContainers(ContainerGroup group) {
+        Map<String, String> startedBefore = startTimes(group);
         // The recorded ids may be stale rather than absent: containers removed out of band, or by a
         // shutdown whose ARM record outlived them, leave ids pointing at nothing. Starting those
         // ids silently does nothing, so recreate instead. Starting a group that has no containers
@@ -376,10 +380,10 @@ public class AciContainerGroupManager {
                         group.getName(), e.getMessage());
                 return false;
             }
-        } else {
-            forEachContainerId(group, false, lifecycleManager::start);
+            return everyNewContainerStarted(group);
         }
-        return isRunning(group);
+        forEachContainerId(group, false, lifecycleManager::start);
+        return everyContainerStarted(group, startedBefore);
     }
 
     /** stop action: secondaries first, the netns owner last. */
@@ -393,15 +397,62 @@ public class AciContainerGroupManager {
      * secondary bounces so it rejoins the fresh namespace.
      */
     public boolean restartGroupContainers(ContainerGroup group) {
+        Map<String, String> startedBefore = startTimes(group);
         forEachContainerId(group, false, id -> lifecycleManager.restart(id, STOP_TIMEOUT_SECONDS));
-        return isRunning(group);
+        return everyContainerStarted(group, startedBefore);
     }
 
-    /** No container of the group is running: the post-condition of a successful stop. */
+    /** Each container's last start time, by container id, to tell afterwards whether an action started it. */
+    private Map<String, String> startTimes(ContainerGroup group) {
+        Map<String, String> times = new LinkedHashMap<>();
+        Map<String, String> ids = group.getContainerIds();
+        if (ids != null) {
+            for (String id : ids.values()) {
+                lifecycleManager.containerState(id).ifPresent(state -> times.put(id, state.startedAt()));
+            }
+        }
+        return times;
+    }
+
+    /**
+     * Every container is running, or ran and exited during this action: a short-lived command can finish before
+     * anything looks, whatever its exit code, and that is the workload's outcome rather than the action's. An exit code
+     * alone does not show that: Docker reports one for a container it never started, and a container whose start failed
+     * keeps the code of its previous run. Only a changed start time does, and it needs no clock shared with the daemon.
+     * A container with no start time from before the action cannot show a change, because the inspect failed, so it
+     * counts only if it is running.
+     */
+    private boolean everyContainerStarted(ContainerGroup group, Map<String, String> startedBefore) {
+        return everyContainer(group, (id, state) -> state.isRunning() || (hasExited(state)
+                && startedBefore.containsKey(id) && !Objects.equals(state.startedAt(), startedBefore.get(id))));
+    }
+
+    /** Containers this action created have no earlier run to confuse with this one, so having exited means they ran. */
+    private boolean everyNewContainerStarted(ContainerGroup group) {
+        return everyContainer(group, (id, state) -> state.isRunning() || hasExited(state));
+    }
+
+    private boolean everyContainer(ContainerGroup group, BiPredicate<String, ContainerStateInfo> reached) {
+        Map<String, String> ids = group.getContainerIds();
+        return ids != null && !ids.isEmpty() && ids.values().stream().allMatch(id -> lifecycleManager.containerState(id)
+                .filter(state -> reached.test(id, state))
+                .isPresent());
+    }
+
+    private static boolean hasExited(ContainerStateInfo state) {
+        return "exited".equalsIgnoreCase(state.status());
+    }
+
+    /**
+     * Docker confirms no container of the group is running: the post-condition of a successful stop. An inspect that
+     * failed confirms nothing, so it fails the stop rather than reading as "not running".
+     */
     private boolean noneRunning(ContainerGroup group) {
         Map<String, String> ids = group.getContainerIds();
-        return ids == null || ids.isEmpty()
-                || ids.values().stream().noneMatch(lifecycleManager::isContainerRunning);
+        return ids == null || ids.isEmpty() || ids.values().stream().allMatch(id -> {
+            ContainerPresence presence = lifecycleManager.presence(id);
+            return presence == ContainerPresence.STOPPED || presence == ContainerPresence.ABSENT;
+        });
     }
 
     /** Delete: remove containers (secondaries first), volumes, and release published ports. */
