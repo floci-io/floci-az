@@ -2705,11 +2705,14 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 int blockCount = Integer.parseInt(metadata.getOrDefault("AppendBlockCount", "0")) + 1;
                 metadata.put("AppendBlockCount", Integer.toString(blockCount));
                 String etag = etags.next();
-                store.put(key, new StoredObject(blobName, data, metadata, Instant.now(), etag));
+                Instant now = Instant.now();
+                store.put(key, new StoredObject(blobName, data, metadata, now, etag));
                 return Response.status(Response.Status.CREATED)
+                        .header("Last-Modified", RFC1123_DATE_TIME.format(now))
                         .header("ETag", etag)
                         .header("x-ms-blob-append-offset", blob.data().length)
                         .header("x-ms-blob-committed-block-count", blockCount)
+                        .header("x-ms-request-server-encrypted", "true")
                         .build();
             });
         } catch (IOException e) {

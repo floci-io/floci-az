@@ -744,6 +744,31 @@ public class BlobServiceTest {
     }
 
     @Test
+    void appendBlockAnswersLastModifiedAndServerEncrypted() {
+        given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
+        given()
+            .header("x-ms-blob-type", "AppendBlob")
+            .body("")
+            .put("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(201);
+
+        Response appended = given()
+            .body("first")
+            .put("/{account}/{container}/{blob}?comp=appendblock", ACCOUNT, CONTAINER, BLOB);
+        appended.then()
+            .statusCode(201)
+            .header("Last-Modified", notNullValue())
+            .header("x-ms-request-server-encrypted", "true");
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("ETag", equalTo(appended.header("ETag")))
+            .header("Last-Modified", equalTo(appended.header("Last-Modified")));
+    }
+
+    @Test
     void putBlobAnswersAQuotedHexEtag() {
         given().put("/{account}/{container}?restype=container", ACCOUNT, CONTAINER);
         given()
