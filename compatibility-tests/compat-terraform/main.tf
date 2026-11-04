@@ -56,6 +56,10 @@ resource "azurerm_key_vault" "kv" {
 
   soft_delete_retention_days = 7
   purge_protection_enabled   = false
+
+  tags = {
+    env = "compat"
+  }
 }
 
 resource "azurerm_key_vault_secret" "secret" {
