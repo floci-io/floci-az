@@ -563,6 +563,10 @@ public interface EmulatorConfig {
         @WithDefault("false")
         boolean validateClientCredentials();
 
+        /** Require directory-backed passwords and account-status checks for password and refresh grants. */
+        @WithDefault("false")
+        boolean validateUserCredentials();
+
         /**
          * Directory holding the persisted RSA signing key. When empty, defaults to
          * {@code {storage.persistent-path}/entra}.

@@ -1,5 +1,6 @@
 package io.floci.az.services.entra;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.storage.InMemoryStorage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,6 +17,28 @@ class DirectorySeedTest {
 
     @TempDir
     Path temp;
+
+    @Test
+    void startupCanProvisionPasswordUsersWithoutPersistingTheirPlaintextPassword() throws Exception {
+        Path file = temp.resolve("password-seed.json");
+        Files.writeString(file, """
+                {"users":[{"id":"password-user","userPrincipalName":"reader@example.test",
+                  "accountEnabled":false,"passwordProfile":{"password":"local-user-test-password",
+                    "forceChangePasswordNextSignIn":true,"forceChangePasswordNextSignInWithMfa":false}}]}
+                """);
+        GraphDirectoryStore store = new GraphDirectoryStore(new InMemoryStorage<>(), "tenant", file.toString());
+        store.seed();
+        DirectoryObject user = store.get("tenant", DirectoryEntitySet.USERS, "password-user").orElseThrow();
+        assertFalse(user.props().path("accountEnabled").asBoolean());
+        assertTrue(user.props().path("passwordProfile").path("forceChangePasswordNextSignIn").asBoolean());
+        assertFalse(user.props().path("passwordProfile").has("password"));
+        SecretHasher.SecretHash hash = new ObjectMapper().treeToValue(user.props().path("passwordProfile")
+                .path("secretHash"), SecretHasher.SecretHash.class);
+        assertTrue(SecretHasher.matches(hash, "local-user-test-password"));
+        store.seed();
+        assertEquals(user.props(), store.get("tenant", DirectoryEntitySet.USERS, "password-user").orElseThrow().props(),
+                "repeat startup must preserve the password profile");
+    }
 
     @Test
     void seededSecretKeyIdsAreStableGuidsAcrossDirectoryRecreation() throws Exception {
@@ -60,6 +83,21 @@ class DirectorySeedTest {
         for (DirectoryEntitySet set : DirectoryEntitySet.values()) {
             assertTrue(store.list("tenant", set).isEmpty());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"accountEnabled\":\"false\"", "\"passwordProfile\":null",
+            "\"passwordProfile\":{\"password\":\" \"}", "\"passwordProfile\":{\"secretHash\":{}}",
+            "\"passwordProfile\":{\"forceChangePasswordNextSignIn\":\"true\"}",
+            "\"passwordProfile\":{\"forceChangePasswordNextSignInWithMfa\":null}"})
+    void malformedPasswordProfilesFailStartupBeforeAnyConfiguredObjectsAreWritten(String properties) throws Exception {
+        Path file = temp.resolve("invalid-password-seed.json");
+        Files.writeString(file, "{\"users\":[{\"id\":\"first\",\"userPrincipalName\":\"first@example.test\"},"
+                + "{\"id\":\"invalid\",\"userPrincipalName\":\"invalid@example.test\"," + properties + "}]}");
+        GraphDirectoryStore store = new GraphDirectoryStore(new InMemoryStorage<>(), "tenant", file.toString());
+        assertThrows(IllegalArgumentException.class, store::seed);
+        assertTrue(store.get("tenant", DirectoryEntitySet.USERS, "first").isEmpty());
+        assertTrue(store.get("tenant", DirectoryEntitySet.USERS, "invalid").isEmpty());
     }
 
     @Test

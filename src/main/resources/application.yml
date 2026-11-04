@@ -338,6 +338,7 @@ floci-az:
       token-lifetime-seconds: 3599
       validate-tokens: false        # FLOCI_AZ_SERVICES_ENTRA_VALIDATE_TOKENS: true = turn on parity-overrides.strict-tokens (ARM requests only)
       validate-client-credentials: false   # FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS: true = unknown client_id and wrong secrets are rejected (AADSTS700016, AADSTS7000215)
+      validate-user-credentials: false     # FLOCI_AZ_SERVICES_ENTRA_VALIDATE_USER_CREDENTIALS: true = validate directory passwords and account status
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
       # seed-file:                  # FLOCI_AZ_SERVICES_ENTRA_SEED_FILE: optional startup directory JSON
     graph:

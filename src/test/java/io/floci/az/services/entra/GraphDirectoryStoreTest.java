@@ -1,5 +1,7 @@
 package io.floci.az.services.entra;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -27,6 +29,29 @@ class GraphDirectoryStoreTest {
 
     private String tenant() {
         return store.defaultTenantId();
+    }
+
+    @Test
+    void userPasswordsAreHashedOnWriteAndSurviveAnUnrelatedUpdate() throws Exception {
+        String id = UUID.randomUUID().toString();
+        String password = "directory-user-test-password";
+        DirectoryObject user = GraphDirectoryStore.user(tenant(), id, id + "@local.invalid", "Password user", null);
+        user.props().putObject("passwordProfile").put("password", password)
+                .put("forceChangePasswordNextSignIn", false);
+        store.put(user);
+
+        DirectoryObject stored = store.get(tenant(), DirectoryEntitySet.USERS, id).orElseThrow();
+        ObjectNode profile = (ObjectNode) stored.props().path("passwordProfile");
+        assertFalse(profile.has("password"));
+        SecretHasher.SecretHash hash = new ObjectMapper().treeToValue(profile.path("secretHash"),
+                SecretHasher.SecretHash.class);
+        assertTrue(SecretHasher.matches(hash, password));
+        assertFalse(SecretHasher.matches(hash, "wrong-password"));
+        stored.props().put("displayName", "Updated user");
+        store.put(stored);
+        assertEquals(profile, store.get(tenant(), DirectoryEntitySet.USERS, id).orElseThrow()
+                .props().path("passwordProfile"));
+        assertTrue(user.props().path("passwordProfile").has("password"), "writing must not mutate the caller's object");
     }
 
     @Test
