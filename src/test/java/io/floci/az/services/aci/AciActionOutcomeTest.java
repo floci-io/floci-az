@@ -4,6 +4,7 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerPresence;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.docker.PortAllocator;
 import io.floci.az.services.aci.AciModels.ContainerGroup;
@@ -14,22 +15,25 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 /**
- * What {@link AciContainerGroupManager} reports for a start or restart, read from the Docker state each action leaves.
- * A false here is a 409 to the client, so a container that ran and exited must not look like one Docker never started.
+ * What {@link AciContainerGroupManager} reports for an action, read from the Docker state it leaves. A false here is a
+ * 409 to the client, so a container that ran and exited must not look like one Docker never started.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("ACI: a start or restart reports whether Docker started the containers")
+@DisplayName("ACI: an action reports whether Docker confirmed its outcome")
 class AciActionOutcomeTest {
 
     private static final String BEFORE = "2026-11-01T10:00:00.000000000Z";
@@ -61,9 +65,14 @@ class AciActionOutcomeTest {
     /** The Docker state per container, which a start or restart replaces with {@code afterAction}. */
     private final Map<String, ContainerStateInfo> docker = new LinkedHashMap<>();
 
+    /** Containers whose next inspect fails, which {@code containerState} reports as empty. */
+    private final Set<String> nextInspectFails = new HashSet<>();
+
     private AciContainerGroupManager manager() {
-        lenient().when(lifecycleManager.containerState(anyString()))
-            .thenAnswer(call -> Optional.ofNullable(docker.get(call.<String>getArgument(0))));
+        lenient().when(lifecycleManager.containerState(anyString())).thenAnswer(call -> {
+            String id = call.getArgument(0);
+            return nextInspectFails.remove(id) ? Optional.empty() : Optional.ofNullable(docker.get(id));
+        });
         return new AciContainerGroupManager(containerBuilder, lifecycleManager, portAllocator, containerDetector,
             config);
     }
@@ -169,5 +178,63 @@ class AciActionOutcomeTest {
         anActionLeaves(STOPPED);
 
         assertFalse(manager.restartGroupContainers(group));
+    }
+
+    @Test
+    void aRestartThatLeavesAnExitedContainerFailsWhenItsFirstInspectFailed() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(STOPPED);
+        anActionLeaves(STOPPED);
+        nextInspectFails.add("id-0");
+
+        assertFalse(manager.restartGroupContainers(group));
+    }
+
+    @Test
+    void aStartThatLeavesAnExitedContainerFailsWhenItsFirstInspectFailed() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(STOPPED);
+        anActionLeaves(STOPPED);
+        nextInspectFails.add("id-0");
+
+        assertFalse(manager.startGroupContainers(group));
+    }
+
+    @Test
+    void aRestartThatLeavesTheContainerRunningSucceedsDespiteAFailedFirstInspect() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(STOPPED);
+        anActionLeaves(RUNNING);
+        nextInspectFails.add("id-0");
+
+        assertTrue(manager.restartGroupContainers(group));
+    }
+
+    @Test
+    void aStopThatLeavesTheContainersStoppedOrGoneSucceeds() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(STOPPED, STOPPED);
+        when(lifecycleManager.presence("id-0")).thenReturn(ContainerPresence.STOPPED);
+        when(lifecycleManager.presence("id-1")).thenReturn(ContainerPresence.ABSENT);
+
+        assertTrue(manager.stopGroupContainers(group));
+    }
+
+    @Test
+    void aStopThatLeavesAContainerRunningFails() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(RUNNING);
+        when(lifecycleManager.presence("id-0")).thenReturn(ContainerPresence.RUNNING);
+
+        assertFalse(manager.stopGroupContainers(group));
+    }
+
+    @Test
+    void aStopFailsWhenDockerCannotSayWhetherTheContainerStopped() {
+        AciContainerGroupManager manager = manager();
+        ContainerGroup group = groupOf(RUNNING);
+        when(lifecycleManager.presence("id-0")).thenReturn(ContainerPresence.UNKNOWN);
+
+        assertFalse(manager.stopGroupContainers(group));
     }
 }

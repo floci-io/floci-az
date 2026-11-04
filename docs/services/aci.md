@@ -137,7 +137,8 @@ floci-az:
   completion before the response, so there is nothing left to poll, and an error here reaches every
   client. The status and code are an emulator choice: no source documents what real ACI returns. A
   container that starts and exits during the action counts as started, whatever its exit code: that
-  outcome shows in the instance view.
+  outcome shows in the instance view. If Docker cannot confirm the outcome because an inspect failed,
+  a stop answers the 409, and so does a start or restart whose container is not running afterwards.
 - `exec` and `attach` return an honest **501**: they hand out a live websocket in real Azure,
   which the emulator does not provide.
 - `azureFile` and `gitRepo` volumes are rejected with a **400**; `emptyDir` and `secret` volumes
