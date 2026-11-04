@@ -139,9 +139,11 @@ floci-az:
 
 ## Notes & limitations
 
-- **WebHook destinations only.** Service Bus, Event Hub, Storage Queue, and Azure Function
-  destinations, plus Domains, Partner/System Topics, and the Event Grid Namespace (MQTT/pull)
-  surface are out of scope.
+- **WebHook destinations only.** Creating a subscription with any other `endpointType` (Service Bus,
+  Event Hub, Storage Queue, Azure Function, Hybrid Connection, Monitor Alert, or Namespace Topic) answers
+  `400 InvalidRequest` naming the type. Real Event Grid accepts these types; floci-az refuses them
+  rather than report a subscription it cannot deliver to.
+- **Out of scope.** Domains, Partner/System Topics, and the Event Grid Namespace (MQTT/pull) surface.
 - **Dead-lettering.** When delivery exhausts `retryPolicy.maxDeliveryAttempts` and the subscription
   has a `StorageBlob` dead-letter destination, the event is written to that container of the storage
   account named by `resourceId` (the account name is the blob account, for example
