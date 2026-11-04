@@ -81,6 +81,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             + "|Microsoft\\.Insights/dataCollectionRules)/?(?:\\?.*)?",
         Pattern.CASE_INSENSITIVE);
 
+    /** {@code DeletedWorkspaces_List} and {@code DeletedWorkspaces_ListByResourceGroup}. */
+    private static final Pattern DELETED_WORKSPACES_PATTERN = Pattern.compile(
+        "subscriptions/[^/]+(?:/resourceGroups/[^/]+)?/providers/Microsoft\\.OperationalInsights/deletedWorkspaces/?"
+            + "(?:\\?.*)?",
+        Pattern.CASE_INSENSITIVE);
+
     static final String WORKSPACE_TYPE = "Microsoft.OperationalInsights/workspaces";
     static final String DCE_TYPE = "Microsoft.Insights/dataCollectionEndpoints";
     static final String DCR_TYPE = "Microsoft.Insights/dataCollectionRules";
@@ -198,6 +204,13 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         if (collection.matches()) {
             return "GET".equals(method)
                 ? listCollection(collection.group(3), new ArmScope(collection.group(1), collection.group(2)))
+                : Response.status(405).build();
+        }
+        // A delete removes a workspace outright, so there is never a soft-deleted one to list. azurerm reads this
+        // list before every workspace create.
+        if (DELETED_WORKSPACES_PATTERN.matcher(path).matches()) {
+            return "GET".equals(method)
+                ? Response.ok(Map.of("value", List.of())).type(MediaType.APPLICATION_JSON).build()
                 : Response.status(405).build();
         }
         // Every workspace, endpoint and rule lives in a resource group: a subscription-level path only lists.
