@@ -117,8 +117,10 @@ class KeyVaultResourceStoreTest {
 
         given().when().delete(vault("sub-stored", "rg", "storedvault") + API).then().statusCode(200);
         given().when().get(hsm("Sub-Stored", "RG", "StoredHsm") + API).then().statusCode(200);
-        assertEquals(List.of(hsm("Sub-Stored", "RG", "StoredHsm").toLowerCase(Locale.ROOT)),
-            List.copyOf(backend.keys()));
+        assertEquals(List.of(
+                "/subscriptions/sub-stored/providers/microsoft.keyvault/locations/eastus/deletedvaults/storedvault",
+                hsm("Sub-Stored", "RG", "StoredHsm").toLowerCase(Locale.ROOT)),
+            backend.keys().stream().sorted().toList());
     }
 
     @Test

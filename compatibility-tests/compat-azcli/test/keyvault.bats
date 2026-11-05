@@ -114,3 +114,33 @@ setup() {
     run az keyvault key purge --vault-name "$KV_NAME" -n "$LIFECYCLE_KEY_NAME" -o none
     assert_success
 }
+
+@test "az keyvault: deleted vault lifecycle (delete, show-deleted, recover, purge)" {
+    local name="floci-test-kv-deleted"
+    run az keyvault create -n "$name" -g "$RG_NAME" -l "$LOCATION" --no-self-perms -o none
+    assert_success
+
+    run az keyvault delete -n "$name" -g "$RG_NAME" -o none
+    assert_success
+
+    run az_json keyvault show-deleted -n "$name"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.name')" "$name"
+    assert_equal "$(echo "$output" | jq -r '.properties.location')" "$LOCATION"
+
+    run az_json keyvault list-deleted
+    assert_success
+    assert_equal "$(echo "$output" | jq -r --arg n "$name" '[.[] | select(.name == $n)] | length')" "1"
+
+    run az keyvault recover -n "$name" -o none
+    assert_success
+    run az_json keyvault show -n "$name" -g "$RG_NAME"
+    assert_success
+
+    run az keyvault delete -n "$name" -g "$RG_NAME" -o none
+    assert_success
+    run az keyvault purge -n "$name" -o none
+    assert_success
+    run az keyvault show-deleted -n "$name"
+    assert_failure
+}
