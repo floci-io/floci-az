@@ -281,6 +281,11 @@ final class Lambdas {
     private record LambdaScope(TemplateScope parent, Map<String, JsonNode> variables) implements TemplateScope {
 
         @Override
+        public JsonNode deployer() {
+            return parent.deployer();
+        }
+
+        @Override
         public JsonNode lambdaVariable(String name) {
             JsonNode value = variables.get(name);
             return value != null || variables.containsKey(name) ? value : parent.lambdaVariable(name);
