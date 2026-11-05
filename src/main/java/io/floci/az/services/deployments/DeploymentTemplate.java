@@ -7,12 +7,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 /**
  * An ARM template (the {@code properties.template} of a deployment), read and checked once before anything is
@@ -20,7 +22,14 @@ import java.util.Set;
  *
  * <p>A child declared inside its parent's {@code resources} is read as a top-level resource carrying its parent's type
  * and name ({@link #flatten}). What floci-az does not serve is refused at validation with {@code InvalidTemplate},
- * never skipped: symbolic resource names ({@code languageVersion} 2.0, whose {@code resources} is an object).
+ * never skipped.
+ *
+ * <p>A {@code languageVersion} 2.x template ({@code resource-declaration.md}, "Use symbolic name") declares
+ * {@code resources} as an object keyed by symbolic name, and can declare {@code existing} resources, which are read and
+ * never deployed. Its nested deployments default to the {@code inner} scope and refuse {@code outer}
+ * ({@code linked-templates.md}). {@code definitions} are read only to resolve a {@code $ref} to its type: floci-az
+ * does not enforce the aggregate constraints of a user-defined type.
+ *
  * User-defined {@code functions} are read into {@link UserFunctions}. A nested deployment ({@code Microsoft.Resources/deployments}, which a Bicep module
  * compiles to) carries its template inline or links to it. A resource {@code copy} loop needs a {@code name} and a {@code count}; its {@code mode} is
  * {@code parallel} or {@code serial}, and a {@code batchSize} is at least 1.
@@ -31,9 +40,11 @@ import java.util.Set;
  * @param resources  the resources, in template order
  * @param outputs    the {@code outputs} object, unevaluated
  * @param functions  the user-defined functions of its {@code functions} section
+ * @param symbolic   true for a {@code languageVersion} 2.x template
  */
 public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> parameters, ObjectNode variables,
-                                 List<Resource> resources, ObjectNode outputs, UserFunctions functions) {
+                                 List<Resource> resources, ObjectNode outputs, UserFunctions functions,
+                                 boolean symbolic) {
 
     /** Azure's code for every template validation and evaluation error. */
     public static final String INVALID_TEMPLATE = "InvalidTemplate";
@@ -53,8 +64,14 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
      * @param type          the declared type, lowercase ({@code string}, {@code securestring}, {@code int}, ...)
      * @param defaultValue  the {@code defaultValue}, unevaluated, or null
      * @param allowedValues the {@code allowedValues}, or null
+     * @param nullable      true when the value may be {@code null} or omitted ({@code definitions.md})
      */
-    public record Parameter(String name, String type, JsonNode defaultValue, ArrayNode allowedValues) {
+    public record Parameter(String name, String type, JsonNode defaultValue, ArrayNode allowedValues,
+                            boolean nullable) {
+
+        public Parameter(String name, String type, JsonNode defaultValue, ArrayNode allowedValues) {
+            this(name, type, defaultValue, allowedValues, false);
+        }
 
         /** A {@code securestring} or {@code secureObject}, whose value is never echoed back. */
         public boolean secure() {
@@ -67,8 +84,14 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
      *
      * @param index      its position in {@code resources}
      * @param definition the resource object
+     * @param symbol     its symbolic name, or null
+     * @param existing   true for a resource declared {@code existing}, which is read and never deployed
      */
-    public record Resource(int index, ObjectNode definition) {
+    public record Resource(int index, ObjectNode definition, String symbol, boolean existing) {
+
+        public Resource(int index, ObjectNode definition) {
+            this(index, definition, null, false);
+        }
     }
 
     public DeploymentTemplate {
@@ -91,16 +114,60 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         if (!(template instanceof ObjectNode object)) {
             throw invalid("The template must be a JSON object.");
         }
+        boolean symbolic = object.path("languageVersion").asText("").startsWith("2.");
         JsonNode resources = object.path("resources");
-        if (resources.isObject()) {
-            throw unsupported("symbolic resource names (languageVersion 2.0)");
+        if (resources.isObject() && !symbolic) {
+            throw invalid("The template 'resources' is an object, which needs a 'languageVersion' of 2.0 or newer.");
         }
-        if (!resources.isMissingNode() && !resources.isArray()) {
+        if (symbolic && resources.isArray() && !resources.isEmpty()) {
+            throw invalid("A template with 'languageVersion' 2.0 or newer declares 'resources' as an object keyed "
+                + "by symbolic name.");
+        }
+        if (!resources.isMissingNode() && !resources.isArray() && !resources.isObject()) {
             throw invalid("The template 'resources' must be an array.");
         }
-        return new DeploymentTemplate(object, parameters(object.path("parameters")),
-            objectOrEmpty(object.path("variables"), "variables"), resources(resources),
-            objectOrEmpty(object.path("outputs"), "outputs"), UserFunctions.parse(object.path("functions")));
+        UnaryOperator<JsonNode> types = symbolic ? declared -> resolveRef(object, declared, new HashSet<>())
+            : UnaryOperator.identity();
+        return new DeploymentTemplate(object, parameters(object.path("parameters"), types),
+            objectOrEmpty(object.path("variables"), "variables"),
+            resources.isObject() ? symbolicResources((ObjectNode) resources) : resources(resources),
+            outputs(objectOrEmpty(object.path("outputs"), "outputs"), symbolic, types),
+            UserFunctions.parse(object.path("functions"), types), symbolic);
+    }
+
+    /**
+     * {@code declared} with the {@code $ref} it carries replaced by what that points at, its own properties winning,
+     * so a user-defined type reads as its underlying {@code type}. Anything without a {@code $ref} is itself.
+     */
+    private static JsonNode resolveRef(ObjectNode template, JsonNode declared, Set<String> followed) {
+        if (!(declared instanceof ObjectNode object) || !object.path("$ref").isTextual()) {
+            return declared;
+        }
+        String ref = object.get("$ref").asText();
+        if (!ref.startsWith("#/") || !followed.add(ref)) {
+            throw invalid("The template type reference '" + ref + "' is not valid.");
+        }
+        JsonNode target = template.at(ref.substring(1));
+        if (!target.isObject()) {
+            throw invalid("The template type reference '" + ref + "' does not resolve to a definition.");
+        }
+        ObjectNode resolved = ((ObjectNode) resolveRef(template, target, followed)).deepCopy();
+        object.properties().forEach(field -> {
+            if (!field.getKey().equals("$ref")) {
+                resolved.set(field.getKey(), field.getValue());
+            }
+        });
+        return resolved;
+    }
+
+    /** The outputs to evaluate: in a 2.x template, a copy with each output's {@code $ref} resolved to its type. */
+    private static ObjectNode outputs(ObjectNode declared, boolean symbolic, UnaryOperator<JsonNode> types) {
+        if (!symbolic) {
+            return declared;
+        }
+        ObjectNode outputs = JsonNodeFactory.instance.objectNode();
+        declared.properties().forEach(field -> outputs.set(field.getKey(), types.apply(field.getValue())));
+        return outputs;
     }
 
     /** A declared type, lowercase, when it is one ARM accepts for a parameter or an output; null otherwise. */
@@ -109,7 +176,7 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         return PARAMETER_TYPES.contains(lower) ? lower : null;
     }
 
-    private static Map<String, Parameter> parameters(JsonNode declared) {
+    private static Map<String, Parameter> parameters(JsonNode declared, UnaryOperator<JsonNode> types) {
         Map<String, Parameter> parameters = new LinkedHashMap<>();
         if (declared.isMissingNode() || declared.isNull()) {
             return parameters;
@@ -120,7 +187,7 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
         Iterator<Map.Entry<String, JsonNode>> fields = declared.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
-            JsonNode definition = field.getValue();
+            JsonNode definition = types.apply(field.getValue());
             String type = declaredType(definition.path("type"));
             if (type == null) {
                 throw invalid("The template parameter '" + field.getKey() + "' has an invalid type '"
@@ -129,9 +196,40 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             JsonNode allowed = definition.path("allowedValues");
             parameters.put(field.getKey().toLowerCase(Locale.ROOT), new Parameter(field.getKey(), type,
                 definition.has("defaultValue") ? definition.get("defaultValue") : null,
-                allowed.isArray() ? (ArrayNode) allowed : null));
+                allowed.isArray() ? (ArrayNode) allowed : null, definition.path("nullable").asBoolean(false)));
         }
         return parameters;
+    }
+
+    /** The resources of an object-form {@code resources}, each keyed by its symbolic name. */
+    private static List<Resource> symbolicResources(ObjectNode declared) {
+        List<Resource> resources = new ArrayList<>();
+        for (Map.Entry<String, JsonNode> field : declared.properties()) {
+            String symbol = field.getKey();
+            List<ObjectNode> flat = new ArrayList<>();
+            flatten(field.getValue(), null, "'" + symbol + "'", flat);
+            for (int i = 0; i < flat.size(); i++) {
+                ObjectNode definition = flat.get(i);
+                if (isNestedDeployment(definition)) {
+                    useInnerScope(definition, symbol);
+                }
+                resources.add(new Resource(resources.size(), definition, i == 0 ? symbol : null,
+                    i == 0 && definition.path("existing").asBoolean(false)));
+            }
+        }
+        return resources;
+    }
+
+    /** A 2.x nested deployment evaluates in the {@code inner} scope by default, and {@code outer} is blocked. */
+    private static void useInnerScope(ObjectNode definition, String symbol) {
+        JsonNode options = definition.path("properties").path("expressionEvaluationOptions");
+        if (options.path("scope").asText("inner").equalsIgnoreCase("outer")) {
+            throw invalid("The nested deployment '" + symbol + "' uses the 'outer' expression evaluation scope, "
+                + "which 'languageVersion' 2.0 or newer blocks.");
+        }
+        if (definition.path("properties") instanceof ObjectNode properties) {
+            properties.putObject("expressionEvaluationOptions").put("scope", "inner");
+        }
     }
 
     private static List<Resource> resources(JsonNode declared) {
@@ -277,9 +375,5 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
     /** An {@code InvalidTemplate} with Azure's validation prefix and {@code message} quoted, as Azure words it. */
     static TemplateException invalid(String message) {
         return new TemplateException(INVALID_TEMPLATE, VALIDATION_FAILED + "'" + message + "'");
-    }
-
-    private static TemplateException unsupported(String feature) {
-        return invalid("The template uses " + feature + ", which floci-az does not support yet.");
     }
 }

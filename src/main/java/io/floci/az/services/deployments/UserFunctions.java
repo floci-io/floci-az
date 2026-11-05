@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 /**
  * The user-defined functions a template declares in its {@code functions} section ({@code user-defined-functions.md}),
@@ -40,6 +41,11 @@ final class UserFunctions {
 
     /** Reads the {@code functions} section; a missing or empty one declares nothing. */
     static UserFunctions parse(JsonNode declared) {
+        return parse(declared, UnaryOperator.identity());
+    }
+
+    /** As {@link #parse(JsonNode)}, with {@code types} resolving a user-defined type where one is declared. */
+    static UserFunctions parse(JsonNode declared, UnaryOperator<JsonNode> types) {
         if (declared == null || declared.isMissingNode() || declared.isNull()) {
             return NONE;
         }
@@ -57,7 +63,7 @@ final class UserFunctions {
             }
             for (Map.Entry<String, JsonNode> member : namespace.get("members").properties()) {
                 String name = prefix + "." + member.getKey();
-                if (functions.put(name.toLowerCase(Locale.ROOT), function(name, member.getValue())) != null) {
+                if (functions.put(name.toLowerCase(Locale.ROOT), function(name, member.getValue(), types)) != null) {
                     throw DeploymentTemplate.invalid("The template function '" + name + "' is declared more than once.");
                 }
             }
@@ -96,7 +102,7 @@ final class UserFunctions {
         return output;
     }
 
-    private static Function function(String name, JsonNode definition) {
+    private static Function function(String name, JsonNode definition, UnaryOperator<JsonNode> types) {
         List<DeploymentTemplate.Parameter> parameters = new ArrayList<>();
         JsonNode declared = definition.path("parameters");
         if (!declared.isMissingNode() && !declared.isArray()) {
@@ -105,7 +111,7 @@ final class UserFunctions {
         }
         for (JsonNode parameter : declared) {
             String parameterName = parameter.path("name").asText("");
-            String type = DeploymentTemplate.declaredType(parameter.path("type"));
+            String type = DeploymentTemplate.declaredType(types.apply(parameter).path("type"));
             if (parameterName.isBlank() || type == null) {
                 throw DeploymentTemplate.invalid("Each parameter of the template function '" + name
                     + "' must have a 'name' and a valid 'type'.");
@@ -116,7 +122,7 @@ final class UserFunctions {
             }
             parameters.add(new DeploymentTemplate.Parameter(parameterName, type, null, null));
         }
-        JsonNode output = definition.path("output");
+        JsonNode output = types.apply(definition.path("output"));
         String outputType = DeploymentTemplate.declaredType(output.path("type"));
         if (outputType == null || !output.has("value")) {
             throw DeploymentTemplate.invalid("The template function '" + name
@@ -172,6 +178,11 @@ final class UserFunctions {
         @Override
         public JsonNode reference(String resourceNameOrId, String apiVersion, boolean full) {
             throw restricted("can't use the 'reference' function");
+        }
+
+        @Override
+        public JsonNode references(String symbol, boolean full) {
+            throw restricted("can't use the 'references' function");
         }
 
         @Override
