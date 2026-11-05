@@ -50,6 +50,23 @@ class ResourceGroupDeleteOverrideTest {
         given().post("/_admin/reset").then().statusCode(204);
     }
 
+    /** The cascade goes through each vault's own delete, so a vault in the group is soft-deleted, not lost. */
+    @Test
+    void theCascadeSoftDeletesAKeyVault() {
+        String keyVaultApi = "?api-version=2023-02-01";
+        json("{\"location\":\"eastus\"}").when().put(group("rg-kv") + API).then().statusCode(201);
+        json("{\"location\":\"eastus\",\"properties\":{\"accessPolicies\":[]}}")
+            .when().put(group("rg-kv") + "/providers/Microsoft.KeyVault/vaults/kv-cascade" + keyVaultApi)
+            .then().statusCode(200);
+
+        given().when().delete(group("rg-kv") + API).then().statusCode(202);
+
+        given().when().get("/subscriptions/" + SUB
+                + "/providers/Microsoft.KeyVault/locations/eastus/deletedVaults/kv-cascade" + keyVaultApi)
+            .then().statusCode(200)
+            .body("properties.vaultId", equalTo(group("rg-kv") + "/providers/Microsoft.KeyVault/vaults/kv-cascade"));
+    }
+
     @Test
     void everyPutStays201() {
         json("{\"location\":\"eastus\"}").when().put(group("rg-del-only") + API).then().statusCode(201);

@@ -311,7 +311,7 @@ setup() {
     assert_output --partial "No changes"
 }
 
-# Runs last: the destroy in teardown_file ignores failures, so the mssql destroy is checked here.
+# The destroy in teardown_file ignores failures, so the mssql destroy is checked here.
 @test "Terraform: destroying the mssql server removes it and its database" {
     cd "$TF_DIR"
     run terraform destroy -input=false -auto-approve -no-color -target=azurerm_mssql_server.sql
@@ -321,4 +321,21 @@ setup() {
 
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Sql/servers/${SQL_NAME}"
     assert_failure
+}
+
+# Runs last: the destroy in teardown_file ignores failures, and leaves nothing to do when this passes.
+@test "Terraform: destroying everything removes the resource group and purges the key vault" {
+    cd "$TF_DIR"
+    run terraform destroy -input=false -auto-approve -no-color
+    assert_success
+    assert_output --partial "azurerm_key_vault.kv: Destruction complete"
+    assert_output --partial "azurerm_resource_group.rg: Destruction complete"
+
+    run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}?api-version=2021-04-01"
+    assert_output "404"
+
+    run curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/providers/Microsoft.KeyVault/locations/eastus/deletedVaults/${KV_NAME}?api-version=2023-02-01"
+    assert_output "404"
 }

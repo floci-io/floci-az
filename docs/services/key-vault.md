@@ -99,6 +99,14 @@ A vault PUT stores `sku`, `tags` and the settings `enabledForDeployment`, `enabl
 `PATCH` merges a partial update over them. They are stored only: nothing enforces them, so `publicNetworkAccess:
 Disabled` does not block traffic, and `enablePurgeProtection` can be turned off again.
 
+Deleting a vault with `enableSoftDelete` leaves a deleted vault behind, which `GET
+/subscriptions/{sub}/providers/Microsoft.KeyVault/deletedVaults`, `GET
+.../locations/{location}/deletedVaults/{name}` and `POST .../locations/{location}/deletedVaults/{name}/purge` serve, so
+`terraform destroy` can purge what it deleted. A PUT with `createMode: recover` restores it, keeping what the request
+does not set. Purging a vault with `enablePurgeProtection` is refused with `409 Conflict`. A deleted vault does not
+hold its name and is not purged when `scheduledPurgeDate` passes, and a plain PUT over its name succeeds and discards
+it. Managed HSMs have no deleted state, so `GET .../deletedManagedHSMs` is always empty.
+
 A vault or managed HSM name is a global DNS name: the first subscription to create it owns it, and another
 subscription's create is refused (`409 VaultAlreadyExists` for a vault, `409 Conflict` for a managed HSM) until the
 owner deletes it. floci-az serves every vault on `{name}.vault.azure.net` and every HSM on

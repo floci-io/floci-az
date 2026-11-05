@@ -24,6 +24,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,13 +42,17 @@ import java.util.stream.Stream;
  * {@code hsmUri} point at {@link KeyVaultHandler}'s data plane. Reached through {@code ArmHandler}'s provider lane,
  * inside the ARM request gate, which owns each name ({@link KeyVaultArmSurface}) before a PUT gets here.
  *
- * <p>Each type is one {@link ArmResourceStore} of the ARM documents responses return, both over the
+ * <p>Each type is one {@link ArmResourceStore} of the ARM documents responses return, all over the
  * {@value #STORE} backend, keyed by canonical id, so a path that differs only in case addresses the one resource and
  * the casing of its first PUT is what responses echo. The store follows the global storage mode. These resources
  * were kept in memory before, so there are no older entries to read.
  *
  * <p>The data plane does not consult these records: it serves any vault name it is addressed by. The one reader is
  * the Key Vault fallback at the ARM base URL ({@link #defaultDataPlaneAccount()}).
+ *
+ * <p>Deleting a vault with {@code enableSoftDelete} leaves a record in a third store, which {@code Vaults_GetDeleted},
+ * {@code Vaults_ListDeleted} and {@code Vaults_PurgeDeleted} serve. azurerm purges that record on destroy with default
+ * settings, and looks it up before every create to decide whether to recover.
  */
 @ApplicationScoped
 public class KeyVaultArmService implements ArmProviderService, ResourceIndexContributor, GlobalNameSource, Resettable {
@@ -74,6 +80,23 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
 
     private static final String ACCESS_POLICY_TYPE = VAULT_TYPE + "/accessPolicies";
 
+    /** A deleted vault's id type, which {@link #deletedVaults} is keyed by. */
+    private static final String DELETED_VAULT_ID_TYPE = NAMESPACE + "/locations/deletedVaults";
+
+    /** The {@code type} a {@code DeletedVault} answers with, which the spec's examples spell without the location. */
+    private static final String DELETED_VAULT_TYPE = NAMESPACE + "/deletedVaults";
+
+    /** A deleted vault's path, in any case: group 1 the location, group 2 the name, group 3 the purge action if any. */
+    private static final Pattern DELETED_VAULT_PATH = Pattern.compile(
+        ".*/providers/Microsoft\\.KeyVault/locations/([^/?]+)/deletedVaults/([^/?]+)(/purge)?/?([?].*)?",
+        Pattern.CASE_INSENSITIVE);
+
+    /** Where a deleted vault's document keeps the vault it replaced, for a recover. Never returned to a client. */
+    private static final String ORIGINAL_VAULT = "vault";
+
+    /** The spec's default for {@code softDeleteRetentionInDays}. */
+    private static final int DEFAULT_RETENTION_DAYS = 90;
+
     /**
      * The {@code VaultProperties} a client sets and reads back as they are. Stored only: the data plane enforces none
      * of them. {@code createMode} is left out because the spec's example responses do not return it.
@@ -85,6 +108,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
 
     private final ArmResourceStore<Map<String, Object>> vaults;
     private final ArmResourceStore<Map<String, Object>> hsms;
+    private final ArmResourceStore<Map<String, Object>> deletedVaults;
     private final GlobalNameRegistry names;
     private final AzureDirectory directory;
 
@@ -97,6 +121,8 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         this.vaults = ArmResourceStore.create(storageFactory, STORE, VAULT_TYPE, documentType(),
             KeyVaultArmService::idOf, key -> false);
         this.hsms = ArmResourceStore.create(storageFactory, STORE, HSM_TYPE, documentType(),
+            KeyVaultArmService::idOf, key -> false);
+        this.deletedVaults = ArmResourceStore.create(storageFactory, STORE, DELETED_VAULT_ID_TYPE, documentType(),
             KeyVaultArmService::idOf, key -> false);
         this.names = names;
         this.directory = directory;
@@ -126,12 +152,23 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         Optional<String> rg = ArmPaths.resourceGroup(path);
         return rg.isPresent()
             ? handleResourceGroupPath(req, path, method, sub, rg.get())
-            : handleSubscriptionPath(req, path, sub);
+            : handleSubscriptionPath(req, path, method, sub);
     }
 
     // ── Subscription level ──────────────────────────────────────────────────
 
-    private Response handleSubscriptionPath(AzureRequest req, String path, String sub) {
+    private Response handleSubscriptionPath(AzureRequest req, String path, String method, String sub) {
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault/deletedVaults)([?].*)?")) {
+            return "GET".equals(method) ? listDeletedVaults(sub) : Response.status(405).build();
+        }
+        // A deleted managed HSM is not kept, so there are none to list. `az keyvault list-deleted` lists both kinds.
+        if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault/deletedManagedHSMs)([?].*)?")) {
+            return "GET".equals(method) ? Response.ok(Map.of("value", List.of())).build() : Response.status(405).build();
+        }
+        Matcher deleted = DELETED_VAULT_PATH.matcher(path);
+        if (deleted.matches()) {
+            return deletedVault(req, method, sub, deleted.group(1), deleted.group(2), deleted.group(3) != null);
+        }
         if (path.matches("subscriptions/[^/?]+/providers/(?i:Microsoft\\.KeyVault)/vaults([?].*)?")) {
             return list(vaults, new ArmScope(sub, null));
         }
@@ -204,7 +241,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             case "PATCH"  -> updateVault(req, id);
             case "GET"    -> get(vaults, id, "vaults/" + vaultName);
             case "DELETE" -> {
-                vaults.delete(id);
+                vaults.delete(id).ifPresent(deleted -> softDelete(req, deleted));
                 yield Response.ok().build();
             }
             default       -> Response.status(405).build();
@@ -221,6 +258,120 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
             }
             default       -> Response.status(405).build();
         };
+    }
+
+    // ── Deleted vaults ──────────────────────────────────────────────────────
+
+    /** Records a vault just deleted, unless it was created with {@code enableSoftDelete: false}. */
+    private void softDelete(AzureRequest req, Stored<Map<String, Object>> deleted) {
+        Map<String, Object> vault = deleted.value();
+        Map<String, Object> properties = ArmJson.cast(vault.get("properties"));
+        if (Boolean.FALSE.equals(properties.get("enableSoftDelete"))) {
+            return;
+        }
+        String location = String.valueOf(vault.get("location"));
+        String name = String.valueOf(vault.get("name"));
+        int retentionDays = properties.get("softDeleteRetentionInDays") instanceof Number days
+            ? days.intValue() : DEFAULT_RETENTION_DAYS;
+        Instant deletedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("vaultId", idOf(vault));
+        details.put("location", location);
+        details.put("tags", vault.get("tags") instanceof Map<?, ?> tags ? ArmJson.cast(tags) : Map.of());
+        details.put("deletionDate", deletedAt.toString());
+        details.put("scheduledPurgeDate", deletedAt.plus(retentionDays, ChronoUnit.DAYS).toString());
+        if (properties.get("enablePurgeProtection") != null) {
+            details.put("purgeProtectionEnabled", properties.get("enablePurgeProtection"));
+        }
+
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("id", deletedVaultId(req, deleted.id().subscriptionId(), location, name).id());
+        document.put("name", name);
+        document.put("type", DELETED_VAULT_TYPE);
+        document.put("properties", details);
+        document.put(ORIGINAL_VAULT, vault);
+        deletedVaults.put(document);
+        LOG.infov("ARM: key vault {0} is soft-deleted", name);
+    }
+
+    private ArmResourceId deletedVaultId(AzureRequest req, String sub, String location, String name) {
+        String id = "/subscriptions/" + sub + "/providers/" + NAMESPACE + "/locations/"
+            + CloudCatalog.normalizeLocation(cloud(req), location) + "/deletedVaults/" + name;
+        return ArmResourceId.parse(id).orElseThrow();
+    }
+
+    private Response listDeletedVaults(String sub) {
+        return Response.ok(Map.of("value", deletedVaults.list(new ArmScope(sub, null)).stream()
+            .map(stored -> deletedVaultResponse(stored.value())).toList())).build();
+    }
+
+    private Response deletedVault(AzureRequest req, String method, String sub, String location, String name,
+                                  boolean purge) {
+        ArmResourceId id = deletedVaultId(req, sub, location, name);
+        if (purge) {
+            return "POST".equals(method) ? purgeDeletedVault(id) : Response.status(405).build();
+        }
+        if (!"GET".equals(method)) {
+            return Response.status(405).build();
+        }
+        return deletedVaults.get(id)
+            .map(stored -> Response.ok(deletedVaultResponse(stored.value())).build())
+            .orElseGet(() -> armNotFound("deletedVaults/" + name));
+    }
+
+    /**
+     * {@code Vaults_PurgeDeleted}, answering the spec's 200. The spec lets only the service purge a vault with purge
+     * protection, but no public source gives the refusal's code; ARM's generic {@code Conflict} stands in.
+     */
+    private Response purgeDeletedVault(ArmResourceId id) {
+        Optional<Stored<Map<String, Object>>> found = deletedVaults.get(id);
+        if (found.isEmpty()) {
+            return armNotFound("deletedVaults/" + id.name());
+        }
+        Map<String, Object> details = ArmJson.cast(found.get().value().get("properties"));
+        if (Boolean.TRUE.equals(details.get("purgeProtectionEnabled"))) {
+            return ArmErrors.error(409, "Conflict", "The vault '" + id.name()
+                + "' has purge protection enabled, so only the Key Vault service can purge it.");
+        }
+        deletedVaults.delete(id);
+        LOG.infov("ARM: purged deleted key vault {0}", id.name());
+        return Response.ok().build();
+    }
+
+    private static Map<String, Object> deletedVaultResponse(Map<String, Object> document) {
+        Map<String, Object> response = new LinkedHashMap<>(document);
+        response.remove(ORIGINAL_VAULT);
+        return response;
+    }
+
+    /** The subscription's deleted vaults of this name: a location is part of their ids, but a name is one vault. */
+    private List<Stored<Map<String, Object>>> deletedVaultsNamed(String sub, String name) {
+        return deletedVaults.list(new ArmScope(sub, null)).stream()
+            .filter(stored -> name.equalsIgnoreCase(stored.id().name()))
+            .toList();
+    }
+
+    /** The PUT a recover amounts to: the deleted vault, with what the request sets over it. */
+    private static Map<String, Object> recovering(Map<String, Object> vault, Map<String, Object> body) {
+        Map<String, Object> merged = new LinkedHashMap<>(vault);
+        if (body.get("location") != null) {
+            merged.put("location", body.get("location"));
+        }
+        if (body.get("tags") != null) {
+            merged.put("tags", body.get("tags"));
+        }
+        Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(vault.get("properties")));
+        if (body.get("properties") instanceof Map<?, ?> requested) {
+            properties.putAll(ArmJson.cast(requested));
+        }
+        merged.put("properties", properties);
+        return merged;
+    }
+
+    private static boolean isRecover(Map<String, Object> body) {
+        return body.get("properties") instanceof Map<?, ?> properties
+            && "recover".equalsIgnoreCase(String.valueOf(properties.get("createMode")));
     }
 
     private static ArmResourceId resourceId(String sub, String rg, String type, String name) {
@@ -246,15 +397,24 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     /**
      * The name is reserved in the {@link GlobalNameRegistry} by the gate before this runs, so a name another resource
      * owns never gets here. A re-PUT keeps the id and name the vault was created with.
+     *
+     * <p>{@code createMode: recover} restores a deleted vault of this name, keeping what the request does not set.
+     * Either way the deleted record goes: no local source says what Azure answers to a plain create over a soft-deleted
+     * name, so it is not refused, and a {@code createMode: recover} with nothing to recover is an ordinary create.
      */
     private Response createOrUpdateVault(AzureRequest req, ArmResourceId id) {
-        Map<String, Object> body = ArmJson.parseBodyLenient(req);
+        Map<String, Object> request = ArmJson.parseBodyLenient(req);
+        List<Stored<Map<String, Object>>> deleted = deletedVaultsNamed(id.subscriptionId(), id.name());
+        Map<String, Object> body = isRecover(request) && !deleted.isEmpty()
+            ? recovering(ArmJson.cast(deleted.getFirst().value().get(ORIGINAL_VAULT)), request)
+            : request;
         Optional<List<Map<String, Object>>> listed = VaultAccessPolicies.listed(body);
         Map<String, Object> written = vaults.createOrUpdate(id, existing -> vaultDocument(body,
             existing.map(KeyVaultArmService::idOf).orElse(id.id()),
             existing.map(document -> String.valueOf(document.get("name"))).orElse(id.name()),
             listed.orElseGet(() -> existing.map(document -> accessPolicies(ArmJson.cast(document.get("properties"))))
                 .orElse(List.of())), defaults.defaultLocation(req.scope()))).stored().value();
+        deleted.forEach(stored -> deletedVaults.delete(stored.id()));
         LOG.infov("ARM: created key vault {0} (vaultUri={1})", written.get("name"),
             ArmJson.cast(written.get("properties")).get("vaultUri"));
         return Response.ok(written).build();
@@ -497,6 +657,7 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
     public void clear() {
         vaults.clear();
         hsms.clear();
+        deletedVaults.clear();
     }
 
     /** The cloud the request's subscription belongs to, as the routing filter resolved it; public without a scope. */
