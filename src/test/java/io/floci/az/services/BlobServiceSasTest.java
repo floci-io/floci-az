@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -38,6 +39,29 @@ class BlobServiceSasTest {
                     .header("x-ms-blob-type", "BlockBlob").body("uploaded")
                     .put(BASE + "/" + version).then().statusCode(201);
         }
+    }
+
+    @Test
+    void serviceSasOverridesResponseHeadersOnRead() throws Exception {
+        var sas = sas("r", "b", "file", "2020-12-06", Map.of(
+                "rscc", "no-store",
+                "rscd", "attachment; filename=\"report.txt\"",
+                "rsce", "identity",
+                "rscl", "fr",
+                "rsct", "text/csv"));
+        for (var response : List.of(
+                given().queryParams(sas).get(BASE + "/file"),
+                given().queryParams(sas).head(BASE + "/file"))) {
+            response.then().statusCode(200)
+                    .header("Cache-Control", "no-store")
+                    .header("Content-Disposition", "attachment; filename=\"report.txt\"")
+                    .header("Content-Encoding", "identity")
+                    .header("Content-Language", "fr")
+                    .header("Content-Type", Matchers.startsWith("text/csv"));
+        }
+
+        given().queryParams(sas("r", "b", "file", "2020-12-06")).get(BASE + "/file")
+                .then().statusCode(200).header("Content-Disposition", Matchers.nullValue());
     }
 
     @Test
@@ -102,6 +126,11 @@ class BlobServiceSasTest {
     }
 
     private Map<String, String> sas(String permissions, String resource, String path, String version) throws Exception {
+        return sas(permissions, resource, path, version, Map.of());
+    }
+
+    private Map<String, String> sas(String permissions, String resource, String path, String version,
+                                    Map<String, String> overrides) throws Exception {
         String expiry = Instant.now().plusSeconds(3600).toString();
         String canonical = "/blob/devstoreaccount1/service-sas" + (path == null ? "" : "/" + path);
         String fields = permissions + "\n\n" + expiry + "\n" + canonical + "\n\n\n\n" + version
@@ -109,10 +138,13 @@ class BlobServiceSasTest {
         if (version.compareTo("2020-12-06") >= 0) {
             fields += "\n";
         }
-        fields += "\n\n\n\n\n";
+        fields += "\n" + overrides.getOrDefault("rscc", "") + "\n" + overrides.getOrDefault("rscd", "")
+                + "\n" + overrides.getOrDefault("rsce", "") + "\n" + overrides.getOrDefault("rscl", "")
+                + "\n" + overrides.getOrDefault("rsct", "");
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(Base64.getDecoder().decode(KEY), "HmacSHA256"));
         var query = new LinkedHashMap<>(Map.of("sv", version, "sp", permissions, "sr", resource, "se", expiry));
+        query.putAll(overrides);
         query.put("sig", Base64.getEncoder().encodeToString(mac.doFinal(fields.getBytes(StandardCharsets.UTF_8))));
         return query;
     }

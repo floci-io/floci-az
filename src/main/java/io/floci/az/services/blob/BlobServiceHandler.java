@@ -2485,6 +2485,24 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
         return object.metadata().containsKey("DataLakeAppendPosition");
     }
 
+    private void applySasResponseOverrides(Response.ResponseBuilder rb, AzureRequest request) {
+        if (request.authContext() == null || request.authContext().storageSas().isEmpty()) {
+            return;
+        }
+        StorageSasToken sas = request.authContext().storageSas().get();
+        overrideHeader(rb, HttpHeaders.CACHE_CONTROL, sas.cacheControl());
+        overrideHeader(rb, "Content-Disposition", sas.contentDisposition());
+        overrideHeader(rb, HttpHeaders.CONTENT_ENCODING, sas.contentEncoding());
+        overrideHeader(rb, HttpHeaders.CONTENT_LANGUAGE, sas.contentLanguage());
+        overrideHeader(rb, HttpHeaders.CONTENT_TYPE, sas.contentType());
+    }
+
+    private static void overrideHeader(Response.ResponseBuilder rb, String name, String value) {
+        if (value != null) {
+            rb.header(name, null).header(name, value);
+        }
+    }
+
     private Response getBlob(AzureRequest request, String containerName, String blobName, boolean headOnly) {
         Response authFailure = authorizeRead(request, containerName, blobName);
         if (authFailure != null) {
@@ -2580,6 +2598,7 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 rb.header(header, value);
             }
         }
+        applySasResponseOverrides(rb, request);
         leaseService.addLeaseHeaders(rb, objKey(request.accountName(), containerName, blobName));
         if (isRangeRequest) {
             rb.header("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, totalSize));
