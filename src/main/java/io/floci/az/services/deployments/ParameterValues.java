@@ -1,8 +1,11 @@
 package io.floci.az.services.deployments;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.jboss.logging.Logger;
 
 import java.util.HashMap;
 import java.util.Locale;
@@ -13,6 +16,10 @@ import java.util.Map;
  * the checks a value must pass against its declaration: the declared type and the {@code allowedValues}.
  */
 final class ParameterValues {
+
+    private static final Logger LOG = Logger.getLogger(ParameterValues.class);
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Azure's spelling of each declared type in the deployment's echoed {@code parameters}. */
     private static final Map<String, String> TYPE_NAMES = Map.of("string", "String", "securestring", "SecureString",
@@ -74,7 +81,22 @@ final class ParameterValues {
                 + "' needs a 'keyVault' id and a 'secretName'.");
         }
         JsonNode version = reference.path("secretVersion");
-        return secrets.read(vaultId.asText(), secretName.asText(), version.isTextual() ? version.asText() : null);
+        JsonNode secret = secrets.read(vaultId.asText(), secretName.asText(), version.isTextual() ? version.asText() : null);
+        if (!declared.type().equals("secureobject")) {
+            return secret;
+        }
+        // A secret is text; a secureObject parameter reads it as the JSON object it holds.
+        try {
+            JsonNode parsed = MAPPER.readTree(secret.asText());
+            if (parsed != null && parsed.isObject()) {
+                return parsed;
+            }
+        } catch (JsonProcessingException e) {
+            // The parser's message quotes the text it failed on, which here is the secret, so it is never logged.
+            LOG.debugv("The secret for parameter {0} is not JSON", declared.name());
+        }
+        throw DeploymentTemplate.invalid("The Key Vault secret for the template parameter '" + declared.name()
+            + "' is not a JSON object, which a 'secureObject' parameter needs.");
     }
 
     /** Fails unless {@code value} fits {@code declared}'s type and is one of its allowed values. */
@@ -87,7 +109,9 @@ final class ParameterValues {
                 + "' is not valid. Expected a value of type '" + typeName(declared) + "'.");
         }
         if (declared.allowedValues() != null && !contains(declared, value)) {
-            throw DeploymentTemplate.invalid("The provided value '" + display(value) + "' for the template "
+            // A secure value never appears in an answer, here neither: it may come from a Key Vault, not the request.
+            String shown = declared.secure() ? "" : " '" + display(value) + "'";
+            throw DeploymentTemplate.invalid("The provided value" + shown + " for the template "
                 + "parameter '" + declared.name() + "' is not valid. The parameter value is not part of the allowed "
                 + "values: '" + display(declared.allowedValues()) + "'.");
         }

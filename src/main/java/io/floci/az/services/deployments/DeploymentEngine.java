@@ -1157,7 +1157,10 @@ public class DeploymentEngine {
             throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' does not allow template deployments: "
                 + "set 'enabledForTemplateDeployment' to true.");
         }
-        Response secret = router.get().readKeyVaultSecret(vault.group(1), secretName, secretVersion, request.origin());
+        // The data plane keys secrets by the vault's own name, the one its vaultUri carries, and an ARM id may spell it
+        // in other casing.
+        String vaultName = answer.path("name").asText(vault.group(1));
+        Response secret = router.get().readKeyVaultSecret(vaultName, secretName, secretVersion, request.origin());
         JsonNode bundle = entity(secret);
         if (secret.getStatus() != 200 || !bundle.path("value").isTextual()) {
             throw DeploymentTemplate.invalid("The secret '" + secretName + "' of Key Vault '" + vaultId
