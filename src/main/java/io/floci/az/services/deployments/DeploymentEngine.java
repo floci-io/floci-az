@@ -80,9 +80,6 @@ public class DeploymentEngine {
     /** A nested deployment may hold many resources, so it is polled for up to ten minutes. */
     private static final int NESTED_POLL_ATTEMPTS = 2400;
 
-    /** The version the engine reads a nested deployment's record with; the handler pins none. */
-    private static final String NESTED_READ_API_VERSION = "2025-04-01";
-
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -346,13 +343,13 @@ public class DeploymentEngine {
         Instant started = Instant.now();
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
-        List<String> deployed = new ArrayList<>();
+        Map<String, String> deployed = new LinkedHashMap<>();
         Map<String, Set<String>> deployedTypes = new LinkedHashMap<>();
         List<Operation> operations = new ArrayList<>();
         for (DependencyGraph.Node node : plan.order()) {
             if (canceled.getAsBoolean()) {
                 LOG.infov("Deployment {0} canceled after {1} resource(s)", request.name(), deployed.size());
-                return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), deployed,
+                return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
                     providers(deployedTypes), dependencies(plan), null, templateHash, started, Instant.now(),
                     operations);
             }
@@ -361,13 +358,14 @@ public class DeploymentEngine {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
                 continue;
             }
-            ObjectNode failure = create(request, plan, node, definition, operations);
+            Created created = create(request, plan, node, definition, operations);
+            ObjectNode failure = created.failure();
             if (failure != null) {
-                return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
+                return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
                     providers(deployedTypes), dependencies(plan), deploymentFailed(request, failure), templateHash,
                     started, Instant.now(), operations);
             }
-            recordDeployed(request, node, definition, deployed, deployedTypes);
+            recordDeployed(request, node, definition, created.resource(), deployed, deployedTypes);
         }
         ObjectNode outputs;
         Instant outputsStarted = Instant.now();
@@ -376,13 +374,13 @@ public class DeploymentEngine {
         } catch (TemplateException e) {
             ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
             operations.add(outputOperation("Failed", detail, outputsStarted));
-            return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
+            return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
                 providers(deployedTypes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
                 Instant.now(), operations);
         }
         operations.add(outputOperation("Succeeded", null, outputsStarted));
         LOG.infov("Deployment {0} succeeded: {1} resource(s)", request.name(), deployed.size());
-        return new Result("Succeeded", parameters, outputs, deployed, providers(deployedTypes), dependencies(plan),
+        return new Result("Succeeded", parameters, outputs, List.copyOf(deployed.values()), providers(deployedTypes), dependencies(plan),
             null, templateHash, started, Instant.now(), operations);
     }
 
@@ -649,8 +647,19 @@ public class DeploymentEngine {
 
     // ── Creating ───────────────────────────────────────────────────────────────────
 
-    /** Creates one resource; null when it ended {@code Succeeded}, else the error detail for the deployment. */
-    private ObjectNode create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
+    /**
+     * What creating one resource ended with: the error detail for the deployment when it failed, else the resource as
+     * its provider last answered, the body whose provisioning state was terminal.
+     */
+    private record Created(ObjectNode failure, JsonNode resource) {
+
+        static Created failed(ObjectNode failure) {
+            return new Created(failure, null);
+        }
+    }
+
+    /** Creates one resource, polling it to a terminal provisioning state. */
+    private Created create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
                               List<Operation> operations) {
         Instant started = Instant.now();
         ResourceRequest prepared;
@@ -659,7 +668,7 @@ public class DeploymentEngine {
         } catch (TemplateException e) {
             ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
             operations.add(resourceOperation(node, null, "Failed", null, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         String apiVersion = prepared.apiVersion();
         ObjectNode body = prepared.body();
@@ -670,21 +679,23 @@ public class DeploymentEngine {
         if (response.getStatus() / 100 != 2) {
             ObjectNode failure = handlerError(node.id(), response, answer);
             operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         String state = answer.path("properties").path("provisioningState").asText("Succeeded");
         if (response.getStatus() == 202 || !TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
-            state = poll(request, node.id(), apiVersion,
+            Polled polled = poll(request, node.id(), apiVersion,
                 DeploymentTemplate.isNestedDeployment(definition) ? NESTED_POLL_ATTEMPTS : POLL_ATTEMPTS);
+            state = polled.state();
+            answer = polled.resource();
         }
         if (!state.equalsIgnoreCase("Succeeded")) {
             ObjectNode failure = detail("ResourceDeploymentFailure", node.id(), "The resource write operation failed "
                 + "to complete successfully, because it reached terminal provisioning state '" + state + "'.");
             operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         operations.add(resourceOperation(node, apiVersion, "Succeeded", statusCode, null, started));
-        return null;
+        return new Created(null, answer);
     }
 
     /** What a resource is sent as: its evaluated body, and the api-version it is sent with. */
@@ -957,25 +968,29 @@ public class DeploymentEngine {
         };
     }
 
+    /** A polled resource's terminal state, and the body it was read in, or null when none was. */
+    private record Polled(String state, JsonNode resource) {
+    }
+
     /** Polls a resource with {@code GET} until its {@code provisioningState} is terminal, for a bounded time. */
-    private String poll(Request request, String id, String apiVersion, int attempts) {
+    private Polled poll(Request request, String id, String apiVersion, int attempts) {
         for (int attempt = 0; attempt < attempts; attempt++) {
             Response response = router.get().dispatchInternal("GET", id, Map.of("api-version", apiVersion),
                 request.origin());
             JsonNode answer = entity(response);
             String state = answer.path("properties").path("provisioningState").asText("Succeeded");
             if (response.getStatus() == 200 && TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
-                return state;
+                return new Polled(state, answer);
             }
             try {
                 Thread.sleep(POLL_INTERVAL);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return "Canceled";
+                return new Polled("Canceled", null);
             }
         }
         LOG.warnv("Deployment {0}: {1} did not reach a terminal state in time", request.name(), id);
-        return "Failed";
+        return new Polled("Failed", null);
     }
 
     // ── Live template functions ────────────────────────────────────────────────────
@@ -1088,11 +1103,15 @@ public class DeploymentEngine {
 
     /**
      * Adds what a resource that just succeeded contributes to its deployment's {@code outputResources} and
-     * {@code providers}. A nested deployment contributes what it deployed, read back from its own record, so a module
-     * nested at any depth reports its resources; its own id is left out, as Azure leaves it out.
+     * {@code providers}. A nested deployment contributes what it deployed, read from the record its poll saw succeed,
+     * so a module nested at any depth reports its resources and a later run under its name cannot change what the parent
+     * records; its own id is left out, as Azure leaves it out.
+     *
+     * @param ids the ids recorded so far, keyed by their lowercase form: ARM ids are case-insensitive, so two modules
+     *            writing one resource list it once
      */
-    private void recordDeployed(Request request, DependencyGraph.Node node, ObjectNode definition, List<String> ids,
-                                Map<String, Set<String>> types) {
+    private void recordDeployed(Request request, DependencyGraph.Node node, ObjectNode definition, JsonNode resource,
+                                Map<String, String> ids, Map<String, Set<String>> types) {
         if (!DeploymentTemplate.isNestedDeployment(definition)) {
             addDeployedId(ids, node.id());
             List<String> segments = ArmResourcePath.segments(node.type());
@@ -1100,15 +1119,13 @@ public class DeploymentEngine {
                 .add(String.join("/", segments.subList(1, segments.size())));
             return;
         }
-        Response response = router.get().dispatchInternal("GET", node.id(),
-            Map.of("api-version", NESTED_READ_API_VERSION), request.origin());
-        if (response.getStatus() != 200) {
-            LOG.warnv("Deployment {0}: could not read nested deployment {1} ({2}), so its resources are not listed",
-                request.name(), node.id(), response.getStatus());
+        if (resource == null || !resource.path("properties").has("outputResources")) {
+            LOG.warnv("Deployment {0}: nested deployment {1} answered no outputResources, so its resources are not listed",
+                request.name(), node.id());
             return;
         }
-        JsonNode properties = entity(response).path("properties");
-        properties.path("outputResources").forEach(resource -> addDeployedId(ids, resource.path("id").asText()));
+        JsonNode properties = resource.path("properties");
+        properties.path("outputResources").forEach(listed -> addDeployedId(ids, listed.path("id").asText()));
         properties.path("providers").forEach(provider -> {
             Set<String> resourceTypes = types.computeIfAbsent(provider.path("namespace").asText(),
                 ignored -> new LinkedHashSet<>());
@@ -1116,11 +1133,8 @@ public class DeploymentEngine {
         });
     }
 
-    /** ARM ids are case-insensitive, so two modules writing one resource list it once. */
-    private static void addDeployedId(List<String> ids, String id) {
-        if (ids.stream().noneMatch(id::equalsIgnoreCase)) {
-            ids.add(id);
-        }
+    private static void addDeployedId(Map<String, String> ids, String id) {
+        ids.putIfAbsent(id.toLowerCase(Locale.ROOT), id);
     }
 
     private static ArrayNode providers(Map<String, Set<String>> deployedTypes) {
