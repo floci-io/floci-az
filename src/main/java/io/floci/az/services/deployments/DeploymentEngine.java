@@ -666,7 +666,10 @@ public class DeploymentEngine {
                 BearerClaims claims = BearerClaims.of(request.origin());
                 ObjectNode deployer = JsonNodeFactory.instance.objectNode();
                 deployer.put("objectId", claims.oid() == null ? "" : claims.oid());
-                deployer.put("tenantId", tenantId);
+                // The caller's own tenant, which differs from the target's for a guest; the target's when the token names
+                // none.
+                String callerTenant = claims.claims().get("tid");
+                deployer.put("tenantId", callerTenant == null || callerTenant.isBlank() ? tenantId : callerTenant);
                 deployer.put("userPrincipalName", claims.upn() == null ? "" : claims.upn());
                 return deployer;
             }

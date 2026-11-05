@@ -159,7 +159,12 @@ final class TemplateFunctions {
             case "cidrsubnet" -> CidrFunctions.cidrSubnet(string(name, args, 0, 3, 3), integer(name, args, 1, 3, 3),
                 integer(name, args, 2, 3, 3));
             case "cidrhost" -> CidrFunctions.cidrHost(string(name, args, 0, 2, 2), integer(name, args, 1, 2, 2));
-            case "deployer" -> scope.deployer();
+            case "deployer" -> {
+                if (!args.isEmpty()) {
+                    throw TemplateException.invalid("The template function 'deployer' takes no arguments.");
+                }
+                yield scope.deployer();
+            }
             case "lambdavariables" -> scope.lambdaVariable(string(name, args, 0, 1, 1));
             case "intersection" -> intersection(name, args);
             case "createarray" -> createArray(args);
