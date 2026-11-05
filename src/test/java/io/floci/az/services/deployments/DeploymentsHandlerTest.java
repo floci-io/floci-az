@@ -812,6 +812,18 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void aParameterWithANullReferenceIsAPlainValueAsAzdSendsIt() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("nullref", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"name": {"value": "plain", "reference": null}},
+              "template": {"parameters": {"name": {"type": "string"}}, "resources": [],
+                "outputs": {"name": {"type": "string", "value": "[parameters('name')]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/nullref" + API).asString());
+        given().when().get(DEPLOYMENTS + "/nullref" + API).then().statusCode(200)
+            .body("properties.outputs.name.value", equalTo("plain"));
+    }
+
+    @Test
     void anOuterNestedOutputReadsAResourceOnlyTheParentDeclares() throws Exception {
         assertEquals("Succeeded", awaitTerminal(put("outerref", """
             {"properties": {"mode": "Incremental", "template": {

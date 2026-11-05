@@ -39,7 +39,8 @@ final class ParameterValues {
                     + "' is not declared in the template, so it cannot be provided.");
             }
             JsonNode entry = field.getValue();
-            if (entry.has("reference")) {
+            // azd sends every parameter as {"value": ..., "reference": null}, so a null reference is no reference.
+            if (entry.path("reference").isObject()) {
                 throw DeploymentTemplate.invalid("The template parameter '" + field.getKey() + "' is a Key Vault "
                     + "reference, which floci-az does not support yet.");
             }
