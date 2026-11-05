@@ -52,6 +52,7 @@ final class Lambdas {
     private static JsonNode filter(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 2, 2);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         Lambda predicate = lambda(call, 1, 1, 2, scope);
         ArrayNode kept = NODES.arrayNode();
         for (int i = 0; i < input.size(); i++) {
@@ -65,6 +66,7 @@ final class Lambdas {
     private static JsonNode map(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 2, 2);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         Lambda mapper = lambda(call, 1, 1, 2, scope);
         ArrayNode mapped = NODES.arrayNode();
         for (int i = 0; i < input.size(); i++) {
@@ -76,6 +78,7 @@ final class Lambdas {
     private static JsonNode reduce(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 3, 3);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         JsonNode current = ExpressionEvaluator.evaluate(call.arguments().get(1), scope);
         Lambda reducer = lambda(call, 2, 2, 3, scope);
         for (int i = 0; i < input.size(); i++) {
@@ -88,6 +91,7 @@ final class Lambdas {
     private static JsonNode sort(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 2, 2);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         Lambda before = lambda(call, 1, 2, 2, scope);
         List<JsonNode> sorted = new ArrayList<>();
         input.forEach(sorted::add);
@@ -120,6 +124,7 @@ final class Lambdas {
     private static JsonNode groupBy(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 2, 2);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         Lambda key = lambda(call, 1, 1, 1, scope);
         ObjectNode groups = NODES.objectNode();
         for (JsonNode element : input) {
@@ -139,6 +144,7 @@ final class Lambdas {
             throw TemplateException.invalid("Unable to evaluate template language function '" + call.name()
                 + "': the first argument of type '" + typeName(input) + "' is not valid; expected an object.");
         }
+        scope.expand(input.size());
         Lambda mapper = lambda(call, 1, 1, 1, scope);
         ObjectNode mapped = NODES.objectNode();
         input.properties().forEach(field -> mapped.set(field.getKey(), mapper.apply(field.getValue())));
@@ -148,6 +154,7 @@ final class Lambdas {
     private static JsonNode toObject(FunctionCall call, TemplateScope scope) {
         checkArguments(call, 2, 3);
         ArrayNode input = inputArray(call, scope);
+        scope.expand(input.size());
         Lambda key = lambda(call, 1, 1, 1, scope);
         Lambda value = call.arguments().size() == 3 ? lambda(call, 2, 1, 1, scope) : null;
         ObjectNode object = NODES.objectNode();
@@ -212,7 +219,40 @@ final class Lambdas {
                 + "': its lambda takes " + (min == max ? String.valueOf(min) : min + " to " + max)
                 + " variables but declares " + variables.size() + ".");
         }
+        refuseLiveCallsOnVariables(call, arguments.getLast());
         return new Lambda(variables, arguments.getLast(), min, scope);
+    }
+
+    /**
+     * A lambda variable can't be used inside {@code reference()} or a {@code list*} function
+     * ({@code template-functions-lambda.md}, "Limitations"), so a body that passes one to them is refused.
+     */
+    private static void refuseLiveCallsOnVariables(FunctionCall call, Expression body) {
+        if (body instanceof FunctionCall inner) {
+            String name = lower(inner.name());
+            if ((name.equals("reference") || name.equals("references") || name.startsWith("list"))
+                    && inner.arguments().stream().anyMatch(Lambdas::readsLambdaVariable)) {
+                throw TemplateException.invalid("Unable to evaluate template language function '" + call.name()
+                    + "': a lambda variable can't be used inside the function '" + inner.name() + "'.");
+            }
+            inner.arguments().forEach(argument -> refuseLiveCallsOnVariables(call, argument));
+        } else if (body instanceof Expression.PropertyAccess access) {
+            refuseLiveCallsOnVariables(call, access.target());
+        } else if (body instanceof Expression.IndexAccess access) {
+            refuseLiveCallsOnVariables(call, access.target());
+            refuseLiveCallsOnVariables(call, access.index());
+        }
+    }
+
+    private static boolean readsLambdaVariable(Expression expression) {
+        return switch (expression) {
+            case FunctionCall inner -> lower(inner.name()).equals("lambdavariables")
+                || inner.arguments().stream().anyMatch(Lambdas::readsLambdaVariable);
+            case Expression.PropertyAccess access -> readsLambdaVariable(access.target());
+            case Expression.IndexAccess access -> readsLambdaVariable(access.target())
+                || readsLambdaVariable(access.index());
+            case Literal ignored -> false;
+        };
     }
 
     /** One parsed lambda; {@code required} is how many variables it has before its optional index. */

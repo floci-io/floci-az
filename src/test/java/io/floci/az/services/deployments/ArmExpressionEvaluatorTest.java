@@ -367,6 +367,9 @@ class ArmExpressionEvaluatorTest {
         "[map(createObject('a', 1), lambda('x', 1))]",
         "[mapValues(createArray(1), lambda('x', 1))]",
         "[flatten(createArray(1))]",
+        "[map(createArray('a'), lambda('id', reference(lambdaVariables('id'), '2023-01-01')))]",
+        "[map(createArray('a'), lambda('id', listKeys(lambdaVariables('id'), '2023-01-01').keys))]",
+        "[map(createArray('a'), lambda('id', concat('x', string(reference(concat('/r/', lambdaVariables('id')))))))]",
     })
     void aMisusedLambdaIsAnInvalidTemplate(String expression) {
         assertThrows(TemplateException.class, () -> eval(expression));
