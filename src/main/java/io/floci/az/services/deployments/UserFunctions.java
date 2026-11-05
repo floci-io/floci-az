@@ -204,6 +204,11 @@ final class UserFunctions {
         }
 
         @Override
+        public JsonNode managementGroup() {
+            return outer.managementGroup();
+        }
+
+        @Override
         public Level level() {
             return outer.level();
         }

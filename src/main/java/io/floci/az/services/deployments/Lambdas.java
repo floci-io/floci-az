@@ -281,6 +281,11 @@ final class Lambdas {
     private record LambdaScope(TemplateScope parent, Map<String, JsonNode> variables) implements TemplateScope {
 
         @Override
+        public JsonNode managementGroup() {
+            return parent.managementGroup();
+        }
+
+        @Override
         public JsonNode deployer() {
             return parent.deployer();
         }

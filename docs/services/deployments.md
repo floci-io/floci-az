@@ -68,7 +68,20 @@ it, otherwise the default tenant). Its own resources are tenant-level ones; a re
 subscription or a resource group is `InvalidTemplate` here, and `subscription()` and `resourceGroup()` are errors.
 It reaches a subscription through a nested deployment that names `subscriptionId` (and `location`), and a
 resource group through one that names both `subscriptionId` and `resourceGroup`, as Azure requires at this scope.
-A nested deployment that targets a management group through `scope` is refused with `InvalidTemplate`.
+
+## Management-group deployments
+
+`/providers/Microsoft.Management/managementGroups/{group}/providers/Microsoft.Resources/deployments/{name}` serves the
+same operations as the other scopes. It carries a `location`, the group must exist, and its resources are ones that
+live at management-group level. `managementGroup()` returns the group, `managementGroupResourceId()` builds an id under
+it or a named group, and `resourceId()` answers `/providers/...`, as Azure documents.
+
+A nested deployment targets a group through `scope`, as a management group's id or
+`Microsoft.Management/managementGroups/{group}`, or the tenant with `/`. From a group, it reaches a subscription or a
+resource group the same way a tenant-scope deployment does. A resource's own `scope` can be `/` too.
+
+The status for a missing group is an emulator choice, since no local source records one: `404 NotFound`. A deployment
+stays in a group's history after the group is deleted.
 
 `resourceId()` without a subscription or a resource group takes the deployment's level, as Azure documents: a
 resource-group id in a resource-group deployment, `/subscriptions/{sub}/providers/...` at subscription scope, and
@@ -264,12 +277,9 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
 
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
-- `pickZones`, `providers`, `managementGroup`, `roleDefinitions`
+- `pickZones`, `providers`, `roleDefinitions`
 - Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
-
-Deployments at management-group scope answer `404`, and a nested deployment that targets a management group is
-`400 InvalidTemplate`.
 
 ## Intentional deviations
 
