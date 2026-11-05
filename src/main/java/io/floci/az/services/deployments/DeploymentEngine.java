@@ -565,6 +565,8 @@ public class DeploymentEngine {
         } else {
             collectReferences(definition, scope, dependsOn);
         }
+        // A references() of a loop with no iterations reads an empty collection, so it depends on nothing either.
+        dependsOn.removeIf(entry -> emptyLoops.contains(entry.toLowerCase(Locale.ROOT)));
         return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn),
             node.loop(), node.symbol());
     }

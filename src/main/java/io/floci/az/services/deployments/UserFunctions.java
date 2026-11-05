@@ -28,7 +28,7 @@ final class UserFunctions {
 
     /** One declared member, {@code namespace.member}, with its parameters and its output. */
     record Function(String name, List<DeploymentTemplate.Parameter> parameters, String outputType,
-                    JsonNode outputValue) {
+                    boolean outputNullable, JsonNode outputValue) {
     }
 
     static final UserFunctions NONE = new UserFunctions(Map.of());
@@ -86,7 +86,7 @@ final class UserFunctions {
         for (int i = 0; i < arguments.size(); i++) {
             DeploymentTemplate.Parameter parameter = function.parameters().get(i);
             JsonNode value = arguments.get(i);
-            if (!ParameterValues.fits(parameter.type(), value)) {
+            if (!(parameter.nullable() && value != null && value.isNull()) && !ParameterValues.fits(parameter.type(), value)) {
                 throw TemplateException.invalid("Unable to evaluate template language function '" + function.name()
                     + "': the value for its parameter '" + parameter.name() + "' is not valid. Expected a value of "
                     + "type '" + ParameterValues.typeName(parameter) + "'.");
@@ -95,7 +95,7 @@ final class UserFunctions {
         }
         JsonNode output = ExpressionEvaluator.evaluateValue(function.outputValue(),
             new FunctionScope(function, values, outer));
-        if (!ParameterValues.fits(function.outputType(), output)) {
+        if (!(function.outputNullable() && output.isNull()) && !ParameterValues.fits(function.outputType(), output)) {
             throw TemplateException.invalid("The output of the template function '" + function.name()
                 + "' is not valid. Expected a value of type '" + function.outputType() + "'.");
         }
@@ -111,7 +111,8 @@ final class UserFunctions {
         }
         for (JsonNode parameter : declared) {
             String parameterName = parameter.path("name").asText("");
-            String type = DeploymentTemplate.declaredType(types.apply(parameter).path("type"));
+            JsonNode resolved = types.apply(parameter);
+            String type = DeploymentTemplate.declaredType(resolved.path("type"));
             if (parameterName.isBlank() || type == null) {
                 throw DeploymentTemplate.invalid("Each parameter of the template function '" + name
                     + "' must have a 'name' and a valid 'type'.");
@@ -120,7 +121,8 @@ final class UserFunctions {
                 throw DeploymentTemplate.invalid("The parameter '" + parameterName + "' of the template function '"
                     + name + "' has a default value; parameters of a user-defined function can't.");
             }
-            parameters.add(new DeploymentTemplate.Parameter(parameterName, type, null, null));
+            parameters.add(new DeploymentTemplate.Parameter(parameterName, type, null, null,
+                resolved.path("nullable").asBoolean(false)));
         }
         JsonNode output = types.apply(definition.path("output"));
         String outputType = DeploymentTemplate.declaredType(output.path("type"));
@@ -128,7 +130,8 @@ final class UserFunctions {
             throw DeploymentTemplate.invalid("The template function '" + name
                 + "' must have an 'output' with a valid 'type' and a 'value'.");
         }
-        return new Function(name, List.copyOf(parameters), outputType, output.get("value"));
+        return new Function(name, List.copyOf(parameters), outputType, output.path("nullable").asBoolean(false),
+            output.get("value"));
     }
 
     /** What a user-defined function's output expression can read: its own parameters and the scope functions. */

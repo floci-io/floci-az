@@ -872,6 +872,30 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void aReadOfAnEmptyCollectionAndANullableFunctionValueBothWork() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("emptyloop", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "definitions": {"maybeText": {"type": "string", "nullable": true}},
+              "functions": [{"namespace": "floci", "members": {"echo": {
+                "parameters": [{"name": "value", "$ref": "#/definitions/maybeText"}],
+                "output": {"$ref": "#/definitions/maybeText", "value": "[parameters('value')]"}}}}],
+              "resources": {
+                "none": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                         "name": "[format('none{0}', copyIndex())]", "location": "westeurope",
+                         "copy": {"name": "nonecopy", "count": 0}},
+                "reader": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                           "name": "reader", "location": "westeurope",
+                           "tags": {"count": "[string(length(references('none')))]"}}},
+              "outputs": {"echoed": {"type": "bool", "value": "[equals(floci.echo(null()), null())]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/emptyloop" + API).asString());
+        given().when().get(DEPLOYMENTS + "/emptyloop" + API).then().statusCode(200)
+            .body("properties.outputs.echoed.value", equalTo(true));
+        given().when().get(RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/reader?api-version=2023-01-31")
+            .then().statusCode(200).body("tags.count", equalTo("0"));
+    }
+
+    @Test
     void anExistingResourceIsReadAndNeverDeployed() throws Exception {
         String missing = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/neverdeployed";
         assertEquals("Succeeded", awaitTerminal(put("readexisting", """
