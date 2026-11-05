@@ -40,6 +40,11 @@ final class CopyScope implements TemplateScope {
     }
 
     @Override
+    public JsonNode deployer() {
+        return parent.deployer();
+    }
+
+    @Override
     public JsonNode lambdaVariable(String name) {
         return parent.lambdaVariable(name);
     }
