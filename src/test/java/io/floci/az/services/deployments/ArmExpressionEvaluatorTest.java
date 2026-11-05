@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -326,13 +327,49 @@ class ArmExpressionEvaluatorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"[unknownFunction()]", "[parameters('missing')]", "[variables('tags').missing]",
-        "[variables('list')[7]]", "[filter(variables('list'), lambda('x', true()))]", "[copyIndex()]",
+        "[variables('list')[7]]", "[filter(variables('list'), 'notalambda')]", "[copyIndex()]",
         "[contoso.custom()]", "[div(1, 0)]", "[substring('abc', 2, 5)]", "[resourceId('Microsoft.Storage/x/y', 'a')]",
         "[int('x')]", "[concat('a', createArray(1))]", "[if(1, 'a', 'b')]", "[format('{0:G}', 1)]",
         "[resourceGroup('other')]", "[range(0, 10001)]", "[json('{')]"})
     void errorsAreInvalidTemplate(String expression) {
         TemplateException error = assertThrows(TemplateException.class, () -> eval(expression));
         assertEquals(TemplateException.INVALID_TEMPLATE, error.code(), error.getMessage());
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', quoteCharacter = '~', value = {
+        "[filter(createArray(1, 2, 3, 4), lambda('n', greater(lambdaVariables('n'), 2)))] | [3,4]",
+        "[filter(createArray(5, 6, 7), lambda('n', 'i', equals(lambdaVariables('i'), 1)))] | [6]",
+        "[map(createArray('a', 'b'), lambda('s', 'i', concat(lambdaVariables('s'), string(lambdaVariables('i')))))] | [\"a0\",\"b1\"]",
+        "[reduce(createArray(1, 2, 3), 10, lambda('cur', 'next', add(lambdaVariables('cur'), lambdaVariables('next'))))] | 16",
+        "[reduce(createArray(5, 6, 7), 0, lambda('cur', 'next', 'i', add(lambdaVariables('cur'), lambdaVariables('i'))))] | 3",
+        "[sort(createArray(3, 1, 2), lambda('a', 'b', less(lambdaVariables('a'), lambdaVariables('b'))))] | [1,2,3]",
+        "[sort(createArray(createArray(1, 'x'), createArray(0, 'y'), createArray(1, 'z')), lambda('a', 'b', less(lambdaVariables('a')[0], lambdaVariables('b')[0])))] | [[0,\"y\"],[1,\"x\"],[1,\"z\"]]",
+        "[groupBy(createArray('foo', 'bar', 'baz'), lambda('s', substring(lambdaVariables('s'), 0, 1)))] | {\"f\":[\"foo\"],\"b\":[\"bar\",\"baz\"]}",
+        "[mapValues(createObject('a', 1, 'b', 2), lambda('v', mul(lambdaVariables('v'), 2)))] | {\"a\":2,\"b\":4}",
+        "[toObject(createArray('x', 'y'), lambda('k', lambdaVariables('k')))] | {\"x\":\"x\",\"y\":\"y\"}",
+        "[toObject(createArray('x'), lambda('k', lambdaVariables('k')), lambda('v', concat(lambdaVariables('v'), '!')))] | {\"x\":\"x!\"}",
+        "[map(createArray(1, 2), lambda('n', map(createArray(10), lambda('m', add(lambdaVariables('m'), lambdaVariables('n'))))))] | [[11],[12]]",
+        "[flatten(createArray(createArray(0, 1), createArray(), createArray(createArray(2))))] | [0,1,[2]]",
+    })
+    void theLambdaFunctionsAndFlattenAnswerAsDocumented(String expression, String expected) throws Exception {
+        assertEquals(new ObjectMapper().readTree(expected), eval(expression));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "[lambda('x', 1)]",
+        "[lambdaVariables('x')]",
+        "[map(createArray(1), lambda('x', 'i', 'j', 1))]",
+        "[sort(createArray(1), lambda('a', 'b', 'i', true()))]",
+        "[filter(createArray(1), lambda('x', 1))]",
+        "[toObject(createArray(1), lambda('x', lambdaVariables('x')))]",
+        "[map(createObject('a', 1), lambda('x', 1))]",
+        "[mapValues(createArray(1), lambda('x', 1))]",
+        "[flatten(createArray(1))]",
+    })
+    void aMisusedLambdaIsAnInvalidTemplate(String expression) {
+        assertThrows(TemplateException.class, () -> eval(expression));
     }
 
     @Test
