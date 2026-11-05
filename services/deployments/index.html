@@ -1,0 +1,2826 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fast, free, open-source local Azure emulator">
+      
+      
+      
+        <link rel="canonical" href="https://floci.io/floci-az/services/deployments/">
+      
+      
+        <link rel="prev" href="../managementgroups/">
+      
+      
+        <link rel="next" href="../../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/floci.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>ARM Template Deployments - Floci-AZ</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <!-- Umami analytics — tracks docs visits (privacy-friendly, cookieless) -->
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="b2ab8ccd-4619-4b94-bfa6-e8870961d6eb"></script>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#arm-template-deployments" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Floci-AZ" class="md-header__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../../assets/floci-header.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Floci-AZ
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ARM Template Deployments
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/quick-start/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../configuration/docker-compose/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../ui/" class="md-tabs__link">
+          
+  
+  
+  Web Console
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Services
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Floci-AZ" class="md-nav__button md-logo" aria-label="Floci-AZ" data-md-component="logo">
+      
+  <img src="../../assets/floci-header.svg" alt="logo">
+
+    </a>
+    Floci-AZ
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/floci-io/floci-az" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci-az
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/azure-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure CLI & SDK Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../terraform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terraform / OpenTofu
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/docker-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/ports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ports Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/endpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emulator Endpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/advanced/application-yml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    application.yml Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Console
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Web Console
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/console-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Contract v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Resource Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blob/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blob Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../queue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Queue Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Table Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../functions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Functions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../app-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    App Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signalr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure SignalR Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../key-vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Key Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entra/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra ID
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../event-hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Hubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../service-bus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Bus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cosmos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cosmos DB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure SQL Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../postgresql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mysql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for MySQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mariadb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Database for MariaDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Kubernetes Service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../container-apps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../apim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Network
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual Machines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../redis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Cache for Redis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Container Instances
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../event-grid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event Grid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monitor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Monitor / Log Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../email/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Communication Services Email
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-identity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Identity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resourcegraph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Resource Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managementgroups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Management Groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARM Template Deployments
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ARM Template Deployments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subscription-scope-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription-scope deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tenant-scope-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant-scope deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nested-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linked-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linked templates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-deployment-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a deployment runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-if" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What-if
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#child-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Child resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#copy-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copy loops
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#template-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-defined-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-defined functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-supported-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not supported yet
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#intentional-deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intentional deviations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subscription-scope-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscription-scope deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tenant-scope-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant-scope deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nested-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested deployments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linked-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linked templates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-deployment-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a deployment runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-if" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What-if
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#child-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Child resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#copy-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copy loops
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#template-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-defined-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-defined functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-supported-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not supported yet
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#intentional-deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intentional deviations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="arm-template-deployments">ARM Template Deployments</h1>
+<p>floci-az runs ARM template deployments (<code>Microsoft.Resources/deployments</code>) at resource-group and subscription
+scope: the calls behind <code>az deployment group create</code> and <code>az deployment sub create</code>, Terraform's
+<code>azurerm_resource_group_template_deployment</code>, and any Bicep file once the client has compiled it to ARM JSON.</p>
+<p>Each resource in the template is created through the same ARM routing, request gate and handler a client
+request would reach, so a deployed storage account, virtual network or key vault is exactly the resource a
+direct <code>PUT</code> creates, and every other floci-az service sees it.</p>
+<p><strong>Protocol:</strong> ARM REST, JSON</p>
+<p><strong>Path:</strong> <code>/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Resources/deployments/{name}</code>, or
+<code>/subscriptions/{sub}/providers/Microsoft.Resources/deployments/{name}</code> at subscription scope</p>
+<p><strong>Api-versions:</strong> the Resources spec 2025-04-01, which the az CLI sends; azurerm sends 2020-06-01, whose
+operations and shapes are the same.</p>
+<h2 id="configuration">Configuration</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">floci-az</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">deployments</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">    </span><span class="c1"># FLOCI_AZ_SERVICES_DEPLOYMENTS_ENABLED</span>
+</code></pre></div>
+<p>With <code>enabled: false</code> a deployment path answers the generic ARM <code>404 ResourceNotFound</code> it answered before
+deployments existed.</p>
+<h2 id="endpoints">Endpoints</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>PUT    .../deployments/{name}                    # CreateOrUpdate: 201 (200 on a re-PUT), Accepted, then runs
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>GET    .../deployments/{name}/operationStatuses/{id}   # the poll the PUT's Azure-AsyncOperation names
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>GET    .../deployments/{name}                    # Get
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>HEAD   .../deployments/{name}                    # CheckExistence: 204 or 404
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>DELETE .../deployments/{name}                    # Delete: removes the record, never the resources; 204
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>GET    .../deployments[?$filter=provisioningState eq 'X'&amp;$top=N]   # nextLink when $top leaves more
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>GET    .../deployments/{name}/operations[/{operationId}]           # also without providers/Microsoft.Resources
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>POST   .../deployments/{name}/validate           # 200, or 400 with the template error
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>POST   .../deployments/{name}/exportTemplate     # {"template": ...}
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>POST   .../deployments/{name}/cancel             # 204 while it runs
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>POST   .../deployments/{name}/whatIf             # the changes it would make, 200
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>POST   /providers/Microsoft.Resources/calculateTemplateHash   # {"minifiedTemplate", "templateHash"}
+</code></pre></div>
+<p>The resource group must exist, or the answer is <code>404 ResourceGroupNotFound</code>. Every endpoint is served at
+subscription scope too, under <code>/subscriptions/{sub}/providers/Microsoft.Resources/deployments</code>, and at tenant
+scope, under <code>/providers/Microsoft.Resources/deployments</code>.</p>
+<h2 id="subscription-scope-deployments">Subscription-scope deployments</h2>
+<p>A subscription-scope deployment deploys subscription-level resources, typically resource groups
+(<code>Microsoft.Resources/resourceGroups</code>, whose id is <code>/subscriptions/{sub}/resourceGroups/{name}</code>), and policy.
+As Azure requires, the body carries a <code>location</code> where the deployment's data is stored: a missing one is
+<code>400 LocationRequired</code>, and reusing a deployment name with another location is
+<code>400 InvalidDeploymentLocation</code>. A resource type that lives in a resource group (a storage account, say) is
+<code>InvalidTemplate</code> at this scope, and <code>resourceGroup()</code> is an error here. Deploying into a resource group from a
+subscription-scope template takes a nested deployment (see below), which is what <code>azd provision</code> and a Bicep file
+with <code>targetScope = 'subscription'</code> and modules send.</p>
+<h2 id="tenant-scope-deployments">Tenant-scope deployments</h2>
+<p>A tenant-scope deployment (<code>az deployment tenant create</code>) carries a <code>location</code> on the same terms as a
+subscription-scope one, and its tenant is the caller's (the tenant of the request's token when the emulator holds
+it, otherwise the default tenant). Its own resources are tenant-level ones; a resource that lives in a
+subscription or a resource group is <code>InvalidTemplate</code> here, and <code>subscription()</code> and <code>resourceGroup()</code> are errors.
+It reaches a subscription through a nested deployment that names <code>subscriptionId</code> (and <code>location</code>), and a
+resource group through one that names both <code>subscriptionId</code> and <code>resourceGroup</code>, as Azure requires at this scope.
+A nested deployment that targets a management group through <code>scope</code> is refused with <code>InvalidTemplate</code>.</p>
+<p><code>resourceId()</code> without a subscription or a resource group takes the deployment's level, as Azure documents: a
+resource-group id in a resource-group deployment, <code>/subscriptions/{sub}/providers/...</code> at subscription scope, and
+<code>/providers/...</code> at tenant scope.</p>
+<h2 id="nested-deployments">Nested deployments</h2>
+<p>A <code>Microsoft.Resources/deployments</code> resource inside a template, which a Bicep module compiles to, is deployed
+as a deployment of its own at its target: the resource group its <code>resourceGroup</code> property names (in the
+subscription <code>subscriptionId</code> names, else the parent's), the subscription <code>subscriptionId</code> alone names, or else
+the parent's own scope. It runs like any other deployment, so it is listed, polled and read at its target, and
+the parent waits for it: <code>reference('module').outputs.name.value</code> reads its outputs once it has finished.</p>
+<ul>
+<li>With <code>expressionEvaluationOptions.scope</code> set to <code>inner</code>, as Bicep modules are, the nested template is its own
+  template: its expressions use its own parameters, which the nested deployment's <code>parameters</code> pass in.</li>
+<li>With <code>outer</code>, the default, its expressions use the parent's parameters and variables: floci-az sends it with
+  the parent's parameters declared as its own (defaulting to the parent's values) and the parent's variable values
+  as its variables. A <code>securestring</code> or <code>secureObject</code> parameter is passed as a parameter value instead of a
+  default, so the child's <code>exportTemplate</code> never shows it. A <code>reference()</code> or <code>list*()</code> call there that names a
+  parent resource is sent naming it by id, since the child does not declare it; an <code>inner</code>-scope deployment nested
+  inside it keeps its own template, whose names are its own. <code>resourceGroup()</code> and <code>subscription()</code> there answer for the nested deployment's own target,
+  where Azure answers the parent's; they differ only when an outer-scope nested deployment targets another scope.</li>
+</ul>
+<p>A nested deployment's template is inline or linked (see Linked templates).</p>
+<h2 id="linked-templates">Linked templates</h2>
+<p>A deployment's <code>templateLink.uri</code> and <code>parametersLink.uri</code> are downloaded over HTTP or HTTPS when the request
+arrives, and the deployment runs the downloaded template as if it had been sent inline; the links are echoed in
+the deployment's properties and in <code>deployment().properties.templateLink</code>. A template staged in floci-az's own blob
+storage works, the local counterpart of a storage account with a SAS token.</p>
+<ul>
+<li>A nested deployment's <code>templateLink.relativePath</code> resolves against the link its parent's template came from,
+  keeping the parent link's query string, as Azure does; a parent sent inline has no base, so it is refused. It
+  must stay relative: an absolute URI, or a path such as <code>//other.host/child.json</code> that leaves the parent's
+  scheme, host or port, is <code>400 InvalidTemplate</code>, so the parent's SAS token never reaches another host.</li>
+<li>A link that cannot be downloaded (no <code>uri</code>, not HTTP or HTTPS, a non-<code>200</code> answer, a timeout after 30 seconds,
+  more than 4 MB), whose content is not a JSON object, or whose content carries a different <code>contentVersion</code> than
+  the link names is <code>400 InvalidContentLink</code>.</li>
+<li><code>parameters</code> and <code>parametersLink</code> together are <code>400 InvalidTemplate</code>, as Azure documents; a parameters link may
+  point at a parameter file (<code>{"parameters": {...}}</code>) or at the parameters object itself.</li>
+<li>A template spec (<code>templateLink.id</code>) is <code>400 InvalidTemplate</code>: floci-az does not serve template specs.</li>
+</ul>
+<h2 id="how-a-deployment-runs">How a deployment runs</h2>
+<p>A <code>PUT</code> checks the template at once and answers <code>201</code> with <code>provisioningState: Accepted</code> and an
+<code>Azure-AsyncOperation</code> header, as Azure does. The deployment then runs in the background: the
+<code>operationStatuses</code> URL answers <code>{"status": "Accepted"}</code> until it ends, then <code>Succeeded</code>, <code>Failed</code> with the
+error, or <code>Canceled</code>, and <code>GET</code> of the deployment shows <code>Running</code> and then the final state. A <code>PUT</code> or
+<code>DELETE</code> of a deployment that is still running is <code>409 DeploymentActive</code>. <code>cancel</code> stops it before its next
+resource and leaves what it already created in place.</p>
+<ol>
+<li>The template is read and checked: parameters (type and <code>allowedValues</code>), variables, resources and
+   outputs. A template floci-az cannot run is refused with <code>400 InvalidTemplate</code> before anything is created.</li>
+<li>Each resource's <code>type</code>, <code>name</code> and <code>dependsOn</code> are evaluated, and the resources are ordered by their
+   dependencies: an explicit <code>dependsOn</code> entry (a name, <code>type/name</code>, or an id), and an implicit dependency
+   for every <code>reference()</code> or <code>list*()</code> call that names a resource by name. As in Azure, <code>resourceId()</code>
+   alone creates no dependency, and a child resource does not depend on its parent unless <code>dependsOn</code> says
+   so. A cycle, or a dependency on a resource the template does not declare, is an <code>InvalidTemplate</code>.</li>
+<li>Each resource is evaluated and sent as <code>PUT {id}?api-version={its apiVersion}</code>, without the template-only
+   keys (<code>type</code>, <code>apiVersion</code>, <code>name</code>, <code>dependsOn</code>, <code>condition</code>, <code>comments</code>). A resource whose <code>condition</code>
+   is false is skipped. A <code>202</code>, or a <code>provisioningState</code> that is not terminal, is polled with <code>GET</code>.</li>
+<li>The outputs are evaluated once every resource exists, so <code>reference()</code> reads the live resource.</li>
+</ol>
+<p>An extension resource's <code>scope</code> names the resource it extends, as a full id or as the <code>Namespace/type/name</code> of a
+resource at the deployment's scope (<code>Microsoft.Storage/storageAccounts/sa1</code>); the resource is created at
+<code>{scope}/providers/{type}/{name}</code>, a policy assignment or a lock on that one account, say.</p>
+<p>Each resource the run tries is a deployment operation (<code>provisioningOperation: Create</code>, with the provider's
+answer as <code>statusCode</code>, <code>OK</code> or <code>Created</code>, its <code>targetResource</code>, and a <code>statusMessage</code> holding the error when it
+failed), followed by one <code>EvaluateDeploymentOutput</code> operation, as Azure records them. The operations list is
+served both under <code>.../providers/Microsoft.Resources/deployments/{name}/operations</code> and under the spec's own
+<code>.../resourcegroups/{rg}/deployments/{name}/operations</code>, which has no provider segment and is the form the az
+CLI sends.</p>
+<p>The deployment answers with Azure's <code>DeploymentExtended</code> body: <code>provisioningState</code>, the echoed
+<code>parameters</code> (a <code>securestring</code> or <code>secureObject</code> value is never echoed), <code>outputs</code>, <code>outputResources</code>,
+<code>providers</code>, <code>dependencies</code>, <code>templateHash</code>, <code>timestamp</code>, <code>duration</code> and <code>correlationId</code>. When a resource
+fails, the deployment ends <code>Failed</code> with Azure's <code>DeploymentFailed</code> error, whose <code>details</code> hold the failing
+resource's own error; a resource that ends in a <code>Failed</code> provisioning state is a
+<code>ResourceDeploymentFailure</code>.</p>
+<h2 id="what-if">What-if</h2>
+<p><code>whatIf</code> prepares the deployment as a <code>PUT</code> would, then reads each resource's current state instead of writing
+it: a resource that does not exist is a <code>Create</code>; one that does is a <code>Modify</code>, with a <code>delta</code> listing each
+property the template sets to a different value, or a <code>NoChange</code>. Only the properties the template sets are
+compared, so a provider's own read-only properties never count as changes; <code>after</code> is the current resource with
+the template's values applied. A nested deployment, and a resource whose expressions cannot be evaluated before
+deployment (a <code>reference()</code> to a resource the deployment would create), are <code>Unsupported</code> with the reason.
+<code>whatIfSettings.resultFormat</code> <code>ResourceIdOnly</code> leaves the documents out. The prediction is only as good as the
+providers' reads: a provider that answers <code>200</code> for anything it is asked about makes a new resource look like a
+<code>NoChange</code>.</p>
+<h2 id="child-resources">Child resources</h2>
+<p>A child resource can be declared outside its parent, with the full type and name
+(<code>Microsoft.Network/virtualNetworks/subnets</code>, <code>vnet1/default</code>), or inside the parent's <code>resources</code> array
+with one segment each (<code>subnets</code>, <code>default</code>), at any depth. A child declared inside is read as a top-level
+resource whose type and name carry its parent's, right after the parent, so template order creates the parent
+first. As in Azure, it does not depend on its parent unless its <code>dependsOn</code> says so, and it is never sent as part
+of the parent's body.</p>
+<h2 id="copy-loops">Copy loops</h2>
+<p>All four kinds of copy loop are served, with <code>copyIndex([loopName], [offset])</code>:</p>
+<ul>
+<li><strong>Resources</strong>: <code>"copy": {"name", "count", "mode", "batchSize"}</code> deploys one resource per iteration. A
+  <code>dependsOn</code> entry naming the loop depends on every instance, and a loop whose <code>count</code> is 0 deploys nothing
+  and satisfies any dependency on it. Instances are created one at a time in iteration order, which meets both
+  <code>parallel</code> and <code>serial</code> mode.</li>
+<li><strong>Properties</strong>: a <code>copy</code> array of <code>{"name", "count", "input"}</code> in a top-level resource's <code>properties</code> builds
+  the array property of that name; <code>copyIndex</code> there names its loop.</li>
+<li><strong>Variables</strong>: a <code>copy</code> array in <code>variables</code> defines one array variable per entry, and a <code>copy</code> array
+  inside a variable's value builds an array property of it.</li>
+<li><strong>Outputs</strong>: an output with <code>"copy": {"count", "input"}</code> is the array of its iterations.</li>
+</ul>
+<p>A <code>count</code> is an integer from 0 to 800, as in Azure; anything else is <code>InvalidTemplate</code>. Loops nested in one another
+share one budget per template: once all of a template's copy iterations together pass 800 x 800, the template is
+an <code>InvalidTemplate</code> before the values are built. Azure caps the expanded template at 4 MB, which a deeper
+expansion could not fit in.</p>
+<h2 id="template-functions">Template functions</h2>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Functions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scope</td>
+<td><code>parameters</code>, <code>variables</code>, <code>resourceGroup</code>, <code>subscription</code>, <code>tenant</code>, <code>deployment</code>, <code>environment</code></td>
+</tr>
+<tr>
+<td>Resource ids</td>
+<td><code>resourceId</code> (every arity), <code>subscriptionResourceId</code>, <code>tenantResourceId</code>, <code>extensionResourceId</code></td>
+</tr>
+<tr>
+<td>Live</td>
+<td><code>reference</code> (by name or id, optional api-version and <code>'Full'</code>), every <code>list*</code> function (<code>listKeys</code>, ...)</td>
+</tr>
+<tr>
+<td>Loops</td>
+<td><code>copyIndex</code></td>
+</tr>
+<tr>
+<td>Logical</td>
+<td><code>true</code>, <code>false</code>, <code>null</code>, <code>not</code>, <code>and</code>, <code>or</code>, <code>if</code>, <code>bool</code>, <code>coalesce</code></td>
+</tr>
+<tr>
+<td>Comparison</td>
+<td><code>equals</code>, <code>less</code>, <code>lessOrEquals</code>, <code>greater</code>, <code>greaterOrEquals</code></td>
+</tr>
+<tr>
+<td>String</td>
+<td><code>concat</code>, <code>format</code>, <code>uniqueString</code>, <code>guid</code>, <code>newGuid</code>, <code>toLower</code>, <code>toUpper</code>, <code>string</code>, <code>int</code>, <code>float</code>, <code>json</code>, <code>length</code>, <code>empty</code>, <code>first</code>, <code>last</code>, <code>take</code>, <code>skip</code>, <code>split</code>, <code>replace</code>, <code>substring</code>, <code>trim</code>, <code>padLeft</code>, <code>startsWith</code>, <code>endsWith</code>, <code>contains</code>, <code>indexOf</code>, <code>lastIndexOf</code>, <code>like</code></td>
+</tr>
+<tr>
+<td>Encoding</td>
+<td><code>base64</code>, <code>base64ToString</code>, <code>base64ToJson</code>, <code>dataUri</code>, <code>dataUriToString</code>, <code>uri</code>, <code>uriComponent</code>, <code>uriComponentToString</code></td>
+</tr>
+<tr>
+<td>Array and object</td>
+<td><code>union</code>, <code>intersection</code>, <code>createArray</code>, <code>createObject</code>, <code>items</code>, <code>objectKeys</code>, <code>shallowMerge</code>, <code>tryGet</code>, <code>indexFromEnd</code>, <code>tryIndexFromEnd</code>, <code>distinct</code>, <code>join</code>, <code>array</code>, <code>range</code></td>
+</tr>
+<tr>
+<td>Numeric</td>
+<td><code>add</code>, <code>sub</code>, <code>mul</code>, <code>div</code>, <code>mod</code>, <code>min</code>, <code>max</code></td>
+</tr>
+<tr>
+<td>Date</td>
+<td><code>utcNow</code>, <code>dateTimeAdd</code>, <code>dateTimeFromEpoch</code>, <code>dateTimeToEpoch</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>environment()</code> returns the subscription's cloud's own metadata (Azure's endpoints and suffixes), so a
+template that builds a hostname from <code>environment().suffixes.storage</code> gets the real Azure suffix, which the
+emulator routes.</p>
+<h3 id="user-defined-functions">User-defined functions</h3>
+<p>A template's <code>functions</code> section declares functions called as <code>namespace.member(...)</code>. Each one is its <code>output</code>
+expression over its own parameters, checked against their declared types, and its result is checked against the
+output's type. The scope functions (<code>resourceGroup()</code>, <code>subscription()</code>, <code>tenant()</code>, <code>deployment()</code>,
+<code>environment()</code>) answer for the deployment. The restrictions Azure documents are each <code>400 InvalidTemplate</code>: a
+function reads only its own parameters, never the template's or <code>variables()</code>, calls no other user-defined
+function, uses neither <code>reference()</code> nor a <code>list*</code> function, and declares no parameter defaults. An outer-scope
+nested deployment calls its parent's functions.</p>
+<h2 id="not-supported-yet">Not supported yet</h2>
+<p>Each of these is refused with <code>400 InvalidTemplate</code>, never skipped:</p>
+<ul>
+<li>symbolic resource names (<code>languageVersion</code> 2.0)</li>
+<li>a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
+  ARM docs advise, declare such children outside the parent, with the parent's name in theirs</li>
+<li>the lambda functions (<code>filter</code>, <code>map</code>, <code>reduce</code>, <code>sort</code>, <code>toObject</code>, <code>groupBy</code>, <code>mapValues</code>), the CIDR
+  functions, <code>pickZones</code>, <code>providers</code>, <code>references</code>, <code>managementGroup</code>, <code>deployer</code>, <code>roleDefinitions</code></li>
+<li>Key Vault parameter references</li>
+<li><code>Complete</code> mode, refused with <code>400 DeploymentModeNotSupported</code> rather than run as <code>Incremental</code></li>
+</ul>
+<p>Deployments at management-group scope answer <code>404</code>, and a nested deployment that targets a management group is
+<code>400 InvalidTemplate</code>.</p>
+<h2 id="intentional-deviations">Intentional deviations</h2>
+<ul>
+<li><strong><code>Retry-After: 1</code></strong> on the <code>PUT</code> and on every status that is not final yet: Azure sends none, and clients
+  then fall back to their own, much longer, poll interval (30 seconds for the az CLI, which polls once straight
+  after the <code>PUT</code>); a local deployment usually finishes within the first second.</li>
+<li><strong>A refused <code>cancel</code></strong> (of a deployment that is no longer running) is <code>409 DeploymentNotActive</code>; Azure
+  documents that only an <code>Accepted</code> or <code>Running</code> deployment can be canceled, but not the error.</li>
+<li><strong>Delete</strong> answers <code>204</code> at once; Azure answers <code>202</code> and lets the client poll.</li>
+<li><strong><code>whatIf</code></strong> answers <code>200</code> with the result at once, one of the two answers the spec declares; Azure answers <code>202</code>
+  and lets the client poll a <code>Location</code>. An array that changed is one <code>Modify</code> of the whole array, where Azure
+  lists its element changes as <code>Array</code> children, and a nested deployment's own changes are not predicted.</li>
+<li><strong>The first failing resource stops the deployment.</strong> Azure goes on with the resources that do not depend
+  on it.</li>
+<li><strong><code>templateHash</code></strong> is a 64-bit hash of the minified, uppercased template, so it is the same for a deployment
+  and for <code>calculateTemplateHash</code> of the same template whatever its whitespace or casing, which is what azd
+  compares to skip an unchanged deployment. Azure does not publish its algorithm, so the value differs from
+  Azure's.</li>
+<li><strong><code>uniqueString</code> and <code>guid</code></strong> have Azure's length and form but not its values: <code>uniqueString</code> is 13
+  lowercase base32 characters from a SHA-256 hash, <code>guid</code> a name-based UUID. A template that only needs
+  stable unique names works; one that compares against a value computed in Azure does not.</li>
+<li><strong><code>format</code> and the date functions</strong> support <code>{n}</code>, <code>{n,width}</code> and the <code>N</code>, <code>D</code> and <code>X</code> number formats,
+  and the <code>u</code>, <code>d</code>, <code>s</code> and <code>o</code> date formats with the common custom tokens; any other format string is an
+  <code>InvalidTemplate</code> rather than a guess.</li>
+<li><strong><code>if</code>, <code>and</code> and <code>or</code> short-circuit</strong>, so a <code>reference()</code> in a branch the condition excludes is never
+  sent.</li>
+<li><strong>Validation messages</strong> start with Azure's <code>Deployment template validation failed:</code> and use its codes, but
+  the wording after it is floci-az's.</li>
+<li><strong>Deployments live in memory</strong>, as the rest of ARM state does.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
