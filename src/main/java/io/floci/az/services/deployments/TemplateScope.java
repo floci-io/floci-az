@@ -74,7 +74,7 @@ public interface TemplateScope {
     }
 
     /**
-     * Charges {@code iterations} copy-loop iterations to the evaluation of one template, before they are built;
+     * Charges {@code iterations} copy-loop or lambda iterations to the evaluation of one template, before they are built;
      * throws {@link TemplateException} once the template expands past what it may (see {@link CopyLoops}). A scope
      * that does not evaluate a whole template counts nothing.
      */

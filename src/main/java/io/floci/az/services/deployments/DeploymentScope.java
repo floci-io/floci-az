@@ -129,7 +129,7 @@ final class DeploymentScope implements TemplateScope {
     public void expand(int iterations) {
         expanded += iterations;
         if (expanded > CopyLoops.MAX_EXPANSION) {
-            throw DeploymentTemplate.invalid("The template's copy loops expand to more than "
+            throw DeploymentTemplate.invalid("The template's copy loops and lambda functions expand to more than "
                 + CopyLoops.MAX_EXPANSION + " values in all, more than a template may hold once expanded.");
         }
     }
