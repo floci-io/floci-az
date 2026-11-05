@@ -962,11 +962,16 @@ class DeploymentsHandlerTest {
     @Test
     void deployerReadsTheCallersToken() throws Exception {
         String claims = Base64.getUrlEncoder().withoutPadding().encodeToString(
-            "{\"oid\":\"11111111-2222-3333-4444-555555555555\",\"upn\":\"dev@floci.test\"}".getBytes(StandardCharsets.UTF_8));
+            ("{\"oid\":\"11111111-2222-3333-4444-555555555555\",\"upn\":\"dev@floci.test\","
+                + "\"tid\":\"99999999-0000-0000-0000-000000000009\"}").getBytes(StandardCharsets.UTF_8));
         Response accepted = given().contentType("application/json").header("Authorization", "Bearer e30." + claims + ".sig")
             .body("""
-                {"properties": {"mode": "Incremental", "template": {"resources": [], "outputs": {
+                {"properties": {"mode": "Incremental", "template": {"resources": [],
+                  "functions": [{"namespace": "floci", "members": {"whoami": {"parameters": [],
+                    "output": {"type": "string", "value": "[deployer().objectId]"}}}}],
+                  "outputs": {
                   "who": {"type": "object", "value": "[deployer()]"},
+                  "fromFunction": {"type": "string", "value": "[floci.whoami()]"},
                   "subnet": {"type": "string", "value": "[cidrSubnet('10.0.0.0/16', 24, 2)]"}}}}}
                 """).when().put(DEPLOYMENTS + "/whoami" + API);
         assertEquals("Succeeded", awaitTerminal(accepted),
@@ -975,7 +980,8 @@ class DeploymentsHandlerTest {
         given().when().get(DEPLOYMENTS + "/whoami" + API).then().statusCode(200)
             .body("properties.outputs.who.value.objectId", equalTo("11111111-2222-3333-4444-555555555555"))
             .body("properties.outputs.who.value.userPrincipalName", equalTo("dev@floci.test"))
-            .body("properties.outputs.who.value.tenantId", notNullValue())
+            .body("properties.outputs.who.value.tenantId", equalTo("99999999-0000-0000-0000-000000000009"))
+            .body("properties.outputs.fromFunction.value", equalTo("11111111-2222-3333-4444-555555555555"))
             .body("properties.outputs.subnet.value", equalTo("10.0.2.0/24"));
     }
 

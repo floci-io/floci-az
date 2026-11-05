@@ -218,8 +218,9 @@ emulator routes.
 ### CIDR and `deployer`
 
 `parseCidr`, `cidrSubnet` and `cidrHost` serve IPv4 and IPv6 as the ARM docs show. The docs do not cover an IPv4 `/31`
-or `/32`, and floci-az treats every address in those as usable. `deployer()` reads the caller's token: without one, or
-for a claim it lacks, `objectId` and `userPrincipalName` are empty strings.
+or `/32`, and floci-az treats every address in those as usable. `deployer()` reads the caller's token, its `tenantId` from the token's
+`tid`: without a token, or for a claim it lacks, `objectId` and `userPrincipalName` are empty strings and `tenantId` is
+the target's tenant.
 
 ### Lambda functions
 

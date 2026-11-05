@@ -383,6 +383,7 @@ class ArmExpressionEvaluatorTest {
         "[cidrSubnet('10.0.0.0/24', 25, 2)]",
         "[cidrHost('10.0.0.0/30', 2)]",
         "[cidrHost('10.0.0.0/24', -1)]",
+        "[deployer('ignored')]",
     })
     void aBadCidrIsAnInvalidTemplate(String expression) {
         assertThrows(TemplateException.class, () -> eval(expression));
