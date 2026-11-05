@@ -1135,11 +1135,13 @@ class DeploymentsHandlerTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         vaultWithSecret("kvother" + suffix, true, "wrong-vault-value");
         String vault = vaultWithSecret("kvref" + suffix, true, "first-s3cr3t");
-        String latest = given().header("Authorization", "Bearer test").contentType("application/json")
-            .body("{\"value\":\"later-s3cr3t!\"}")
-            .when().put("/kvref" + suffix + "-keyvault/secrets/app-secret").then().statusCode(200)
+        String first = given().header("Authorization", "Bearer test")
+            .when().get("/kvref" + suffix + "-keyvault/secrets/app-secret").then().statusCode(200)
             .extract().path("id");
-        String pinned = latest.substring(latest.lastIndexOf('/') + 1);
+        String pinned = first.substring(first.lastIndexOf('/') + 1);
+        given().header("Authorization", "Bearer test").contentType("application/json")
+            .body("{\"value\":\"later-s3cr3t!\"}")
+            .when().put("/kvref" + suffix + "-keyvault/secrets/app-secret").then().statusCode(200);
 
         assertEquals("Succeeded", awaitTerminal(put("kvdep", referenceDeployment(vault, ""))),
             () -> given().when().get(DEPLOYMENTS + "/kvdep" + API).asString());
@@ -1152,7 +1154,35 @@ class DeploymentsHandlerTest {
         assertEquals("Succeeded", awaitTerminal(put("kvpinned",
             referenceDeployment(vault, ", \"secretVersion\": \"" + pinned + "\""))));
         given().when().get(DEPLOYMENTS + "/kvpinned" + API).then().statusCode(200)
+            .body("properties.outputs.startsWith.value", equalTo("fir"));
+
+        String otherCasing = vault.substring(0, vault.lastIndexOf('/') + 1) + ("kvref" + suffix).toUpperCase();
+        assertEquals("Succeeded", awaitTerminal(put("kvcasing", referenceDeployment(otherCasing, ""))));
+        given().when().get(DEPLOYMENTS + "/kvcasing" + API).then().statusCode(200)
             .body("properties.outputs.startsWith.value", equalTo("lat"));
+    }
+
+    @Test
+    void aKeyVaultReferenceFillsASecureObjectAndAConstraintErrorNeverShowsTheSecret() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String json = vaultWithSecret("kvjson" + suffix, true, "{\\\"region\\\":\\\"west\\\"}");
+        assertEquals("Succeeded", awaitTerminal(put("kvobject", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"config": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"config": {"type": "secureObject"}}, "resources": [],
+                "outputs": {"region": {"type": "string", "value": "[parameters('config').region]"}}}}}
+            """.formatted(json))), () -> given().when().get(DEPLOYMENTS + "/kvobject" + API).asString());
+        given().when().get(DEPLOYMENTS + "/kvobject" + API).then().statusCode(200)
+            .body("properties.outputs.region.value", equalTo("west"));
+
+        String leaky = vaultWithSecret("kvleak" + suffix, true, "leaky-s3cr3t");
+        String answer = put("kvleak", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring", "allowedValues": ["other"]}},
+                "resources": []}}}
+            """.formatted(leaky)).then().statusCode(400).extract().asString();
+        assertFalse(answer.contains("leaky-s3cr3t"), answer);
     }
 
     @Test
