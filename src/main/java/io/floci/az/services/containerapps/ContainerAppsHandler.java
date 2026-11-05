@@ -655,6 +655,11 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!properties.has("zoneRedundant")) {
             properties.put("zoneRedundant", false);
         }
+        ObjectNode customDomainConfiguration = properties.withObject("/customDomainConfiguration");
+        if (!customDomainConfiguration.hasNonNull("customDomainVerificationId")) {
+            customDomainConfiguration.put("customDomainVerificationId",
+                    Integer.toHexString(environmentId(environment).hashCode()));
+        }
         return response;
     }
 
