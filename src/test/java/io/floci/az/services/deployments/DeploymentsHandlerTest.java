@@ -21,6 +21,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -689,10 +690,7 @@ class DeploymentsHandlerTest {
                     + " \"name\": \"rg\", \"location\": \"westeurope\"}]}",
                 "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2025-04-01\","
                     + " \"name\": \"n\", \"resourceGroup\": \"rg\", \"properties\": {\"mode\": \"Incremental\","
-                    + " \"template\": {}}}]}",
-                "{\"resources\": [{\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2025-04-01\","
-                    + " \"name\": \"n\", \"scope\": \"/providers/Microsoft.Management/managementGroups/mg\","
-                    + " \"location\": \"westeurope\", \"properties\": {\"mode\": \"Incremental\", \"template\": {}}}]}")) {
+                    + " \"template\": {}}}]}")) {
             json("{\"location\": \"westeurope\", \"properties\": {\"mode\": \"Incremental\", \"template\": "
                     + template + "}}")
                 .when().post(TENANT_DEPLOYMENTS + "/t-bad/validate" + API).then().statusCode(400)
@@ -983,6 +981,108 @@ class DeploymentsHandlerTest {
             .body("properties.outputs.who.value.tenantId", equalTo("99999999-0000-0000-0000-000000000009"))
             .body("properties.outputs.fromFunction.value", equalTo("11111111-2222-3333-4444-555555555555"))
             .body("properties.outputs.subnet.value", equalTo("10.0.2.0/24"));
+    }
+
+    private static final String MANAGEMENT_GROUP = "/providers/Microsoft.Management/managementGroups/deploy-mg";
+    private static final String MG_DEPLOYMENTS = MANAGEMENT_GROUP + "/providers/Microsoft.Resources/deployments";
+
+    private static void managementGroupExists() {
+        given().contentType("application/json").body("{}").when().put(MANAGEMENT_GROUP + "?api-version=2021-04-01")
+            .then().statusCode(lessThan(300));
+    }
+
+    private static Response putAtManagementGroup(String name, String body) {
+        return given().contentType("application/json").body(body).when().put(MG_DEPLOYMENTS + "/" + name + API);
+    }
+
+    @Test
+    void aManagementGroupDeploymentCreatesItsResourcesAndReadsItsGroup() throws Exception {
+        managementGroupExists();
+        String policy = MANAGEMENT_GROUP + "/providers/Microsoft.Authorization/policyDefinitions/mgpolicy";
+        Response accepted = putAtManagementGroup("mgdep", """
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {
+              "resources": [{"type": "Microsoft.Authorization/policyDefinitions", "apiVersion": "2021-06-01",
+                "name": "mgpolicy", "properties": {"mode": "All", "policyRule": {
+                  "if": {"field": "type", "equals": "Microsoft.Storage/storageAccounts"},
+                  "then": {"effect": "audit"}}}}],
+              "outputs": {
+                "group": {"type": "string", "value": "[managementGroup().name]"},
+                "here": {"type": "string",
+                  "value": "[managementGroupResourceId('Microsoft.Authorization/policyDefinitions', 'mgpolicy')]"},
+                "there": {"type": "string",
+                  "value": "[managementGroupResourceId('other', 'Microsoft.Authorization/policyDefinitions', 'x')]"},
+                "level": {"type": "string", "value": "[resourceId('Microsoft.Authorization/policyDefinitions', 'x')]"}}}}}
+            """);
+        accepted.then().statusCode(201).body("id", equalTo(MG_DEPLOYMENTS + "/mgdep"));
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(MG_DEPLOYMENTS + "/mgdep" + API).asString());
+
+        given().when().get(policy + "?api-version=2021-06-01").then().statusCode(200);
+        given().when().get(MG_DEPLOYMENTS + "/mgdep" + API).then().statusCode(200)
+            .body("location", equalTo("westeurope"))
+            .body("properties.outputResources.id", contains(policy))
+            .body("properties.outputs.group.value", equalTo("deploy-mg"))
+            .body("properties.outputs.here.value", equalTo(policy))
+            .body("properties.outputs.there.value", equalTo("/providers/Microsoft.Management/managementGroups/other"
+                + "/providers/Microsoft.Authorization/policyDefinitions/x"))
+            .body("properties.outputs.level.value", equalTo("/providers/Microsoft.Authorization/policyDefinitions/x"));
+        given().when().get(MG_DEPLOYMENTS + API).then().statusCode(200).body("value.name", contains("mgdep"));
+        given().when().get(MG_DEPLOYMENTS + "/mgdep/operations" + API).then().statusCode(200);
+        given().when().head(MG_DEPLOYMENTS + "/mgdep" + API).then().statusCode(204);
+        given().when().get("/providers/Microsoft.Resources/deployments/mgdep" + API).then().statusCode(404);
+    }
+
+    @Test
+    void aNestedDeploymentReachesAManagementGroupAndASubscriptionFromIt() throws Exception {
+        managementGroupExists();
+        Response accepted = put("tomg", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Resources/deployments", "apiVersion": "2025-04-01", "name": "intogroup",
+               "scope": "Microsoft.Management/managementGroups/deploy-mg", "location": "westeurope",
+               "properties": {"mode": "Incremental", "expressionEvaluationOptions": {"scope": "inner"}, "template": {
+                 "resources": [
+                   {"type": "Microsoft.Resources/deployments", "apiVersion": "2025-04-01", "name": "intosub",
+                    "subscriptionId": "%s", "location": "westeurope",
+                    "properties": {"mode": "Incremental", "template": {"resources": [
+                      {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01",
+                       "name": "rg-from-mg", "location": "westeurope"}]}}}],
+                 "outputs": {"group": {"type": "string", "value": "[managementGroup().name]"}}}}}]}}}
+            """.formatted(SUB));
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(DEPLOYMENTS + "/tomg" + API).asString());
+
+        given().when().get(MG_DEPLOYMENTS + "/intogroup" + API).then().statusCode(200)
+            .body("properties.outputs.group.value", equalTo("deploy-mg"));
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-from-mg?api-version=2021-04-01")
+            .then().statusCode(200);
+        given().when().get(DEPLOYMENTS + "/tomg" + API).then().statusCode(200)
+            .body("properties.outputResources.id", contains("/subscriptions/" + SUB + "/resourceGroups/rg-from-mg"));
+    }
+
+    @Test
+    void aManagementGroupDeploymentNeedsItsGroupALocationAndAResourceThatLivesThere() throws Exception {
+        given().contentType("application/json").body("""
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {"resources": []}}}
+            """).when().put("/providers/Microsoft.Management/managementGroups/no-such-mg/providers/"
+                + "Microsoft.Resources/deployments/x" + API)
+            .then().statusCode(404);
+        managementGroupExists();
+        putAtManagementGroup("noloc", """
+            {"properties": {"mode": "Incremental", "template": {"resources": []}}}
+            """).then().statusCode(400).body("error.code", equalTo("LocationRequired"));
+        putAtManagementGroup("wronghome", """
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "deploysa0001",
+               "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}]}}}
+            """).then().statusCode(400).body("error.code", equalTo("InvalidTemplate"));
+    }
+
+    @Test
+    void managementGroupIsAnErrorOutsideAManagementGroupDeployment() throws Exception {
+        assertEquals("Failed", awaitTerminal(put("notmg", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [],
+              "outputs": {"group": {"type": "string", "value": "[managementGroup().name]"}}}}}
+            """)));
     }
 
     @Test

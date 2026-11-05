@@ -29,6 +29,11 @@ public interface TemplateScope {
     /** {@code deployment()}: name, properties and the rest of the deployment object. */
     JsonNode deployment();
 
+    /** {@code managementGroup()}: the group a management-group deployment runs at. */
+    default JsonNode managementGroup() {
+        throw TemplateException.invalid("The template function 'managementGroup' is not available here.");
+    }
+
     /** {@code deployer()}: the caller's objectId, tenantId and userPrincipalName. */
     default JsonNode deployer() {
         throw TemplateException.invalid("The template function 'deployer' is not available here.");

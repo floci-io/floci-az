@@ -51,8 +51,7 @@ final class TemplateFunctions {
 
     /** Functions Azure documents that floci-az does not implement; calling one is an error, never a guess. */
     static final Set<String> UNSUPPORTED = Set.of(
-        "providers", "pickzones", "managementgroup", "managementgroupresourceid",
-        "roledefinitions", "lambda");
+        "providers", "pickzones", "roledefinitions", "lambda");
 
     /** The {@code guid()} namespace ({@code template-functions-string.md}, guid). */
     private static final UUID GUID_NAMESPACE = UUID.fromString("11fb06fb-712d-4ddd-98c7-e71bbd588830");
@@ -88,6 +87,13 @@ final class TemplateFunctions {
             case "deployment" -> scopeObject(name, args, scope.deployment());
             case "environment" -> scopeObject(name, args, scope.environment());
             case "resourceid" -> NODES.textNode(resourceId(name, args, scope));
+            case "managementgroup" -> {
+                if (!args.isEmpty()) {
+                    throw TemplateException.invalid("The template function 'managementGroup' takes no arguments.");
+                }
+                yield scope.managementGroup();
+            }
+            case "managementgroupresourceid" -> NODES.textNode(managementGroupResourceId(name, args, scope));
             case "subscriptionresourceid" -> NODES.textNode(subscriptionResourceId(name, args, scope));
             case "tenantresourceid" -> NODES.textNode(tenantResourceId(name, args));
             case "extensionresourceid" -> NODES.textNode(extensionResourceId(name, args));
@@ -319,6 +325,18 @@ final class TemplateFunctions {
         List<String> values = strings(name, args, 2);
         int typeIndex = typeIndex(name, values, 0);
         return providerPath(name, values.get(typeIndex), values.subList(typeIndex + 1, values.size()));
+    }
+
+    /**
+     * {@code managementGroupResourceId([managementGroup], resourceType, name...)}: the id of a resource at
+     * management-group level, in the current group unless one is named ({@code template-functions-resource.md}).
+     */
+    private static String managementGroupResourceId(String name, List<JsonNode> args, TemplateScope scope) {
+        List<String> values = strings(name, args, 2);
+        int typeIndex = typeIndex(name, values, 1);
+        String group = typeIndex == 1 ? values.get(0) : text(scope.managementGroup().path("name"));
+        return "/providers/Microsoft.Management/managementGroups/" + group
+            + providerPath(name, values.get(typeIndex), values.subList(typeIndex + 1, values.size()));
     }
 
     /** {@code extensionResourceId(resourceId, resourceType, name...)}. */

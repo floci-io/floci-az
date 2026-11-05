@@ -16,6 +16,7 @@ import io.floci.az.core.arm.ArmErrors;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.directory.ResourceGroups;
+import io.floci.az.services.managementgroups.ManagementGroupStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -99,13 +100,20 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     private static final Pattern TEMPLATE_HASH = Pattern.compile(
         "providers/microsoft\\.resources/calculatetemplatehash/?", Pattern.CASE_INSENSITIVE);
 
+    private static final String MANAGEMENT_GROUP_SEGMENTS = "providers/microsoft\\.management/managementgroups/[^/]+/";
+
+    /** The group a {@code providers/Microsoft.Management/managementGroups/{group}/...} path names. */
+    private static final Pattern MANAGEMENT_GROUP = Pattern.compile(
+        "^providers/microsoft\\.management/managementgroups/([^/]+)/", Pattern.CASE_INSENSITIVE);
+
     /**
      * {@code [subscriptions/{sub}[/resourcegroups/{rg}]/]providers/Microsoft.Resources/deployments[/{name}[/{action}]]}:
-     * resource-group, subscription or tenant scope.
+     * resource-group, subscription, management-group or tenant scope. A management-group path keeps its group in
+     * {@link #MANAGEMENT_GROUP}, so its match reads as a tenant path here.
      */
     private static final Pattern PATH = Pattern.compile(
-        "(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?providers/microsoft\\.resources/deployments"
-            + "(?:/([^/?]+)(?:/([^/?]+))?)?/?",
+        "(?:" + MANAGEMENT_GROUP_SEGMENTS + ")?(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?"
+            + "providers/microsoft\\.resources/deployments(?:/([^/?]+)(?:/([^/?]+))?)?/?",
         Pattern.CASE_INSENSITIVE);
 
     /**
@@ -113,7 +121,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
      * segment: the spec's {@code DeploymentOperations_List} path has none, and the az CLI sends that form.
      */
     private static final Pattern OPERATIONS = Pattern.compile(
-        "(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?(?:providers/microsoft\\.resources/)?deployments/"
+        "(?:" + MANAGEMENT_GROUP_SEGMENTS + ")?(?:subscriptions/([^/]+)(?:/resourcegroups/([^/]+))?/)?"
+            + "(?:providers/microsoft\\.resources/)?deployments/"
             + "([^/?]+)/operations(?:/([^/?]+))?/?", Pattern.CASE_INSENSITIVE);
 
     /** {@code subscriptions/{sub}/resourcegroups/{rg}/deployments/...}: the form with no provider segment. */
@@ -122,7 +131,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
 
     /** {@code .../deployments/{name}/operationStatuses/{id}}. */
     private static final Pattern OPERATION_STATUS = Pattern.compile(
-        "(?:subscriptions/[^/]+(?:/resourcegroups/[^/]+)?/)?providers/microsoft\\.resources/deployments/[^/?]+"
+        "(?:" + MANAGEMENT_GROUP_SEGMENTS + ")?(?:subscriptions/[^/]+(?:/resourcegroups/[^/]+)?/)?"
+            + "providers/microsoft\\.resources/deployments/[^/?]+"
             + "/operationstatuses/([^/?]+)/?", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern STATE_FILTER =
@@ -137,6 +147,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     private final DeploymentEngine engine;
     private final ResourceGroups groups;
     private final LinkedTemplates links;
+    private final ManagementGroupStore managementGroups;
 
     /** Runs each deployment after its {@code PUT} has been answered; virtual threads, as runs mostly wait. */
     private final ExecutorService runner = Executors.newVirtualThreadPerTaskExecutor();
@@ -170,7 +181,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
 
     @Inject
     public DeploymentsHandler(EmulatorConfig config, DeploymentEngine engine, ResourceGroups groups,
-                              LinkedTemplates links) {
+                              LinkedTemplates links, ManagementGroupStore managementGroups) {
+        this.managementGroups = managementGroups;
         this.config = config;
         this.engine = engine;
         this.groups = groups;
@@ -238,8 +250,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         }
         Matcher matcher = PATH.matcher(query < 0 ? path : path.substring(0, query));
         if (!matcher.matches()) {
-            return ArmErrors.notFound("floci-az serves deployments at resource-group, subscription and tenant scope "
-                + "only: " + path);
+            return ArmErrors.notFound("floci-az serves deployments at resource-group, subscription, management-group "
+                + "and tenant scope only: " + path);
         }
         String subscriptionId = matcher.group(1);
         String resourceGroup = matcher.group(2);
@@ -248,6 +260,11 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         String method = req.method().toUpperCase(Locale.ROOT);
         if (resourceGroup != null && !groups.exists(subscriptionId, resourceGroup)) {
             return ArmErrors.resourceGroupNotFound(resourceGroup);
+        }
+        String managementGroup = managementGroup(req);
+        if (managementGroup != null
+                && managementGroups.get(engine.callerTenant(req), managementGroup).isEmpty()) {
+            return ArmErrors.error(404, "NotFound", "The management group '" + managementGroup + "' was not found.");
         }
         if (name == null) {
             return "GET".equals(method) ? list(req, subscriptionId, resourceGroup) : Response.status(405).build();
@@ -281,12 +298,12 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (current != null && current.active()) {
             return deploymentActive(name, current);
         }
-        Response location = checkLocation(subscriptionId, resourceGroup, name, body, current);
+        Response location = checkLocation(subscriptionId, resourceGroup, managementGroup(req), name, body, current);
         if (location != null) {
             return location;
         }
-        DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
-            body.get("properties"), req.detached());
+        DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup,
+            managementGroup(req), name, body.get("properties"), req.detached());
         DeploymentEngine.Prepared prepared;
         try {
             prepared = engine.prepare(request);
@@ -516,12 +533,13 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (body == null) {
             return invalidContent();
         }
-        Response location = checkLocation(subscriptionId, resourceGroup, name, body, null);
+        Response location = checkLocation(subscriptionId, resourceGroup, managementGroup(req), name, body, null);
         if (location != null) {
             return location;
         }
         try {
-            return json(200, engine.whatIf(new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
+            return json(200, engine.whatIf(new DeploymentEngine.Request(subscriptionId, resourceGroup,
+                managementGroup(req), name,
                 body.get("properties"), req.detached())));
         } catch (TemplateException e) {
             return templateError(e);
@@ -595,7 +613,7 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (body == null) {
             return invalidContent();
         }
-        Response location = checkLocation(subscriptionId, resourceGroup, name, body, null);
+        Response location = checkLocation(subscriptionId, resourceGroup, managementGroup(req), name, body, null);
         if (location != null) {
             return location;
         }
@@ -651,15 +669,16 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
      * "Deployment location and name"): required, and fixed for a name once used. Null when it is acceptable; a
      * resource-group deployment takes its group's location and needs none.
      */
-    private static Response checkLocation(String subscriptionId, String resourceGroup, String name, JsonNode body,
-                                          StoredDeployment existing) {
+    private static Response checkLocation(String subscriptionId, String resourceGroup, String managementGroup,
+                                          String name, JsonNode body, StoredDeployment existing) {
         if (resourceGroup != null) {
             return null;
         }
         String location = body.path("location").asText("");
         if (location.isBlank()) {
             return ArmErrors.error(400, "LocationRequired", "The location property is required for the "
-                + (subscriptionId == null ? "tenant" : "subscription") + "-scope deployment '" + name + "'.");
+                + (managementGroup != null ? "management-group" : subscriptionId == null ? "tenant" : "subscription")
+                + "-scope deployment '" + name + "'.");
         }
         String previous = existing == null ? null : existing.body().path("location").asText(null);
         if (previous != null && !squash(previous).equals(squash(location))) {
@@ -768,11 +787,21 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
     /**
      * A deployment's key: {@code {subscription}/{group}/{name}}, a subscription-scope deployment having an empty group
      * part. A tenant-scope deployment belongs to the caller's tenant, so its key is {@code tenant:{tenantId}//{name}}
-     * and two tenants never read or replace each other's.
+     * and two tenants never read or replace each other's. A management-group deployment is the same, under its group.
      */
     private String key(AzureRequest req, String subscriptionId, String resourceGroup, String name) {
+        String managementGroup = managementGroup(req);
+        if (managementGroup != null) {
+            return key("mg:" + engine.callerTenant(req) + ":" + managementGroup, resourceGroup, name);
+        }
         return key(subscriptionId == null ? "tenant:" + engine.callerTenant(req) : subscriptionId, resourceGroup,
             name);
+    }
+
+    /** The management group the request's path names, or null. */
+    private static String managementGroup(AzureRequest req) {
+        Matcher matcher = MANAGEMENT_GROUP.matcher(req.resourcePath());
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private static String key(String owner, String resourceGroup, String name) {
