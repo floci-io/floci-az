@@ -91,6 +91,21 @@ public class DeploymentEngine {
 
     private static final String MANAGEMENT_GROUP_API_VERSION = "2021-04-01";
 
+    /**
+     * The types a management-group deployment can hold ({@code deploy-to-management-group.md}, "Supported resources"),
+     * lowercase. A subscription-level type outside it, such as a resource group, is refused before anything is written.
+     */
+    private static final Set<String> MANAGEMENT_GROUP_TYPES = Set.of(
+        "microsoft.blueprint/blueprints", "microsoft.blueprint/blueprints/artifacts",
+        "microsoft.blueprint/blueprints/versions", "microsoft.blueprint/blueprintassignments",
+        "microsoft.authorization/policyassignments", "microsoft.authorization/policydefinitions",
+        "microsoft.authorization/policysetdefinitions", "microsoft.policyinsights/remediations",
+        "microsoft.authorization/privatelinkassociations", "microsoft.authorization/roleassignments",
+        "microsoft.authorization/roleassignmentschedulerequests", "microsoft.authorization/roledefinitions",
+        "microsoft.authorization/roleeligibilityschedulerequests",
+        "microsoft.authorization/rolemanagementpolicyassignments", "microsoft.resources/deployments",
+        "microsoft.insights/diagnosticsettings", "microsoft.resources/tags");
+
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -493,7 +508,9 @@ public class DeploymentEngine {
         if (!request.inResourceGroup() && !nested && !resource.existing()) {
             types.type(ArmResourcePath.normalizedType(type))
                 .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP
-                    || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION))
+                    || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION)
+                    || (request.atManagementGroup() && served.scope() == ArmScopeKind.SUBSCRIPTION
+                        && !MANAGEMENT_GROUP_TYPES.contains(ArmResourcePath.normalizedType(type).toLowerCase(Locale.ROOT))))
                 .ifPresent(served -> {
                     String home = served.scope() == ArmScopeKind.RESOURCE_GROUP ? "resource group" : "subscription";
                     throw DeploymentTemplate.invalid("The resource '" + name + "' of type '" + type + "' belongs "

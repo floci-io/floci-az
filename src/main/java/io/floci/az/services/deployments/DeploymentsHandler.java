@@ -617,8 +617,8 @@ public class DeploymentsHandler implements AzureServiceHandler, Resettable, Reso
         if (location != null) {
             return location;
         }
-        DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup, name,
-            body.get("properties"), req);
+        DeploymentEngine.Request request = new DeploymentEngine.Request(subscriptionId, resourceGroup,
+            managementGroup(req), name, body.get("properties"), req);
         try {
             DeploymentEngine.Prepared prepared = engine.prepare(request);
             List<String> resources = prepared.resourceIds();

@@ -72,8 +72,9 @@ resource group through one that names both `subscriptionId` and `resourceGroup`,
 ## Management-group deployments
 
 `/providers/Microsoft.Management/managementGroups/{group}/providers/Microsoft.Resources/deployments/{name}` serves the
-same operations as the other scopes. It carries a `location`, the group must exist, and its resources are ones that
-live at management-group level. `managementGroup()` returns the group, `managementGroupResourceId()` builds an id under
+same operations as the other scopes. It carries a `location`, the group must exist, and its resources are the types the
+ARM docs list for that scope (policy, role and blueprint types, diagnostic settings, tags and nested deployments); a
+resource group or another subscription-level type is refused before anything is written. `managementGroup()` returns the group, `managementGroupResourceId()` builds an id under
 it or a named group, and `resourceId()` answers `/providers/...`, as Azure documents.
 
 A nested deployment targets a group through `scope`, as a management group's id or
