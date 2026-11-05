@@ -229,6 +229,14 @@ expansion could not fit in.
 template that builds a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the
 emulator routes.
 
+### Key Vault parameter references
+
+A deployment parameter can be `{"reference": {"keyVault": {"id": ...}, "secretName": ..., "secretVersion": ...}}`, read
+from the vault's secrets when the deployment is validated or prepared. As the ARM docs require, the vault must have
+`enabledForTemplateDeployment` set to `true`. The value is never echoed: floci-az refuses a reference to a parameter
+that isn't `securestring` or `secureObject`, which the deployment would echo. Azure's error codes for these failures
+have no local source, so each one is `400 InvalidTemplate`.
+
 ### CIDR and `deployer`
 
 `parseCidr`, `cidrSubnet` and `cidrHost` serve IPv4 and IPv6 as the ARM docs show. The docs do not cover an IPv4 `/31`
@@ -279,7 +287,6 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - `pickZones`, `providers`, `roleDefinitions`
-- Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
 ## Intentional deviations

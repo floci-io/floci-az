@@ -90,6 +90,8 @@ public class ArmRouter {
      * The stages a request floci-az makes to itself runs through, in the routing filter's order. Every stage of
      * the chain ahead of these, and the ones after, matches only hosts and paths an ARM resource id never has.
      */
+    private static final String KEY_VAULT_DATA_PLANE_VERSION = "7.4";
+
     private final List<Function<RoutingContext, RouteOutcome>> internalStages;
 
     /**
@@ -197,6 +199,42 @@ public class ArmRouter {
     public Response dispatchInternal(String method, String path, Map<String, String> query,
                                      Map<String, String> headers, byte[] body, AzureRequest origin) {
         String relative = path.startsWith("/") ? path.substring(1) : path;
+        RoutingContext ctx = internalContext(method, relative, query, headers, body, origin);
+        LOG.debugv("Internal ARM request: {0} {1}", ctx.method(), relative);
+        for (Function<RoutingContext, RouteOutcome> stage : internalStages) {
+            RouteOutcome outcome = stage.apply(ctx);
+            if (outcome instanceof Handled handled) {
+                return handled.response();
+            }
+            if (outcome == Fallthrough.TO_JAX_RS) {
+                break;
+            }
+        }
+        return ArmErrors.notFound("Resource not found: " + relative);
+    }
+
+    /**
+     * Reads a secret of the named vault through the Key Vault data plane on behalf of {@code origin}, the way a
+     * template deployment resolves a Key Vault parameter reference. An ARM path cannot name a vault's data plane, so
+     * this is the one internal request that does not start from one. The data plane challenges a request with no
+     * credentials, so one sent for an origin without any carries a placeholder: the origin already passed the gate.
+     *
+     * @param version the secret's version, or null for the current one
+     */
+    public Response readKeyVaultSecret(String vault, String secret, String version, AzureRequest origin) {
+        String path = "secrets/" + secret + (version == null ? "" : "/" + version);
+        Map<String, String> headers = authorization(origin) == null
+            ? Map.of(HttpHeaders.AUTHORIZATION, "Bearer floci-internal") : Map.of();
+        RoutingContext ctx = internalContext("GET", path, Map.of("api-version", KEY_VAULT_DATA_PLANE_VERSION), headers,
+            null, origin);
+        RouteOutcome outcome = dispatcher.dispatchOrServiceDisabled(ctx, vault, "keyvault", path);
+        return outcome instanceof Handled handled ? handled.response()
+            : ArmErrors.notFound("Secret not found: " + secret);
+    }
+
+    /** The routing context of a request floci-az makes to itself: {@code origin}'s caller, scheme and authority. */
+    private RoutingContext internalContext(String method, String relative, Map<String, String> query,
+                                           Map<String, String> headers, byte[] body, AzureRequest origin) {
         // Case-insensitive, as header names are, so a caller's header replaces a forwarded one in any spelling.
         Map<String, String> initialHeaders = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         if (origin.headers() != null) {
@@ -218,21 +256,10 @@ public class ArmRouter {
         String rawQuery = query.isEmpty() ? null : query.entrySet().stream()
             .map(entry -> entry.getKey() + "=" + entry.getValue())
             .collect(Collectors.joining("&"));
-        RoutingContext ctx = new RoutingContext(method.toUpperCase(Locale.ROOT), relative, relative, rawQuery,
+        return new RoutingContext(method.toUpperCase(Locale.ROOT), relative, relative, rawQuery,
             requestHeaders, requestHeaders.map(), queryParameters,
             body == null ? InputStream.nullInputStream() : new ByteArrayInputStream(body), origin.host(), origin.secure(),
             origin.remoteAddress(), authority, scopeResolver.resolve(relative, origin.host(), authorization(origin)));
-        LOG.debugv("Internal ARM request: {0} {1}", ctx.method(), relative);
-        for (Function<RoutingContext, RouteOutcome> stage : internalStages) {
-            RouteOutcome outcome = stage.apply(ctx);
-            if (outcome instanceof Handled handled) {
-                return handled.response();
-            }
-            if (outcome == Fallthrough.TO_JAX_RS) {
-                break;
-            }
-        }
-        return ArmErrors.notFound("Resource not found: " + relative);
     }
 
     /** The caller's {@code Authorization} header, so an internal request is scoped to the same caller. */

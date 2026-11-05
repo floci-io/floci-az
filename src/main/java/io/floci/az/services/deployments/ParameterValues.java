@@ -21,11 +21,18 @@ final class ParameterValues {
     private ParameterValues() {
     }
 
+    /** Reads the secret a Key Vault parameter reference names. */
+    interface SecretReader {
+        /** @param secretVersion the version the reference pins, or null for the current one */
+        JsonNode read(String vaultId, String secretName, String secretVersion);
+    }
+
     /**
-     * The supplied values keyed by lowercase name. A supplied parameter the template does not declare, and a Key
-     * Vault {@code reference} (not supported yet), are each an {@code InvalidTemplate}.
+     * The supplied values keyed by lowercase name, a Key Vault {@code reference} resolved through {@code secrets}
+     * ({@code key-vault-parameter.md}). A supplied parameter the template does not declare is an
+     * {@code InvalidTemplate}, and so is a reference to a parameter that is not secure, which the deployment would echo.
      */
-    static Map<String, JsonNode> supplied(DeploymentTemplate template, JsonNode parameters) {
+    static Map<String, JsonNode> supplied(DeploymentTemplate template, JsonNode parameters, SecretReader secrets) {
         Map<String, JsonNode> values = new HashMap<>();
         if (parameters == null || parameters.isMissingNode() || parameters.isNull()) {
             return values;
@@ -39,9 +46,11 @@ final class ParameterValues {
                     + "' is not declared in the template, so it cannot be provided.");
             }
             JsonNode entry = field.getValue();
-            if (entry.has("reference")) {
-                throw DeploymentTemplate.invalid("The template parameter '" + field.getKey() + "' is a Key Vault "
-                    + "reference, which floci-az does not support yet.");
+            // azd sends every parameter as {"value": ..., "reference": null}, so a null reference is no reference.
+            if (entry.path("reference").isObject()) {
+                values.put(field.getKey().toLowerCase(Locale.ROOT),
+                    secretReference(template.parameter(field.getKey()), entry.get("reference"), secrets));
+                continue;
             }
             if (!entry.has("value")) {
                 throw DeploymentTemplate.invalid("The template parameter '" + field.getKey()
@@ -50,6 +59,22 @@ final class ParameterValues {
             values.put(field.getKey().toLowerCase(Locale.ROOT), entry.get("value"));
         }
         return values;
+    }
+
+    private static JsonNode secretReference(DeploymentTemplate.Parameter declared, JsonNode reference,
+                                            SecretReader secrets) {
+        if (!declared.secure()) {
+            throw DeploymentTemplate.invalid("The template parameter '" + declared.name() + "' is a Key Vault "
+                + "reference, so it must be declared 'securestring' or 'secureObject'.");
+        }
+        JsonNode vaultId = reference.path("keyVault").path("id");
+        JsonNode secretName = reference.path("secretName");
+        if (!vaultId.isTextual() || !secretName.isTextual()) {
+            throw DeploymentTemplate.invalid("The Key Vault reference of the template parameter '" + declared.name()
+                + "' needs a 'keyVault' id and a 'secretName'.");
+        }
+        JsonNode version = reference.path("secretVersion");
+        return secrets.read(vaultId.asText(), secretName.asText(), version.isTextual() ? version.asText() : null);
     }
 
     /** Fails unless {@code value} fits {@code declared}'s type and is one of its allowed values. */
