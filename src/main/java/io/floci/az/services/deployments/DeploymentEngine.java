@@ -106,6 +106,12 @@ public class DeploymentEngine {
         "microsoft.authorization/rolemanagementpolicyassignments", "microsoft.resources/deployments",
         "microsoft.insights/diagnosticsettings", "microsoft.resources/tags");
 
+    private static final String KEY_VAULT_API_VERSION = "2023-07-01";
+
+    private static final Pattern KEY_VAULT_ID = Pattern.compile(
+        "/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.KeyVault/vaults/([^/]+)/?",
+        Pattern.CASE_INSENSITIVE);
+
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -455,7 +461,8 @@ public class DeploymentEngine {
             throw DeploymentTemplate.invalid("The deployment 'template' is missing.");
         }
         DeploymentTemplate template = DeploymentTemplate.parse(properties.get("template"));
-        Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"));
+        Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"),
+            (vaultId, secretName, secretVersion) -> readSecret(request, vaultId, secretName, secretVersion));
         List<DependencyGraph.Node> nodes = new ArrayList<>();
         Map<String, TemplateScope> instanceScopes = new LinkedHashMap<>();
         DeploymentScope scope = scope(request, template, supplied, nodes, instanceScopes);
@@ -1127,6 +1134,36 @@ public class DeploymentEngine {
         ObjectNode whole = answer.deepCopy();
         whole.put("apiVersion", version);
         return whole;
+    }
+
+    /**
+     * The value of a Key Vault parameter reference ({@code key-vault-parameter.md}). The vault is read through ARM, so
+     * its tenant scope applies, and must allow template deployments; the secret is read through the data plane. Azure's
+     * error codes for these failures have no local source, so each is an {@code InvalidTemplate}.
+     */
+    private JsonNode readSecret(Request request, String vaultId, String secretName, String secretVersion) {
+        Matcher vault = KEY_VAULT_ID.matcher(vaultId);
+        if (!vault.matches()) {
+            throw DeploymentTemplate.invalid("The Key Vault reference id '" + vaultId + "' is not a vault's id.");
+        }
+        Response read = router.get().dispatchInternal("GET", vaultId,
+            Map.of("api-version", KEY_VAULT_API_VERSION), request.origin());
+        JsonNode answer = entity(read);
+        if (read.getStatus() != 200) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' of a parameter reference could not be "
+                + "read: " + errorMessage(answer));
+        }
+        if (!answer.path("properties").path("enabledForTemplateDeployment").asBoolean(false)) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' does not allow template deployments: "
+                + "set 'enabledForTemplateDeployment' to true.");
+        }
+        Response secret = router.get().readKeyVaultSecret(vault.group(1), secretName, secretVersion, request.origin());
+        JsonNode bundle = entity(secret);
+        if (secret.getStatus() != 200 || !bundle.path("value").isTextual()) {
+            throw DeploymentTemplate.invalid("The secret '" + secretName + "' of Key Vault '" + vaultId
+                + "' could not be read: " + errorMessage(bundle));
+        }
+        return JsonNodeFactory.instance.textNode(bundle.get("value").asText());
     }
 
     /** {@code managementGroup()} ({@code template-functions-scope.md}): the group a deployment runs at, as ARM reads it. */
