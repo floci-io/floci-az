@@ -500,6 +500,26 @@ resource "azurerm_resource_group_template_deployment" "tpl" {
         name       = "[concat(parameters('accountName'), '/default/tplcontainer')]"
         dependsOn  = ["[resourceId('Microsoft.Storage/storageAccounts', parameters('accountName'))]"]
         properties = {}
+      },
+      {
+        type       = "Microsoft.Resources/deployments"
+        apiVersion = "2022-09-01"
+        name       = "floci-test-module"
+        properties = {
+          mode = "Incremental"
+          template = {
+            "$schema"      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
+            contentVersion = "1.0.0.0"
+            resources = [
+              {
+                type       = "Microsoft.ManagedIdentity/userAssignedIdentities"
+                apiVersion = "2023-01-31"
+                name       = "floci-test-module-identity"
+                location   = "[resourceGroup().location]"
+              }
+            ]
+          }
+        }
       }
     ]
     outputs = {

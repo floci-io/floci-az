@@ -80,6 +80,9 @@ public class DeploymentEngine {
     /** A nested deployment may hold many resources, so it is polled for up to ten minutes. */
     private static final int NESTED_POLL_ATTEMPTS = 2400;
 
+    /** The version the engine reads a nested deployment's record with; the handler pins none. */
+    private static final String NESTED_READ_API_VERSION = "2025-04-01";
+
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -138,8 +141,9 @@ public class DeploymentEngine {
      * @param provisioningState {@code Succeeded} or {@code Failed}
      * @param parameters        the echoed parameters, secure values left out
      * @param outputs           the evaluated outputs, each {@code {"type", "value"}}; empty when it failed
-     * @param outputResources   the ids of the resources it created or updated, in creation order
-     * @param providers         the namespaces and types it deployed, Azure's {@code providers} shape
+     * @param outputResources   the ids of the resources it created or updated, in creation order; a nested deployment
+     *                          contributes the resources it deployed rather than its own id, as Azure lists them
+     * @param providers         the namespaces and types of those resources, Azure's {@code providers} shape
      * @param dependencies      the explicit and implicit dependencies, Azure's {@code dependencies} shape
      * @param error             the {@code DeploymentFailed} error, or null when it succeeded
      * @param templateHash      a stable hash of the template
@@ -343,13 +347,13 @@ public class DeploymentEngine {
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
         List<String> deployed = new ArrayList<>();
-        List<DependencyGraph.Node> deployedNodes = new ArrayList<>();
+        Map<String, Set<String>> deployedTypes = new LinkedHashMap<>();
         List<Operation> operations = new ArrayList<>();
         for (DependencyGraph.Node node : plan.order()) {
             if (canceled.getAsBoolean()) {
                 LOG.infov("Deployment {0} canceled after {1} resource(s)", request.name(), deployed.size());
                 return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                    providers(deployedNodes), dependencies(plan), null, templateHash, started, Instant.now(),
+                    providers(deployedTypes), dependencies(plan), null, templateHash, started, Instant.now(),
                     operations);
             }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
@@ -360,11 +364,10 @@ public class DeploymentEngine {
             ObjectNode failure = create(request, plan, node, definition, operations);
             if (failure != null) {
                 return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                    providers(deployedNodes), dependencies(plan), deploymentFailed(request, failure), templateHash,
+                    providers(deployedTypes), dependencies(plan), deploymentFailed(request, failure), templateHash,
                     started, Instant.now(), operations);
             }
-            deployed.add(node.id());
-            deployedNodes.add(node);
+            recordDeployed(request, node, definition, deployed, deployedTypes);
         }
         ObjectNode outputs;
         Instant outputsStarted = Instant.now();
@@ -374,12 +377,12 @@ public class DeploymentEngine {
             ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
             operations.add(outputOperation("Failed", detail, outputsStarted));
             return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                providers(deployedNodes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
+                providers(deployedTypes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
                 Instant.now(), operations);
         }
         operations.add(outputOperation("Succeeded", null, outputsStarted));
         LOG.infov("Deployment {0} succeeded: {1} resource(s)", request.name(), deployed.size());
-        return new Result("Succeeded", parameters, outputs, deployed, providers(deployedNodes), dependencies(plan),
+        return new Result("Succeeded", parameters, outputs, deployed, providers(deployedTypes), dependencies(plan),
             null, templateHash, started, Instant.now(), operations);
     }
 
@@ -1083,20 +1086,50 @@ public class DeploymentEngine {
         return values;
     }
 
-    private ArrayNode providers(List<DependencyGraph.Node> deployed) {
-        Map<String, Map<String, Set<String>>> byNamespace = new LinkedHashMap<>();
-        for (DependencyGraph.Node node : deployed) {
+    /**
+     * Adds what a resource that just succeeded contributes to its deployment's {@code outputResources} and
+     * {@code providers}. A nested deployment contributes what it deployed, read back from its own record, so a module
+     * nested at any depth reports its resources; its own id is left out, as Azure leaves it out.
+     */
+    private void recordDeployed(Request request, DependencyGraph.Node node, ObjectNode definition, List<String> ids,
+                                Map<String, Set<String>> types) {
+        if (!DeploymentTemplate.isNestedDeployment(definition)) {
+            addDeployedId(ids, node.id());
             List<String> segments = ArmResourcePath.segments(node.type());
-            byNamespace.computeIfAbsent(segments.getFirst(), ignored -> new LinkedHashMap<>())
-                .computeIfAbsent(String.join("/", segments.subList(1, segments.size())),
-                    ignored -> new LinkedHashSet<>());
+            types.computeIfAbsent(segments.getFirst(), ignored -> new LinkedHashSet<>())
+                .add(String.join("/", segments.subList(1, segments.size())));
+            return;
         }
+        Response response = router.get().dispatchInternal("GET", node.id(),
+            Map.of("api-version", NESTED_READ_API_VERSION), request.origin());
+        if (response.getStatus() != 200) {
+            LOG.warnv("Deployment {0}: could not read nested deployment {1} ({2}), so its resources are not listed",
+                request.name(), node.id(), response.getStatus());
+            return;
+        }
+        JsonNode properties = entity(response).path("properties");
+        properties.path("outputResources").forEach(resource -> addDeployedId(ids, resource.path("id").asText()));
+        properties.path("providers").forEach(provider -> {
+            Set<String> resourceTypes = types.computeIfAbsent(provider.path("namespace").asText(),
+                ignored -> new LinkedHashSet<>());
+            provider.path("resourceTypes").forEach(type -> resourceTypes.add(type.path("resourceType").asText()));
+        });
+    }
+
+    /** ARM ids are case-insensitive, so two modules writing one resource list it once. */
+    private static void addDeployedId(List<String> ids, String id) {
+        if (ids.stream().noneMatch(id::equalsIgnoreCase)) {
+            ids.add(id);
+        }
+    }
+
+    private static ArrayNode providers(Map<String, Set<String>> deployedTypes) {
         ArrayNode providers = JsonNodeFactory.instance.arrayNode();
-        byNamespace.forEach((namespace, resourceTypes) -> {
+        deployedTypes.forEach((namespace, resourceTypes) -> {
             ObjectNode provider = providers.addObject();
             provider.put("namespace", namespace);
             ArrayNode typesNode = provider.putArray("resourceTypes");
-            resourceTypes.keySet().forEach(resourceType -> typesNode.addObject().put("resourceType", resourceType));
+            resourceTypes.forEach(resourceType -> typesNode.addObject().put("resourceType", resourceType));
         });
         return providers;
     }
