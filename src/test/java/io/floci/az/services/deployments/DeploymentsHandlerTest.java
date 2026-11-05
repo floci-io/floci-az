@@ -1075,6 +1075,27 @@ class DeploymentsHandlerTest {
               {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "deploysa0001",
                "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}}]}}}
             """).then().statusCode(400).body("error.code", equalTo("InvalidTemplate"));
+        putAtManagementGroup("grouphome", """
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Resources/resourceGroups", "apiVersion": "2021-04-01", "name": "rg-not-here",
+               "location": "westeurope"}]}}}
+            """).then().statusCode(400).body("error.code", equalTo("InvalidTemplate"));
+        given().when().get("/subscriptions/" + SUB + "/resourceGroups/rg-not-here?api-version=2021-04-01")
+            .then().statusCode(404);
+    }
+
+    @Test
+    void validateAtAManagementGroupEvaluatesAgainstItsGroup() {
+        managementGroupExists();
+        given().contentType("application/json").body("""
+            {"location": "westeurope", "properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.Authorization/policyDefinitions", "apiVersion": "2021-06-01",
+               "name": "[concat(managementGroup().name, '-policy')]", "properties": {"mode": "All", "policyRule": {
+                 "if": {"field": "type", "equals": "Microsoft.Storage/storageAccounts"}, "then": {"effect": "audit"}}}}]}}}
+            """).when().post(MG_DEPLOYMENTS + "/mgvalidate/validate" + API)
+            .then().statusCode(200)
+            .body("properties.validatedResources[0].id",
+                equalTo(MANAGEMENT_GROUP + "/providers/Microsoft.Authorization/policyDefinitions/deploy-mg-policy"));
     }
 
     @Test
