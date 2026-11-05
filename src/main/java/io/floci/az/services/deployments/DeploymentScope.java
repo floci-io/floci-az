@@ -2,6 +2,7 @@ package io.floci.az.services.deployments;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.HashMap;
@@ -28,6 +29,8 @@ final class DeploymentScope implements TemplateScope {
     /** What the engine answers for a live call. */
     interface LiveCalls {
         JsonNode reference(String resourceNameOrId, String apiVersion, boolean full);
+
+        JsonNode references(String symbol, boolean full);
 
         JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
     }
@@ -175,6 +178,11 @@ final class DeploymentScope implements TemplateScope {
     }
 
     @Override
+    public JsonNode references(String symbol, boolean full) {
+        return live.references(symbol, full);
+    }
+
+    @Override
     public JsonNode list(String resourceId, String action, String apiVersion, JsonNode body) {
         return live.list(resourceId, action, apiVersion, body);
     }
@@ -195,6 +203,9 @@ final class DeploymentScope implements TemplateScope {
 
     private JsonNode defaultValue(DeploymentTemplate.Parameter declared) {
         if (declared.defaultValue() == null) {
+            if (declared.nullable()) {
+                return NullNode.getInstance();
+            }
             throw DeploymentTemplate.invalid("The value for the template parameter '" + declared.name()
                 + "' is not provided.");
         }

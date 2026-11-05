@@ -27,7 +27,7 @@ import static io.floci.az.services.deployments.TemplateValues.typeName;
  * function the scope answers ({@link UserFunctions}).
  *
  * <p>Functions floci-az does not implement are an {@code InvalidTemplate} error, never a silent value:
- * {@code providers}, {@code references}, {@code pickZones},
+ * {@code providers}, {@code pickZones},
  * {@code managementGroup}, {@code managementGroupResourceId}, {@code deployer}, {@code roleDefinitions}, the lambda
  * functions ({@code lambda}, {@code filter}, {@code map}, {@code reduce}, {@code sort}, {@code toObject},
  * {@code groupBy}, {@code mapValues}), the CIDR functions ({@code parseCidr}, {@code cidrSubnet}, {@code cidrHost}),
