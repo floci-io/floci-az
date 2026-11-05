@@ -56,6 +56,15 @@ public interface TemplateScope {
      */
     JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
 
+    /**
+     * {@code lambdaVariables()}: the value of a variable of the lambda being evaluated. Outside a lambda there is none,
+     * including inside {@code reference()} and the {@code list*} functions, whose arguments are read before a lambda
+     * binds anything, which is the limitation {@code template-functions-lambda.md} documents.
+     */
+    default JsonNode lambdaVariable(String name) {
+        throw TemplateException.invalid("The lambda variable '" + name + "' is not available here.");
+    }
+
     /** The scope a deployment runs at, which decides the form of the ids {@code resourceId()} builds. */
     enum Level { RESOURCE_GROUP, SUBSCRIPTION, TENANT }
 

@@ -52,8 +52,7 @@ final class TemplateFunctions {
     /** Functions Azure documents that floci-az does not implement; calling one is an error, never a guess. */
     static final Set<String> UNSUPPORTED = Set.of(
         "providers", "pickzones", "managementgroup", "managementgroupresourceid",
-        "deployer", "roledefinitions", "lambda", "filter", "map", "reduce", "sort", "toobject", "groupby",
-        "mapvalues", "parsecidr", "cidrsubnet", "cidrhost");
+        "deployer", "roledefinitions", "lambda", "parsecidr", "cidrsubnet", "cidrhost");
 
     /** The {@code guid()} namespace ({@code template-functions-string.md}, guid). */
     private static final UUID GUID_NAMESPACE = UUID.fromString("11fb06fb-712d-4ddd-98c7-e71bbd588830");
@@ -155,6 +154,8 @@ final class TemplateFunctions {
             case "uricomponenttostring" -> NODES.textNode(URLDecoder.decode(
                 string(name, args, 0, 1, 1).replace("+", "%2B"), StandardCharsets.UTF_8));
             case "union" -> union(name, args);
+            case "flatten" -> flatten(name, args);
+            case "lambdavariables" -> scope.lambdaVariable(string(name, args, 0, 1, 1));
             case "intersection" -> intersection(name, args);
             case "createarray" -> createArray(args);
             case "createobject" -> createObject(name, args);
@@ -223,6 +224,18 @@ final class TemplateFunctions {
             throw typeError(name, value, "a boolean");
         }
         return value.booleanValue();
+    }
+
+    /** {@code flatten(arrayOfArrays)}: one level of sub-arrays, in their order (Bicep's {@code SystemNamespaceType}). */
+    private static JsonNode flatten(String name, List<JsonNode> args) {
+        ArrayNode flattened = NODES.arrayNode();
+        for (JsonNode element : array(name, args, 0, 1, 1)) {
+            if (!element.isArray()) {
+                throw typeError(name, element, "an array of arrays");
+            }
+            flattened.addAll((ArrayNode) element);
+        }
+        return flattened;
     }
 
     private static ArrayNode array(String name, List<JsonNode> args, int index, int min, int max) {
