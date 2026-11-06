@@ -14,6 +14,7 @@ import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.core.docker.CurrentContainerNetworkResolver;
 import io.floci.az.services.eventhub.ArtemisTlsGenerator;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Manages one Artemis container per Service Bus namespace.
@@ -142,6 +144,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     private final CurrentContainerNetworkResolver currentContainerResolver;
     private final ServiceBusConfigGenerator configGenerator;
     private final ArtemisTlsGenerator tlsGenerator;
+    private final Consumer<String> brokerStarted;
 
     @Inject
     public ServiceBusNamespaceManager(EmulatorConfig config,
@@ -149,13 +152,37 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
                                        ContainerLifecycleManager lifecycleManager,
                                        CurrentContainerNetworkResolver currentContainerResolver,
                                        ServiceBusConfigGenerator configGenerator,
+                                       ArtemisTlsGenerator tlsGenerator,
+                                       Event<ServiceBusBrokerStarted> brokerStarted) {
+        this(config, containerBuilder, lifecycleManager, currentContainerResolver,
+                configGenerator, tlsGenerator,
+                namespace -> brokerStarted.fire(new ServiceBusBrokerStarted(namespace)));
+    }
+
+    public ServiceBusNamespaceManager(EmulatorConfig config,
+                                       ContainerBuilder containerBuilder,
+                                       ContainerLifecycleManager lifecycleManager,
+                                       CurrentContainerNetworkResolver currentContainerResolver,
+                                       ServiceBusConfigGenerator configGenerator,
                                        ArtemisTlsGenerator tlsGenerator) {
+        this(config, containerBuilder, lifecycleManager, currentContainerResolver,
+                configGenerator, tlsGenerator, namespace -> { });
+    }
+
+    ServiceBusNamespaceManager(EmulatorConfig config,
+                               ContainerBuilder containerBuilder,
+                               ContainerLifecycleManager lifecycleManager,
+                               CurrentContainerNetworkResolver currentContainerResolver,
+                               ServiceBusConfigGenerator configGenerator,
+                               ArtemisTlsGenerator tlsGenerator,
+                               Consumer<String> brokerStarted) {
         this.config = config;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.currentContainerResolver = currentContainerResolver;
         this.configGenerator = configGenerator;
         this.tlsGenerator = tlsGenerator;
+        this.brokerStarted = brokerStarted;
     }
 
     ServiceBusNamespaceManager(EmulatorConfig config,
@@ -263,6 +290,7 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
 
             LOG.infov("Service Bus namespace ''{0}'' ready: amqp:{1}, amqps:{2}",
                     namespaceName, amqpEndpoint, amqpsEndpoint);
+            brokerStarted.accept(namespaceName);
             return state;
         } catch (RuntimeException e) {
             logFailedStart(namespaceName, containerId);
