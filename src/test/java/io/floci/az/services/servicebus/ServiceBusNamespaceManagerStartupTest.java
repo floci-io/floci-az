@@ -273,8 +273,10 @@ class ServiceBusNamespaceManagerStartupTest {
                     .thenReturn(new ContainerLifecycleManager.ContainerInfo("container-id",
                             Map.of(5672, resolved, 5671, resolved, 8161, resolved),
                             Map.of(5672, 49175, 5671, 49176, 8161, 49177)));
+            List<String> startedBrokers = new ArrayList<>();
             ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
-                    config, containerBuilder, lifecycleManager, configGenerator, tlsGenerator);
+                    config, containerBuilder, lifecycleManager, null, configGenerator, tlsGenerator,
+                    startedBrokers::add);
 
             try {
                 ServiceBusNamespaceManager.NamespaceState state = manager.startNamespace("default", 0, 0);
@@ -283,6 +285,7 @@ class ServiceBusNamespaceManagerStartupTest {
                 assertEquals(broker.getLocalPort(), state.amqpsPort());
                 assertEquals(49175, state.amqpHostPort());
                 assertEquals(49176, state.amqpsHostPort());
+                assertEquals(List.of("default"), startedBrokers);
             } finally {
                 manager.stopNamespace("default");
             }
