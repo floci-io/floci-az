@@ -54,10 +54,25 @@ final class DirectorySeed {
                     optional(application, "displayName", appId), credentials));
         }
         for (JsonNode user : array(root, "users")) {
-            fields(user, Set.of("id", "userPrincipalName", "displayName", "mail"));
+            fields(user, Set.of("id", "userPrincipalName", "displayName", "mail", "accountEnabled", "passwordProfile"));
             String upn = required(user, "userPrincipalName");
-            objects.add(GraphDirectoryStore.user(tenant, id(user), upn,
-                    optional(user, "displayName", upn), optional(user, "mail", null)));
+            DirectoryObject object = GraphDirectoryStore.user(tenant, id(user), upn,
+                    optional(user, "displayName", upn), optional(user, "mail", null));
+            validateOptionalBoolean(user, "accountEnabled");
+            if (user.has("accountEnabled")) {
+                object.props().put("accountEnabled", user.get("accountEnabled").asBoolean());
+            }
+            if (user.has(GraphDirectoryStore.PASSWORD_PROFILE)) {
+                JsonNode profile = user.get(GraphDirectoryStore.PASSWORD_PROFILE);
+                fields(profile, Set.of("password", "forceChangePasswordNextSignIn", "forceChangePasswordNextSignInWithMfa"));
+                if (profile.has("password")) {
+                    required(profile, "password");
+                }
+                validateOptionalBoolean(profile, "forceChangePasswordNextSignIn");
+                validateOptionalBoolean(profile, "forceChangePasswordNextSignInWithMfa");
+                object.props().set(GraphDirectoryStore.PASSWORD_PROFILE, profile.deepCopy());
+            }
+            objects.add(object);
         }
         for (JsonNode group : array(root, "groups")) {
             fields(group, Set.of("id", "displayName", "securityEnabled", "members"));
@@ -171,5 +186,12 @@ final class DirectorySeed {
 
     private static String optional(JsonNode object, String field, String fallback) {
         return object.has(field) && !object.path(field).isNull() ? required(object, field) : fallback;
+    }
+
+    private static void validateOptionalBoolean(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        if (value != null && !value.isBoolean()) {
+            throw new IllegalArgumentException("Seed " + field + " must be a boolean.");
+        }
     }
 }

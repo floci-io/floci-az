@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -49,7 +50,8 @@ class EntraCompatibilityTest {
     private static final String TENANT = "00000000-0000-0000-0000-000000000002";
     private static final String CLIENT_ID = "11111111-1111-1111-1111-111111111111";
     private static final String CLIENT_SECRET = "floci-az-dev-secret";
-    private static final String DEV_USER = "dev-user@floci-az.local";
+    private static final String USERNAME = System.getenv().getOrDefault("FLOCI_AZ_ENTRA_USERNAME", "dev-user@floci-az.local");
+    private static final String PASSWORD = System.getenv().getOrDefault("FLOCI_AZ_ENTRA_PASSWORD", "any-password");
     private static final String API_SCOPE = "api://floci-compat/.default";
 
     private static final HttpClient HTTP = HttpClient.newHttpClient();
@@ -116,8 +118,8 @@ class EntraCompatibilityTest {
         TokenCredential credential = new UsernamePasswordCredentialBuilder()
                 .tenantId(TENANT)
                 .clientId(CLIENT_ID)
-                .username(DEV_USER)
-                .password("any-password")
+                .username(USERNAME)
+                .password(PASSWORD)
                 .authorityHost(httpsBase())
                 .disableInstanceDiscovery()
                 .addPolicy(new EmulatorConfig.ForceHttpPolicy())
@@ -131,12 +133,16 @@ class EntraCompatibilityTest {
         assertEquals(CLIENT_ID, claims.get("azp").asText());
         assertFalse(claims.has("idtyp"), "a delegated token carries no idtyp=app");
         assertFalse(claims.get("oid").asText().isBlank());
+        assertEquals(USERNAME, claims.get("preferred_username").asText());
+        assertEquals(claims.get("oid").asText(), claims.get("sub").asText());
     }
 
     @Test
     void passwordGrantOverTheWireIssuesASignedDelegatedToken() throws Exception {
-        String form = "grant_type=password&client_id=" + CLIENT_ID + "&username=" + DEV_USER
-                + "&password=any-password&scope=https%3A%2F%2Fmanagement.azure.com%2F.default";
+        String form = "grant_type=password&client_id=" + CLIENT_ID + "&username="
+                + URLEncoder.encode(USERNAME, StandardCharsets.UTF_8) + "&password="
+                + URLEncoder.encode(PASSWORD, StandardCharsets.UTF_8)
+                + "&scope=https%3A%2F%2Fmanagement.azure.com%2F.default";
         HttpRequest request = HttpRequest.newBuilder(URI.create(discovery.get("token_endpoint").asText()))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(form))

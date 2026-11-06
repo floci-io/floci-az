@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.Base64;
 
 /**
- * Hashes and verifies application client secrets with PBKDF2 (HMAC-SHA256) and a random salt,
+ * Hashes and verifies client secrets and user passwords with PBKDF2 (HMAC-SHA256) and a random salt,
  * using only the JCA. The iteration count is stored with every hash, so raising it later leaves
  * existing hashes verifiable.
  */
@@ -32,8 +32,8 @@ public final class SecretHasher {
     }
 
     /**
-     * A stored secret hash. Persisted inside an application's {@code passwordCredentials}, so the
-     * plaintext is never written to storage.
+     * A stored secret hash. Persisted inside an application's {@code passwordCredentials} or a
+     * user's {@code passwordProfile}, so plaintext is never written to storage.
      *
      * @param algorithm  the JCA algorithm name, {@link #ALGORITHM}
      * @param iterations the PBKDF2 iteration count the hash was derived with
@@ -71,7 +71,7 @@ public final class SecretHasher {
             byte[] actual = derive(candidate, decoder.decode(stored.salt()), stored.iterations());
             return MessageDigest.isEqual(expected, actual);
         } catch (IllegalArgumentException e) {
-            LOG.warnv("Entra: a stored client secret hash is malformed and matches nothing: {0}", e.getMessage());
+            LOG.warnv("Entra: a stored secret hash is malformed and matches nothing: {0}", e.getMessage());
             return false;
         }
     }

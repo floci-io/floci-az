@@ -61,6 +61,13 @@ class AadstsCatalogGoldenTest {
         GOLDEN.put(AadstsError.INVALID_SCOPE,
                 new Entry(70011, "invalid_scope", 400,
                         "The provided value for the input parameter 'scope' is not valid."));
+        GOLDEN.put(AadstsError.INVALID_USER_CREDENTIALS,
+                new Entry(50126, "invalid_grant", 400,
+                        "Error validating credentials due to invalid username or password."));
+        GOLDEN.put(AadstsError.USER_DISABLED,
+                new Entry(50057, "invalid_grant", 400, "User account is disabled."));
+        GOLDEN.put(AadstsError.PASSWORD_CHANGE_REQUIRED,
+                new Entry(50055, "invalid_grant", 400, "The password has expired and must be changed."));
         GOLDEN.put(AadstsError.MISSING_REQUIRED_PARAMETER,
                 new Entry(900144, "invalid_request", 400,
                         "The request body must contain the following parameter: '%s'."));
