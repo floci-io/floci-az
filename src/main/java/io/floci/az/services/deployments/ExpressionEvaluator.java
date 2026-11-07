@@ -28,9 +28,8 @@ import static io.floci.az.services.deployments.TemplateValues.typeName;
  *
  * <p>Functions floci-az does not implement are an {@code InvalidTemplate} error, never a silent value:
  * {@code providers}, {@code pickZones},
- * {@code managementGroup}, {@code managementGroupResourceId}, {@code deployer}, {@code roleDefinitions}, the lambda
- * functions ({@code lambda}, {@code filter}, {@code map}, {@code reduce}, {@code sort}, {@code toObject},
- * {@code groupBy}, {@code mapValues}), the CIDR functions ({@code parseCidr}, {@code cidrSubnet}, {@code cidrHost}),
+ * {@code managementGroup}, {@code managementGroupResourceId}, {@code deployer}, {@code roleDefinitions}, a
+ * {@code lambda} anywhere but as an argument of the functions {@link Lambdas} serves, the CIDR functions ({@code parseCidr}, {@code cidrSubnet}, {@code cidrHost}),
  * and the scope functions with arguments
  * ({@code resourceGroup(...)}, {@code subscription(...)}).
  *
@@ -96,6 +95,9 @@ public final class ExpressionEvaluator {
             case "and" -> logical(call, scope, true);
             case "or" -> logical(call, scope, false);
             default -> {
+                if (Lambdas.handles(name)) {
+                    yield Lambdas.call(call, scope);
+                }
                 List<JsonNode> arguments = new ArrayList<>();
                 for (Expression argument : call.arguments()) {
                     arguments.add(evaluate(argument, scope));
