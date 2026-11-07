@@ -54,6 +54,9 @@ final class ParameterValues {
 
     /** Fails unless {@code value} fits {@code declared}'s type and is one of its allowed values. */
     static void check(DeploymentTemplate.Parameter declared, JsonNode value) {
+        if (declared.nullable() && value != null && value.isNull()) {
+            return;
+        }
         if (!fits(declared.type(), value)) {
             throw DeploymentTemplate.invalid("The provided value for the template parameter '" + declared.name()
                 + "' is not valid. Expected a value of type '" + typeName(declared) + "'.");

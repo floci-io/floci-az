@@ -41,6 +41,14 @@ public interface TemplateScope {
     JsonNode reference(String resourceNameOrId, String apiVersion, boolean full);
 
     /**
+     * {@code references()}: the state of every deployed instance of the resource loop with this symbolic name, in copy
+     * index order.
+     */
+    default JsonNode references(String symbol, boolean full) {
+        throw TemplateException.invalid("The template function 'references' is not available here.");
+    }
+
+    /**
      * A {@code list*} function ({@code listKeys}, {@code listSecrets}, ...): the action {@code action} posted to the
      * resource.
      *

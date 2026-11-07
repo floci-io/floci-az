@@ -51,7 +51,7 @@ final class TemplateFunctions {
 
     /** Functions Azure documents that floci-az does not implement; calling one is an error, never a guess. */
     static final Set<String> UNSUPPORTED = Set.of(
-        "providers", "references", "pickzones", "managementgroup", "managementgroupresourceid",
+        "providers", "pickzones", "managementgroup", "managementgroupresourceid",
         "deployer", "roledefinitions", "lambda", "filter", "map", "reduce", "sort", "toobject", "groupby",
         "mapvalues", "parsecidr", "cidrsubnet", "cidrhost");
 
@@ -93,6 +93,8 @@ final class TemplateFunctions {
             case "tenantresourceid" -> NODES.textNode(tenantResourceId(name, args));
             case "extensionresourceid" -> NODES.textNode(extensionResourceId(name, args));
             case "reference" -> reference(name, args, scope);
+            case "references" -> scope.references(string(name, args, 0, 1, 2),
+                args.size() > 1 && "full".equalsIgnoreCase(string(name, args, 1, 1, 2)));
             case "copyindex" -> copyIndex(name, args, scope);
             case "true" -> booleanValue(name, args, true);
             case "false" -> booleanValue(name, args, false);

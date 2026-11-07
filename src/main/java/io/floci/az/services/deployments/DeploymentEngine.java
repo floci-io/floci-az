@@ -217,7 +217,10 @@ public class DeploymentEngine {
 
         /** The ids of the resources it will deploy, in creation order. */
         public List<String> resourceIds() {
-            return plan.order().stream().map(DependencyGraph.Node::id).toList();
+            return plan.order().stream()
+                .filter(node -> !plan.template().resources().get(node.index()).existing())
+                .map(DependencyGraph.Node::id)
+                .toList();
         }
 
         /** Its parameters as a deployment answer echoes them. */
@@ -257,6 +260,9 @@ public class DeploymentEngine {
             request.properties().path("whatIfSettings").path("resultFormat").asText(""));
         ArrayNode changes = JsonNodeFactory.instance.arrayNode();
         for (DependencyGraph.Node node : plan.order()) {
+            if (plan.template().resources().get(node.index()).existing()) {
+                continue;
+            }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
             if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scopeOf(node)))) {
                 continue;
@@ -353,6 +359,9 @@ public class DeploymentEngine {
                     providers(deployedTypes), dependencies(plan), null, templateHash, started, Instant.now(),
                     operations);
             }
+            if (plan.template().resources().get(node.index()).existing()) {
+                continue;
+            }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
             if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), plan.scopeOf(node)))) {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
@@ -405,14 +414,14 @@ public class DeploymentEngine {
         DeploymentTemplate template = DeploymentTemplate.parse(properties.get("template"));
         Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"));
         List<DependencyGraph.Node> nodes = new ArrayList<>();
-        DeploymentScope scope = scope(request, template, supplied, nodes);
-        Map<String, JsonNode> parameters = scope.resolvedParameters();
         Map<String, TemplateScope> instanceScopes = new LinkedHashMap<>();
+        DeploymentScope scope = scope(request, template, supplied, nodes, instanceScopes);
+        Map<String, JsonNode> parameters = scope.resolvedParameters();
         Set<String> emptyLoops = new LinkedHashSet<>();
         for (DeploymentTemplate.Resource resource : template.resources()) {
             JsonNode copy = resource.definition().get("copy");
             if (copy == null) {
-                nodes.add(node(request, resource, scope, null));
+                nodes.add(node(request, resource, scope, null, resource.symbol()));
                 continue;
             }
             // A copy loop is one resource per iteration, each evaluated with copyIndex() at its iteration.
@@ -420,10 +429,14 @@ public class DeploymentEngine {
             int count = CopyLoops.count(copy.get("count"), scope, loop);
             if (count == 0) {
                 emptyLoops.add(loop.toLowerCase(Locale.ROOT));
+                if (resource.symbol() != null) {
+                    emptyLoops.add(resource.symbol().toLowerCase(Locale.ROOT));
+                }
             }
             for (int i = 0; i < count; i++) {
                 CopyScope iteration = new CopyScope(scope, loop, i, true);
-                DependencyGraph.Node node = node(request, resource, iteration, loop);
+                DependencyGraph.Node node = node(request, resource, iteration, loop,
+                    resource.symbol() == null ? null : resource.symbol() + "[" + i + "]");
                 instanceScopes.put(node.id().toLowerCase(Locale.ROOT), iteration);
                 nodes.add(node);
             }
@@ -437,7 +450,7 @@ public class DeploymentEngine {
     }
 
     private DependencyGraph.Node node(Request request, DeploymentTemplate.Resource resource, TemplateScope scope,
-                                      String loop) {
+                                      String loop, String symbol) {
         ObjectNode definition = resource.definition();
         String type = text(evaluate(definition.get("type"), scope), "type");
         String name = text(evaluate(definition.get("name"), scope), "name");
@@ -449,7 +462,7 @@ public class DeploymentEngine {
             }
         }
         boolean nested = DeploymentTemplate.isNestedDeployment(definition);
-        if (!request.inResourceGroup() && !nested) {
+        if (!request.inResourceGroup() && !nested && !resource.existing()) {
             types.type(ArmResourcePath.normalizedType(type))
                 .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP
                     || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION))
@@ -465,11 +478,13 @@ public class DeploymentEngine {
             scopeId = nestedTarget(request, definition, scope);
         } else if (definition.has("scope")) {
             scopeId = extensionScope(request, text(evaluate(definition.get("scope"), scope), "scope"), name);
+        } else if (resource.existing()) {
+            scopeId = targetScope(request, definition, scope);
         } else {
             scopeId = request.scopeId();
         }
         return new DependencyGraph.Node(resource.index(), ArmResourcePath.id(scopeId, type, name),
-            type, name, dependsOn, loop);
+            type, name, dependsOn, loop, symbol);
     }
 
     /**
@@ -484,10 +499,15 @@ public class DeploymentEngine {
             throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
                 + "' targets a management group through 'scope', which floci-az does not support yet.");
         }
+        return targetScope(request, definition, scope);
+    }
+
+    /** The scope {@code definition}'s {@code resourceGroup} and {@code subscriptionId} name, else the deployment's. */
+    private static String targetScope(Request request, ObjectNode definition, TemplateScope scope) {
         String subscription = definition.has("subscriptionId")
             ? text(evaluate(definition.get("subscriptionId"), scope), "subscriptionId") : request.subscriptionId();
         if (definition.has("resourceGroup") && subscription == null) {
-            throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
+            throw DeploymentTemplate.invalid("The resource '" + definition.path("name").asText()
                 + "' names a resourceGroup at tenant scope, where it must also name its subscriptionId.");
         }
         if (definition.has("resourceGroup")) {
@@ -545,8 +565,10 @@ public class DeploymentEngine {
         } else {
             collectReferences(definition, scope, dependsOn);
         }
+        // A references() of a loop with no iterations reads an empty collection, so it depends on nothing either.
+        dependsOn.removeIf(entry -> emptyLoops.contains(entry.toLowerCase(Locale.ROOT)));
         return new DependencyGraph.Node(node.index(), node.id(), node.type(), node.name(), List.copyOf(dependsOn),
-            node.loop());
+            node.loop(), node.symbol());
     }
 
     /**
@@ -623,7 +645,7 @@ public class DeploymentEngine {
     }
 
     private DeploymentScope scope(Request request, DeploymentTemplate template, Map<String, JsonNode> supplied,
-                                  List<DependencyGraph.Node> nodes) {
+                                  List<DependencyGraph.Node> nodes, Map<String, TemplateScope> instanceScopes) {
         String tenantId = tenantOf(request);
         CloudProfile cloud = request.origin() != null && request.origin().scope() != null
             ? request.origin().scope().cloud() : directory.cloudOfTenant(tenantId);
@@ -631,6 +653,11 @@ public class DeploymentEngine {
             @Override
             public JsonNode reference(String resourceNameOrId, String apiVersion, boolean full) {
                 return DeploymentEngine.this.reference(request, template, nodes, resourceNameOrId, apiVersion, full);
+            }
+
+            @Override
+            public JsonNode references(String symbol, boolean full) {
+                return DeploymentEngine.this.references(request, template, nodes, instanceScopes, symbol, full);
             }
 
             @Override
@@ -642,7 +669,8 @@ public class DeploymentEngine {
             request.inResourceGroup() ? resourceGroupObject(request, cloud) : null,
             request.atTenant() ? null : subscriptionObject(request, tenantId), tenantObject(tenantId),
             environmentObject(cloud),
-            self -> deploymentObject(request, template), live);
+            self -> template.symbolic() ? limitedDeploymentObject(request, template)
+                : deploymentObject(request, template), live);
     }
 
     // ── Creating ───────────────────────────────────────────────────────────────────
@@ -1026,13 +1054,42 @@ public class DeploymentEngine {
     }
 
     /**
-     * The template resource {@code nameOrId} names: by name, the way {@code reference()} and the {@code list*}
-     * functions name a resource of the same template, else by id. Null for an id the template does not declare; a
-     * name it does not declare is an {@code InvalidTemplate}.
+     * {@code references()} ({@code template-functions-resource.md}): the state of each instance of a resource loop of
+     * this template, in copy index order, leaving out those whose {@code condition} is false.
+     */
+    private JsonNode references(Request request, DeploymentTemplate template, List<DependencyGraph.Node> nodes,
+                                Map<String, TemplateScope> instanceScopes, String symbol, boolean full) {
+        boolean declaredLoop = template.resources().stream().anyMatch(resource ->
+            symbol.equalsIgnoreCase(resource.symbol()) && resource.definition().has("copy"));
+        if (!declaredLoop) {
+            throw DeploymentTemplate.invalid("The template function 'references' names '" + symbol
+                + "', which is not a resource collection of this template.");
+        }
+        ArrayNode states = JsonNodeFactory.instance.arrayNode();
+        for (DependencyGraph.Node node : nodes) {
+            if (!node.inCollection(symbol)) {
+                continue;
+            }
+            ObjectNode definition = template.resources().get(node.index()).definition();
+            TemplateScope scope = instanceScopes.get(node.id().toLowerCase(Locale.ROOT));
+            if (definition.has("condition") && !truthy(evaluate(definition.get("condition"), scope))) {
+                continue;
+            }
+            states.add(reference(request, template, nodes, node.symbol(), null, full));
+        }
+        return states;
+    }
+
+    /**
+     * The template resource {@code nameOrId} names: by symbolic name in a template that has them, where a resource's
+     * name no longer works ({@code resource-declaration.md}), else by name, the way {@code reference()} and the
+     * {@code list*} functions name a resource of the same template, else by id. Null for an id the template does not
+     * declare; a name it does not declare is an {@code InvalidTemplate}.
      */
     private static DependencyGraph.Node declared(List<DependencyGraph.Node> nodes, String nameOrId) {
         DependencyGraph.Node declared = nodes.stream()
-            .filter(node -> DependencyGraph.isName(nameOrId) ? node.name().equalsIgnoreCase(nameOrId)
+            .filter(node -> DependencyGraph.isName(nameOrId)
+                ? (node.symbol() != null ? node.symbol() : node.name()).equalsIgnoreCase(nameOrId)
                 : ArmResourcePath.canonical(node.id()).equalsIgnoreCase(ArmResourcePath.canonical(nameOrId)))
             .findFirst()
             .orElse(null);
@@ -1162,6 +1219,7 @@ public class DeploymentEngine {
             for (String reference : node.dependsOn()) {
                 plan.order().stream()
                     .filter(target -> target.id().equalsIgnoreCase(reference) || target.name().equalsIgnoreCase(reference)
+                        || reference.equalsIgnoreCase(target.symbol())
                         || (ArmResourcePath.normalizedType(target.type()) + "/" + target.name())
                             .equalsIgnoreCase(ArmResourcePath.normalizedType(reference)))
                     .findFirst()
@@ -1242,6 +1300,25 @@ public class DeploymentEngine {
             .orElseGet(JsonNodeFactory.instance::objectNode);
         environment.put("name", cloud.name());
         return environment;
+    }
+
+    /**
+     * {@code deployment()} of a {@code languageVersion} 2.0 template: the limited subset
+     * {@code template-functions-deployment.md} documents. Its {@code location}, documented for subscription, management
+     * group and tenant scope, is not available here and is left out.
+     */
+    private static ObjectNode limitedDeploymentObject(Request request, DeploymentTemplate template) {
+        ObjectNode deployment = JsonNodeFactory.instance.objectNode();
+        deployment.put("name", request.name());
+        ObjectNode properties = deployment.putObject("properties");
+        ObjectNode declared = properties.putObject("template");
+        declared.put("contentVersion", template.template().path("contentVersion").asText(""));
+        declared.set("metadata", template.template().has("metadata") ? template.template().get("metadata").deepCopy()
+            : JsonNodeFactory.instance.objectNode());
+        if (request.properties().path("templateLink").isObject()) {
+            properties.set("templateLink", request.properties().get("templateLink").deepCopy());
+        }
+        return deployment;
     }
 
     private ObjectNode deploymentObject(Request request, DeploymentTemplate template) {

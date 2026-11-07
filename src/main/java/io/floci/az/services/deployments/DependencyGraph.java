@@ -35,11 +35,25 @@ public final class DependencyGraph {
      * @param name      its name as evaluated, slash-separated for a child
      * @param dependsOn what it depends on: evaluated {@code dependsOn} entries and implicit references by name
      * @param loop      the name of the copy loop it is an instance of, or null
+     * @param symbol    its symbolic name in a {@code languageVersion} 2.0 template, {@code sym[1]} for an instance of a
+     *                  loop, or null
      */
-    public record Node(int index, String id, String type, String name, List<String> dependsOn, String loop) {
+    public record Node(int index, String id, String type, String name, List<String> dependsOn, String loop,
+                       String symbol) {
 
         public Node {
             dependsOn = List.copyOf(dependsOn);
+        }
+
+        /** A resource with no symbolic name. */
+        public Node(int index, String id, String type, String name, List<String> dependsOn, String loop) {
+            this(index, id, type, name, dependsOn, loop, null);
+        }
+
+        /** True for an instance of the loop whose symbolic name is {@code collection}. */
+        boolean inCollection(String collection) {
+            return symbol != null && loop != null
+                && symbol.toLowerCase(Locale.ROOT).startsWith(collection.toLowerCase(Locale.ROOT) + "[");
         }
 
         /** A resource that is not part of a copy loop. */
@@ -74,7 +88,7 @@ public final class DependencyGraph {
     }
 
     /**
-     * The first argument of every {@code reference()} and {@code list*()} call in {@code value}, a resource
+     * The first argument of every {@code reference()}, {@code references()} and {@code list*()} call in {@code value}, a resource
      * definition or any part of one: the expressions whose value, when it is a name rather than an id, is an
      * implicit dependency.
      */
@@ -101,7 +115,8 @@ public final class DependencyGraph {
         switch (expression) {
             case Expression.FunctionCall call -> {
                 String name = call.name().toLowerCase(Locale.ROOT);
-                if ((name.equals("reference") || name.startsWith("list")) && !call.arguments().isEmpty()) {
+                if ((name.equals("reference") || name.equals("references") || name.startsWith("list"))
+                        && !call.arguments().isEmpty()) {
                     references.add(call.arguments().getFirst());
                 }
                 call.arguments().forEach(argument -> walk(argument, references));
@@ -118,18 +133,24 @@ public final class DependencyGraph {
     }
 
     /**
-     * The indexes of the nodes {@code reference} names: every instance of the copy loop it names, else the one node
-     * it names by id, by {@code type/name}, or by name.
+     * The indexes of the nodes {@code reference} names: every instance of the copy loop it names, by the loop's name or
+     * its symbolic name, else the one node it names by symbolic name, by id, by {@code type/name}, or by name.
      */
     private static List<Integer> resolve(List<Node> nodes, String reference, Node from) {
         List<Integer> loop = new ArrayList<>();
         for (int i = 0; i < nodes.size(); i++) {
-            if (nodes.get(i).loop() != null && nodes.get(i).loop().equalsIgnoreCase(reference)) {
+            if ((nodes.get(i).loop() != null && nodes.get(i).loop().equalsIgnoreCase(reference))
+                    || nodes.get(i).inCollection(reference)) {
                 loop.add(i);
             }
         }
         if (!loop.isEmpty()) {
             return loop;
+        }
+        for (int i = 0; i < nodes.size(); i++) {
+            if (reference.equalsIgnoreCase(nodes.get(i).symbol())) {
+                return List.of(i);
+            }
         }
         List<Integer> matches = new ArrayList<>();
         for (int i = 0; i < nodes.size(); i++) {

@@ -225,15 +225,33 @@ function reads only its own parameters, never the template's or `variables()`, c
 function, uses neither `reference()` nor a `list*` function, and declares no parameter defaults. An outer-scope
 nested deployment calls its parent's functions.
 
+## Symbolic names (`languageVersion` 2.0)
+
+A template with a `languageVersion` of 2.0 or newer declares `resources` as an object keyed by symbolic name, which is
+what Bicep compiles to when a file uses user-defined types and similar features.
+
+- `dependsOn`, `reference()` and the `list*` functions name a resource by its symbol, `sym[1]` for one instance of a
+  loop. A `dependsOn` on a loop's symbol depends on every instance. As the ARM docs say, `reference()` no longer accepts
+  a resource's name.
+- `references('sym')` returns every deployed instance of a loop, in copy index order.
+- A resource declared `existing: true` is read, never deployed, and is not listed in `outputResources`. It can name
+  another `resourceGroup` and `subscriptionId`, or a `scope`.
+- A nested deployment defaults to the `inner` expression scope, and `outer` is refused.
+- `deployment()` returns the limited subset the ARM docs list. Its `location` is left out.
+- `definitions`, `$ref` and `nullable` are read for a parameter's or output's type. The aggregate constraints of a
+  user-defined type (`properties`, `items`, `sealed`, `discriminator`) are not enforced.
+
+Emulator choices, since no local source settles them: a missing `existing` resource fails only when something reads
+it, a non-empty array under `languageVersion` 2.0 is refused, and any `languageVersion` starting `2.` counts as 2.0.
+
 ## Not supported yet
 
 Each of these is refused with `400 InvalidTemplate`, never skipped:
 
-- symbolic resource names (`languageVersion` 2.0)
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
 - the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR
-  functions, `pickZones`, `providers`, `references`, `managementGroup`, `deployer`, `roleDefinitions`
+  functions, `pickZones`, `providers`, `managementGroup`, `deployer`, `roleDefinitions`
 - Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
