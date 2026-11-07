@@ -138,8 +138,9 @@ public class DeploymentEngine {
      * @param provisioningState {@code Succeeded} or {@code Failed}
      * @param parameters        the echoed parameters, secure values left out
      * @param outputs           the evaluated outputs, each {@code {"type", "value"}}; empty when it failed
-     * @param outputResources   the ids of the resources it created or updated, in creation order
-     * @param providers         the namespaces and types it deployed, Azure's {@code providers} shape
+     * @param outputResources   the ids of the resources it created or updated, in creation order; a nested deployment
+     *                          contributes the resources it deployed rather than its own id, as Azure lists them
+     * @param providers         the namespaces and types of those resources, Azure's {@code providers} shape
      * @param dependencies      the explicit and implicit dependencies, Azure's {@code dependencies} shape
      * @param error             the {@code DeploymentFailed} error, or null when it succeeded
      * @param templateHash      a stable hash of the template
@@ -342,14 +343,14 @@ public class DeploymentEngine {
         Instant started = Instant.now();
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
-        List<String> deployed = new ArrayList<>();
-        List<DependencyGraph.Node> deployedNodes = new ArrayList<>();
+        Map<String, String> deployed = new LinkedHashMap<>();
+        Map<String, Set<String>> deployedTypes = new LinkedHashMap<>();
         List<Operation> operations = new ArrayList<>();
         for (DependencyGraph.Node node : plan.order()) {
             if (canceled.getAsBoolean()) {
                 LOG.infov("Deployment {0} canceled after {1} resource(s)", request.name(), deployed.size());
-                return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                    providers(deployedNodes), dependencies(plan), null, templateHash, started, Instant.now(),
+                return new Result("Canceled", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
+                    providers(deployedTypes), dependencies(plan), null, templateHash, started, Instant.now(),
                     operations);
             }
             ObjectNode definition = plan.template().resources().get(node.index()).definition();
@@ -357,14 +358,14 @@ public class DeploymentEngine {
                 LOG.debugv("Deployment {0}: {1} skipped, its condition is false", request.name(), node.id());
                 continue;
             }
-            ObjectNode failure = create(request, plan, node, definition, operations);
+            Created created = create(request, plan, node, definition, operations);
+            ObjectNode failure = created.failure();
             if (failure != null) {
-                return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                    providers(deployedNodes), dependencies(plan), deploymentFailed(request, failure), templateHash,
+                return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
+                    providers(deployedTypes), dependencies(plan), deploymentFailed(request, failure), templateHash,
                     started, Instant.now(), operations);
             }
-            deployed.add(node.id());
-            deployedNodes.add(node);
+            recordDeployed(request, node, definition, created.resource(), deployed, deployedTypes);
         }
         ObjectNode outputs;
         Instant outputsStarted = Instant.now();
@@ -373,13 +374,13 @@ public class DeploymentEngine {
         } catch (TemplateException e) {
             ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
             operations.add(outputOperation("Failed", detail, outputsStarted));
-            return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), deployed,
-                providers(deployedNodes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
+            return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
+                providers(deployedTypes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
                 Instant.now(), operations);
         }
         operations.add(outputOperation("Succeeded", null, outputsStarted));
         LOG.infov("Deployment {0} succeeded: {1} resource(s)", request.name(), deployed.size());
-        return new Result("Succeeded", parameters, outputs, deployed, providers(deployedNodes), dependencies(plan),
+        return new Result("Succeeded", parameters, outputs, List.copyOf(deployed.values()), providers(deployedTypes), dependencies(plan),
             null, templateHash, started, Instant.now(), operations);
     }
 
@@ -646,8 +647,19 @@ public class DeploymentEngine {
 
     // ── Creating ───────────────────────────────────────────────────────────────────
 
-    /** Creates one resource; null when it ended {@code Succeeded}, else the error detail for the deployment. */
-    private ObjectNode create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
+    /**
+     * What creating one resource ended with: the error detail for the deployment when it failed, else the resource as
+     * its provider last answered, the body whose provisioning state was terminal.
+     */
+    private record Created(ObjectNode failure, JsonNode resource) {
+
+        static Created failed(ObjectNode failure) {
+            return new Created(failure, null);
+        }
+    }
+
+    /** Creates one resource, polling it to a terminal provisioning state. */
+    private Created create(Request request, Plan plan, DependencyGraph.Node node, ObjectNode definition,
                               List<Operation> operations) {
         Instant started = Instant.now();
         ResourceRequest prepared;
@@ -656,7 +668,7 @@ public class DeploymentEngine {
         } catch (TemplateException e) {
             ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
             operations.add(resourceOperation(node, null, "Failed", null, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         String apiVersion = prepared.apiVersion();
         ObjectNode body = prepared.body();
@@ -667,21 +679,23 @@ public class DeploymentEngine {
         if (response.getStatus() / 100 != 2) {
             ObjectNode failure = handlerError(node.id(), response, answer);
             operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         String state = answer.path("properties").path("provisioningState").asText("Succeeded");
         if (response.getStatus() == 202 || !TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
-            state = poll(request, node.id(), apiVersion,
+            Polled polled = poll(request, node.id(), apiVersion,
                 DeploymentTemplate.isNestedDeployment(definition) ? NESTED_POLL_ATTEMPTS : POLL_ATTEMPTS);
+            state = polled.state();
+            answer = polled.resource();
         }
         if (!state.equalsIgnoreCase("Succeeded")) {
             ObjectNode failure = detail("ResourceDeploymentFailure", node.id(), "The resource write operation failed "
                 + "to complete successfully, because it reached terminal provisioning state '" + state + "'.");
             operations.add(resourceOperation(node, apiVersion, "Failed", statusCode, failure, started));
-            return failure;
+            return Created.failed(failure);
         }
         operations.add(resourceOperation(node, apiVersion, "Succeeded", statusCode, null, started));
-        return null;
+        return new Created(null, answer);
     }
 
     /** What a resource is sent as: its evaluated body, and the api-version it is sent with. */
@@ -954,25 +968,29 @@ public class DeploymentEngine {
         };
     }
 
+    /** A polled resource's terminal state, and the body it was read in, or null when none was. */
+    private record Polled(String state, JsonNode resource) {
+    }
+
     /** Polls a resource with {@code GET} until its {@code provisioningState} is terminal, for a bounded time. */
-    private String poll(Request request, String id, String apiVersion, int attempts) {
+    private Polled poll(Request request, String id, String apiVersion, int attempts) {
         for (int attempt = 0; attempt < attempts; attempt++) {
             Response response = router.get().dispatchInternal("GET", id, Map.of("api-version", apiVersion),
                 request.origin());
             JsonNode answer = entity(response);
             String state = answer.path("properties").path("provisioningState").asText("Succeeded");
             if (response.getStatus() == 200 && TERMINAL_STATES.contains(state.toLowerCase(Locale.ROOT))) {
-                return state;
+                return new Polled(state, answer);
             }
             try {
                 Thread.sleep(POLL_INTERVAL);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return "Canceled";
+                return new Polled("Canceled", null);
             }
         }
         LOG.warnv("Deployment {0}: {1} did not reach a terminal state in time", request.name(), id);
-        return "Failed";
+        return new Polled("Failed", null);
     }
 
     // ── Live template functions ────────────────────────────────────────────────────
@@ -1083,20 +1101,49 @@ public class DeploymentEngine {
         return values;
     }
 
-    private ArrayNode providers(List<DependencyGraph.Node> deployed) {
-        Map<String, Map<String, Set<String>>> byNamespace = new LinkedHashMap<>();
-        for (DependencyGraph.Node node : deployed) {
+    /**
+     * Adds what a resource that just succeeded contributes to its deployment's {@code outputResources} and
+     * {@code providers}. A nested deployment contributes what it deployed, read from the record its poll saw succeed,
+     * so a module nested at any depth reports its resources and a later run under its name cannot change what the parent
+     * records; its own id is left out, as Azure leaves it out.
+     *
+     * @param ids the ids recorded so far, keyed by their lowercase form: ARM ids are case-insensitive, so two modules
+     *            writing one resource list it once
+     */
+    private void recordDeployed(Request request, DependencyGraph.Node node, ObjectNode definition, JsonNode resource,
+                                Map<String, String> ids, Map<String, Set<String>> types) {
+        if (!DeploymentTemplate.isNestedDeployment(definition)) {
+            addDeployedId(ids, node.id());
             List<String> segments = ArmResourcePath.segments(node.type());
-            byNamespace.computeIfAbsent(segments.getFirst(), ignored -> new LinkedHashMap<>())
-                .computeIfAbsent(String.join("/", segments.subList(1, segments.size())),
-                    ignored -> new LinkedHashSet<>());
+            types.computeIfAbsent(segments.getFirst(), ignored -> new LinkedHashSet<>())
+                .add(String.join("/", segments.subList(1, segments.size())));
+            return;
         }
+        if (resource == null || !resource.path("properties").has("outputResources")) {
+            LOG.warnv("Deployment {0}: nested deployment {1} answered no outputResources, so its resources are not listed",
+                request.name(), node.id());
+            return;
+        }
+        JsonNode properties = resource.path("properties");
+        properties.path("outputResources").forEach(listed -> addDeployedId(ids, listed.path("id").asText()));
+        properties.path("providers").forEach(provider -> {
+            Set<String> resourceTypes = types.computeIfAbsent(provider.path("namespace").asText(),
+                ignored -> new LinkedHashSet<>());
+            provider.path("resourceTypes").forEach(type -> resourceTypes.add(type.path("resourceType").asText()));
+        });
+    }
+
+    private static void addDeployedId(Map<String, String> ids, String id) {
+        ids.putIfAbsent(id.toLowerCase(Locale.ROOT), id);
+    }
+
+    private static ArrayNode providers(Map<String, Set<String>> deployedTypes) {
         ArrayNode providers = JsonNodeFactory.instance.arrayNode();
-        byNamespace.forEach((namespace, resourceTypes) -> {
+        deployedTypes.forEach((namespace, resourceTypes) -> {
             ObjectNode provider = providers.addObject();
             provider.put("namespace", namespace);
             ArrayNode typesNode = provider.putArray("resourceTypes");
-            resourceTypes.keySet().forEach(resourceType -> typesNode.addObject().put("resourceType", resourceType));
+            resourceTypes.forEach(resourceType -> typesNode.addObject().put("resourceType", resourceType));
         });
         return providers;
     }

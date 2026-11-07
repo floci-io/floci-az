@@ -279,6 +279,13 @@ setup() {
     assert_output --partial "flocitesttplsa"
 }
 
+@test "OpenTofu: template deployment lists its module's resource, not the module" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Resources/deployments/floci-test-deployment?api-version=2020-06-01"
+    assert_success
+    assert_output --partial "userAssignedIdentities/floci-test-module-identity"
+    refute_output --partial "deployments/floci-test-module"
+}
+
 @test "OpenTofu: template deployment created a real storage account and container" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/flocitesttplsa?api-version=2023-01-01"
     assert_success

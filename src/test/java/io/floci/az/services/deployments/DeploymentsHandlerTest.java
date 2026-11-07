@@ -812,6 +812,53 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void aParentListsTheResourcesOfItsModulesAtAnyDepthAndNotTheModules() throws Exception {
+        String identity = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/";
+        assertEquals("Succeeded", awaitTerminal(put("modules", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [
+              {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+               "name": "toplevel", "location": "westeurope"},
+              {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "module",
+               "properties": {"mode": "Incremental", "template": {"resources": [
+                 {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01", "name": "deploysa0001",
+                  "location": "westeurope", "kind": "StorageV2", "sku": {"name": "Standard_LRS"}},
+                 {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "submodule",
+                  "properties": {"mode": "Incremental", "template": {"resources": [
+                    {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                     "name": "nested", "location": "westeurope"}]}}}]}}}]}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/modules" + API).asString());
+
+        given().when().get(DEPLOYMENTS + "/modules" + API).then().statusCode(200)
+            .body("properties.outputResources.id", contains(identity + "toplevel", ACCOUNT, identity + "nested"))
+            .body("properties.providers.namespace", contains("Microsoft.ManagedIdentity", "Microsoft.Storage"))
+            .body("properties.providers.find { it.namespace == 'Microsoft.Storage' }.resourceTypes.resourceType",
+                contains("storageAccounts"));
+        given().when().get(DEPLOYMENTS + "/module" + API).then().statusCode(200)
+            .body("properties.outputResources.id", contains(ACCOUNT, identity + "nested"));
+    }
+
+    @Test
+    void azdsEmptySubscriptionTemplateRecordsTheVoidStateWithItsTags() throws Exception {
+        Response accepted = given().contentType("application/json").body("""
+            {"location": "westeurope",
+             "tags": {"azd-env-name": "dev", "azd-deploy-reason": "down"},
+             "properties": {"mode": "Incremental", "parameters": {}, "template": {
+               "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+               "contentVersion": "1.0.0.0", "parameters": {}, "variables": {}, "resources": [], "outputs": {}}}}
+            """).when().put(SUB_DEPLOYMENTS + "/void" + API);
+        accepted.then().statusCode(201);
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(SUB_DEPLOYMENTS + "/void" + API).asString());
+
+        given().when().get(SUB_DEPLOYMENTS + "/void" + API).then().statusCode(200)
+            .body("tags.azd-env-name", equalTo("dev"))
+            .body("tags.azd-deploy-reason", equalTo("down"))
+            .body("properties.outputResources", hasSize(0))
+            .body("properties.providers", hasSize(0))
+            .body("properties.timestamp", notNullValue());
+    }
+
+    @Test
     void anOuterNestedOutputReadsAResourceOnlyTheParentDeclares() throws Exception {
         assertEquals("Succeeded", awaitTerminal(put("outerref", """
             {"properties": {"mode": "Incremental", "template": {
