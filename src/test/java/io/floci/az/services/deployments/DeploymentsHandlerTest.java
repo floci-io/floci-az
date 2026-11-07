@@ -914,6 +914,26 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void anExistingDeploymentIsReadForItsOutputsWithoutATemplate() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("producer", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [],
+              "outputs": {"greeting": {"type": "string", "value": "hello"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/producer" + API).asString());
+
+        assertEquals("Succeeded", awaitTerminal(put("consumer", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "resources": {"prior": {"type": "Microsoft.Resources/deployments", "apiVersion": "2025-04-01",
+                                      "name": "producer", "existing": true}},
+              "outputs": {"greeting": {"type": "string",
+                                       "value": "[reference('prior').outputs.greeting.value]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/consumer" + API).asString());
+        given().when().get(DEPLOYMENTS + "/consumer" + API).then().statusCode(200)
+            .body("properties.outputs.greeting.value", equalTo("hello"))
+            .body("properties.outputResources", hasSize(0));
+    }
+
+    @Test
     void aSymbolicTemplateNoLongerReadsAResourceByItsName() throws Exception {
         assertEquals("Failed", awaitTerminal(put("byname", """
             {"properties": {"mode": "Incremental", "template": {
