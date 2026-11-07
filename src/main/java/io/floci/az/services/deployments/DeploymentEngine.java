@@ -41,6 +41,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Runs a resource-group template deployment: reads and checks the template, resolves its parameters, orders its
@@ -81,6 +83,29 @@ public class DeploymentEngine {
     /** A nested deployment may hold many resources, so it is polled for up to ten minutes. */
     private static final int NESTED_POLL_ATTEMPTS = 2400;
 
+    private static final String MANAGEMENT_GROUP_PREFIX = "/providers/Microsoft.Management/managementGroups/";
+
+    /** {@code [/][providers/]Microsoft.Management/managementGroups/{name}}, the forms a {@code scope} names one by. */
+    private static final Pattern MANAGEMENT_GROUP_SCOPE = Pattern.compile(
+        "/?(?:providers/)?Microsoft\\.Management/managementGroups/([^/]+)/?", Pattern.CASE_INSENSITIVE);
+
+    private static final String MANAGEMENT_GROUP_API_VERSION = "2021-04-01";
+
+    /**
+     * The types a management-group deployment can hold ({@code deploy-to-management-group.md}, "Supported resources"),
+     * lowercase. A subscription-level type outside it, such as a resource group, is refused before anything is written.
+     */
+    private static final Set<String> MANAGEMENT_GROUP_TYPES = Set.of(
+        "microsoft.blueprint/blueprints", "microsoft.blueprint/blueprints/artifacts",
+        "microsoft.blueprint/blueprints/versions", "microsoft.blueprint/blueprintassignments",
+        "microsoft.authorization/policyassignments", "microsoft.authorization/policydefinitions",
+        "microsoft.authorization/policysetdefinitions", "microsoft.policyinsights/remediations",
+        "microsoft.authorization/privatelinkassociations", "microsoft.authorization/roleassignments",
+        "microsoft.authorization/roleassignmentschedulerequests", "microsoft.authorization/roledefinitions",
+        "microsoft.authorization/roleeligibilityschedulerequests",
+        "microsoft.authorization/rolemanagementpolicyassignments", "microsoft.resources/deployments",
+        "microsoft.insights/diagnosticsettings", "microsoft.resources/tags");
+
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -100,8 +125,14 @@ public class DeploymentEngine {
      * @param properties     the request body's {@code properties}
      * @param origin         the client request, whose caller the internal requests act for
      */
-    public record Request(String subscriptionId, String resourceGroup, String name, JsonNode properties,
-                          AzureRequest origin) {
+    public record Request(String subscriptionId, String resourceGroup, String managementGroup, String name,
+                          JsonNode properties, AzureRequest origin) {
+
+        /** A deployment at resource-group, subscription or tenant scope. */
+        public Request(String subscriptionId, String resourceGroup, String name, JsonNode properties,
+                       AzureRequest origin) {
+            this(subscriptionId, resourceGroup, null, name, properties, origin);
+        }
 
         /** The deployment's ARM id. */
         public String id() {
@@ -110,12 +141,17 @@ public class DeploymentEngine {
 
         /** True for a deployment at tenant scope, which names no subscription. */
         public boolean atTenant() {
-            return subscriptionId == null;
+            return subscriptionId == null && managementGroup == null;
+        }
+
+        /** True for a deployment at management-group scope. */
+        public boolean atManagementGroup() {
+            return managementGroup != null;
         }
 
         /** True for a deployment at subscription scope. */
         public boolean atSubscription() {
-            return subscriptionId != null && resourceGroup == null;
+            return subscriptionId != null && resourceGroup == null && managementGroup == null;
         }
 
         /** True for a deployment in a resource group. */
@@ -123,8 +159,14 @@ public class DeploymentEngine {
             return resourceGroup != null;
         }
 
-        /** What the deployment's resources sit under: the resource group, the subscription, or the tenant (empty). */
+        /**
+         * What the deployment's resources sit under: the resource group, the subscription, the management group, or the
+         * tenant (empty).
+         */
         String scopeId() {
+            if (atManagementGroup()) {
+                return MANAGEMENT_GROUP_PREFIX + managementGroup;
+            }
             if (atTenant()) {
                 return "";
             }
@@ -466,11 +508,14 @@ public class DeploymentEngine {
         if (!request.inResourceGroup() && !nested && !resource.existing()) {
             types.type(ArmResourcePath.normalizedType(type))
                 .filter(served -> served.scope() == ArmScopeKind.RESOURCE_GROUP
-                    || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION))
+                    || (request.atTenant() && served.scope() == ArmScopeKind.SUBSCRIPTION)
+                    || (request.atManagementGroup() && served.scope() == ArmScopeKind.SUBSCRIPTION
+                        && !MANAGEMENT_GROUP_TYPES.contains(ArmResourcePath.normalizedType(type).toLowerCase(Locale.ROOT))))
                 .ifPresent(served -> {
                     String home = served.scope() == ArmScopeKind.RESOURCE_GROUP ? "resource group" : "subscription";
                     throw DeploymentTemplate.invalid("The resource '" + name + "' of type '" + type + "' belongs "
-                        + "in a " + home + " and cannot be deployed at " + (request.atTenant() ? "tenant" : "subscription")
+                        + "in a " + home + " and cannot be deployed at "
+                        + (request.atTenant() ? "tenant" : request.atManagementGroup() ? "management group" : "subscription")
                         + " scope; deploy it through a nested deployment that names the " + home + ".");
                 });
         }
@@ -492,13 +537,21 @@ public class DeploymentEngine {
      * Where a nested deployment runs ({@code deploy-to-subscription.md} and {@code deploy-to-tenant.md}, "Deployment
      * scopes"): the resource group its {@code resourceGroup} names, in the subscription its {@code subscriptionId}
      * names or the parent's; a subscription it names without a group; else the parent deployment's own scope. A
-     * tenant has no subscription to default to, so a group there needs its subscription named. A management group,
-     * which the {@code scope} property names, is not served yet.
+     * tenant has no subscription to default to, so a group there needs its subscription named. The {@code scope}
+     * property names a management group, or {@code /} for the tenant ({@code deploy-to-management-group.md}).
      */
     private static String nestedTarget(Request request, ObjectNode definition, TemplateScope scope) {
         if (definition.has("scope")) {
-            throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
-                + "' targets a management group through 'scope', which floci-az does not support yet.");
+            String declared = text(evaluate(definition.get("scope"), scope), "scope");
+            if (declared.equals("/")) {
+                return "";
+            }
+            Matcher group = MANAGEMENT_GROUP_SCOPE.matcher(declared);
+            if (!group.matches()) {
+                throw DeploymentTemplate.invalid("The nested deployment '" + definition.path("name").asText()
+                    + "' has the scope '" + declared + "', which is neither a management group nor '/'.");
+            }
+            return MANAGEMENT_GROUP_PREFIX + group.group(1);
         }
         return targetScope(request, definition, scope);
     }
@@ -522,15 +575,19 @@ public class DeploymentEngine {
      * The id an extension resource's {@code scope} names ({@code scope-extension-resources.md}): a full resource
      * id, or the {@code Namespace/type/name} of a resource at the deployment's own scope, such as
      * {@code Microsoft.Storage/storageAccounts/sa1}. The resource is then created under it,
-     * {@code {scope}/providers/{type}/{name}}.
+     * {@code {scope}/providers/{type}/{name}}. {@code /} names the tenant, and a management group can be named as
+     * {@code Microsoft.Management/managementGroups/{name}} from any scope.
      */
     private static String extensionScope(Request request, String declared, String resourceName) {
+        if (declared.equals("/")) {
+            return "";
+        }
+        Matcher group = MANAGEMENT_GROUP_SCOPE.matcher(declared);
+        if (group.matches()) {
+            return MANAGEMENT_GROUP_PREFIX + group.group(1);
+        }
         if (declared.startsWith("/")) {
-            String id = declared.replaceAll("/+$", "");
-            if (id.isEmpty()) {
-                throw DeploymentTemplate.invalid("The scope of resource '" + resourceName + "' is empty.");
-            }
-            return id;
+            return declared.replaceAll("/+$", "");
         }
         List<String> segments = ArmResourcePath.segments(declared);
         if (segments.size() < 3 || segments.size() % 2 == 0) {
@@ -662,6 +719,11 @@ public class DeploymentEngine {
             }
 
             @Override
+            public JsonNode managementGroup() {
+                return DeploymentEngine.this.managementGroup(request);
+            }
+
+            @Override
             public JsonNode deployer() {
                 BearerClaims claims = BearerClaims.of(request.origin());
                 ObjectNode deployer = JsonNodeFactory.instance.objectNode();
@@ -681,7 +743,7 @@ public class DeploymentEngine {
         };
         return new DeploymentScope(template, supplied,
             request.inResourceGroup() ? resourceGroupObject(request, cloud) : null,
-            request.atTenant() ? null : subscriptionObject(request, tenantId), tenantObject(tenantId),
+            request.subscriptionId() == null ? null : subscriptionObject(request, tenantId), tenantObject(tenantId),
             environmentObject(cloud),
             self -> template.symbolic() ? limitedDeploymentObject(request, template)
                 : deploymentObject(request, template), live);
@@ -1067,6 +1129,21 @@ public class DeploymentEngine {
         return whole;
     }
 
+    /** {@code managementGroup()} ({@code template-functions-scope.md}): the group a deployment runs at, as ARM reads it. */
+    private JsonNode managementGroup(Request request) {
+        if (!request.atManagementGroup()) {
+            throw DeploymentTemplate.invalid("The template function 'managementGroup' is not expected at this "
+                + "location: it is only valid in a management-group deployment.");
+        }
+        Response response = router.get().dispatchInternal("GET", request.scopeId(),
+            Map.of("api-version", MANAGEMENT_GROUP_API_VERSION), request.origin());
+        JsonNode answer = entity(response);
+        if (response.getStatus() != 200) {
+            throw new TemplateException(errorCode(answer, "ResourceNotFound"), errorMessage(answer));
+        }
+        return answer;
+    }
+
     /**
      * {@code references()} ({@code template-functions-resource.md}): the state of each instance of a resource loop of
      * this template, in copy index order, leaving out those whose {@code condition} is false.
@@ -1276,7 +1353,7 @@ public class DeploymentEngine {
      * request scope's token tenant), else the default tenant.
      */
     private String tenantOf(Request request) {
-        if (!request.atTenant()) {
+        if (request.subscriptionId() != null) {
             return directory.tenantOfSubscription(request.subscriptionId());
         }
         return callerTenant(request.origin());
