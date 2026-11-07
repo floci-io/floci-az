@@ -1226,6 +1226,22 @@ class DeploymentsHandlerTest {
         String operations = given().when().get(DEPLOYMENTS + "/kvquoteoutput/operations" + API).then().statusCode(200)
             .extract().asString();
         assertThat(operations, not(containsString("s3cr3t")));
+
+        String conditional = """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                 "name": "kvquoteid", "location": "westeurope",
+                 "condition": "[equals(int(parameters('secret')), 1)]"}]}}}
+            """.formatted(vault);
+        assertEquals("Failed", awaitTerminal(put("kvquotecondition", conditional)));
+        String failed = given().when().get(DEPLOYMENTS + "/kvquotecondition" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(failed, not(containsString("s3cr3t")));
+        String predicted = given().contentType("application/json").body(conditional)
+            .when().post(DEPLOYMENTS + "/kvquotecondition/whatIf" + API).asString();
+        assertThat(predicted, not(containsString("s3cr3t")));
     }
 
     @Test

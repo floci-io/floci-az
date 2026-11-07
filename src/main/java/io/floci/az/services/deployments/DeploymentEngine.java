@@ -306,6 +306,14 @@ public class DeploymentEngine {
      */
     public ObjectNode whatIf(Request request) {
         Plan plan = plan(request);
+        try {
+            return whatIf(request, plan);
+        } catch (TemplateException e) {
+            throw plan.secrets().redact(e);
+        }
+    }
+
+    private ObjectNode whatIf(Request request, Plan plan) {
         boolean idsOnly = "ResourceIdOnly".equalsIgnoreCase(
             request.properties().path("whatIfSettings").path("resultFormat").asText(""));
         ArrayNode changes = JsonNodeFactory.instance.arrayNode();
@@ -395,8 +403,15 @@ public class DeploymentEngine {
      * leaving what was already created in place, as Azure does.
      */
     public Result run(Prepared prepared, BooleanSupplier canceled) {
-        Request request = prepared.request();
-        Plan plan = prepared.plan();
+        // A template error that leaves the run, a resource's condition for one, never quotes a Key Vault secret either.
+        try {
+            return run(prepared.request(), prepared.plan(), canceled);
+        } catch (TemplateException e) {
+            throw prepared.plan().secrets().redact(e);
+        }
+    }
+
+    private Result run(Request request, Plan plan, BooleanSupplier canceled) {
         Instant started = Instant.now();
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
