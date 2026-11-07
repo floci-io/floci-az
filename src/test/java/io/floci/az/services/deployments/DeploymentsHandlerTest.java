@@ -12,6 +12,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -1210,8 +1211,22 @@ class DeploymentsHandlerTest {
                 {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
                  "name": "[string(int(parameters('secret')))]", "location": "westeurope"}]}}}
             """.formatted(vault)).then().statusCode(400)
-            .body("error.message", containsString("is not an integer"))
+            .body("error.message", containsString("the value is not an integer"))
             .body("error.message", not(containsString("s3cr3t")));
+
+        // Redaction knows only the secret's own text; a function must not quote a transformed copy either.
+        for (String transformed : List.of("[string(int(toUpper(parameters('secret'))))]",
+                "[cidrHost(substring(parameters('secret'), 4), 1)]", "[string(bool(skip(parameters('secret'), 1)))]",
+                "[dateTimeAdd('2024-01-01', toUpper(parameters('secret')))]")) {
+            String message = put("kvquotetransformed", """
+                {"properties": {"mode": "Incremental",
+                  "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+                  "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                    {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                     "name": "%s", "location": "westeurope"}]}}}
+                """.formatted(vault, transformed)).then().statusCode(400).extract().path("error.message");
+            assertThat(transformed, message.toLowerCase(Locale.ROOT), not(containsString("s3cr3t")));
+        }
 
         assertEquals("Failed", awaitTerminal(put("kvquoteoutput", """
             {"properties": {"mode": "Incremental",
