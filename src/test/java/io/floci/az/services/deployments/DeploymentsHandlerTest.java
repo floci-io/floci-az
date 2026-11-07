@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyOrNullString;
@@ -1195,6 +1196,36 @@ class DeploymentsHandlerTest {
                 "resources": []}}}
             """.formatted(leaky)).then().statusCode(400).extract().asString();
         assertFalse(answer.contains("leaky-s3cr3t"), answer);
+    }
+
+    @Test
+    void aFunctionThatFailsOnAKeyVaultSecretNeverQuotesIt() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String vault = vaultWithSecret("kvquote" + suffix, true, "not-a-number-s3cr3t");
+
+        put("kvquotename", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                 "name": "[string(int(parameters('secret')))]", "location": "westeurope"}]}}}
+            """.formatted(vault)).then().statusCode(400)
+            .body("error.message", containsString("is not an integer"))
+            .body("error.message", not(containsString("s3cr3t")));
+
+        assertEquals("Failed", awaitTerminal(put("kvquoteoutput", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [],
+                "outputs": {"number": {"type": "int", "value": "[int(parameters('secret'))]"}}}}}
+            """.formatted(vault))));
+        String deployment = given().when().get(DEPLOYMENTS + "/kvquoteoutput" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(deployment, containsString("is not an integer"));
+        assertThat(deployment, not(containsString("s3cr3t")));
+        String operations = given().when().get(DEPLOYMENTS + "/kvquoteoutput/operations" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(operations, not(containsString("s3cr3t")));
     }
 
     @Test
