@@ -215,6 +215,13 @@ expansion could not fit in.
 template that builds a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the
 emulator routes.
 
+### CIDR and `deployer`
+
+`parseCidr`, `cidrSubnet` and `cidrHost` serve IPv4 and IPv6 as the ARM docs show. The docs do not cover an IPv4 `/31`
+or `/32`, and floci-az treats every address in those as usable. `deployer()` reads the caller's token, its `tenantId` from the token's
+`tid`: without a token, or for a claim it lacks, `objectId` and `userPrincipalName` are empty strings and `tenantId` is
+the target's tenant.
+
 ### Lambda functions
 
 `filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy` and `mapValues` take a `lambda(...)` argument, read with
@@ -257,7 +264,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
 
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
-- the CIDR functions, `pickZones`, `providers`, `managementGroup`, `deployer`, `roleDefinitions`
+- `pickZones`, `providers`, `managementGroup`, `roleDefinitions`
 - Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 

@@ -357,6 +357,39 @@ class ArmExpressionEvaluatorTest {
     }
 
     @ParameterizedTest
+    @CsvSource(delimiter = '|', quoteCharacter = '~', value = {
+        "[parseCidr('10.144.5.9/20')] | {\"network\":\"10.144.0.0\",\"netmask\":\"255.255.240.0\",\"broadcast\":\"10.144.15.255\",\"firstUsable\":\"10.144.0.1\",\"lastUsable\":\"10.144.15.254\",\"cidr\":20}",
+        "[parseCidr('fdad:3236:5555::/48')] | {\"network\":\"fdad:3236:5555::\",\"netmask\":\"ffff:ffff:ffff::\",\"firstUsable\":\"fdad:3236:5555::\",\"lastUsable\":\"fdad:3236:5555:ffff:ffff:ffff:ffff:ffff\",\"cidr\":48}",
+        "[cidrSubnet('10.144.0.0/20', 24, 3)] | \"10.144.3.0/24\"",
+        "[cidrSubnet('fdad:3236:5555::/48', 52, 1)] | \"fdad:3236:5555:1000::/52\"",
+        "[cidrHost('10.144.3.0/24', 0)] | \"10.144.3.1\"",
+        "[cidrHost('fdad:3236:5555:3000::/52', 0)] | \"fdad:3236:5555:3000::\"",
+        "[cidrHost('fdad:3236:5555:3000::/52', 5)] | \"fdad:3236:5555:3000::5\"",
+        "[parseCidr('10.0.0.1/32').firstUsable] | \"10.0.0.1\"",
+        "[cidrHost('::/0', 1)] | \"::1\"",
+    })
+    void theCidrFunctionsAnswerAsDocumented(String expression, String expected) throws Exception {
+        assertEquals(new ObjectMapper().readTree(expected), eval(expression));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "[parseCidr('10.0.0.0')]",
+        "[parseCidr('10.0.0.256/24')]",
+        "[parseCidr('10.0.0.0/33')]",
+        "[parseCidr('example.com/24')]",
+        "[parseCidr('1::2::3/64')]",
+        "[cidrSubnet('10.0.0.0/24', 23, 0)]",
+        "[cidrSubnet('10.0.0.0/24', 25, 2)]",
+        "[cidrHost('10.0.0.0/30', 2)]",
+        "[cidrHost('10.0.0.0/24', -1)]",
+        "[deployer('ignored')]",
+    })
+    void aBadCidrIsAnInvalidTemplate(String expression) {
+        assertThrows(TemplateException.class, () -> eval(expression));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
         "[lambda('x', 1)]",
         "[lambdaVariables('x')]",

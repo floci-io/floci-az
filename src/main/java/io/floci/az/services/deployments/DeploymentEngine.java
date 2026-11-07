@@ -11,6 +11,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceType;
 import io.floci.az.core.arm.ArmScopeKind;
 import io.floci.az.core.arm.ArmTypeRegistry;
+import io.floci.az.core.auth.BearerClaims;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -658,6 +659,19 @@ public class DeploymentEngine {
             @Override
             public JsonNode references(String symbol, boolean full) {
                 return DeploymentEngine.this.references(request, template, nodes, instanceScopes, symbol, full);
+            }
+
+            @Override
+            public JsonNode deployer() {
+                BearerClaims claims = BearerClaims.of(request.origin());
+                ObjectNode deployer = JsonNodeFactory.instance.objectNode();
+                deployer.put("objectId", claims.oid() == null ? "" : claims.oid());
+                // The caller's own tenant, which differs from the target's for a guest; the target's when the token names
+                // none.
+                String callerTenant = claims.claims().get("tid");
+                deployer.put("tenantId", callerTenant == null || callerTenant.isBlank() ? tenantId : callerTenant);
+                deployer.put("userPrincipalName", claims.upn() == null ? "" : claims.upn());
+                return deployer;
             }
 
             @Override
