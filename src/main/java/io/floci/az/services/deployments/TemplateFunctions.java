@@ -46,6 +46,9 @@ import static io.floci.az.services.deployments.TemplateValues.typeName;
  * The template language's function library, called by {@link ExpressionEvaluator} with arguments already evaluated.
  * Semantics follow {@code azure-resource-manager/templates/template-functions-*.md}; {@code if}, {@code and} and
  * {@code or} evaluate lazily and live in the evaluator.
+ *
+ * <p>An error names an argument's type, never its value: the value may be derived from a Key Vault secret, and
+ * redaction ({@link SecretRedaction}) only finds the secret's exact text, not an upper-cased or sliced copy of it.
  */
 final class TemplateFunctions {
 
@@ -472,7 +475,7 @@ final class TemplateFunctions {
                 int close = pattern.indexOf('}', i);
                 if (close < 0) {
                     throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                        + "': the format string '" + pattern + "' is not valid.");
+                        + "': the format string is not valid.");
                 }
                 result.append(formatItem(name, pattern.substring(i + 1, close), args));
                 i = close + 1;
@@ -492,17 +495,17 @@ final class TemplateFunctions {
             item = item.substring(0, colon);
         }
         int alignment = 0;
-        int comma = item.indexOf(',');
-        if (comma >= 0) {
-            alignment = Integer.parseInt(item.substring(comma + 1).strip());
-            item = item.substring(0, comma);
-        }
         int index;
         try {
+            int comma = item.indexOf(',');
+            if (comma >= 0) {
+                alignment = Integer.parseInt(item.substring(comma + 1).strip());
+                item = item.substring(0, comma);
+            }
             index = Integer.parseInt(item.strip());
         } catch (NumberFormatException e) {
             throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                + "': '{" + item + "}' is not a valid format item.");
+                + "': the format string has a format item that is not valid.");
         }
         if (index + 1 >= args.size()) {
             throw TemplateException.invalid("Unable to evaluate template language function '" + name
@@ -547,7 +550,7 @@ final class TemplateFunctions {
 
     private static TemplateException unsupportedFormat(String name, String spec) {
         return TemplateException.invalid("Unable to evaluate template language function '" + name
-            + "': the format string '" + spec + "' is not supported by floci-az.");
+            + "': the format string uses a number format that floci-az does not support.");
     }
 
     /**
@@ -734,7 +737,7 @@ final class TemplateFunctions {
             return URI.create(base).resolve(relative).toString();
         } catch (IllegalArgumentException e) {
             throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                + "': '" + base + "' and '" + relative + "' do not form a URI.");
+                + "': the values do not form a URI.");
         }
     }
 
@@ -767,7 +770,7 @@ final class TemplateFunctions {
                 return Long.parseLong(value.asText().strip());
             } catch (NumberFormatException e) {
                 throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                    + "': '" + value.asText() + "' is not an integer.");
+                    + "': the value is not an integer.");
             }
         }
         throw typeError(name, value, "a string or a number");
@@ -782,7 +785,7 @@ final class TemplateFunctions {
                 return Double.parseDouble(value.asText().strip());
             } catch (NumberFormatException e) {
                 throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                    + "': '" + value.asText() + "' is not a number.");
+                    + "': the value is not a number.");
             }
         }
         throw typeError(name, value, "a string or a number");
@@ -799,7 +802,7 @@ final class TemplateFunctions {
             return Boolean.parseBoolean(lower(value.asText()));
         }
         throw TemplateException.invalid("Unable to evaluate template language function '" + name
-            + "': '" + text(value) + "' is not a boolean.");
+            + "': the value is not a boolean.");
     }
 
     private static JsonNode json(String name, String value) {
@@ -1066,7 +1069,7 @@ final class TemplateFunctions {
                 return NODES.nullNode();
             }
             throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                + "': the index '" + fromEnd + "' is out of bounds.");
+                + "': the index is out of bounds.");
         }
         return values.get((int) index);
     }
@@ -1162,7 +1165,7 @@ final class TemplateFunctions {
         Matcher matcher = DURATION.matcher(duration);
         if (!matcher.matches() || duration.endsWith("P") || duration.endsWith("T")) {
             throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                + "': '" + duration + "' is not an ISO 8601 duration.");
+                + "': the value is not an ISO 8601 duration.");
         }
         long days = group(matcher, 2) * 365 + group(matcher, 3) * 30 + group(matcher, 4) * 7 + group(matcher, 5);
         double seconds = matcher.group(8) == null ? 0 : Double.parseDouble(matcher.group(8));
@@ -1200,7 +1203,7 @@ final class TemplateFunctions {
         try {
             return LocalDate.parse(normalized).atStartOfDay().atOffset(ZoneOffset.UTC);
         } catch (DateTimeParseException e) {
-            throw TemplateException.invalid("The value '" + value + "' is not an ISO 8601 date and time.");
+            throw TemplateException.invalid("The value is not an ISO 8601 date and time.");
         }
     }
 
@@ -1223,7 +1226,7 @@ final class TemplateFunctions {
                     .appendFraction(ChronoField.NANO_OF_SECOND, 7, 7, true).appendLiteral('Z').toFormatter()
                     .format(utc);
                 default -> throw TemplateException.invalid("Unable to evaluate template language function '" + name
-                    + "': the date format '" + format + "' is not supported by floci-az.");
+                    + "': the date format is not supported by floci-az.");
             };
         }
         return DateTimeFormatter.ofPattern(customPattern(name, format), Locale.ROOT).format(utc);
