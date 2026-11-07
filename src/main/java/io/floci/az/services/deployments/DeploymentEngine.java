@@ -109,7 +109,7 @@ public class DeploymentEngine {
     private static final String KEY_VAULT_API_VERSION = "2023-07-01";
 
     private static final Pattern KEY_VAULT_ID = Pattern.compile(
-        "/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.KeyVault/vaults/([^/]+)/?",
+        "/subscriptions/([^/]+)/resourceGroups/[^/]+/providers/Microsoft\\.KeyVault/vaults/([^/]+)/?",
         Pattern.CASE_INSENSITIVE);
 
     /** Keys of a nested deployment that pick its target, which its id already carries. */
@@ -1137,14 +1137,19 @@ public class DeploymentEngine {
     }
 
     /**
-     * The value of a Key Vault parameter reference ({@code key-vault-parameter.md}). The vault is read through ARM, so
-     * its tenant scope applies, and must allow template deployments; the secret is read through the data plane. Azure's
-     * error codes for these failures have no local source, so each is an {@code InvalidTemplate}.
+     * The value of a Key Vault parameter reference ({@code key-vault-parameter.md}). The vault must be in the
+     * deployment's own tenant and allow template deployments; it is read through ARM, the secret through the data plane.
+     * The tenant is checked here because both reads are internal, which the request gate's tenant rule does not see.
+     * Azure's error codes for these failures have no local source, so each is an {@code InvalidTemplate}.
      */
     private JsonNode readSecret(Request request, String vaultId, String secretName, String secretVersion) {
         Matcher vault = KEY_VAULT_ID.matcher(vaultId);
         if (!vault.matches()) {
             throw DeploymentTemplate.invalid("The Key Vault reference id '" + vaultId + "' is not a vault's id.");
+        }
+        if (!directory.tenantOfSubscription(vault.group(1)).equalsIgnoreCase(tenantOf(request))) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' of a parameter reference is in another "
+                + "tenant than the deployment's.");
         }
         Response read = router.get().dispatchInternal("GET", vaultId,
             Map.of("api-version", KEY_VAULT_API_VERSION), request.origin());
@@ -1159,7 +1164,7 @@ public class DeploymentEngine {
         }
         // The data plane keys secrets by the vault's own name, the one its vaultUri carries, and an ARM id may spell it
         // in other casing.
-        String vaultName = answer.path("name").asText(vault.group(1));
+        String vaultName = answer.path("name").asText(vault.group(2));
         Response secret = router.get().readKeyVaultSecret(vaultName, secretName, secretVersion, request.origin());
         JsonNode bundle = entity(secret);
         if (secret.getStatus() != 200 || !bundle.path("value").isTextual()) {
