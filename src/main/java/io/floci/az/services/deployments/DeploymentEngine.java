@@ -229,7 +229,8 @@ public class DeploymentEngine {
 
     /** A deployment read, checked and ordered, ready to run. */
     record Plan(DeploymentTemplate template, DeploymentScope scope, Map<String, JsonNode> parameters,
-                        List<DependencyGraph.Node> order, Map<String, TemplateScope> instanceScopes) {
+                        List<DependencyGraph.Node> order, Map<String, TemplateScope> instanceScopes,
+                        SecretRedaction secrets) {
 
         /** The scope a resource is evaluated in: its copy iteration's, or the deployment's. */
         TemplateScope scopeOf(DependencyGraph.Node node) {
@@ -326,7 +327,8 @@ public class DeploymentEngine {
             try {
                 prepared = resourceRequest(plan, node, definition);
             } catch (TemplateException e) {
-                unsupported(change, "The resource could not be evaluated before deployment: " + e.getMessage());
+                unsupported(change, "The resource could not be evaluated before deployment: "
+                    + plan.secrets().redact(e.getMessage()));
                 continue;
             }
             Response response = router.get().dispatchInternal("GET", node.id(),
@@ -430,7 +432,7 @@ public class DeploymentEngine {
         try {
             outputs = outputs(plan);
         } catch (TemplateException e) {
-            ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
+            ObjectNode detail = detail(e.code(), request.id(), plan.secrets().redact(e.getMessage()));
             operations.add(outputOperation("Failed", detail, outputsStarted));
             return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
                 providers(deployedTypes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
@@ -444,7 +446,17 @@ public class DeploymentEngine {
 
     // ── Preparing ──────────────────────────────────────────────────────────────────
 
+    /** {@link #plan(Request, SecretRedaction)}, whose errors never quote a Key Vault secret it read. */
     private Plan plan(Request request) {
+        SecretRedaction secrets = new SecretRedaction();
+        try {
+            return plan(request, secrets);
+        } catch (TemplateException e) {
+            throw secrets.redact(e);
+        }
+    }
+
+    private Plan plan(Request request, SecretRedaction secrets) {
         JsonNode properties = request.properties();
         if (properties == null || !properties.isObject()) {
             throw DeploymentTemplate.invalid("The deployment 'properties' are missing.");
@@ -462,7 +474,11 @@ public class DeploymentEngine {
         }
         DeploymentTemplate template = DeploymentTemplate.parse(properties.get("template"));
         Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"),
-            (vaultId, secretName, secretVersion) -> readSecret(request, vaultId, secretName, secretVersion));
+            (vaultId, secretName, secretVersion) -> {
+                JsonNode secret = readSecret(request, vaultId, secretName, secretVersion);
+                secrets.add(secret.asText());
+                return secret;
+            });
         List<DependencyGraph.Node> nodes = new ArrayList<>();
         Map<String, TemplateScope> instanceScopes = new LinkedHashMap<>();
         DeploymentScope scope = scope(request, template, supplied, nodes, instanceScopes);
@@ -496,7 +512,7 @@ public class DeploymentEngine {
             TemplateScope nodeScope = instanceScopes.getOrDefault(node.id().toLowerCase(Locale.ROOT), scope);
             withImplicit.add(withImplicitReferences(node, template, nodeScope, emptyLoops, nodes));
         }
-        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes);
+        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes, secrets);
     }
 
     private DependencyGraph.Node node(Request request, DeploymentTemplate.Resource resource, TemplateScope scope,
@@ -680,7 +696,8 @@ public class DeploymentEngine {
             try {
                 evaluated = ExpressionEvaluator.evaluate(argument, scope);
             } catch (TemplateException e) {
-                LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+                // Only the code: the message may quote a parameter's value, a Key Vault secret among them.
+                LOG.debugv("Outer nested template reference left to the child: {0}", e.code());
                 continue;
             }
             if (evaluated.isTextual() && DependencyGraph.isName(evaluated.asText())
@@ -777,7 +794,7 @@ public class DeploymentEngine {
         try {
             prepared = resourceRequest(plan, node, definition);
         } catch (TemplateException e) {
-            ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
+            ObjectNode failure = detail(e.code(), node.id(), plan.secrets().redact(e.getMessage()));
             operations.add(resourceOperation(node, null, "Failed", null, failure, started));
             return Created.failed(failure);
         }
@@ -1012,7 +1029,8 @@ public class DeploymentEngine {
         try {
             name = ExpressionEvaluator.evaluate(argument, plan.scope());
         } catch (TemplateException e) {
-            LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+            // Only the code: the message may quote a parameter's value, a Key Vault secret among them.
+            LOG.debugv("Outer nested template reference left to the child: {0}", e.code());
             return null;
         }
         if (!name.isTextual() || !DependencyGraph.isName(name.asText())) {
