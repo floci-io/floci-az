@@ -210,11 +210,11 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             flatten(field.getValue(), null, "'" + symbol + "'", flat);
             for (int i = 0; i < flat.size(); i++) {
                 ObjectNode definition = flat.get(i);
-                if (isNestedDeployment(definition)) {
+                boolean existing = i == 0 && isExisting(definition);
+                if (isNestedDeployment(definition) && !existing) {
                     useInnerScope(definition, symbol);
                 }
-                resources.add(new Resource(resources.size(), definition, i == 0 ? symbol : null,
-                    i == 0 && definition.path("existing").asBoolean(false)));
+                resources.add(new Resource(resources.size(), definition, i == 0 ? symbol : null, existing));
             }
         }
         return resources;
@@ -274,7 +274,8 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             throw invalid("The resource '" + name + "' uses a property copy loop, which is only allowed on a "
                 + "top-level resource.");
         }
-        if (isNestedDeployment(flattened)) {
+        // An existing deployment is only read, for its outputs, so it carries no template to check.
+        if (isNestedDeployment(flattened) && !(parent == null && isExisting(flattened))) {
             checkNestedDeployment(flattened, name);
         }
         flat.add(flattened);
@@ -325,6 +326,11 @@ public record DeploymentTemplate(ObjectNode template, Map<String, Parameter> par
             return value.substring(1, value.length() - 1);
         }
         return "'" + ExpressionParser.unescape(value).replace("'", "''") + "'";
+    }
+
+    /** True for a resource declared {@code existing}, which a 2.x template reads and never deploys. */
+    private static boolean isExisting(ObjectNode resource) {
+        return resource.path("existing").asBoolean(false);
     }
 
     /** True for a nested deployment ({@code Microsoft.Resources/deployments}), which a Bicep module compiles to. */
