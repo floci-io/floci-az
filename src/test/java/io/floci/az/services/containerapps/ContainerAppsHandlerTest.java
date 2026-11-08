@@ -113,10 +113,12 @@ public class ContainerAppsHandlerTest {
                         equalTo(verificationId));
 
         given().contentType("application/json")
-                .body("{\"properties\":{\"customDomainConfiguration\":{\"customDomainVerificationId\":\"custom\"}}}")
+                .body("{\"properties\":{\"customDomainConfiguration\":{\"customDomainVerificationId\":\"custom\","
+                        + "\"dnsSuffix\":\"apps.example.com\"}}}")
                 .patch(ENVIRONMENT_URL).then()
                 .statusCode(200)
-                .body("properties.customDomainConfiguration.customDomainVerificationId", equalTo("custom"));
+                .body("properties.customDomainConfiguration.customDomainVerificationId", equalTo(verificationId))
+                .body("properties.customDomainConfiguration.dnsSuffix", equalTo("apps.example.com"));
     }
 
     @Test
