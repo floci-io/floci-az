@@ -15,6 +15,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,6 +40,26 @@ class StorageAccountResourceStoreTest {
     private static String account(String sub, String rg, String name) {
         return "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Storage/storageAccounts/"
             + name;
+    }
+
+    @Test
+    void aGetReturnsWhatThePutSet() {
+        String body = "{\"location\":\"westeurope\",\"kind\":\"BlockBlobStorage\",\"sku\":{\"name\":\"Premium_ZRS\"},"
+            + "\"properties\":{\"minimumTlsVersion\":\"TLS1_2\",\"allowSharedKeyAccess\":false,"
+            + "\"encryption\":{\"services\":{\"queue\":{\"keyType\":\"Service\"}}}}}";
+        given().contentType("application/json").body(body).when().put(account("sub-echo", "rg", "echosa") + API)
+            .then().statusCode(200);
+
+        given().when().get(account("sub-echo", "rg", "echosa") + API)
+            .then().statusCode(200)
+            .body("sku.name", equalTo("Premium_ZRS"))
+            .body("sku.tier", equalTo("Premium"))
+            .body("kind", equalTo("BlockBlobStorage"))
+            .body("properties.accessTier", nullValue())
+            .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
+            .body("properties.allowSharedKeyAccess", equalTo(false))
+            .body("properties.encryption.services.queue.keyType", equalTo("Service"))
+            .body("properties.encryption.services.blob.keyType", equalTo("Account"));
     }
 
     @Test

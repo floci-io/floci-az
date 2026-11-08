@@ -337,29 +337,45 @@ public class StorageAccountArmService
         if (tags != null) {
             resource.put("tags", tags);
         }
-        resource.put("sku", Map.of("name", "Standard_LRS", "tier", "Standard"));
-        resource.put("kind", "StorageV2");
-        resource.put("properties", Map.of(
-                "provisioningState", "Succeeded",
-                "isHnsEnabled", hnsEnabled,
-                "primaryEndpoints", Map.of(
-                        "blob",  "http://" + account + ".blob.core.windows.net/",
-                        "dfs",   "http://" + account + ".dfs.core.windows.net/",
-                        "queue", "http://" + account + ".queue.core.windows.net/",
-                        "table", "http://" + account + ".table.core.windows.net/"),
-                "primaryLocation", location,
-                "statusOfPrimary", "available",
-                "supportsHttpsTrafficOnly", false,
-                "accessTier", "Hot",
-                "encryption", Map.of(
-                        "services", Map.of(
-                                "blob",  Map.of("enabled", true, "keyType", "Account"),
-                                "file",  Map.of("enabled", true, "keyType", "Account"),
-                                "queue", Map.of("enabled", true, "keyType", "Account"),
-                                "table", Map.of("enabled", true, "keyType", "Account")),
-                        "keySource", "Microsoft.Storage")
-        ));
+        String skuName = ArmJson.string(ArmJson.cast(body.get("sku")), "name", "Standard_LRS");
+        resource.put("sku", Map.of("name", skuName, "tier", skuName.startsWith("Premium") ? "Premium" : "Standard"));
+        String kind = ArmJson.string(body, "kind", "StorageV2");
+        resource.put("kind", kind);
+        Map<String, Object> requested = ArmJson.cast(body.get("properties"));
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("supportsHttpsTrafficOnly", false);
+        // azurerm rejects an access tier on the kinds that do not have one.
+        if (Set.of("StorageV2", "BlobStorage", "FileStorage").contains(kind)) {
+            properties.put("accessTier", "Hot");
+        }
+        properties.putAll(requested);
+        properties.put("encryption", encryption(ArmJson.cast(requested.get("encryption"))));
+        properties.put("provisioningState", "Succeeded");
+        properties.put("isHnsEnabled", hnsEnabled);
+        properties.put("primaryEndpoints", Map.of(
+                "blob",  "http://" + account + ".blob.core.windows.net/",
+                "dfs",   "http://" + account + ".dfs.core.windows.net/",
+                "queue", "http://" + account + ".queue.core.windows.net/",
+                "table", "http://" + account + ".table.core.windows.net/"));
+        properties.put("primaryLocation", location);
+        properties.put("statusOfPrimary", "available");
+        resource.put("properties", properties);
         return resource;
+    }
+
+    /** The default encryption settings with {@code requested} laid over them, service by service. */
+    private static Map<String, Object> encryption(Map<String, Object> requested) {
+        Map<String, Object> requestedServices = ArmJson.cast(requested.get("services"));
+        Map<String, Object> services = new LinkedHashMap<>();
+        for (String service : List.of("blob", "file", "queue", "table")) {
+            Map<String, Object> settings = new LinkedHashMap<>(Map.of("enabled", true, "keyType", "Account"));
+            settings.putAll(ArmJson.cast(requestedServices.get(service)));
+            services.put(service, settings);
+        }
+        Map<String, Object> encryption = new LinkedHashMap<>(requested);
+        encryption.put("services", services);
+        encryption.putIfAbsent("keySource", "Microsoft.Storage");
+        return encryption;
     }
 
     /**
