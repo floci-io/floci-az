@@ -33,7 +33,7 @@ public class DirectoryReader {
     }
 
     public record DirectoryUser(String id, String tenantId, String userPrincipalName, String displayName,
-                                String mail) {
+                                String mail, boolean accountEnabled, boolean passwordChangeRequired) {
     }
 
     public record DirectoryGroup(String id, String tenantId, String displayName, boolean securityEnabled) {
@@ -81,6 +81,15 @@ public class DirectoryReader {
                 .map(DirectoryReader::toUser);
     }
 
+    /** Verifies a user's password without exposing the stored hash in the public user view. */
+    boolean userPasswordMatches(String tenantId, String userId, String candidate) {
+        return store.get(tenantId, DirectoryEntitySet.USERS, userId)
+                .map(user -> SecretHasher.matches(secretHash(user,
+                        user.props().path(GraphDirectoryStore.PASSWORD_PROFILE).get(GraphDirectoryStore.SECRET_HASH)),
+                        candidate))
+                .orElse(false);
+    }
+
     public Optional<DirectoryGroup> group(String tenantId, String id) {
         return store.get(tenantId, DirectoryEntitySet.GROUPS, id).map(DirectoryReader::toGroup);
     }
@@ -113,8 +122,11 @@ public class DirectoryReader {
     }
 
     private static DirectoryUser toUser(DirectoryObject object) {
+        JsonNode profile = object.props().path(GraphDirectoryStore.PASSWORD_PROFILE);
         return new DirectoryUser(object.id(), object.tenantId(), object.text("userPrincipalName"),
-                object.text("displayName"), object.text("mail"));
+                object.text("displayName"), object.text("mail"), object.props().path("accountEnabled").asBoolean(true),
+                profile.path("forceChangePasswordNextSignIn").asBoolean(false)
+                        || profile.path("forceChangePasswordNextSignInWithMfa").asBoolean(false));
     }
 
     private static DirectoryGroup toGroup(DirectoryObject object) {
@@ -149,15 +161,15 @@ public class DirectoryReader {
                 object.text("displayName"));
     }
 
-    private SecretHash secretHash(DirectoryObject application, JsonNode node) {
+    private SecretHash secretHash(DirectoryObject object, JsonNode node) {
         if (node == null || node.isNull()) {
             return null;
         }
         try {
             return mapper.treeToValue(node, SecretHash.class);
         } catch (JsonProcessingException e) {
-            LOG.warnv(e, "Entra: application {0} has an unreadable secret hash; that secret will never match",
-                    application.id());
+            LOG.warnv("Entra: directory object {0} has an unreadable secret hash; that secret will never match",
+                    object.id());
             return null;
         }
     }

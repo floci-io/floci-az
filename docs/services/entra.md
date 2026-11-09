@@ -29,6 +29,8 @@ discovery document and JWKS. This replaces the previous static, unsigned-token s
   `client_id` and `client_secret` get a token and `ClientSecretCredential` works with zero setup.
   Set `validate-client-credentials: true` to check them against the directory (see
   [Client credential validation](#client-credential-validation))
+- **Optional directory password validation**: `validate-user-credentials: true` verifies
+  provisioned user passwords and account status. The default still accepts arbitrary passwords.
 
 ## Endpoints
 
@@ -129,8 +131,9 @@ elsewhere (`client_credentials` is likewise accepted without strict validation).
 
 ## Refreshing a session
 
-Include `offline_access` in the original authorization request to receive an opaque
-`refresh_token` from the v2.0 code exchange. A request without this scope does not receive one.
+Include `offline_access` in the original authorization request or directory-backed password
+request to receive an opaque `refresh_token` at the v2.0 token endpoint. A request without
+this scope does not receive one. Synthetic password-grant identities do not receive refresh tokens.
 Renew the session without another authorization request:
 
 ```bash
@@ -227,14 +230,49 @@ both get a token, and the first unregistered `client_id` is logged once at `WARN
 
 The secret may be sent in the form (`client_secret_post`) or in an HTTP Basic header
 (`client_secret_basic`). The `password` and `authorization_code` grants need no secret, only a
-registered `client_id`. A `client_assertion` is accepted without verification, and the `password`
-grant does not check the user's password. The seeded dev app (`11111111-...` with
-`floci-az-dev-secret`) is registered, so it keeps working. Secrets are stored as salted
+registered `client_id`. A `client_assertion` is accepted without verification. User passwords
+are checked separately only when `validate-user-credentials` is enabled. The seeded dev app
+(`11111111-...` with `floci-az-dev-secret`) is registered, so it keeps working. Secrets are stored as salted
 PBKDF2-HMAC-SHA256 hashes, never in plaintext.
 
 Tenants: `common`, `organizations` and `consumers` act in the default tenant. Any other tenant id
 is accepted as it is and served from the default tenant's directory, so the dev app authenticates
 under it too.
+
+## User credential validation
+
+Set `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_USER_CREDENTIALS=true` (configuration key
+`floci-az.services.entra.validate-user-credentials`) to validate password grants against the
+directory. This is independent of client credential validation; enable both to check clients too.
+
+Strict password grants require nonblank `username`, `password` and `client_id` values. The client
+id may come from HTTP Basic. The username is matched case-insensitively within the resolved
+directory. With the built-in tenant resolver, use the configured default tenant or one of its
+aliases; arbitrary tenant ids cannot borrow the default directory's passwords.
+
+| Request | Response |
+|---|---|
+| Missing or blank required field | `400` `invalid_request`, `AADSTS900144` |
+| Unknown user, wrong password, missing or malformed password hash | `400` `invalid_grant`, `AADSTS50126` |
+| Disabled account (`accountEnabled: false`) | `400` `invalid_grant`, `AADSTS50057` |
+| Password change required on next sign-in | `400` `invalid_grant`, `AADSTS50055` |
+
+Provisioned users use their stored object id in `oid`, `sub` and `client_info`, matching code-flow
+sign-in and Graph memberships. Unprovisioned users retain synthetic identities when validation
+is off. The built-in dev user has no password: use a password-bearing user from the startup seed
+for strict ROPC.
+
+V2 password grants for directory users issue a refresh token only for an explicit `offline_access`
+scope and a supplied client id. Renewal uses the existing client, tenant and token checks. With
+user validation enabled, both password-flow and code-flow refresh sessions also reject disabled
+accounts and either forced-password-change flag, returning `invalid_grant`/`AADSTS70000`.
+Deleted users are rejected regardless of the setting. With validation off, account status is not checked.
+
+This subset follows the [ROPC grant](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth-ropc)
+and [passwordProfile](https://learn.microsoft.com/en-us/graph/api/resources/passwordprofile?view=graph-rest-1.0)
+contracts. MFA, federation, conditional access and complete password-change revocation are not
+modelled. Clearing a forced-change flag permits renewal again; changing a password alone does
+not revoke refresh tokens.
 
 ## Configuration
 
@@ -248,6 +286,7 @@ floci-az:
       token-lifetime-seconds: 3599
       validate-tokens: false        # true: ARM requests must carry a valid token (same as parity-overrides.strict-tokens)
       validate-client-credentials: false   # true: reject unregistered clients and wrong secrets
+      validate-user-credentials: false     # true: check directory passwords and account status
       # signing-key-path:           # optional; default {storage.persistent-path}/entra
 ```
 
@@ -259,6 +298,7 @@ floci-az:
 | `token-lifetime-seconds` | `FLOCI_AZ_SERVICES_ENTRA_TOKEN_LIFETIME_SECONDS` | `3599` |
 | `validate-tokens` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_TOKENS` | `false` |
 | `validate-client-credentials` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS` | `false` |
+| `validate-user-credentials` | `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_USER_CREDENTIALS` | `false` |
 | `signing-key-path` | `FLOCI_AZ_SERVICES_ENTRA_SIGNING_KEY_PATH` | `{storage.persistent-path}/entra` |
 
 > `validate-tokens: true` turns on [token verification](arm.md#token-verification) for ARM requests. Data planes
@@ -304,7 +344,12 @@ Mount the file into the container and use its container path in the environment 
     "id": "bbbbbbbb-0000-0000-0000-000000000001",
     "userPrincipalName": "reader@example.test",
     "displayName": "Local Reader",
-    "mail": "reader@example.test"
+    "mail": "reader@example.test",
+    "accountEnabled": true,
+    "passwordProfile": {
+      "password": "local-user-development-only",
+      "forceChangePasswordNextSignIn": false
+    }
   }],
   "groups": [{
     "id": "cccccccc-0000-0000-0000-000000000001",
@@ -319,6 +364,9 @@ The arrays are optional. All object ids are required and unique within the file;
 digits, periods, underscores or hyphens. Applications require `appId`; users require
 `userPrincipalName`; groups require `displayName`. Application/user `displayName` defaults to
 appId/UPN, `mail` and `clientSecret` are optional, and `securityEnabled` defaults to true.
+Users optionally accept boolean `accountEnabled` (default true) and `passwordProfile`, whose
+optional fields are a nonblank `password` and the booleans `forceChangePasswordNextSignIn` and
+`forceChangePasswordNextSignInWithMfa` (both default false). Omit the profile for browser-only users.
 The top-level `tenantId` defaults to `default-tenant-id`. Memberships must reference users or
 groups in that tenant, either already present or included in the file. Configure the tenant
 resolver appropriately when seeding a directory other than the default.
@@ -330,8 +378,17 @@ objects and merges memberships; it does not overwrite existing profiles, rotate 
 or delete objects or memberships omitted on later starts. Repeat starts do not duplicate links.
 Explicit reset also reapplies the seed.
 
-Client secrets are hashed by the normal directory writer before persistence. Protect the seed
-file itself because its optional `clientSecret` values are plaintext. To check seeded clients,
+Client secrets and user passwords are hashed by the normal directory writer before persistence.
+User profiles store an internal `secretHash` using PBKDF2-HMAC-SHA256, 600000 iterations, a random
+16-byte salt and a 32-byte derived key, with both byte arrays encoded as base64. Writing an
+existing hash preserves it; writing a new password replaces it. Password profiles and hashes
+are excluded from Graph member responses. Protect the seed file itself because its optional
+`clientSecret` and `password` values are plaintext. To check seeded clients,
 enable `FLOCI_AZ_SERVICES_ENTRA_VALIDATE_CLIENT_CREDENTIALS`. Existing `login_hint` selects
 seeded users for authorization-code sign-in, and Graph membership reads use the same records.
 This is a startup seed contract, not a directory CRUD or interactive account-picker API.
+
+The Java SDK compatibility suite can exercise these seeded users by setting
+`FLOCI_AZ_ENTRA_USERNAME` and `FLOCI_AZ_ENTRA_PASSWORD` for the test process and running
+`EntraCompatibilityTest` against an emulator with both validation options enabled. Without
+these test overrides, it uses the permissive dev user and an arbitrary password.

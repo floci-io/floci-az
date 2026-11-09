@@ -59,6 +59,7 @@ import java.util.stream.Stream;
  *
  * <p>Plaintext client secrets are never written: {@link #put} replaces any {@code secretText} in an
  * application's {@code passwordCredentials} with a {@link SecretHash}.
+ * User {@code passwordProfile.password} values are likewise replaced with a stored hash.
  * Configured seeds are loaded eagerly so a bad file prevents startup before readiness is reported.
  */
 @Startup
@@ -81,6 +82,8 @@ public class GraphDirectoryStore implements Resettable {
     public static final String SECRET_TEXT = "secretText";
     /** The stored {@link SecretHash} inside a password credential. Internal, never served by Graph. */
     public static final String SECRET_HASH = "secretHash";
+    /** User password policy and internal password hash; plaintext is hashed on write. */
+    public static final String PASSWORD_PROFILE = "passwordProfile";
 
     /**
      * The hash of {@link EntraStore#DEV_CLIENT_SECRET}. The dev secret is public, so its salt is a
@@ -484,6 +487,11 @@ public class GraphDirectoryStore implements Resettable {
     /** A copy of {@code props} whose password credentials carry hashes, never plaintext. */
     private ObjectNode withHashedSecrets(ObjectNode props) {
         ObjectNode copy = props.deepCopy();
+        if (copy.get(PASSWORD_PROFILE) instanceof ObjectNode profile && profile.hasNonNull("password")) {
+            SecretHash hash = SecretHasher.hash(profile.get("password").asText());
+            profile.remove("password");
+            profile.set(SECRET_HASH, mapper.valueToTree(hash));
+        }
         JsonNode credentials = copy.get(PASSWORD_CREDENTIALS);
         if (credentials instanceof ArrayNode array) {
             for (JsonNode element : array) {

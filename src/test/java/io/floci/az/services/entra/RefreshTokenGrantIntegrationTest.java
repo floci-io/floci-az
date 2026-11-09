@@ -99,6 +99,20 @@ class RefreshTokenGrantIntegrationTest {
     }
 
     @Test
+    void passwordSessionsPreserveClientAndTenantBindings() {
+        String token = tokenRequest(true).formParam("grant_type", "password")
+                .formParam("username", EntraStore.DEV_USER_UPN).formParam("password", "permissive-password")
+                .formParam("scope", SCOPE).post(TOKEN).then().statusCode(200).extract().path("refresh_token");
+        refresh(token, false).then().statusCode(401).body("error_codes", contains(7000218));
+        tokenRequest("other-client", false).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
+                .post(TOKEN).then().statusCode(400).body("error_codes", contains(700016));
+        tokenRequest(true).formParam("grant_type", "refresh_token").formParam("refresh_token", token)
+                .post("/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/oauth2/v2.0/token")
+                .then().statusCode(400).body("error_codes", contains(70000));
+        refresh(token, true).then().statusCode(200);
+    }
+
+    @Test
     void refreshRenewsAnExpiredAccessTokenForTheSameUser() throws Exception {
         Response original = exchange(SCOPE, true);
         String access = original.path("access_token");

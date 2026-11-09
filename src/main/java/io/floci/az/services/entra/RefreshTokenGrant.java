@@ -1,5 +1,6 @@
 package io.floci.az.services.entra;
 
+import io.floci.az.config.EmulatorConfig;
 import io.floci.az.services.entra.DirectoryReader.DirectoryUser;
 import io.floci.az.services.entra.EntraModels.RefreshToken;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -17,15 +18,17 @@ public class RefreshTokenGrant implements GrantHandler {
     private final TokenIssuer issuer;
     private final EntraResponses responses;
     private final ClientAuthenticator authenticator;
+    private final EmulatorConfig config;
 
     @Inject
     public RefreshTokenGrant(EntraStore store, DirectoryReader directory, TokenIssuer issuer,
-                             EntraResponses responses, ClientAuthenticator authenticator) {
+                             EntraResponses responses, ClientAuthenticator authenticator, EmulatorConfig config) {
         this.store = store;
         this.directory = directory;
         this.issuer = issuer;
         this.responses = responses;
         this.authenticator = authenticator;
+        this.config = config;
     }
 
     static Instant expiry(boolean spa) {
@@ -63,7 +66,8 @@ public class RefreshTokenGrant implements GrantHandler {
         }
         String scope = request.scope() == null || request.scope().isBlank() ? grant.scope() : request.scope();
         DirectoryUser user = directory.user(grant.directoryTenantId(), grant.userObjectId()).orElse(null);
-        if (user == null) {
+        if (user == null || (config.services().entra().validateUserCredentials()
+                && (!user.accountEnabled() || user.passwordChangeRequired()))) {
             return responses.error(AadstsError.REFRESH_TOKEN_INVALID);
         }
 
