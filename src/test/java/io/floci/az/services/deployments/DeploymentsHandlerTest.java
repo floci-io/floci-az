@@ -824,6 +824,142 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void aSymbolicTemplateDeploysInDependencyOrderAndReadsBySymbol() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("symbolic", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0", "contentVersion": "1.0.0.0",
+              "definitions": {"accountName": {"type": "string", "minLength": 3}, "alias": {"$ref": "#/definitions/accountName"}},
+              "parameters": {"account": {"$ref": "#/definitions/alias", "defaultValue": "deploysa0001"},
+                             "note": {"type": "string", "nullable": true}},
+              "resources": {
+                "ids": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                        "name": "[format('id{0}', copyIndex())]", "location": "westeurope",
+                        "dependsOn": ["store"], "copy": {"name": "idcopy", "count": 2}},
+                "after": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                          "name": "after", "location": "westeurope", "dependsOn": ["ids"]},
+                "store": {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                          "name": "[parameters('account')]", "location": "westeurope", "kind": "StorageV2",
+                          "sku": {"name": "Standard_LRS"}},
+                "mod": {"type": "Microsoft.Resources/deployments", "apiVersion": "2022-09-01", "name": "symmodule",
+                        "properties": {"mode": "Incremental", "template": {
+                          "variables": {"answer": "from-inner"},
+                          "resources": [],
+                          "outputs": {"answer": {"type": "string", "value": "[variables('answer')]"}}}}}},
+              "outputs": {
+                "blob": {"$ref": "#/definitions/accountName", "value": "[reference('store').primaryEndpoints.blob]"},
+                "second": {"type": "string", "value": "[reference('ids[1]', '2023-01-31', 'Full').name]"},
+                "all": {"type": "int", "value": "[length(references('ids'))]"},
+                "note": {"type": "bool", "value": "[equals(parameters('note'), null())]"},
+                "inner": {"type": "string", "value": "[reference('mod').outputs.answer.value]"},
+                "named": {"type": "string", "value": "[deployment().name]"},
+                "hasNoMode": {"type": "bool", "value": "[empty(tryGet(deployment().properties, 'mode'))]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/symbolic" + API).asString());
+
+        String blob = given().when().get(ACCOUNT + "?api-version=2023-01-01").then().statusCode(200)
+            .extract().path("properties.primaryEndpoints.blob");
+        String identity = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/";
+        given().when().get(DEPLOYMENTS + "/symbolic" + API).then().statusCode(200)
+            .body("properties.outputs.blob.value", equalTo(blob))
+            .body("properties.outputs.blob.type", equalTo("string"))
+            .body("properties.outputs.second.value", equalTo("id1"))
+            .body("properties.outputs.all.value", equalTo(2))
+            .body("properties.outputs.note.value", equalTo(true))
+            .body("properties.outputs.inner.value", equalTo("from-inner"))
+            .body("properties.outputs.named.value", equalTo("symbolic"))
+            .body("properties.outputs.hasNoMode.value", equalTo(true))
+            .body("properties.outputResources.id", contains(ACCOUNT, identity + "id0", identity + "id1",
+                identity + "after"));
+    }
+
+    @Test
+    void aReadOfAnEmptyCollectionAndANullableFunctionValueBothWork() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("emptyloop", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "definitions": {"maybeText": {"type": "string", "nullable": true}},
+              "functions": [{"namespace": "floci", "members": {"echo": {
+                "parameters": [{"name": "value", "$ref": "#/definitions/maybeText"}],
+                "output": {"$ref": "#/definitions/maybeText", "value": "[parameters('value')]"}}}}],
+              "resources": {
+                "none": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                         "name": "[format('none{0}', copyIndex())]", "location": "westeurope",
+                         "copy": {"name": "nonecopy", "count": 0}},
+                "reader": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                           "name": "reader", "location": "westeurope",
+                           "tags": {"count": "[string(length(references('none')))]"}}},
+              "outputs": {"echoed": {"type": "bool", "value": "[equals(floci.echo(null()), null())]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/emptyloop" + API).asString());
+        given().when().get(DEPLOYMENTS + "/emptyloop" + API).then().statusCode(200)
+            .body("properties.outputs.echoed.value", equalTo(true));
+        given().when().get(RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/reader?api-version=2023-01-31")
+            .then().statusCode(200).body("tags.count", equalTo("0"));
+    }
+
+    @Test
+    void anExistingResourceIsReadAndNeverDeployed() throws Exception {
+        String missing = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/neverdeployed";
+        assertEquals("Succeeded", awaitTerminal(put("readexisting", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "resources": {
+                "unread": {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                           "name": "neverdeployed", "existing": true},
+                "store": {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                          "name": "deploysa0001", "location": "westeurope", "kind": "StorageV2",
+                          "sku": {"name": "Standard_LRS"}}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/readexisting" + API).asString());
+
+        given().when().get(missing + "?api-version=2023-01-31").then().statusCode(404);
+        given().when().get(DEPLOYMENTS + "/readexisting" + API).then().statusCode(200)
+            .body("properties.outputResources.id", contains(ACCOUNT));
+
+        assertEquals("Succeeded", awaitTerminal(put("readexisting2", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "resources": {"store": {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                      "name": "deploysa0001", "existing": true}},
+              "outputs": {"kind": {"type": "string", "value": "[reference('store', '2023-01-01', 'Full').kind]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/readexisting2" + API).asString());
+        given().when().get(DEPLOYMENTS + "/readexisting2" + API).then().statusCode(200)
+            .body("properties.outputs.kind.value", equalTo("StorageV2"))
+            .body("properties.outputResources", hasSize(0));
+    }
+
+    @Test
+    void anExistingDeploymentIsReadForItsOutputsWithoutATemplate() throws Exception {
+        assertEquals("Succeeded", awaitTerminal(put("producer", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [],
+              "outputs": {"greeting": {"type": "string", "value": "hello"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/producer" + API).asString());
+
+        assertEquals("Succeeded", awaitTerminal(put("consumer", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "resources": {"prior": {"type": "Microsoft.Resources/deployments", "apiVersion": "2025-04-01",
+                                      "name": "producer", "existing": true}},
+              "outputs": {"greeting": {"type": "string",
+                                       "value": "[reference('prior').outputs.greeting.value]"}}}}}
+            """)), () -> given().when().get(DEPLOYMENTS + "/consumer" + API).asString());
+        given().when().get(DEPLOYMENTS + "/consumer" + API).then().statusCode(200)
+            .body("properties.outputs.greeting.value", equalTo("hello"))
+            .body("properties.outputResources", hasSize(0));
+    }
+
+    @Test
+    void aSymbolicTemplateNoLongerReadsAResourceByItsName() throws Exception {
+        assertEquals("Failed", awaitTerminal(put("byname", """
+            {"properties": {"mode": "Incremental", "template": {
+              "languageVersion": "2.0",
+              "resources": {"store": {"type": "Microsoft.Storage/storageAccounts", "apiVersion": "2023-01-01",
+                                      "name": "deploysa0001", "location": "westeurope", "kind": "StorageV2",
+                                      "sku": {"name": "Standard_LRS"}}},
+              "outputs": {"blob": {"type": "object", "value": "[reference('deploysa0001')]"}}}}}
+            """)));
+        given().when().get(DEPLOYMENTS + "/byname" + API).then().statusCode(200)
+            .body("properties.error.details[0].message", containsString("deploysa0001"));
+    }
+
+    @Test
     void aParentListsTheResourcesOfItsModulesAtAnyDepthAndNotTheModules() throws Exception {
         String identity = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/";
         assertEquals("Succeeded", awaitTerminal(put("modules", """

@@ -95,6 +95,15 @@ final class CopyScope implements TemplateScope {
     }
 
     @Override
+    public JsonNode references(String symbol, boolean full) {
+        if (loopName != null && answersUnnamed) {
+            throw TemplateException.invalid("The template function 'references' can't be used within a resource "
+                + "copy loop.");
+        }
+        return parent.references(symbol, full);
+    }
+
+    @Override
     public JsonNode list(String resourceId, String action, String apiVersion, JsonNode body) {
         return parent.list(resourceId, action, apiVersion, body);
     }

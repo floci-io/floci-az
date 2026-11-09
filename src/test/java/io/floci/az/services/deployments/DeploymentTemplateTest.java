@@ -63,14 +63,19 @@ class DeploymentTemplateTest {
     @ParameterizedTest
     @ValueSource(strings = {
         "{\"languageVersion\": \"2.0\", \"resources\": {\"sa\": {}}}",
+        "{\"resources\": {\"sa\": {\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"2023-01-01\", \"name\": \"sa\"}}}",
+        "{\"languageVersion\": \"2.0\", \"resources\": [{\"type\": \"Microsoft.Storage/storageAccounts\", \"apiVersion\": \"2023-01-01\", \"name\": \"sa\"}]}",
+        "{\"languageVersion\": \"2.0\", \"resources\": {\"m\": {\"type\": \"Microsoft.Resources/deployments\", \"apiVersion\": \"2022-09-01\", \"name\": \"m\", \"properties\": {\"mode\": \"Incremental\", \"template\": {}, \"expressionEvaluationOptions\": {\"scope\": \"outer\"}}}}}",
+        "{\"languageVersion\": \"2.0\", \"parameters\": {\"p\": {\"$ref\": \"#/definitions/nope\"}}}",
+        "{\"languageVersion\": \"2.0\", \"definitions\": {\"a\": {\"$ref\": \"#/definitions/a\"}}, \"parameters\": {\"p\": {\"$ref\": \"#/definitions/a\"}}}",
+        "{\"parameters\": {\"p\": {\"$ref\": \"#/definitions/a\"}}, \"definitions\": {\"a\": {\"type\": \"string\"}}}",
     })
-    void whatPhaseOneDoesNotServeIsRefusedNotSkipped(String template) {
+    void aMalformedSymbolicTemplateIsRefused(String template) {
         TemplateException refused = assertThrows(TemplateException.class,
             () -> DeploymentTemplate.parse(json(template)));
 
         assertEquals("InvalidTemplate", refused.code());
         assertTrue(refused.getMessage().startsWith("Deployment template validation failed: '"), refused.getMessage());
-        assertTrue(refused.getMessage().contains("does not support"), refused.getMessage());
     }
 
     @ParameterizedTest
