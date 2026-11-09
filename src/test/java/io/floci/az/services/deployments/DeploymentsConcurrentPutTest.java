@@ -78,7 +78,7 @@ class DeploymentsConcurrentPutTest {
         };
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.effectiveBaseUrl()).thenReturn("http://localhost:4577");
-        handler = new DeploymentsHandler(config, engine, new ResourceGroups(null), new LinkedTemplates());
+        handler = new DeploymentsHandler(config, engine, new ResourceGroups(null), new LinkedTemplates(), null);
     }
 
     @AfterEach

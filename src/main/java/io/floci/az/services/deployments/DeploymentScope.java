@@ -32,6 +32,8 @@ final class DeploymentScope implements TemplateScope {
 
         JsonNode references(String symbol, boolean full);
 
+        JsonNode managementGroup();
+
         JsonNode deployer();
 
         JsonNode list(String resourceId, String action, String apiVersion, JsonNode body);
@@ -182,6 +184,11 @@ final class DeploymentScope implements TemplateScope {
     @Override
     public JsonNode references(String symbol, boolean full) {
         return live.references(symbol, full);
+    }
+
+    @Override
+    public JsonNode managementGroup() {
+        return live.managementGroup();
     }
 
     @Override
