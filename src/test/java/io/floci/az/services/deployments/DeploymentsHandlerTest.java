@@ -9,6 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
 import static io.restassured.RestAssured.given;
@@ -967,6 +969,32 @@ class DeploymentsHandlerTest {
             """)));
         given().when().get(DEPLOYMENTS + "/lambdabudget" + API).then().statusCode(200)
             .body("properties.error.details[0].message", containsString("lambda functions expand"));
+    }
+
+    @Test
+    void deployerReadsTheCallersToken() throws Exception {
+        String claims = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            ("{\"oid\":\"11111111-2222-3333-4444-555555555555\",\"upn\":\"dev@floci.test\","
+                + "\"tid\":\"99999999-0000-0000-0000-000000000009\"}").getBytes(StandardCharsets.UTF_8));
+        Response accepted = given().contentType("application/json").header("Authorization", "Bearer e30." + claims + ".sig")
+            .body("""
+                {"properties": {"mode": "Incremental", "template": {"resources": [],
+                  "functions": [{"namespace": "floci", "members": {"whoami": {"parameters": [],
+                    "output": {"type": "string", "value": "[deployer().objectId]"}}}}],
+                  "outputs": {
+                  "who": {"type": "object", "value": "[deployer()]"},
+                  "fromFunction": {"type": "string", "value": "[floci.whoami()]"},
+                  "subnet": {"type": "string", "value": "[cidrSubnet('10.0.0.0/16', 24, 2)]"}}}}}
+                """).when().put(DEPLOYMENTS + "/whoami" + API);
+        assertEquals("Succeeded", awaitTerminal(accepted),
+            () -> given().when().get(DEPLOYMENTS + "/whoami" + API).asString());
+
+        given().when().get(DEPLOYMENTS + "/whoami" + API).then().statusCode(200)
+            .body("properties.outputs.who.value.objectId", equalTo("11111111-2222-3333-4444-555555555555"))
+            .body("properties.outputs.who.value.userPrincipalName", equalTo("dev@floci.test"))
+            .body("properties.outputs.who.value.tenantId", equalTo("99999999-0000-0000-0000-000000000009"))
+            .body("properties.outputs.fromFunction.value", equalTo("11111111-2222-3333-4444-555555555555"))
+            .body("properties.outputs.subnet.value", equalTo("10.0.2.0/24"));
     }
 
     @Test

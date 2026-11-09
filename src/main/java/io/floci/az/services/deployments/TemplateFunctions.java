@@ -52,7 +52,7 @@ final class TemplateFunctions {
     /** Functions Azure documents that floci-az does not implement; calling one is an error, never a guess. */
     static final Set<String> UNSUPPORTED = Set.of(
         "providers", "pickzones", "managementgroup", "managementgroupresourceid",
-        "deployer", "roledefinitions", "lambda", "parsecidr", "cidrsubnet", "cidrhost");
+        "roledefinitions", "lambda");
 
     /** The {@code guid()} namespace ({@code template-functions-string.md}, guid). */
     private static final UUID GUID_NAMESPACE = UUID.fromString("11fb06fb-712d-4ddd-98c7-e71bbd588830");
@@ -155,6 +155,16 @@ final class TemplateFunctions {
                 string(name, args, 0, 1, 1).replace("+", "%2B"), StandardCharsets.UTF_8));
             case "union" -> union(name, args);
             case "flatten" -> flatten(name, args);
+            case "parsecidr" -> CidrFunctions.parseCidr(string(name, args, 0, 1, 1));
+            case "cidrsubnet" -> CidrFunctions.cidrSubnet(string(name, args, 0, 3, 3), integer(name, args, 1, 3, 3),
+                integer(name, args, 2, 3, 3));
+            case "cidrhost" -> CidrFunctions.cidrHost(string(name, args, 0, 2, 2), integer(name, args, 1, 2, 2));
+            case "deployer" -> {
+                if (!args.isEmpty()) {
+                    throw TemplateException.invalid("The template function 'deployer' takes no arguments.");
+                }
+                yield scope.deployer();
+            }
             case "lambdavariables" -> scope.lambdaVariable(string(name, args, 0, 1, 1));
             case "intersection" -> intersection(name, args);
             case "createarray" -> createArray(args);

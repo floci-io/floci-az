@@ -174,6 +174,11 @@ final class UserFunctions {
         }
 
         @Override
+        public JsonNode deployer() {
+            return outer.deployer();
+        }
+
+        @Override
         public JsonNode environment() {
             return outer.environment();
         }
