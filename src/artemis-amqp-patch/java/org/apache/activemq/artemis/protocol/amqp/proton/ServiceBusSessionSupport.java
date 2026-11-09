@@ -23,6 +23,8 @@ import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
+import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPException;
 import org.apache.activemq.artemis.utils.collections.LinkedListIterator;
 import org.apache.qpid.proton.amqp.Symbol;
@@ -300,6 +302,19 @@ public final class ServiceBusSessionSupport {
             SESSION_LOCK_LOST_ERROR, "The session lock has expired"));
       } catch (ActiveMQAMQPException e) {
          LOGGER.warn("Failed to close an expired Service Bus session receiver", e);
+      }
+   }
+
+   /** Return expired session deliveries through Artemis's failed-consumer cancellation path. */
+   public static void closeSender(AMQPSessionCallback session, ServerConsumer consumer,
+                                  ErrorCondition condition) throws Exception {
+      if (condition != null && SESSION_LOCK_LOST_ERROR.equals(condition.getCondition())) {
+         // A normal close decrements delivery counts. Expiry must retain them so the next
+         // delivery increments once and Artemis can enforce max-delivery-attempts normally.
+         consumer.close(true);
+         consumer.getQueue().recheckRefCount(session.getSessionContext());
+      } else {
+         session.closeSender(consumer);
       }
    }
 
