@@ -100,6 +100,28 @@ public class ContainerAppsHandlerTest {
     }
 
     @Test
+    void managedEnvironmentReportsCustomDomainVerificationId() {
+        createEnvironment();
+
+        String verificationId = given().get(ENVIRONMENT_URL).then()
+                .statusCode(200)
+                .body("properties.customDomainConfiguration.customDomainVerificationId", notNullValue())
+                .extract().path("properties.customDomainConfiguration.customDomainVerificationId");
+        given().get(PROVIDER + "/managedEnvironments?api-version=2025-07-01").then()
+                .statusCode(200)
+                .body("value[0].properties.customDomainConfiguration.customDomainVerificationId",
+                        equalTo(verificationId));
+
+        given().contentType("application/json")
+                .body("{\"properties\":{\"customDomainConfiguration\":{\"customDomainVerificationId\":\"custom\","
+                        + "\"dnsSuffix\":\"apps.example.com\"}}}")
+                .patch(ENVIRONMENT_URL).then()
+                .statusCode(200)
+                .body("properties.customDomainConfiguration.customDomainVerificationId", equalTo(verificationId))
+                .body("properties.customDomainConfiguration.dnsSuffix", equalTo("apps.example.com"));
+    }
+
+    @Test
     void nameAvailabilityUsesManagedEnvironmentScope() {
         createEnvironment();
         String body = "{\"name\":\"available-app\",\"type\":\"Microsoft.App/containerApps\"}";
