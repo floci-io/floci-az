@@ -334,6 +334,8 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                     response = snapshotBlob(request, containerName, blobName);
                 } else if ("PUT".equalsIgnoreCase(method) && "metadata".equals(comp)) {
                     response = setBlobMetadata(request, containerName, blobName);
+                } else if ("PUT".equalsIgnoreCase(method) && "properties".equals(comp)) {
+                    response = setBlobProperties(request, containerName, blobName);
                 } else if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
                         && "metadata".equals(comp)) {
                     response = getBlobMetadata(request, containerName, blobName);
@@ -2908,6 +2910,57 @@ public class BlobServiceHandler implements AzureServiceHandler, Resettable {
                 .header("ETag", so.etag());
         addUserMetadataHeaders(rb, so.metadata());
         return rb.build();
+    }
+
+    private Response setBlobProperties(AzureRequest request, String containerName, String blobName) {
+        Response authFailure = authorizeWrite(request, containerName, blobName);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return leaseService.exclusively(() -> {
+            Optional<StoredObject> object = store.get(objKey(request.accountName(), containerName, blobName));
+            if (object.isEmpty()) {
+                return new AzureErrorResponse("BlobNotFound", "The specified blob does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+
+            Response conditionFailure = validateBlobConditions(request, object);
+            if (conditionFailure != null) {
+                return conditionFailure;
+            }
+            Response leaseFailure = leaseService.validateWrite(request,
+                    objKey(request.accountName(), containerName, blobName));
+            if (leaseFailure != null) {
+                return leaseFailure;
+            }
+
+            StoredObject so = object.get();
+            Map<String, String> metadata = new HashMap<>(so.metadata());
+            String contentType = request.headers().getHeaderString("x-ms-blob-content-type");
+            boolean setsHttpHeaders = contentType != null || BLOB_HTTP_PROPERTY_HEADERS.keySet().stream()
+                    .anyMatch(header -> request.headers().getHeaderString(header) != null);
+            // Azure replaces the whole set: a header left out of the request is cleared.
+            if (setsHttpHeaders) {
+                metadata.put("Content-Type", usableContentType(contentType));
+                BLOB_HTTP_PROPERTY_HEADERS.forEach((requestHeader, property) -> {
+                    String value = request.headers().getHeaderString(requestHeader);
+                    if (value != null) {
+                        metadata.put(property, value);
+                    } else {
+                        metadata.remove(property);
+                    }
+                });
+            }
+
+            String etag = etags.next();
+            store.put(objKey(request.accountName(), containerName, blobName),
+                    new StoredObject(so.key(), so.data(), metadata, Instant.now(), etag));
+
+            return Response.ok()
+                    .header("Last-Modified", RFC1123_DATE_TIME.format(Instant.now()))
+                    .header("ETag", etag)
+                    .build();
+        });
     }
 
     private Response setBlobMetadata(AzureRequest request, String containerName, String blobName) {

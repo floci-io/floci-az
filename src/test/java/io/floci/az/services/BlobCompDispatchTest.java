@@ -61,7 +61,7 @@ public class BlobCompDispatchTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {
-            "properties", "tier", "page", "undelete", "expiry", "seal"
+            "tier", "page", "undelete", "expiry", "seal"
     })
     void unimplementedBlobCompIsNotMistakenForPutBlob(String comp) {
         given()
