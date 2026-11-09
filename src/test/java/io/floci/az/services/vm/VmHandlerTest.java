@@ -3,6 +3,7 @@ package io.floci.az.services.vm;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -148,6 +149,17 @@ class VmHandlerTest {
         given().when().post(BASE + "/virtualMachines/vm1/restart" + API)
                 .then().statusCode(202)
                 .header("Azure-AsyncOperation", containsString("/operations/"));
+    }
+
+    @Test
+    @DisplayName("Power action polling preserves HTTPS behind a TLS-terminating proxy")
+    void powerActionPollingPreservesForwardedHttps() {
+        createVm("vm1");
+        Response response = given().header("X-Forwarded-Proto", "https")
+                .when().post(BASE + "/virtualMachines/vm1/restart" + API);
+        response.then().statusCode(202)
+                .header("Azure-AsyncOperation", startsWith("https://"))
+                .header("Location", equalTo(response.header("Azure-AsyncOperation")));
     }
 
     @Test

@@ -25,6 +25,9 @@ Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azur
   so `azurerm_linux_virtual_machine` and its dependencies apply end-to-end.
 - **Long-running operations**: power actions return `202` with an `Azure-AsyncOperation` header
   pointing at an operation-status endpoint, so SDK pollers complete cleanly.
+  Both `Azure-AsyncOperation` and `Location` preserve the request's authority and scheme,
+  including `X-Forwarded-Proto` behind a TLS-terminating proxy. Requests without an authority
+  or `Host` header fall back to the configured base URL.
 
 ---
 
