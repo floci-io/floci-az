@@ -17,7 +17,7 @@ import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -72,7 +72,7 @@ import java.util.function.Consumer;
  * standard Redis clients can connect to the sidecar.</p>
  */
 @ApplicationScoped
-public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
+public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndexSource, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(RedisHandler.class);
 
@@ -600,24 +600,16 @@ public class RedisHandler implements AzureServiceHandler, Resettable, ResourceIn
         store.clear();
     }
 
-    // ── ResourceIndexContributor ────────────────────────────────────────────────
+    // ── StoreIndexSource ────────────────────────────────────────────────
 
     @Override
     public boolean indexEnabled() {
         return config.services().redis().enabled();
     }
 
-    @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(new ArmScope(sub, rg));
-    }
 
     @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(new ArmScope(sub, null));
-    }
-
-    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
         return store.list(scope).stream()
                 .map(ArmResourceStore.Stored::value)
                 .map(cache -> ArmResources.indexEntry(cache.armId(), cache.getName(), TYPE,

@@ -15,7 +15,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
@@ -52,7 +52,7 @@ import java.util.zip.GZIPInputStream;
 
 @ApplicationScoped
 public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProviderService,
-        ResourceIndexContributor {
+        StoreIndexSource {
 
     private static final Logger LOG = Logger.getLogger(MonitorHandler.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -242,15 +242,6 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
         return DCE_TYPE.equalsIgnoreCase(type) ? endpoints : rules;
     }
 
-    @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(new ArmScope(sub, rg));
-    }
-
-    @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(new ArmScope(sub, null));
-    }
 
     @Override
     public boolean indexEnabled() {
@@ -267,7 +258,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
      * Workspaces, data collection endpoints and rules in a subscription, or in one of its resource groups.
      * Diagnostic settings are extension resources and are not listed.
      */
-    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+    @Override
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
         return Stream.of(workspaces, endpoints, rules)
                 .flatMap(resources -> resources.list(scope).stream())
                 .map(ArmResourceStore.Stored::value)

@@ -16,7 +16,7 @@ import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.StorageFactory;
 import io.floci.az.services.vm.VmModels.PowerState;
@@ -66,7 +66,7 @@ import java.util.stream.Stream;
  * Power actions are pure state transitions. This keeps the service usable in CI without Docker.</p>
  */
 @ApplicationScoped
-public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSource {
 
     private static final Logger LOG = Logger.getLogger(VmHandler.class);
 
@@ -638,24 +638,16 @@ public class VmHandler implements AzureServiceHandler, Resettable, ResourceIndex
         store.clear();
     }
 
-    // ── ResourceIndexContributor ────────────────────────────────────────────────
+    // ── StoreIndexSource ────────────────────────────────────────────────
 
     @Override
     public boolean indexEnabled() {
         return config.services().vm().enabled();
     }
 
-    @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(new ArmScope(sub, rg));
-    }
 
     @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(new ArmScope(sub, null));
-    }
-
-    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
         return store.list(scope).stream()
                 .map(ArmResourceStore.Stored::value)
                 .map(vm -> ArmResources.indexEntry(vm.armId(), vm.getName(), TYPE,

@@ -7,12 +7,12 @@ import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResourceId;
-import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResourceStore.Stored;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -55,7 +55,7 @@ import java.util.stream.Stream;
  * settings, and looks it up before every create to decide whether to recover.
  */
 @ApplicationScoped
-public class KeyVaultArmService implements ArmProviderService, ResourceIndexContributor, GlobalNameSource, Resettable {
+public class KeyVaultArmService implements ArmProviderService, StoreIndexSource, GlobalNameSource, Resettable {
 
     private static final Logger LOG = Logger.getLogger(KeyVaultArmService.class);
 
@@ -606,20 +606,15 @@ public class KeyVaultArmService implements ArmProviderService, ResourceIndexCont
         return DEFAULT_DATA_PLANE_ACCOUNT;
     }
 
-    // ── ResourceIndexContributor ────────────────────────────────────────────
+    // ── StoreIndexSource ────────────────────────────────────────────
 
     /**
      * The full documents rather than the trimmed index entry: azurerm reads the generic listing to fill its Key Vault
      * cache and looks vaults up by {@code properties.vaultUri}.
      */
     @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexed(new ArmScope(sub, rg));
-    }
-
-    @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexed(new ArmScope(sub, null));
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return indexed(scope);
     }
 
     private List<Map<String, Object>> indexed(ArmScope scope) {
