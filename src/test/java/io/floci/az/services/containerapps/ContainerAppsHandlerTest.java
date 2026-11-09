@@ -13,7 +13,9 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -187,6 +189,42 @@ public class ContainerAppsHandlerTest {
                 .body("value[0].properties.active", equalTo(true))
                 .body("value[0].properties.replicas", equalTo(2))
                 .body("value[0].properties.trafficWeight", equalTo(100));
+    }
+
+    @Test
+    void plainSecretDropsEmptyKeyVaultReference() {
+        createEnvironment();
+        given().contentType("application/json")
+                .body(appBody(ENVIRONMENT_ID, "Single", "v1", 1, 4, 8080)
+                        .replace("[{\"name\": \"api-key\", \"value\": \"secret-value\"}]", """
+                                [{"name": "api-key", "value": "secret-value", "keyVaultUrl": "", "identity": ""},
+                                 {"name": "vault-key", "keyVaultUrl": "https://vault.vault.azure.net/secrets/key",
+                                  "identity": "System"}]"""))
+                .put(appUrl("plain-secret-app")).then().statusCode(201);
+
+        given().post(appUrl("plain-secret-app", "/listSecrets")).then()
+                .statusCode(200)
+                .body("value[0].value", equalTo("secret-value"))
+                .body("value[0]", not(hasKey("keyVaultUrl")))
+                .body("value[0]", not(hasKey("identity")))
+                .body("value[1].keyVaultUrl", equalTo("https://vault.vault.azure.net/secrets/key"))
+                .body("value[1].identity", equalTo("System"));
+        given().get(appUrl("plain-secret-app")).then()
+                .statusCode(200)
+                .body("properties.configuration.secrets[0]", not(hasKey("keyVaultUrl")))
+                .body("properties.configuration.secrets[0]", not(hasKey("identity")))
+                .body("properties.configuration.secrets[1].keyVaultUrl",
+                        equalTo("https://vault.vault.azure.net/secrets/key"));
+
+        given().contentType("application/json")
+                .body("{\"properties\":{\"configuration\":{\"secrets\":"
+                        + "[{\"name\":\"api-key\",\"value\":\"rotated\",\"keyVaultUrl\":\"\",\"identity\":\"\"}]}}}")
+                .patch(appUrl("plain-secret-app")).then().statusCode(200);
+        given().post(appUrl("plain-secret-app", "/listSecrets")).then()
+                .statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].value", equalTo("rotated"))
+                .body("value[0]", not(hasKey("keyVaultUrl")));
     }
 
     @Test

@@ -326,6 +326,19 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
         if (!configuration.hasNonNull("activeRevisionsMode")) {
             configuration.put("activeRevisionsMode", "Single");
         }
+        removeEmptyKeyVaultReferences(configuration);
+    }
+
+    private static void removeEmptyKeyVaultReferences(ObjectNode configuration) {
+        configuration.path("secrets").forEach(secret -> {
+            if (secret instanceof ObjectNode object) {
+                for (String field : List.of("keyVaultUrl", "identity")) {
+                    if (object.path(field).asText().isBlank()) {
+                        object.remove(field);
+                    }
+                }
+            }
+        });
     }
 
     private void validateApp(ObjectNode document) {
