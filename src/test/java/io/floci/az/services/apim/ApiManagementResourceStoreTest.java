@@ -1,7 +1,9 @@
 package io.floci.az.services.apim;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.InMemoryStorage;
+import io.floci.az.core.storage.PersistentStorage;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -9,17 +11,28 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.lessThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -29,6 +42,8 @@ import static org.mockito.Mockito.when;
 class ApiManagementResourceStoreTest {
 
     private static final String API = "?api-version=2022-08-01";
+    private static final TypeReference<Map<String, StoredObject>> STORED = new TypeReference<>() {
+    };
     private static final String BODY = "{\"location\":\"eastus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
         + "\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"x\"}}";
 
@@ -169,7 +184,7 @@ class ApiManagementResourceStoreTest {
     }
 
     @Test
-    void childrenSurviveARestartAndAResetClearsThem() {
+    void twoStoresOverOneBackendShareChildrenAndAClearEmptiesIt() {
         InMemoryStorage<String, StoredObject> disk = new InMemoryStorage<>();
         StorageFactory factory = mock(StorageFactory.class);
         when(factory.create("apim-children")).thenReturn(disk);
@@ -188,5 +203,58 @@ class ApiManagementResourceStoreTest {
         assertEquals(1, after.productApis().size());
         after.productApis().clear();
         assertTrue(disk.keys().isEmpty());
+    }
+
+    @Test
+    void childrenWrittenToAPersistentBackendAreReadBackAfterReopeningIt(@TempDir Path dir) {
+        Path file = dir.resolve("apim-children.json");
+        ApiManagementStore before = openPersistent(file);
+        before.apis().put("sub/rg/apim/s/apis/a", new LinkedHashMap<>(Map.of("name", "A", "_service", "s")));
+        before.namedValues().put("sub/rg/apim/s/namedvalues/greeting",
+            new LinkedHashMap<>(Map.of("name", "Greeting", "properties", Map.of("value", "hello"))));
+        before.productApis().put("sub/rg/apim/s/products/p/apis/a", "sub/rg/apim/s/apis/a");
+
+        ApiManagementStore after = openPersistent(file);
+        assertEquals("A", after.apis().get("sub/rg/apim/s/apis/a").get("name"));
+        assertEquals("Greeting", after.namedValues().get("sub/rg/apim/s/namedvalues/greeting").get("name"));
+        assertEquals("sub/rg/apim/s/apis/a", after.productApis().get("sub/rg/apim/s/products/p/apis/a"));
+        assertTrue(after.backends().isEmpty());
+
+        after.apis().remove("sub/rg/apim/s/apis/a");
+        assertNull(openPersistent(file).apis().get("sub/rg/apim/s/apis/a"));
+    }
+
+    @Test
+    void anEntryDeletedWhileAListingIteratesIsSkippedRatherThanReadAsNull() {
+        StorageFactory factory = mock(StorageFactory.class);
+        when(factory.create("apim-children")).thenReturn(new InMemoryStorage<>());
+        ApiManagementStore store = new ApiManagementStore(factory);
+        for (String name : List.of("a", "b", "c")) {
+            store.backends().put("sub/rg/apim/s/backends/" + name, new LinkedHashMap<>(Map.of("name", name)));
+        }
+
+        Iterator<Map.Entry<String, Map<String, Object>>> listing = store.backends().entrySet().iterator();
+        String first = listing.next().getKey();
+        String deleted = Set.of("sub/rg/apim/s/backends/a", "sub/rg/apim/s/backends/b", "sub/rg/apim/s/backends/c")
+            .stream().filter(key -> !key.equals(first)).sorted().findFirst().orElseThrow();
+        store.backends().remove(deleted);
+
+        List<String> rest = new ArrayList<>();
+        while (listing.hasNext()) {
+            Map.Entry<String, Map<String, Object>> entry = listing.next();
+            assertNotNull(entry.getValue(), "a value for " + entry.getKey());
+            rest.add(entry.getKey());
+        }
+        assertEquals(1, rest.size());
+        assertFalse(rest.contains(deleted));
+        assertThrows(NoSuchElementException.class, listing::next);
+    }
+
+    private static ApiManagementStore openPersistent(Path file) {
+        PersistentStorage<String, StoredObject> backend = new PersistentStorage<>(file, STORED);
+        backend.load();
+        StorageFactory factory = mock(StorageFactory.class);
+        when(factory.create("apim-children")).thenReturn(backend);
+        return new ApiManagementStore(factory);
     }
 }

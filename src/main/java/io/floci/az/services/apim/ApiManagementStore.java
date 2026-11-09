@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -144,22 +145,43 @@ public class ApiManagementStore {
                 public Iterator<Entry<String, V>> iterator() {
                     Iterator<String> keys = keys().iterator();
                     return new Iterator<>() {
+                        private Entry<String, V> upcoming;
                         private String current;
 
+                        /**
+                         * Reads ahead to the next key that still has a value: the keys are a snapshot, so one
+                         * deleted since the iteration started is skipped rather than handed out with a null value.
+                         */
                         @Override
                         public boolean hasNext() {
-                            return keys.hasNext();
+                            while (upcoming == null && keys.hasNext()) {
+                                String key = keys.next();
+                                V value = get(key);
+                                if (value != null) {
+                                    upcoming = new SimpleImmutableEntry<>(key, value);
+                                }
+                            }
+                            return upcoming != null;
                         }
 
                         @Override
                         public Entry<String, V> next() {
-                            current = keys.next();
-                            return new SimpleImmutableEntry<>(current, get(current));
+                            if (!hasNext()) {
+                                throw new NoSuchElementException();
+                            }
+                            Entry<String, V> entry = upcoming;
+                            upcoming = null;
+                            current = entry.getKey();
+                            return entry;
                         }
 
                         @Override
                         public void remove() {
+                            if (current == null) {
+                                throw new IllegalStateException();
+                            }
                             backend.delete(prefix + current);
+                            current = null;
                         }
                     };
                 }

@@ -304,7 +304,8 @@ public class ApiManagementGateway {
 
     private Optional<String> findNamedValue(String serviceName, String namedValueId) {
         return store.namedValues().values().stream()
-                .filter(n -> ApiManagementService.same(serviceName, n.get("_service")) && namedValueId.equals(n.get("name")))
+                .filter(n -> ApiManagementService.same(serviceName, n.get("_service"))
+                        && ApiManagementService.same(namedValueId, n.get("name")))
                 .map(n -> stringValue(cast(n.get("properties")).get("value")))
                 .filter(v -> v != null)
                 .findFirst();
@@ -312,7 +313,8 @@ public class ApiManagementGateway {
 
     private Optional<String> resolveBackendUrl(String serviceName, String backendId) {
         return store.backends().values().stream()
-                .filter(b -> ApiManagementService.same(serviceName, b.get("_service")) && backendId.equals(b.get("name")))
+                .filter(b -> ApiManagementService.same(serviceName, b.get("_service"))
+                        && ApiManagementService.same(backendId, b.get("name")))
                 .map(b -> stringValue(cast(b.get("properties")).get("url")))
                 .filter(v -> v != null && !v.isBlank())
                 .findFirst();

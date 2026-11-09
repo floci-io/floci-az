@@ -443,20 +443,19 @@ public class ApiManagementService implements GlobalNameSource {
         String sub = service.subscriptionId();
         String rg = service.resourceGroup();
         String serviceName = service.name();
-        apis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
-        operations.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
-        policies.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName)));
-        products.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
-        subscriptions.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/subscriptions/"));
-        namedValues.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/namedValues/"));
-        backends.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/backends/"));
-        productApis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
+        // Each map holds one kind, so the service's own key prefix selects all of its children; spelling a kind's
+        // segment here would have to match the lowercased keys exactly.
+        String children = serviceKey(sub, rg, serviceName) + "/";
+        for (Map<String, ?> kind : List.of(apis, operations, policies, products, subscriptions, namedValues, backends,
+                productApis)) {
+            kind.keySet().removeIf(k -> k.startsWith(children));
+        }
     }
 
     private void deleteApi(String sub, String rg, String serviceName, String apiId) {
         apis.remove(apiKey(sub, rg, serviceName, apiId));
         operations.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId) + "/operations/"));
-        policies.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId)));
+        policies.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId) + "/"));
         productApis.entrySet().removeIf(e -> e.getValue().equals(apiKey(sub, rg, serviceName, apiId)));
     }
 
