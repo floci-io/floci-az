@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +61,24 @@ class StorageAccountResourceStoreTest {
             .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
             .body("properties.allowSharedKeyAccess", equalTo(false))
             .body("properties.encryption.services.queue.keyType", equalTo("Service"))
+            .body("properties.encryption.services.blob.keyType", equalTo("Account"));
+    }
+
+    @Test
+    void aPutCannotSetReadOnlyPropertiesOrNulls() {
+        String body = "{\"location\":\"westeurope\",\"properties\":{\"creationTime\":\"2020-01-01T00:00:00Z\","
+            + "\"secondaryEndpoints\":{\"blob\":\"http://x/\"},\"minimumTlsVersion\":null,\"accessTier\":null,"
+            + "\"encryption\":{\"services\":{\"blob\":{\"lastEnabledTime\":\"2020-01-01T00:00:00Z\",\"keyType\":null}}}}}";
+        given().contentType("application/json").body(body).when().put(account("sub-ro", "rg", "readonlysa") + API)
+            .then().statusCode(200);
+
+        given().when().get(account("sub-ro", "rg", "readonlysa") + API)
+            .then().statusCode(200)
+            .body("properties", not(hasKey("creationTime")))
+            .body("properties", not(hasKey("secondaryEndpoints")))
+            .body("properties", not(hasKey("minimumTlsVersion")))
+            .body("properties.accessTier", equalTo("Hot"))
+            .body("properties.encryption.services.blob", not(hasKey("lastEnabledTime")))
             .body("properties.encryption.services.blob.keyType", equalTo("Account"));
     }
 

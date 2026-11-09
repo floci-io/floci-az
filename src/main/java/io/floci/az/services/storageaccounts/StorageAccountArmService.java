@@ -66,6 +66,12 @@ public class StorageAccountArmService
 
     private static final String NAMESPACE = "Microsoft.Storage";
     private static final String ACCOUNT_TYPE = NAMESPACE + "/storageAccounts";
+    /** What {@code StorageAccountProperties} marks readOnly and the create parameters do not accept. */
+    private static final Set<String> READ_ONLY_PROPERTIES = Set.of(
+            "provisioningState", "primaryEndpoints", "primaryLocation", "statusOfPrimary", "lastGeoFailoverTime",
+            "secondaryLocation", "statusOfSecondary", "creationTime", "keyCreationTime", "secondaryEndpoints",
+            "geoReplicationStats", "failoverInProgress", "privateEndpointConnections", "blobRestoreStatus",
+            "isSkuConversionBlocked", "accountMigrationInProgress");
 
     /**
      * A resource group's account collection, query stripped. The namespace matches in any casing, as clients
@@ -348,7 +354,7 @@ public class StorageAccountArmService
         if (Set.of("StorageV2", "BlobStorage", "FileStorage").contains(kind)) {
             properties.put("accessTier", "Hot");
         }
-        properties.putAll(requested);
+        putWritable(properties, requested, READ_ONLY_PROPERTIES);
         properties.put("encryption", encryption(ArmJson.cast(requested.get("encryption"))));
         properties.put("provisioningState", "Succeeded");
         properties.put("isHnsEnabled", hnsEnabled);
@@ -363,16 +369,26 @@ public class StorageAccountArmService
         return resource;
     }
 
+    /** Lays {@code requested} over {@code target}, leaving out explicit nulls and the {@code readOnly} names. */
+    private static void putWritable(Map<String, Object> target, Map<String, Object> requested, Set<String> readOnly) {
+        requested.forEach((name, value) -> {
+            if (value != null && !readOnly.contains(name)) {
+                target.put(name, value);
+            }
+        });
+    }
+
     /** The default encryption settings with {@code requested} laid over them, service by service. */
     private static Map<String, Object> encryption(Map<String, Object> requested) {
         Map<String, Object> requestedServices = ArmJson.cast(requested.get("services"));
         Map<String, Object> services = new LinkedHashMap<>();
         for (String service : List.of("blob", "file", "queue", "table")) {
             Map<String, Object> settings = new LinkedHashMap<>(Map.of("enabled", true, "keyType", "Account"));
-            settings.putAll(ArmJson.cast(requestedServices.get(service)));
+            putWritable(settings, ArmJson.cast(requestedServices.get(service)), Set.of("lastEnabledTime"));
             services.put(service, settings);
         }
-        Map<String, Object> encryption = new LinkedHashMap<>(requested);
+        Map<String, Object> encryption = new LinkedHashMap<>();
+        putWritable(encryption, requested, Set.of());
         encryption.put("services", services);
         encryption.putIfAbsent("keySource", "Microsoft.Storage");
         return encryption;
