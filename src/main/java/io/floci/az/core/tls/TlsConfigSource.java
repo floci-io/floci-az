@@ -40,6 +40,14 @@ import java.util.Set;
  */
 public class TlsConfigSource implements ConfigSource {
 
+    /**
+     * Azure's public-cloud hosts a client that cannot be pointed at a custom cloud calls, served when
+     * {@code floci-az.tls.public-hosts} is on. floci-az routes these by path, so only the certificate and DNS need them.
+     */
+    public static final List<String> PUBLIC_HOSTS = List.of("management.azure.com", "management.core.windows.net",
+        "login.microsoftonline.com", "graph.microsoft.com");
+
+
     private static final Logger LOG = Logger.getLogger(TlsConfigSource.class);
 
     static final String SELF_SIGNED_CERT_NAME     = "floci-az-selfsigned.crt";
@@ -214,6 +222,12 @@ public class TlsConfigSource implements ConfigSource {
 
     private List<String> extractCustomHostnames() {
         Set<String> hostnames = new LinkedHashSet<>();
+
+        if (Boolean.parseBoolean(resolveProperty("floci-az.tls.public-hosts", "false"))) {
+            hostnames.addAll(PUBLIC_HOSTS);
+            LOG.warnv("TLS: floci-az.tls.public-hosts is on: the certificate names Azure's own hosts {0}. Trust its CA "
+                + "only where clients should reach floci-az instead of Azure.", PUBLIC_HOSTS);
+        }
 
         String hostname = resolveProperty("floci-az.hostname", "");
         if (!hostname.isBlank() && !isDefaultHostname(hostname)) {

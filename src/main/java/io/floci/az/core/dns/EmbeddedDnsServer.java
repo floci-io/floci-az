@@ -2,6 +2,7 @@ package io.floci.az.core.dns;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerDetector;
+import io.floci.az.core.tls.TlsConfigSource;
 import io.quarkus.runtime.Startup;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -83,6 +84,9 @@ public class EmbeddedDnsServer {
             suffixes.addAll(BUILTIN_SUFFIXES);
             config.hostname().ifPresent(suffixes::add);
             config.dns().extraSuffixes().ifPresent(suffixes::addAll);
+            if (config.tls().publicHosts()) {
+                suffixes.addAll(TlsConfigSource.PUBLIC_HOSTS);
+            }
 
             DatagramSocket socket = vertx.createDatagramSocket(new DatagramSocketOptions().setIpV6(false));
             socket.listen(DNS_PORT, "0.0.0.0", ar -> {

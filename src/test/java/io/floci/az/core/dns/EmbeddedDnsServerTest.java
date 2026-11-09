@@ -1,5 +1,6 @@
 package io.floci.az.core.dns;
 
+import io.floci.az.core.tls.TlsConfigSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -290,5 +291,15 @@ class EmbeddedDnsServerTest {
         buf.putShort((short) 1); // type A
         buf.putShort((short) 1); // class IN
         return buf.array();
+    }
+
+    @Test
+    void azuresPublicHostsAreAnsweredOnlyWhenAddedToTheSuffixes() {
+        assertFalse(dns.matchesSuffix("management.azure.com"));
+
+        EmbeddedDnsServer withPublicHosts = new EmbeddedDnsServer(TlsConfigSource.PUBLIC_HOSTS);
+
+        TlsConfigSource.PUBLIC_HOSTS.forEach(host -> assertTrue(withPublicHosts.matchesSuffix(host), host));
+        assertFalse(withPublicHosts.matchesSuffix("azure.com"));
     }
 }
