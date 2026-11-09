@@ -5,6 +5,7 @@ import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
+import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
 import com.azure.messaging.servicebus.models.SubQueue;
 import org.junit.jupiter.api.Assumptions;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
@@ -156,19 +158,32 @@ class ServiceBusCompatibilityTest {
         }
     }
 
-    @Test
-    @DisplayName("explicit dead-letter moves message to DLQ")
-    void explicitDeadLetter() throws Exception {
+    @ParameterizedTest
+    @CsvSource({"false,false,false", "false,false,true", "false,true,false", "false,true,true",
+            "true,false,false", "true,false,true", "true,true,false", "true,true,true"})
+    @DisplayName("explicit dead-letter preserves standard and streamed payloads and metadata")
+    void explicitDeadLetter(boolean large, boolean metadata, boolean properties) throws Exception {
         String queue = uniqueQueue();
-        String payload = "dlq-" + UUID.randomUUID();
-
-        send(queue, payload);
+        String payload = large ? "x".repeat(200_000) : "dlq-" + UUID.randomUUID();
+        ServiceBusMessage sent = new ServiceBusMessage(payload);
+        if (properties) {
+            sent.getApplicationProperties().put("custom", "preserved");
+        }
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            sender.sendMessage(sent);
+        }
 
         try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
             ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
                     .stream().findFirst().orElse(null);
             assertNotNull(msg, "Expected a message to dead-letter");
-            receiver.deadLetter(msg);
+            if (metadata) {
+                receiver.deadLetter(msg, new DeadLetterOptions()
+                        .setDeadLetterReason("poison").setDeadLetterErrorDescription("invalid payload"));
+            } else {
+                receiver.deadLetter(msg);
+            }
         }
 
         // Message should appear in the DLQ sub-queue
@@ -182,6 +197,13 @@ class ServiceBusCompatibilityTest {
                     .stream().findFirst().orElse(null);
             assertNotNull(dlqMsg, "Message should be in DLQ");
             assertEquals(payload, dlqMsg.getBody().toString());
+            if (properties) {
+                assertEquals("preserved", dlqMsg.getApplicationProperties().get("custom"));
+            }
+            if (metadata) {
+                assertEquals("poison", dlqMsg.getDeadLetterReason());
+                assertEquals("invalid payload", dlqMsg.getDeadLetterErrorDescription());
+            }
             dlqReceiver.complete(dlqMsg);
         }
     }

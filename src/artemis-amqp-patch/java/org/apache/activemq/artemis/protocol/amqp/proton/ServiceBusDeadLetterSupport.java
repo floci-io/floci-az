@@ -3,6 +3,7 @@ package org.apache.activemq.artemis.protocol.amqp.proton;
 import org.apache.activemq.artemis.api.core.ActiveMQPropertyConversionException;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.paging.PagingStore;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 
@@ -26,7 +27,13 @@ public final class ServiceBusDeadLetterSupport {
          Map.Entry<?, ?> entry = (Map.Entry<?, ?>) rawEntry;
          message.putObjectProperty(entry.getKey().toString(), compatiblePropertyValue(entry.getValue()));
       }
+      // Reencoding resets AMQPStandardMessage's cached estimate. QueueImpl.refDown
+      // later releases the new estimate, so keep its existing paging owner in balance.
+      int previousEstimate = message.getMemoryEstimate();
       message.reencode();
+      if (message.getRefCount() > 0 && message.getOwner() instanceof PagingStore owner) {
+         owner.addSize(message.getMemoryEstimate() - previousEstimate, false);
+      }
    }
 
    private static Object compatiblePropertyValue(Object value) {
