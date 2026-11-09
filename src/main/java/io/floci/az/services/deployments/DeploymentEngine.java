@@ -106,6 +106,12 @@ public class DeploymentEngine {
         "microsoft.authorization/rolemanagementpolicyassignments", "microsoft.resources/deployments",
         "microsoft.insights/diagnosticsettings", "microsoft.resources/tags");
 
+    private static final String KEY_VAULT_API_VERSION = "2023-07-01";
+
+    private static final Pattern KEY_VAULT_ID = Pattern.compile(
+        "/subscriptions/([^/]+)/resourceGroups/[^/]+/providers/Microsoft\\.KeyVault/vaults/([^/]+)/?",
+        Pattern.CASE_INSENSITIVE);
+
     /** Keys of a nested deployment that pick its target, which its id already carries. */
     private static final Set<String> NESTED_TARGET_KEYS = Set.of("resourcegroup", "subscriptionid");
 
@@ -223,7 +229,8 @@ public class DeploymentEngine {
 
     /** A deployment read, checked and ordered, ready to run. */
     record Plan(DeploymentTemplate template, DeploymentScope scope, Map<String, JsonNode> parameters,
-                        List<DependencyGraph.Node> order, Map<String, TemplateScope> instanceScopes) {
+                        List<DependencyGraph.Node> order, Map<String, TemplateScope> instanceScopes,
+                        SecretRedaction secrets) {
 
         /** The scope a resource is evaluated in: its copy iteration's, or the deployment's. */
         TemplateScope scopeOf(DependencyGraph.Node node) {
@@ -299,6 +306,14 @@ public class DeploymentEngine {
      */
     public ObjectNode whatIf(Request request) {
         Plan plan = plan(request);
+        try {
+            return whatIf(request, plan);
+        } catch (TemplateException e) {
+            throw plan.secrets().redact(e);
+        }
+    }
+
+    private ObjectNode whatIf(Request request, Plan plan) {
         boolean idsOnly = "ResourceIdOnly".equalsIgnoreCase(
             request.properties().path("whatIfSettings").path("resultFormat").asText(""));
         ArrayNode changes = JsonNodeFactory.instance.arrayNode();
@@ -320,7 +335,8 @@ public class DeploymentEngine {
             try {
                 prepared = resourceRequest(plan, node, definition);
             } catch (TemplateException e) {
-                unsupported(change, "The resource could not be evaluated before deployment: " + e.getMessage());
+                unsupported(change, "The resource could not be evaluated before deployment: "
+                    + plan.secrets().redact(e.getMessage()));
                 continue;
             }
             Response response = router.get().dispatchInternal("GET", node.id(),
@@ -387,8 +403,15 @@ public class DeploymentEngine {
      * leaving what was already created in place, as Azure does.
      */
     public Result run(Prepared prepared, BooleanSupplier canceled) {
-        Request request = prepared.request();
-        Plan plan = prepared.plan();
+        // A template error that leaves the run, a resource's condition for one, never quotes a Key Vault secret either.
+        try {
+            return run(prepared.request(), prepared.plan(), canceled);
+        } catch (TemplateException e) {
+            throw prepared.plan().secrets().redact(e);
+        }
+    }
+
+    private Result run(Request request, Plan plan, BooleanSupplier canceled) {
         Instant started = Instant.now();
         ObjectNode parameters = ParameterValues.echo(plan.template(), plan.parameters());
         String templateHash = templateHash(plan.template());
@@ -424,7 +447,7 @@ public class DeploymentEngine {
         try {
             outputs = outputs(plan);
         } catch (TemplateException e) {
-            ObjectNode detail = detail(e.code(), request.id(), e.getMessage());
+            ObjectNode detail = detail(e.code(), request.id(), plan.secrets().redact(e.getMessage()));
             operations.add(outputOperation("Failed", detail, outputsStarted));
             return new Result("Failed", parameters, JsonNodeFactory.instance.objectNode(), List.copyOf(deployed.values()),
                 providers(deployedTypes), dependencies(plan), deploymentFailed(request, detail), templateHash, started,
@@ -438,7 +461,17 @@ public class DeploymentEngine {
 
     // ── Preparing ──────────────────────────────────────────────────────────────────
 
+    /** {@link #plan(Request, SecretRedaction)}, whose errors never quote a Key Vault secret it read. */
     private Plan plan(Request request) {
+        SecretRedaction secrets = new SecretRedaction();
+        try {
+            return plan(request, secrets);
+        } catch (TemplateException e) {
+            throw secrets.redact(e);
+        }
+    }
+
+    private Plan plan(Request request, SecretRedaction secrets) {
         JsonNode properties = request.properties();
         if (properties == null || !properties.isObject()) {
             throw DeploymentTemplate.invalid("The deployment 'properties' are missing.");
@@ -455,7 +488,12 @@ public class DeploymentEngine {
             throw DeploymentTemplate.invalid("The deployment 'template' is missing.");
         }
         DeploymentTemplate template = DeploymentTemplate.parse(properties.get("template"));
-        Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"));
+        Map<String, JsonNode> supplied = ParameterValues.supplied(template, properties.get("parameters"),
+            (vaultId, secretName, secretVersion) -> {
+                JsonNode secret = readSecret(request, vaultId, secretName, secretVersion);
+                secrets.add(secret.asText());
+                return secret;
+            });
         List<DependencyGraph.Node> nodes = new ArrayList<>();
         Map<String, TemplateScope> instanceScopes = new LinkedHashMap<>();
         DeploymentScope scope = scope(request, template, supplied, nodes, instanceScopes);
@@ -489,7 +527,7 @@ public class DeploymentEngine {
             TemplateScope nodeScope = instanceScopes.getOrDefault(node.id().toLowerCase(Locale.ROOT), scope);
             withImplicit.add(withImplicitReferences(node, template, nodeScope, emptyLoops, nodes));
         }
-        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes);
+        return new Plan(template, scope, parameters, DependencyGraph.order(withImplicit), instanceScopes, secrets);
     }
 
     private DependencyGraph.Node node(Request request, DeploymentTemplate.Resource resource, TemplateScope scope,
@@ -673,7 +711,8 @@ public class DeploymentEngine {
             try {
                 evaluated = ExpressionEvaluator.evaluate(argument, scope);
             } catch (TemplateException e) {
-                LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+                // Only the code: the message may quote a parameter's value, a Key Vault secret among them.
+                LOG.debugv("Outer nested template reference left to the child: {0}", e.code());
                 continue;
             }
             if (evaluated.isTextual() && DependencyGraph.isName(evaluated.asText())
@@ -770,7 +809,7 @@ public class DeploymentEngine {
         try {
             prepared = resourceRequest(plan, node, definition);
         } catch (TemplateException e) {
-            ObjectNode failure = detail(e.code(), node.id(), e.getMessage());
+            ObjectNode failure = detail(e.code(), node.id(), plan.secrets().redact(e.getMessage()));
             operations.add(resourceOperation(node, null, "Failed", null, failure, started));
             return Created.failed(failure);
         }
@@ -1005,7 +1044,8 @@ public class DeploymentEngine {
         try {
             name = ExpressionEvaluator.evaluate(argument, plan.scope());
         } catch (TemplateException e) {
-            LOG.debugv("Outer nested template reference left to the child: {0}", e.getMessage());
+            // Only the code: the message may quote a parameter's value, a Key Vault secret among them.
+            LOG.debugv("Outer nested template reference left to the child: {0}", e.code());
             return null;
         }
         if (!name.isTextual() || !DependencyGraph.isName(name.asText())) {
@@ -1127,6 +1167,44 @@ public class DeploymentEngine {
         ObjectNode whole = answer.deepCopy();
         whole.put("apiVersion", version);
         return whole;
+    }
+
+    /**
+     * The value of a Key Vault parameter reference ({@code key-vault-parameter.md}). The vault must be in the
+     * deployment's own tenant and allow template deployments; it is read through ARM, the secret through the data plane.
+     * The tenant is checked here because both reads are internal, which the request gate's tenant rule does not see.
+     * Azure's error codes for these failures have no local source, so each is an {@code InvalidTemplate}.
+     */
+    private JsonNode readSecret(Request request, String vaultId, String secretName, String secretVersion) {
+        Matcher vault = KEY_VAULT_ID.matcher(vaultId);
+        if (!vault.matches()) {
+            throw DeploymentTemplate.invalid("The Key Vault reference id '" + vaultId + "' is not a vault's id.");
+        }
+        if (!directory.tenantOfSubscription(vault.group(1)).equalsIgnoreCase(tenantOf(request))) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' of a parameter reference is in another "
+                + "tenant than the deployment's.");
+        }
+        Response read = router.get().dispatchInternal("GET", vaultId,
+            Map.of("api-version", KEY_VAULT_API_VERSION), request.origin());
+        JsonNode answer = entity(read);
+        if (read.getStatus() != 200) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' of a parameter reference could not be "
+                + "read: " + errorMessage(answer));
+        }
+        if (!answer.path("properties").path("enabledForTemplateDeployment").asBoolean(false)) {
+            throw DeploymentTemplate.invalid("The Key Vault '" + vaultId + "' does not allow template deployments: "
+                + "set 'enabledForTemplateDeployment' to true.");
+        }
+        // The data plane keys secrets by the vault's own name, the one its vaultUri carries, and an ARM id may spell it
+        // in other casing.
+        String vaultName = answer.path("name").asText(vault.group(2));
+        Response secret = router.get().readKeyVaultSecret(vaultName, secretName, secretVersion, request.origin());
+        JsonNode bundle = entity(secret);
+        if (secret.getStatus() != 200 || !bundle.path("value").isTextual()) {
+            throw DeploymentTemplate.invalid("The secret '" + secretName + "' of Key Vault '" + vaultId
+                + "' could not be read: " + errorMessage(bundle));
+        }
+        return JsonNodeFactory.instance.textNode(bundle.get("value").asText());
     }
 
     /** {@code managementGroup()} ({@code template-functions-scope.md}): the group a deployment runs at, as ARM reads it. */

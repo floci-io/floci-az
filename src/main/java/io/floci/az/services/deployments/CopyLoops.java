@@ -73,7 +73,8 @@ final class CopyLoops {
         JsonNode count = ExpressionEvaluator.evaluateValue(declared, scope);
         if (!count.isIntegralNumber() || count.asLong() < 0 || count.asLong() > MAX_COUNT) {
             throw DeploymentTemplate.invalid("The copy count of '" + loopName + "' must be an integer from 0 to "
-                + MAX_COUNT + "; it is '" + count + "'.");
+                + MAX_COUNT + "; it is of type '" + TemplateValues.typeName(count) + "'"
+                + (count.isIntegralNumber() ? ", out of that range." : "."));
         }
         return count.asInt();
     }

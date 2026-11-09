@@ -12,8 +12,11 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyOrNullString;
@@ -1116,6 +1119,160 @@ class DeploymentsHandlerTest {
             {"properties": {"mode": "Incremental", "template": {"resources": [],
               "outputs": {"group": {"type": "string", "value": "[managementGroup().name]"}}}}}
             """)));
+    }
+
+    private static String vaultWithSecret(String name, boolean templateDeployment, String value) {
+        String id = RG + "/providers/Microsoft.KeyVault/vaults/" + name;
+        given().contentType("application/json").body("""
+            {"location": "westeurope", "properties": {"tenantId": "00000000-0000-0000-0000-000000000000",
+              "sku": {"family": "A", "name": "standard"}, "accessPolicies": [],
+              "enabledForTemplateDeployment": %s}}
+            """.formatted(templateDeployment)).when().put(id + "?api-version=2023-07-01").then().statusCode(lessThan(300));
+        given().header("Authorization", "Bearer test").contentType("application/json")
+            .body("{\"value\":\"" + value + "\"}")
+            .when().put("/" + name + "-keyvault/secrets/app-secret").then().statusCode(200);
+        return id;
+    }
+
+    private static String referenceDeployment(String vaultId, String extra) {
+        return """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"%s}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [],
+                "outputs": {"length": {"type": "int", "value": "[length(parameters('secret'))]"},
+                            "startsWith": {"type": "string", "value": "[substring(parameters('secret'), 0, 3)]"}}}}}
+            """.formatted(vaultId, extra);
+    }
+
+    @Test
+    void aKeyVaultReferenceReadsTheSecretOfTheVaultItNamesAndNeverEchoesIt() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        vaultWithSecret("kvother" + suffix, true, "wrong-vault-value");
+        String vault = vaultWithSecret("kvref" + suffix, true, "first-s3cr3t");
+        String first = given().header("Authorization", "Bearer test")
+            .when().get("/kvref" + suffix + "-keyvault/secrets/app-secret").then().statusCode(200)
+            .extract().path("id");
+        String pinned = first.substring(first.lastIndexOf('/') + 1);
+        given().header("Authorization", "Bearer test").contentType("application/json")
+            .body("{\"value\":\"later-s3cr3t!\"}")
+            .when().put("/kvref" + suffix + "-keyvault/secrets/app-secret").then().statusCode(200);
+
+        assertEquals("Succeeded", awaitTerminal(put("kvdep", referenceDeployment(vault, ""))),
+            () -> given().when().get(DEPLOYMENTS + "/kvdep" + API).asString());
+        String body = given().when().get(DEPLOYMENTS + "/kvdep" + API).then().statusCode(200)
+            .body("properties.outputs.length.value", equalTo("later-s3cr3t!".length()))
+            .body("properties.outputs.startsWith.value", equalTo("lat"))
+            .extract().asString();
+        assertFalse(body.contains("later-s3cr3t!"), body);
+
+        assertEquals("Succeeded", awaitTerminal(put("kvpinned",
+            referenceDeployment(vault, ", \"secretVersion\": \"" + pinned + "\""))));
+        given().when().get(DEPLOYMENTS + "/kvpinned" + API).then().statusCode(200)
+            .body("properties.outputs.startsWith.value", equalTo("fir"));
+
+        String otherCasing = vault.substring(0, vault.lastIndexOf('/') + 1) + ("kvref" + suffix).toUpperCase();
+        assertEquals("Succeeded", awaitTerminal(put("kvcasing", referenceDeployment(otherCasing, ""))));
+        given().when().get(DEPLOYMENTS + "/kvcasing" + API).then().statusCode(200)
+            .body("properties.outputs.startsWith.value", equalTo("lat"));
+    }
+
+    @Test
+    void aKeyVaultReferenceFillsASecureObjectAndAConstraintErrorNeverShowsTheSecret() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String json = vaultWithSecret("kvjson" + suffix, true, "{\\\"region\\\":\\\"west\\\"}");
+        assertEquals("Succeeded", awaitTerminal(put("kvobject", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"config": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"config": {"type": "secureObject"}}, "resources": [],
+                "outputs": {"region": {"type": "string", "value": "[parameters('config').region]"}}}}}
+            """.formatted(json))), () -> given().when().get(DEPLOYMENTS + "/kvobject" + API).asString());
+        given().when().get(DEPLOYMENTS + "/kvobject" + API).then().statusCode(200)
+            .body("properties.outputs.region.value", equalTo("west"));
+
+        String leaky = vaultWithSecret("kvleak" + suffix, true, "leaky-s3cr3t");
+        String answer = put("kvleak", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring", "allowedValues": ["other"]}},
+                "resources": []}}}
+            """.formatted(leaky)).then().statusCode(400).extract().asString();
+        assertFalse(answer.contains("leaky-s3cr3t"), answer);
+    }
+
+    @Test
+    void aFunctionThatFailsOnAKeyVaultSecretNeverQuotesIt() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String vault = vaultWithSecret("kvquote" + suffix, true, "not-a-number-s3cr3t");
+
+        put("kvquotename", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                 "name": "[string(int(parameters('secret')))]", "location": "westeurope"}]}}}
+            """.formatted(vault)).then().statusCode(400)
+            .body("error.message", containsString("the value is not an integer"))
+            .body("error.message", not(containsString("s3cr3t")));
+
+        // Redaction knows only the secret's own text; a function must not quote a transformed copy either.
+        for (String transformed : List.of("[string(int(toUpper(parameters('secret'))))]",
+                "[cidrHost(substring(parameters('secret'), 4), 1)]", "[string(bool(skip(parameters('secret'), 1)))]",
+                "[dateTimeAdd('2024-01-01', toUpper(parameters('secret')))]")) {
+            String message = put("kvquotetransformed", """
+                {"properties": {"mode": "Incremental",
+                  "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+                  "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                    {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                     "name": "%s", "location": "westeurope"}]}}}
+                """.formatted(vault, transformed)).then().statusCode(400).extract().path("error.message");
+            assertThat(transformed, message.toLowerCase(Locale.ROOT), not(containsString("s3cr3t")));
+        }
+
+        assertEquals("Failed", awaitTerminal(put("kvquoteoutput", """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [],
+                "outputs": {"number": {"type": "int", "value": "[int(parameters('secret'))]"}}}}}
+            """.formatted(vault))));
+        String deployment = given().when().get(DEPLOYMENTS + "/kvquoteoutput" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(deployment, containsString("is not an integer"));
+        assertThat(deployment, not(containsString("s3cr3t")));
+        String operations = given().when().get(DEPLOYMENTS + "/kvquoteoutput/operations" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(operations, not(containsString("s3cr3t")));
+
+        String conditional = """
+            {"properties": {"mode": "Incremental",
+              "parameters": {"secret": {"reference": {"keyVault": {"id": "%s"}, "secretName": "app-secret"}}},
+              "template": {"parameters": {"secret": {"type": "securestring"}}, "resources": [
+                {"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": "2023-01-31",
+                 "name": "kvquoteid", "location": "westeurope",
+                 "condition": "[equals(int(parameters('secret')), 1)]"}]}}}
+            """.formatted(vault);
+        assertEquals("Failed", awaitTerminal(put("kvquotecondition", conditional)));
+        String failed = given().when().get(DEPLOYMENTS + "/kvquotecondition" + API).then().statusCode(200)
+            .extract().asString();
+        assertThat(failed, not(containsString("s3cr3t")));
+        String predicted = given().contentType("application/json").body(conditional)
+            .when().post(DEPLOYMENTS + "/kvquotecondition/whatIf" + API).asString();
+        assertThat(predicted, not(containsString("s3cr3t")));
+    }
+
+    @Test
+    void aKeyVaultReferenceNeedsAVaultThatAllowsTemplateDeploymentsASecretAndASecureParameter() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String closed = vaultWithSecret("kvclosed" + suffix, false, "hidden");
+        put("kvclosed", referenceDeployment(closed, "")).then().statusCode(400)
+            .body("error.code", equalTo("InvalidTemplate"))
+            .body("error.message", containsString("enabledForTemplateDeployment"));
+        String open = vaultWithSecret("kvopen" + suffix, true, "visible");
+        put("kvnosecret", referenceDeployment(open, "").replace("app-secret", "no-such-secret")).then().statusCode(400)
+            .body("error.message", containsString("no-such-secret"));
+        put("kvnovault", referenceDeployment(RG + "/providers/Microsoft.KeyVault/vaults/absent" + suffix, ""))
+            .then().statusCode(400).body("error.code", equalTo("InvalidTemplate"));
+        put("kvplain", referenceDeployment(open, "").replace("securestring", "string")).then().statusCode(400)
+            .body("error.message", containsString("securestring"));
     }
 
     @Test

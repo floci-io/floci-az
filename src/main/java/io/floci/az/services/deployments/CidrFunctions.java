@@ -83,7 +83,7 @@ final class CidrFunctions {
         BigInteger index = BigInteger.valueOf(subnetIndex);
         BigInteger subnets = TWO.pow((int) newCidr - parsed.prefix());
         if (index.signum() < 0 || index.compareTo(subnets) >= 0) {
-            throw invalid("cidrSubnet", "the subnet index " + subnetIndex + " is out of range for '" + network + "'.");
+            throw invalid("cidrSubnet", "the subnet index is out of range for the network.");
         }
         BigInteger size = TWO.pow(parsed.bits() - (int) newCidr);
         return NODES.textNode(parsed.format(parsed.address().add(size.multiply(index))) + "/" + newCidr);
@@ -93,7 +93,7 @@ final class CidrFunctions {
         Network parsed = parse("cidrHost", network);
         BigInteger host = parsed.firstUsable().add(BigInteger.valueOf(hostIndex));
         if (hostIndex < 0 || host.compareTo(parsed.lastUsable()) > 0) {
-            throw invalid("cidrHost", "the host index " + hostIndex + " is out of range for '" + network + "'.");
+            throw invalid("cidrHost", "the host index is out of range for the network.");
         }
         return NODES.textNode(parsed.format(host));
     }
@@ -101,7 +101,7 @@ final class CidrFunctions {
     private static Network parse(String function, String cidr) {
         int slash = cidr.indexOf('/');
         if (slash < 0) {
-            throw invalid(function, "'" + cidr + "' is not in CIDR notation.");
+            throw invalid(function, "the value is not in CIDR notation.");
         }
         String address = cidr.substring(0, slash);
         boolean v4 = IPV4.matcher(address).matches();
@@ -111,10 +111,10 @@ final class CidrFunctions {
         try {
             prefix = Integer.parseInt(cidr.substring(slash + 1));
         } catch (NumberFormatException e) {
-            throw invalid(function, "'" + cidr + "' has an invalid prefix length.");
+            throw invalid(function, "the value has an invalid prefix length.");
         }
         if (prefix < 0 || prefix > bits) {
-            throw invalid(function, "'" + cidr + "' has an invalid prefix length.");
+            throw invalid(function, "the value has an invalid prefix length.");
         }
         BigInteger hostBits = TWO.pow(bits - prefix);
         return new Network(v4, value.divide(hostBits).multiply(hostBits), prefix);
@@ -125,7 +125,7 @@ final class CidrFunctions {
         for (String part : address.split("\\.")) {
             int octet = Integer.parseInt(part);
             if (octet > 255) {
-                throw invalid(function, "'" + address + "' is not a valid IP address.");
+                throw invalid(function, "the value is not a valid IP address.");
             }
             value = value.shiftLeft(8).add(BigInteger.valueOf(octet));
         }
@@ -133,7 +133,7 @@ final class CidrFunctions {
     }
 
     private static BigInteger parseV6(String function, String address) {
-        TemplateException bad = invalid(function, "'" + address + "' is not a valid IP address.");
+        TemplateException bad = invalid(function, "the value is not a valid IP address.");
         if (!IPV6.matcher(address).matches()) {
             throw bad;
         }
