@@ -1,6 +1,8 @@
 package io.floci.az.core.tls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logging.Logger;
@@ -44,9 +46,17 @@ public class TlsConfigSource implements ConfigSource {
      * Azure's public-cloud hosts a client that cannot be pointed at a custom cloud calls, served when
      * {@code floci-az.tls.public-hosts} is on. floci-az routes these by path, so only the certificate and DNS need them.
      */
-    public static final List<String> PUBLIC_HOSTS = List.of("management.azure.com", "management.core.windows.net",
-        "login.microsoftonline.com", "graph.microsoft.com");
+    public static final List<String> PUBLIC_HOSTS = publicHosts(CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD));
 
+    /** The ARM and management, sign-in and Graph hosts of {@code cloud}, as the cloud catalog names them. */
+    static List<String> publicHosts(CloudProfile cloud) {
+        Set<String> hosts = new LinkedHashSet<>();
+        hosts.add(URI.create(cloud.endpoints().resourceManager()).getHost());
+        cloud.audiences().forEach(audience -> hosts.add(URI.create(audience).getHost()));
+        hosts.addAll(cloud.endpoints().authorityHosts());
+        hosts.add(URI.create(cloud.endpoints().microsoftGraph()).getHost());
+        return List.copyOf(hosts);
+    }
 
     private static final Logger LOG = Logger.getLogger(TlsConfigSource.class);
 

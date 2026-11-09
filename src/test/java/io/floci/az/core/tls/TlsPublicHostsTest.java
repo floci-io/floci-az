@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,12 @@ class TlsPublicHostsTest {
         System.clearProperty("floci-az.tls.self-signed");
         System.clearProperty("floci-az.storage.persistent-path");
         System.clearProperty("floci-az.tls.public-hosts");
+    }
+
+    @Test
+    void thePublicHostsAreThePublicCloudsArmSignInAndGraphHosts() {
+        assertEquals(List.of("management.azure.com", "management.core.windows.net", "login.microsoftonline.com",
+            "graph.microsoft.com"), TlsConfigSource.PUBLIC_HOSTS);
     }
 
     private List<String> sans() throws Exception {
