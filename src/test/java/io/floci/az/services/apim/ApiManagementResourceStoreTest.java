@@ -1,6 +1,7 @@
 package io.floci.az.services.apim;
 
 import io.floci.az.core.StoredObject;
+import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import io.quarkus.test.junit.QuarkusTest;
@@ -11,11 +12,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.lessThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @QuarkusTest
 @DisplayName("API Management: services in one store keyed by canonical id")
@@ -137,5 +144,49 @@ class ApiManagementResourceStoreTest {
             .then().statusCode(200);
         given().when().get("/subscriptions/sub-all/providers/Microsoft.ApiManagement/service" + API)
             .then().statusCode(200).body("value", hasSize(2));
+    }
+
+    @Test
+    void aChildPutThroughOtherCasingUpdatesTheOneChildAndTheGatewayFindsIt() {
+        String service = service("sub-case", "RG-Children", "ApimKids");
+        given().contentType("application/json").body(BODY).when().put(service + API).then().statusCode(200);
+        String apiBody = "{\"properties\":{\"displayName\":\"%s\",\"path\":\"kids\","
+            + "\"protocols\":[\"https\"],\"serviceUrl\":\"http://localhost:1\"}}";
+        given().contentType("application/json").body(apiBody.formatted("first"))
+            .when().put(service + "/apis/Echo" + API).then().statusCode(lessThan(300));
+        given().contentType("application/json").body(apiBody.formatted("second"))
+            .when().put(service("SUB-CASE", "rg-children", "apimkids") + "/apis/ECHO" + API)
+            .then().statusCode(lessThan(300));
+
+        given().when().get(service + "/apis" + API).then().statusCode(200)
+            .body("value", hasSize(1))
+            .body("value[0].properties.displayName", equalTo("second"));
+        given().when().get(service("sub-case", "rg-children", "APIMKIDS") + "/apis/echo" + API).then().statusCode(200)
+            .body("properties.displayName", equalTo("second"));
+
+        given().when().delete(service + "/apis/eCHO" + API).then().statusCode(lessThan(300));
+        given().when().get(service + "/apis" + API).then().statusCode(200).body("value", hasSize(0));
+    }
+
+    @Test
+    void childrenSurviveARestartAndAResetClearsThem() {
+        InMemoryStorage<String, StoredObject> disk = new InMemoryStorage<>();
+        StorageFactory factory = mock(StorageFactory.class);
+        when(factory.create("apim-children")).thenReturn(disk);
+
+        ApiManagementStore before = new ApiManagementStore(factory);
+        before.apis().put("sub/rg/apim/s/apis/a", new LinkedHashMap<>(Map.of("name", "a", "_service", "s")));
+        before.productApis().put("sub/rg/apim/s/products/p/apis/a", "sub/rg/apim/s/apis/a");
+
+        ApiManagementStore after = new ApiManagementStore(factory);
+        assertEquals("a", after.apis().get("sub/rg/apim/s/apis/a").get("name"));
+        assertEquals("sub/rg/apim/s/apis/a", after.productApis().get("sub/rg/apim/s/products/p/apis/a"));
+        assertTrue(after.operations().isEmpty(), "each kind holds only its own keys");
+
+        after.apis().keySet().removeIf(key -> key.startsWith("sub/rg/apim/s/"));
+        assertTrue(after.apis().isEmpty());
+        assertEquals(1, after.productApis().size());
+        after.productApis().clear();
+        assertTrue(disk.keys().isEmpty());
     }
 }
