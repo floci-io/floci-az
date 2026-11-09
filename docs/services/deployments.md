@@ -151,6 +151,10 @@ fails, the deployment ends `Failed` with Azure's `DeploymentFailed` error, whose
 resource's own error; a resource that ends in a `Failed` provisioning state is a
 `ResourceDeploymentFailure`.
 
+A nested deployment (a Bicep module) adds the resources it deployed to its parent's `outputResources` and
+`providers`, at any depth, and not its own id, as Azure lists them. floci-az lists what succeeded before a parent
+failed or was canceled; Azure's lists on those states are not settled by any local source.
+
 ## What-if
 
 `whatIf` prepares the deployment as a `PUT` would, then reads each resource's current state instead of writing
