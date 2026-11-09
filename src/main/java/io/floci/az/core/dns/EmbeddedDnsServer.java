@@ -116,39 +116,46 @@ public class EmbeddedDnsServer {
     private void handleQuery(Vertx vertx, DatagramSocket socket, byte[] data,
                              String senderHost, int senderPort, String myIp) {
         try {
-            ByteBuffer buf = ByteBuffer.wrap(data);
-            short txId = buf.getShort();
-            short flags = buf.getShort();
-            short qdCount = buf.getShort();
-            buf.getShort(); // ancount
-            buf.getShort(); // nscount
-            buf.getShort(); // arcount
-
+            ByteBuffer header = ByteBuffer.wrap(data);
+            header.getShort(); // id
+            short flags = header.getShort();
+            short qdCount = header.getShort();
             if ((flags & 0x8000) != 0 || qdCount < 1) {
                 return; // not a standard query
             }
 
-            int questionOffset = buf.position(); // always 12 for a standard query
-            String qname = readName(buf, data);
-            short qtype = buf.getShort();
-            buf.getShort(); // qclass
-            int questionEnd = buf.position();
-
-            Optional<String> resolvedAddress = qtype == TYPE_A ? resolveARecord(qname, myIp) : Optional.empty();
-            if (resolvedAddress.isPresent()) {
-                byte[] response = buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get());
-                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
-            } else if (qtype == TYPE_AAAA && matchesSuffix(qname)) {
-                // A name this server answers has no IPv6 address: forwarding the AAAA query would hand a dual-stack
-                // client the real host's address (Azure's own, under public-hosts) instead of floci-az's.
-                byte[] response = buildEmptyResponse(txId, data, questionOffset, questionEnd);
-                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
+            Optional<byte[]> answer = localAnswer(data, myIp);
+            if (answer.isPresent()) {
+                socket.send(Buffer.buffer(answer.get()), senderPort, senderHost, v -> {});
             } else {
                 forwardAsync(vertx, socket, data, senderHost, senderPort);
             }
         } catch (Exception e) {
             LOG.debugv("DNS packet error: {0}", e.getMessage());
         }
+    }
+
+    /** The reply this server gives a standard query itself, or empty when the query is forwarded upstream. */
+    Optional<byte[]> localAnswer(byte[] data, String myIp) {
+        ByteBuffer buf = ByteBuffer.wrap(data);
+        short txId = buf.getShort();
+        int questionOffset = 12; // the fixed header: id, flags and the four section counts
+        buf.position(questionOffset);
+        String qname = readName(buf, data);
+        short qtype = buf.getShort();
+        buf.getShort(); // qclass
+        int questionEnd = buf.position();
+
+        Optional<String> resolvedAddress = qtype == TYPE_A ? resolveARecord(qname, myIp) : Optional.empty();
+        if (resolvedAddress.isPresent()) {
+            return Optional.of(buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get()));
+        }
+        if (qtype == TYPE_AAAA && matchesSuffix(qname)) {
+            // A name this server answers has no IPv6 address: forwarding the AAAA query would hand a dual-stack
+            // client the real host's address (Azure's own, under public-hosts) instead of floci-az's.
+            return Optional.of(buildEmptyResponse(txId, data, questionOffset, questionEnd));
+        }
+        return Optional.empty();
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
