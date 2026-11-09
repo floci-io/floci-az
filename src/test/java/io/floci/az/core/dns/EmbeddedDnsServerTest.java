@@ -122,6 +122,22 @@ class EmbeddedDnsServerTest {
         assertEquals("floci.io", dns.readName(buf, data));
     }
 
+    // ── buildEmptyResponse ────────────────────────────────────────────────────
+
+    @Test
+    void anIpv6QueryForAnOwnedNameGetsASuccessfulAnswerWithNoRecords() {
+        byte[] query = buildQuery("management.azure.com", (short) 0x4321);
+        byte[] response = dns.buildEmptyResponse((short) 0x4321, query, 12, query.length);
+        ByteBuffer buf = ByteBuffer.wrap(response);
+        assertEquals((short) 0x4321, buf.getShort(0));
+        short flags = buf.getShort(2);
+        assertTrue((flags & 0x8000) != 0, "QR bit must be set");
+        assertEquals(0, flags & 0x000F, "RCODE must be NOERROR, not NXDOMAIN, so the client falls back to IPv4");
+        assertEquals(1, buf.getShort(4));
+        assertEquals(0, buf.getShort(6));
+        assertEquals(query.length, response.length, "the question is echoed and nothing follows it");
+    }
+
     // ── buildAResponse ────────────────────────────────────────────────────────
 
     @Test

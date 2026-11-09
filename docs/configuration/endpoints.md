@@ -80,6 +80,9 @@ them to floci-az and trust its certificate.
 Turning this on or off changes the certificate's names, so the certificate is regenerated and clients must trust it
 again.
 
+Set it as an environment variable or a system property, like the other TLS settings: the certificate is made before
+the configuration files load, so a value in `application.yml` is ignored.
+
 !!! warning
     A client that trusts this CA will accept floci-az as Azure for these names. Trust it only in an environment where
     those calls should reach the emulator, never on a machine that also talks to real Azure with the same trust store.

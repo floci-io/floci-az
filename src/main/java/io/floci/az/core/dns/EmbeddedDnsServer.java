@@ -47,6 +47,8 @@ public class EmbeddedDnsServer {
     private static final Logger LOG = Logger.getLogger(EmbeddedDnsServer.class);
     private static final int DNS_PORT = 53;
     private static final int TTL = 60;
+    private static final short TYPE_A = 1;
+    private static final short TYPE_AAAA = 28;
     private static final String FALLBACK_UPSTREAM = "127.0.0.11";
     // EDNS0-capable resolvers (Node/c-ares, glibc) advertise UDP payloads well above the
     // legacy 512-byte limit; CDN-backed public names return larger responses. Receiving into
@@ -84,7 +86,7 @@ public class EmbeddedDnsServer {
             suffixes.addAll(BUILTIN_SUFFIXES);
             config.hostname().ifPresent(suffixes::add);
             config.dns().extraSuffixes().ifPresent(suffixes::addAll);
-            if (config.tls().publicHosts()) {
+            if (TlsConfigSource.publicHostsEnabled()) {
                 suffixes.addAll(TlsConfigSource.PUBLIC_HOSTS);
             }
 
@@ -132,9 +134,14 @@ public class EmbeddedDnsServer {
             buf.getShort(); // qclass
             int questionEnd = buf.position();
 
-            Optional<String> resolvedAddress = qtype == 1 ? resolveARecord(qname, myIp) : Optional.empty();
+            Optional<String> resolvedAddress = qtype == TYPE_A ? resolveARecord(qname, myIp) : Optional.empty();
             if (resolvedAddress.isPresent()) {
                 byte[] response = buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get());
+                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
+            } else if (qtype == TYPE_AAAA && matchesSuffix(qname)) {
+                // A name this server answers has no IPv6 address: forwarding the AAAA query would hand a dual-stack
+                // client the real host's address (Azure's own, under public-hosts) instead of floci-az's.
+                byte[] response = buildEmptyResponse(txId, data, questionOffset, questionEnd);
                 socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
             } else {
                 forwardAsync(vertx, socket, data, senderHost, senderPort);
@@ -194,6 +201,20 @@ public class EmbeddedDnsServer {
             sb.append(new String(label));
         }
         return sb.toString();
+    }
+
+    /** A successful answer with no records (NODATA): the name exists here but has no record of the asked type. */
+    byte[] buildEmptyResponse(short txId, byte[] query, int questionOffset, int questionEnd) {
+        int questionLength = questionEnd - questionOffset;
+        ByteBuffer resp = ByteBuffer.allocate(12 + questionLength);
+        resp.putShort(txId);
+        resp.putShort((short) 0x8180); // QR=1, RD=1, RA=1, RCODE=0 (NOERROR), the flags of the A answer
+        resp.putShort((short) 1);      // qdcount
+        resp.putShort((short) 0);      // ancount
+        resp.putShort((short) 0);      // nscount
+        resp.putShort((short) 0);      // arcount
+        resp.put(query, questionOffset, questionLength);
+        return resp.array();
     }
 
     byte[] buildAResponse(byte[] query, short txId, int questionOffset, int questionEnd, String ip) {

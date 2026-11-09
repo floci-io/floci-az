@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** {@code floci-az.tls.public-hosts} adds Azure's own hosts to the certificate, and only when it is on. */
@@ -75,5 +76,29 @@ class TlsPublicHostsTest {
 
         TlsConfigSource.PUBLIC_HOSTS.forEach(host -> assertTrue(names.contains(host), host));
         assertTrue(names.contains("*.vault.azure.net"), names.toString());
+    }
+
+    private String caPem() throws Exception {
+        return Files.readString(tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_CA_NAME));
+    }
+
+    @Test
+    void anUnchangedSettingReusesTheCertificateAndToggledItReplacesItBothWays() throws Exception {
+        List<String> first = sans();
+        String firstCa = caPem();
+        List<String> again = sans();
+        assertEquals(first, again);
+        assertEquals(firstCa, caPem(), "an unchanged setting must keep the CA clients already trust");
+
+        System.setProperty("floci-az.tls.public-hosts", "true");
+        List<String> on = sans();
+        String onCa = caPem();
+        TlsConfigSource.PUBLIC_HOSTS.forEach(host -> assertTrue(on.contains(host), host));
+        assertNotEquals(firstCa, onCa, "turning it on changes the names, so the certificate is made again");
+
+        System.setProperty("floci-az.tls.public-hosts", "false");
+        List<String> off = sans();
+        TlsConfigSource.PUBLIC_HOSTS.forEach(host -> assertFalse(off.contains(host), host));
+        assertNotEquals(onCa, caPem(), "turning it off drops Azure's names again");
     }
 }
