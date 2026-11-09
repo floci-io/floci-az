@@ -272,6 +272,12 @@
                         </goals>
                         <configuration>
                             <target>
+                                <!-- Session expiry is a failed delivery; explicit close remains graceful. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  sessionSPI.closeSender(brokerConsumer);"
+                                    value="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  ServiceBusSessionSupport.closeSender(sessionSPI, brokerConsumer, condition);"
+                                    failOnNoReplacements="true" />
                                 <!-- Azure SDKs require an explicit header on the first delivery.
                                      Keep Artemis's zero-based conversion (deliveryCount - 1). -->
                                 <replace

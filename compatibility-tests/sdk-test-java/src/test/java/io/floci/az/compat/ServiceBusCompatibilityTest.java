@@ -196,8 +196,7 @@ class ServiceBusCompatibilityTest {
         send(queue, payload);
 
         // Exhaust the entity's two delivery attempts by abandoning both. Only the relative
-        // delivery count is asserted: the emulator's AMQP delivery-count header is 1-based
-        // where Azure's is 0-based, and this SDK reads the header verbatim.
+        // delivery count is asserted: this SDK exposes the zero-based AMQP header directly.
         long previousCount = -1;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {

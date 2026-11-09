@@ -25,6 +25,12 @@ reports `1` and the receive after one abandon reports `2`. The Java and JavaScri
 the raw AMQP count, reporting `0` and `1` for those same receives. Peek and session-lock renewal
 do not count as additional delivery attempts.
 
+When a session lock expires, its unsettled deliveries retain their attempt count before requeue,
+so each subsequent delivery increments once and `MaxDeliveryCount` moves exhausted messages to
+the dead-letter queue. Explicitly closing a session without settling its messages does not
+increment the count. Completed messages remain removed. This follows Azure's
+[session delivery-count contract](https://learn.microsoft.com/azure/service-bus-messaging/message-sessions#impact-of-delivery-count).
+
 ## Management plane
 
 Entity CRUD is served over HTTP at `/{account}-servicebus/`:
