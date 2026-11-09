@@ -960,6 +960,16 @@ class DeploymentsHandlerTest {
     }
 
     @Test
+    void nestedLambdasAreChargedToTheTemplatesExpansionBudget() throws Exception {
+        assertEquals("Failed", awaitTerminal(put("lambdabudget", """
+            {"properties": {"mode": "Incremental", "template": {"resources": [], "outputs": {"grid": {"type": "array",
+              "value": "[map(range(0, 1000), lambda('i', map(range(0, 1000), lambda('j', lambdaVariables('j')))))]"}}}}}
+            """)));
+        given().when().get(DEPLOYMENTS + "/lambdabudget" + API).then().statusCode(200)
+            .body("properties.error.details[0].message", containsString("lambda functions expand"));
+    }
+
+    @Test
     void aParentListsTheResourcesOfItsModulesAtAnyDepthAndNotTheModules() throws Exception {
         String identity = RG + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/";
         assertEquals("Succeeded", awaitTerminal(put("modules", """

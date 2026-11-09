@@ -215,6 +215,13 @@ expansion could not fit in.
 template that builds a hostname from `environment().suffixes.storage` gets the real Azure suffix, which the
 emulator routes.
 
+### Lambda functions
+
+`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy` and `mapValues` take a `lambda(...)` argument, read with
+`lambdaVariables()`. `filter`, `map` and `reduce` accept an optional index variable. As the ARM docs say, a lambda is
+valid only as an argument of these functions, and a lambda variable can't be used inside `reference()` or a `list*`
+function. `sort` is stable. `flatten` removes one level of nesting.
+
 ### User-defined functions
 
 A template's `functions` section declares functions called as `namespace.member(...)`. Each one is its `output`
@@ -250,8 +257,7 @@ Each of these is refused with `400 InvalidTemplate`, never skipped:
 
 - a copy loop on a child declared inside its parent, and children inside a parent that has a copy loop: as the
   ARM docs advise, declare such children outside the parent, with the parent's name in theirs
-- the lambda functions (`filter`, `map`, `reduce`, `sort`, `toObject`, `groupBy`, `mapValues`), the CIDR
-  functions, `pickZones`, `providers`, `managementGroup`, `deployer`, `roleDefinitions`
+- the CIDR functions, `pickZones`, `providers`, `managementGroup`, `deployer`, `roleDefinitions`
 - Key Vault parameter references
 - `Complete` mode, refused with `400 DeploymentModeNotSupported` rather than run as `Incremental`
 
