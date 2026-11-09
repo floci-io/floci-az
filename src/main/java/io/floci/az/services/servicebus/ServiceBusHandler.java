@@ -12,6 +12,7 @@ import io.floci.az.core.StoredObject;
 import io.floci.az.core.storage.StorageBackend;
 import io.floci.az.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -29,6 +30,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -755,24 +758,96 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         warnOnActionIgnored(initialRule);
 
         try {
-            ServiceBusEntityXml.MessageLifetimeSettings effectiveLifetime =
-                    new ServiceBusEntityXml.MessageLifetimeSettings(
-                            Math.min(topic.defaultMessageTtlMillis(), lifetime.ttlMillis()),
-                            lifetime.deadLetterOnExpiration());
-            namespaceManager.jolokiaCreateSubscription(
-                    namespace, topicName, subName, selector,
-                    sub.requiresSession(), sub.lockDurationSeconds(),
-                    sub.maxDeliveryCount(),
-                    new ServiceBusEntityXml.DuplicateDetectionSettings(
-                            topic.requiresDuplicateDetection(),
-                            topic.duplicateDetectionHistorySeconds()),
-                    effectiveLifetime);
+            provisionSubscription(namespace, topic, sub, selector);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to provision subscription '%s/%s' in Artemis for namespace '%s'",
                     topicName, subName, namespace);
         }
 
         return atomEntry(201, subscriptionEntryXml(namespace, sub));
+    }
+
+    private void provisionSubscription(String namespace, ServiceBusModels.TopicEntity topic,
+                                        ServiceBusModels.SubscriptionEntity sub, String selector) {
+        namespaceManager.jolokiaCreateSubscription(
+                namespace, sub.topicName(), sub.name(), selector,
+                sub.requiresSession(), sub.lockDurationSeconds(),
+                sub.maxDeliveryCount(),
+                duplicateDetection(topic),
+                new ServiceBusEntityXml.MessageLifetimeSettings(
+                        Math.min(topic.defaultMessageTtlMillis(), sub.defaultMessageTtlMillis()),
+                        sub.deadLetteringOnMessageExpiration()));
+    }
+
+    private static ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection(
+            ServiceBusModels.TopicEntity topic) {
+        return new ServiceBusEntityXml.DuplicateDetectionSettings(
+                topic.requiresDuplicateDetection(), topic.duplicateDetectionHistorySeconds());
+    }
+
+    /**
+     * Every broker starts empty, while persistent storage keeps entity definitions across a
+     * restart. Create calls return early for a stored entity, so restore them here or the broker
+     * never gets them. Messages live in the broker and are not restored.
+     */
+    void onBrokerStarted(@Observes ServiceBusBrokerStarted started) {
+        String namespace = started.namespace();
+        List<StoredObject> stored = store.scan(key -> namespace.equals(namespaceOf(key)));
+        restore(stored, path -> path.startsWith("queues/"),
+                object -> restoreQueue(namespace, object));
+        restore(stored, path -> path.startsWith("topics/") && !path.contains("/subscriptions/"),
+                object -> restoreTopic(namespace, object));
+        restore(stored, path -> path.contains("/subscriptions/") && !path.contains("/rules/"),
+                object -> restoreSubscription(namespace, object));
+    }
+
+    private static String namespaceOf(String key) {
+        String[] parts = key.split("/", 4);
+        return parts.length == 4 ? parts[2] : null;
+    }
+
+    private static void restore(List<StoredObject> stored, Predicate<String> entityPath,
+                                 Consumer<StoredObject> restoreEntity) {
+        for (StoredObject object : stored) {
+            if (!entityPath.test(object.key().split("/", 4)[3])) {
+                continue;
+            }
+            try {
+                restoreEntity.accept(object);
+            } catch (RuntimeException e) {
+                LOG.warnf(e, "Failed to restore stored Service Bus entity '%s' to the broker",
+                        object.key());
+            }
+        }
+    }
+
+    private void restoreQueue(String namespace, StoredObject object) {
+        ServiceBusModels.QueueEntity queue =
+                fromBytes(object.data(), ServiceBusModels.QueueEntity.class);
+        namespaceManager.jolokiaCreateQueue(namespace, queue.name(), queue.requiresSession(),
+                queue.lockDurationSeconds(), queue.maxDeliveryCount(),
+                new ServiceBusEntityXml.DuplicateDetectionSettings(
+                        queue.requiresDuplicateDetection(), queue.duplicateDetectionHistorySeconds()),
+                new ServiceBusEntityXml.MessageLifetimeSettings(
+                        queue.defaultMessageTtlMillis(), queue.deadLetteringOnMessageExpiration()));
+    }
+
+    private void restoreTopic(String namespace, StoredObject object) {
+        ServiceBusModels.TopicEntity topic =
+                fromBytes(object.data(), ServiceBusModels.TopicEntity.class);
+        namespaceManager.jolokiaCreateTopic(namespace, topic.name(), duplicateDetection(topic));
+    }
+
+    private void restoreSubscription(String namespace, StoredObject object) {
+        ServiceBusModels.SubscriptionEntity sub =
+                fromBytes(object.data(), ServiceBusModels.SubscriptionEntity.class);
+        String account = object.key().split("/", 3)[1];
+        ServiceBusModels.TopicEntity topic = fromBytes(
+                store.get(topicKey(account, namespace, sub.topicName())).orElseThrow().data(),
+                ServiceBusModels.TopicEntity.class);
+        String selector = ServiceBusRuleSelector.forRules(
+                loadRules(account, namespace, sub.topicName(), sub.name()));
+        provisionSubscription(namespace, topic, sub, selector);
     }
 
     private Response handleDeleteSubscription(String account, String namespace,
