@@ -51,6 +51,24 @@ public class QueueServiceTest {
     }
 
     @Test
+    void messagesComeBackInSendOrder() {
+        given().when().put("/{account}/fifo-queue", ACCOUNT).then().statusCode(201);
+        for (int i = 0; i < 8; i++) {
+            given().contentType("application/xml")
+                .body("<QueueMessage><MessageText>m" + i + "</MessageText></QueueMessage>")
+                .when().post("/{account}/fifo-queue/messages", ACCOUNT)
+                .then().statusCode(201);
+        }
+
+        given().when().get("/{account}/fifo-queue/messages?peekonly=true&numofmessages=8", ACCOUNT)
+            .then().statusCode(200)
+            .body("QueueMessagesList.QueueMessage.MessageText",
+                contains("m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"));
+
+        given().when().delete("/{account}/fifo-queue", ACCOUNT).then().statusCode(204);
+    }
+
+    @Test
     void createAndDeleteQueue() {
         given()
             .when().put("/{account}/{queue}", ACCOUNT, QUEUE)

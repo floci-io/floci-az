@@ -27,18 +27,21 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private static final Logger LOGGER = Logger.getLogger(QueueServiceHandler.class);
+    private static final AtomicLong SEND_SEQUENCE = new AtomicLong();
     private static final DateTimeFormatter RFC1123_DATE_TIME = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
             .withZone(ZoneId.of("GMT"));
@@ -406,7 +409,8 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
             metadata.put("DequeueCount", "0");
             metadata.put("_visibleAt", String.valueOf(visibleAt.toEpochMilli()));
 
-            String key = System.currentTimeMillis() + "-" + messageId;
+            // Keys sort in send order; the counter orders messages sent in the same millisecond.
+            String key = String.format("%013d-%012d-%s", System.currentTimeMillis(), SEND_SEQUENCE.incrementAndGet(), messageId);
             store.put(objKey(request.accountName(), queueName, key),
                     new StoredObject(key, msgReq.MessageText().getBytes(), metadata, Instant.now(), messageId));
 
@@ -460,6 +464,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
         List<StoredObject> visible = store.scan(k -> k.startsWith(keyPrefix)).stream()
                 .filter(so -> isVisible(so, now))
+                .sorted(Comparator.comparing(StoredObject::key))
                 .limit(numOfMessages)
                 .collect(Collectors.toList());
 
