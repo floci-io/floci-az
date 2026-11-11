@@ -2,6 +2,7 @@ package io.floci.az.core.dns;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerDetector;
+import io.floci.az.core.tls.TlsConfigSource;
 import io.quarkus.runtime.Startup;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -46,6 +47,8 @@ public class EmbeddedDnsServer {
     private static final Logger LOG = Logger.getLogger(EmbeddedDnsServer.class);
     private static final int DNS_PORT = 53;
     private static final int TTL = 60;
+    private static final short TYPE_A = 1;
+    private static final short TYPE_AAAA = 28;
     private static final String FALLBACK_UPSTREAM = "127.0.0.11";
     // EDNS0-capable resolvers (Node/c-ares, glibc) advertise UDP payloads well above the
     // legacy 512-byte limit; CDN-backed public names return larger responses. Receiving into
@@ -83,6 +86,9 @@ public class EmbeddedDnsServer {
             suffixes.addAll(BUILTIN_SUFFIXES);
             config.hostname().ifPresent(suffixes::add);
             config.dns().extraSuffixes().ifPresent(suffixes::addAll);
+            if (TlsConfigSource.publicHostsEnabled()) {
+                suffixes.addAll(TlsConfigSource.PUBLIC_HOSTS);
+            }
 
             DatagramSocket socket = vertx.createDatagramSocket(new DatagramSocketOptions().setIpV6(false));
             socket.listen(DNS_PORT, "0.0.0.0", ar -> {
@@ -110,34 +116,46 @@ public class EmbeddedDnsServer {
     private void handleQuery(Vertx vertx, DatagramSocket socket, byte[] data,
                              String senderHost, int senderPort, String myIp) {
         try {
-            ByteBuffer buf = ByteBuffer.wrap(data);
-            short txId = buf.getShort();
-            short flags = buf.getShort();
-            short qdCount = buf.getShort();
-            buf.getShort(); // ancount
-            buf.getShort(); // nscount
-            buf.getShort(); // arcount
-
+            ByteBuffer header = ByteBuffer.wrap(data);
+            header.getShort(); // id
+            short flags = header.getShort();
+            short qdCount = header.getShort();
             if ((flags & 0x8000) != 0 || qdCount < 1) {
                 return; // not a standard query
             }
 
-            int questionOffset = buf.position(); // always 12 for a standard query
-            String qname = readName(buf, data);
-            short qtype = buf.getShort();
-            buf.getShort(); // qclass
-            int questionEnd = buf.position();
-
-            Optional<String> resolvedAddress = qtype == 1 ? resolveARecord(qname, myIp) : Optional.empty();
-            if (resolvedAddress.isPresent()) {
-                byte[] response = buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get());
-                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
+            Optional<byte[]> answer = localAnswer(data, myIp);
+            if (answer.isPresent()) {
+                socket.send(Buffer.buffer(answer.get()), senderPort, senderHost, v -> {});
             } else {
                 forwardAsync(vertx, socket, data, senderHost, senderPort);
             }
         } catch (Exception e) {
             LOG.debugv("DNS packet error: {0}", e.getMessage());
         }
+    }
+
+    /** The reply this server gives a standard query itself, or empty when the query is forwarded upstream. */
+    Optional<byte[]> localAnswer(byte[] data, String myIp) {
+        ByteBuffer buf = ByteBuffer.wrap(data);
+        short txId = buf.getShort();
+        int questionOffset = 12; // the fixed header: id, flags and the four section counts
+        buf.position(questionOffset);
+        String qname = readName(buf, data);
+        short qtype = buf.getShort();
+        buf.getShort(); // qclass
+        int questionEnd = buf.position();
+
+        Optional<String> resolvedAddress = qtype == TYPE_A ? resolveARecord(qname, myIp) : Optional.empty();
+        if (resolvedAddress.isPresent()) {
+            return Optional.of(buildAResponse(data, txId, questionOffset, questionEnd, resolvedAddress.get()));
+        }
+        if (qtype == TYPE_AAAA && matchesSuffix(qname)) {
+            // A name this server answers has no IPv6 address: forwarding the AAAA query would hand a dual-stack
+            // client the real host's address (Azure's own, under public-hosts) instead of floci-az's.
+            return Optional.of(buildEmptyResponse(txId, data, questionOffset, questionEnd));
+        }
+        return Optional.empty();
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -190,6 +208,20 @@ public class EmbeddedDnsServer {
             sb.append(new String(label));
         }
         return sb.toString();
+    }
+
+    /** A successful answer with no records (NODATA): the name exists here but has no record of the asked type. */
+    byte[] buildEmptyResponse(short txId, byte[] query, int questionOffset, int questionEnd) {
+        int questionLength = questionEnd - questionOffset;
+        ByteBuffer resp = ByteBuffer.allocate(12 + questionLength);
+        resp.putShort(txId);
+        resp.putShort((short) 0x8180); // QR=1, RD=1, RA=1, RCODE=0 (NOERROR), the flags of the A answer
+        resp.putShort((short) 1);      // qdcount
+        resp.putShort((short) 0);      // ancount
+        resp.putShort((short) 0);      // nscount
+        resp.putShort((short) 0);      // arcount
+        resp.put(query, questionOffset, questionLength);
+        return resp.array();
     }
 
     byte[] buildAResponse(byte[] query, short txId, int questionOffset, int questionEnd, String ip) {

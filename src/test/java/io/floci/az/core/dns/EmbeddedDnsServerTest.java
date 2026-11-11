@@ -1,5 +1,6 @@
 package io.floci.az.core.dns;
 
+import io.floci.az.core.tls.TlsConfigSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -119,6 +120,50 @@ class EmbeddedDnsServerTest {
 
         ByteBuffer buf = ByteBuffer.wrap(data);
         assertEquals("floci.io", dns.readName(buf, data));
+    }
+
+    // ── localAnswer ───────────────────────────────────────────────────────────
+
+    private static final short TYPE_AAAA = 28;
+
+    @Test
+    void anIpv6QueryForAnOwnedNameIsAnsweredLocallyWithNoRecords() {
+        EmbeddedDnsServer withPublicHosts = new EmbeddedDnsServer(TlsConfigSource.PUBLIC_HOSTS);
+        byte[] query = buildQuery("management.azure.com", (short) 0x4321, TYPE_AAAA);
+
+        byte[] response = withPublicHosts.localAnswer(query, "172.19.0.2").orElseThrow(
+            () -> new AssertionError("an AAAA query for an owned name must not be forwarded upstream"));
+
+        ByteBuffer buf = ByteBuffer.wrap(response);
+        assertEquals((short) 0x4321, buf.getShort(0));
+        short flags = buf.getShort(2);
+        assertTrue((flags & 0x8000) != 0, "QR bit must be set");
+        assertEquals(0, flags & 0x000F, "RCODE must be NOERROR, not NXDOMAIN, so the client falls back to IPv4");
+        assertEquals(1, buf.getShort(4));
+        assertEquals(0, buf.getShort(6));
+        assertEquals(TYPE_AAAA, buf.getShort(query.length - 4), "the AAAA question is echoed");
+        assertEquals(query.length, response.length, "the question is echoed and nothing follows it");
+    }
+
+    @Test
+    void anIpv6QueryForAnyOtherNameIsForwarded() {
+        EmbeddedDnsServer withPublicHosts = new EmbeddedDnsServer(TlsConfigSource.PUBLIC_HOSTS);
+
+        assertTrue(withPublicHosts.localAnswer(buildQuery("example.com", (short) 7, TYPE_AAAA), "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void anIpv4QueryForAnOwnedNameStillResolvesToTheEmulator() {
+        EmbeddedDnsServer withPublicHosts = new EmbeddedDnsServer(TlsConfigSource.PUBLIC_HOSTS);
+        byte[] response = withPublicHosts.localAnswer(buildQuery("management.azure.com", (short) 8), "172.19.0.2")
+            .orElseThrow();
+
+        ByteBuffer buf = ByteBuffer.wrap(response);
+        assertEquals(1, buf.getShort(6));
+        byte[] address = new byte[4];
+        buf.position(response.length - 4);
+        buf.get(address);
+        assertArrayEquals(new byte[] {(byte) 172, 19, 0, 2}, address);
     }
 
     // ── buildAResponse ────────────────────────────────────────────────────────
@@ -277,6 +322,10 @@ class EmbeddedDnsServerTest {
     }
 
     private byte[] buildQuery(String name, short txId) {
+        return buildQuery(name, txId, (short) 1);
+    }
+
+    private byte[] buildQuery(String name, short txId, short type) {
         byte[] encodedName = encodeName(name);
         // header(12) + name + type(2) + class(2)
         ByteBuffer buf = ByteBuffer.allocate(12 + encodedName.length + 4);
@@ -287,8 +336,18 @@ class EmbeddedDnsServerTest {
         buf.putShort((short) 0);
         buf.putShort((short) 0);
         buf.put(encodedName);
-        buf.putShort((short) 1); // type A
+        buf.putShort(type);
         buf.putShort((short) 1); // class IN
         return buf.array();
+    }
+
+    @Test
+    void azuresPublicHostsAreAnsweredOnlyWhenAddedToTheSuffixes() {
+        assertFalse(dns.matchesSuffix("management.azure.com"));
+
+        EmbeddedDnsServer withPublicHosts = new EmbeddedDnsServer(TlsConfigSource.PUBLIC_HOSTS);
+
+        TlsConfigSource.PUBLIC_HOSTS.forEach(host -> assertTrue(withPublicHosts.matchesSuffix(host), host));
+        assertFalse(withPublicHosts.matchesSuffix("azure.com"));
     }
 }

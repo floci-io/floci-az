@@ -1169,6 +1169,16 @@ public interface EmulatorConfig {
         boolean selfSigned();
 
         /**
+         * Answer for Azure's own public-cloud hosts ({@code management.azure.com} and the others in
+         * {@code TlsConfigSource.PUBLIC_HOSTS}), in the self-signed certificate and the embedded DNS, for a client that
+         * hardcodes them and cannot be pointed at a custom cloud, such as azd. Off by default: a CA a client trusts can
+         * then sign Azure's real names, so it should only be trusted where that is intended. Read, like the other TLS
+         * settings, from a system property or the environment only ({@code TlsConfigSource.publicHostsEnabled()}).
+         */
+        @WithDefault("false")
+        boolean publicHosts();
+
+        /**
          * Additional port the TLS proxy binds for HTTPS traffic, alongside the public
          * floci-az {@link EmulatorConfig#port()}.
          *

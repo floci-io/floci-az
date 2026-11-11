@@ -45,6 +45,7 @@ floci-az:
   tls:
     enabled: false    # set to true to enable HTTP+HTTPS on the same port via protocol-sniffing proxy
     self-signed: true  # auto-generate self-signed cert when no cert-path/key-path provided
+    public-hosts: false  # FLOCI_AZ_TLS_PUBLIC_HOSTS: answer for management.azure.com and friends in the cert and DNS, for clients such as azd
     https-port: 443    # FLOCI_AZ_TLS_HTTPS_PORT — also bind 443 so Azure SDK default-HTTPS clients reach floci-az (0 disables)
   base-url: http://localhost:4577
   storage:
