@@ -73,3 +73,13 @@ def test_check_without_the_checkout_verifies_shape_only(tmp_path):
     path = tmp_path / "role-definitions.json"
     path.write_text(g.render({"_source": {}, "roleDefinitions": g.roles([READER])}), encoding="utf-8")
     assert g.main(["--check", "--local-root", str(tmp_path / "absent"), "--output", str(path)]) == 0
+
+
+def test_characters_outside_ascii_are_escaped_and_decode_to_azures_text(tmp_path):
+    dashed = dict(READER, description="Full control of the agent\u2014manage chats")
+    text = g.render({"_source": {}, "roleDefinitions": g.roles([dashed])})
+    assert text.isascii()
+    assert json.loads(text)["roleDefinitions"][0]["description"] == "Full control of the agent\u2014manage chats"
+    path = tmp_path / "role-definitions.json"
+    path.write_text(text.replace("\\u2014", "\u2014"), encoding="utf-8")
+    assert any("ASCII" in problem for problem in g.self_check(path))

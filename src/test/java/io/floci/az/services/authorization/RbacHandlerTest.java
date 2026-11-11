@@ -251,6 +251,41 @@ class RbacHandlerTest {
                 .body("value.id", contains(atRg));
     }
 
+    /**
+     * Above and below follow the management-group hierarchy, not the id string: a subscription's {@code atScope()}
+     * includes its group's assignments, and a group's unfiltered list includes its subscription's.
+     */
+    @Test
+    void theListFollowsTheManagementGroupHierarchy() {
+        String placed = "aaaaaaaa-5555-5555-5555-000000000001";
+        String unplaced = "aaaaaaaa-5555-5555-5555-000000000002";
+        String group = "/providers/Microsoft.Management/managementGroups/rbac-mg";
+        given().contentType("application/json").body("{}").queryParam("api-version", "2023-04-01")
+                .when().put(group).then().statusCode(200);
+        given().queryParam("api-version", "2023-04-01")
+                .when().put(group + "/subscriptions/" + placed).then().statusCode(200);
+
+        String atGroup = group + ASSIGNMENTS + "/" + UUID.randomUUID();
+        String atPlaced = "/subscriptions/" + placed + ASSIGNMENTS + "/" + UUID.randomUUID();
+        putAssignment(atGroup, DEFINITIONS + "/" + READER, PRINCIPAL, null).statusCode(201);
+        putAssignment(atPlaced, "/subscriptions/" + placed + DEFINITIONS + "/" + READER, OTHER_PRINCIPAL, null)
+                .statusCode(201);
+
+        listAssignments("/subscriptions/" + placed, "atScope()").body("value.id", containsInAnyOrder(atGroup, atPlaced));
+        listAssignments(group, null).body("value.id", containsInAnyOrder(atGroup, atPlaced));
+        listAssignments("/subscriptions/" + unplaced, "atScope()").body("value.id", not(hasItem(atGroup)));
+    }
+
+    /** A resource directly under a subscription, with no resource group, is a scope like any other resource. */
+    @Test
+    void anAssignmentOnASubscriptionLevelResourceIsStored() {
+        String policyDefinition = SUB_SCOPE + "/providers/Microsoft.Authorization/policyDefinitions/rbac-pd";
+        putAssignment(policyDefinition + ASSIGNMENTS + "/" + UUID.randomUUID(), SUB_SCOPE + DEFINITIONS + "/" + READER,
+                PRINCIPAL, null)
+                .statusCode(201)
+                .body("properties.scope", equalTo(policyDefinition));
+    }
+
     /** A resource group's assignments, and those on its resources, go with it; the subscription's stay. */
     @Test
     void aResourceGroupDeleteTakesItsAssignments() {

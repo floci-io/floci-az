@@ -7,7 +7,9 @@ which `GET {scope}/providers/Microsoft.Authorization/roleDefinitions` answers. C
 Azure's own, never hand-typed. iam-dataset `azure/built-in-roles-raw.json` is the role list as the Azure API returns
 it; this script keeps the fields the role definition resource carries and sorts the roles by GUID.
 
-Each role is one line, so a role Azure adds or changes is a one-line diff.
+Each role is one line, so a role Azure adds or changes is a one-line diff. Characters outside ASCII are written as
+JSON escapes: Azure's descriptions carry a few (an em dash among them), and the repo's gates refuse those characters
+in new files, while the escape decodes to Azure's exact text.
 
 Run from anywhere in the repo:
     python3 tools/arm/gen_roles.py            # rewrite the vendored file in place
@@ -91,7 +93,7 @@ def build(root: Path) -> dict:
 def render(document: dict) -> str:
     """The provenance block indented, then one role per line."""
     source = json.dumps({"_source": document["_source"]}, indent=2, ensure_ascii=False)
-    lines = [json.dumps(entry, ensure_ascii=False, separators=(",", ":")) for entry in document["roleDefinitions"]]
+    lines = [json.dumps(entry, ensure_ascii=True, separators=(",", ":")) for entry in document["roleDefinitions"]]
     return (source[:-2] + ',\n  "roleDefinitions": [\n    ' + ",\n    ".join(lines) + "\n  ]\n}\n")
 
 
@@ -108,8 +110,11 @@ def self_check(path: Path) -> list[str]:
     """Problems with the vendored file that need no sources."""
     if not path.exists():
         return [f"{path} is missing"]
+    text = path.read_text(encoding="utf-8")
+    if not text.isascii():
+        return [f"{path}: characters outside ASCII must be written as JSON escapes"]
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(text)
     except json.JSONDecodeError as e:
         return [f"{path}: not valid JSON ({e})"]
     entries = document.get("roleDefinitions")

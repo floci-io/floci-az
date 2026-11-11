@@ -25,6 +25,15 @@ class RbacPathTest {
     }
 
     @Test
+    void aResourceDirectlyUnderASubscriptionIsAResourceScope() {
+        RbacPath path = parse("subscriptions/s1/providers/Microsoft.Authorization/policyDefinitions/p1"
+                + "/providers/Microsoft.Authorization/roleAssignments/a");
+        assertEquals("subscriptions/s1/providers/Microsoft.Authorization/policyDefinitions/p1", path.scope());
+        assertEquals(ScopeKind.RESOURCE, path.scopeKind());
+        assertEquals("s1", path.subscriptionId());
+    }
+
+    @Test
     void azurermsDoubleSlashTenantFormIsTheTenantRoot() {
         RbacPath path = parse("//providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7");
         assertEquals("", path.scope());

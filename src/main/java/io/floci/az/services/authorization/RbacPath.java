@@ -24,6 +24,8 @@ record RbacPath(String scope, Type type, String name, String remainder) {
     private static final Pattern SUBSCRIPTION = Pattern.compile("subscriptions/([^/]+)");
     private static final Pattern RESOURCE_GROUP = Pattern.compile("subscriptions/([^/]+)/resourcegroups/([^/]+)");
     private static final Pattern RESOURCE = Pattern.compile("subscriptions/([^/]+)/resourcegroups/([^/]+)/providers/.+");
+    /** A resource with no resource group, directly under its subscription: a policy definition, for one. */
+    private static final Pattern SUBSCRIPTION_RESOURCE = Pattern.compile("subscriptions/([^/]+)/providers/.+");
     private static final Pattern MANAGEMENT_GROUP = Pattern.compile("providers/microsoft.management/managementgroups/[^/]+");
     private static final Pattern SUBSCRIPTION_PREFIX = Pattern.compile("(?i)subscriptions/([^/]+)(?:/.*)?");
 
@@ -104,7 +106,7 @@ record RbacPath(String scope, Type type, String name, String remainder) {
         if (RESOURCE_GROUP.matcher(key).matches()) {
             return ScopeKind.RESOURCE_GROUP;
         }
-        if (RESOURCE.matcher(key).matches()) {
+        if (RESOURCE.matcher(key).matches() || SUBSCRIPTION_RESOURCE.matcher(key).matches()) {
             return ScopeKind.RESOURCE;
         }
         return ScopeKind.UNKNOWN;

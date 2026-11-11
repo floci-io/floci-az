@@ -13,12 +13,16 @@ import io.floci.az.core.arm.ArmResourceType;
 import io.floci.az.core.arm.ArmTypeRegistry;
 import io.floci.az.core.arm.ResourceGroupCleanup;
 import io.floci.az.core.auth.BearerClaims;
+import io.floci.az.core.directory.AzureDirectory;
+import io.floci.az.core.directory.Tenant;
 import io.floci.az.services.authorization.RbacPath.ScopeKind;
 import io.floci.az.services.authorization.RbacPath.Type;
 import io.floci.az.services.authorization.RoleDefinitionCatalog.Permission;
 import io.floci.az.services.authorization.RoleDefinitionCatalog.RoleDefinition;
 import io.floci.az.services.entra.DirectoryReader;
 import io.floci.az.services.managedidentity.ManagedIdentityStore;
+import io.floci.az.services.managementgroups.ManagementGroupStore;
+import io.floci.az.services.managementgroups.ManagementGroupStore.Group;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -29,10 +33,12 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,6 +67,10 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
     private static final String PERMISSION_CONDITION_VERSION = "2022-05-01-preview";
     private static final Pattern FILTER_EQUALS = Pattern.compile("(\\w+)\\s+eq\\s+'([^']*)'", Pattern.CASE_INSENSITIVE);
     private static final Pattern ASSIGNED_TO = Pattern.compile("assignedTo\\('([^']*)'\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SUBSCRIPTION_SCOPE = Pattern.compile("subscriptions/([^/]+)(?:/.*)?");
+    private static final Pattern MANAGEMENT_GROUP_SCOPE =
+            Pattern.compile("providers/microsoft\\.management/managementgroups/([^/]+)(?:/.*)?");
+    private static final String MANAGEMENT_GROUP_PREFIX = "providers/microsoft.management/managementgroups/";
     private static final Pattern GUID_AFTER_DEFINITIONS =
             Pattern.compile("(?i).*/roleDefinitions/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?");
     /** An assignment's properties, in the order Azure writes them; every one is present, absent ones as null. */
@@ -74,16 +84,21 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
     private final ManagedIdentityStore identities;
     private final ArmTypeRegistry types;
     private final Instance<ArmRouter> router;
+    private final AzureDirectory tenants;
+    private final ManagementGroupStore managementGroups;
 
     @Inject
     public RbacHandler(EmulatorConfig config, RoleAssignmentStore assignments, DirectoryReader directory,
-                       ManagedIdentityStore identities, ArmTypeRegistry types, Instance<ArmRouter> router) {
+                       ManagedIdentityStore identities, ArmTypeRegistry types, Instance<ArmRouter> router,
+                       AzureDirectory tenants, ManagementGroupStore managementGroups) {
         this.config = config;
         this.assignments = assignments;
         this.directory = directory;
         this.identities = identities;
         this.types = types;
         this.router = router;
+        this.tenants = tenants;
+        this.managementGroups = managementGroups;
     }
 
     @Override
@@ -299,7 +314,7 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
             Map<String, Object> properties = new LinkedHashMap<>();
             properties.put("roleDefinitionId", roleDefinitionId);
             properties.put("principalId", principalId);
-            properties.put("principalType", principalType(props, previous, principalId));
+            properties.put("principalType", principalType(props, previous, principalId, directoryTenant(req, path)));
             properties.put("scope", path.scopeId());
             properties.put("condition", props.get("condition"));
             properties.put("conditionVersion", props.get("conditionVersion"));
@@ -377,16 +392,19 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
         ArmResourceId resource = scope.get();
         LOG.infov("Role assignment on missing resource {0} refused: floci-az.parity-overrides.strict-resource-groups"
                 + " is on (or turn the override off)", resource.id());
-        return ArmErrors.error(404, "ResourceNotFound", "The Resource '" + resource.typePath() + "/"
-                + String.join("/", resource.names()) + "' under resource group '" + resource.resourceGroup()
-                + "' was not found.");
+        String named = resource.typePath() + "/" + String.join("/", resource.names());
+        return ArmErrors.error(404, "ResourceNotFound", resource.resourceGroup() == null
+                ? "The Resource '" + named + "' was not found."
+                : "The Resource '" + named + "' under resource group '" + resource.resourceGroup() + "' was not found.");
     }
 
     /**
      * The principal's type: what the client sent, else what the assignment already said, else what the directory
-     * knows the principal as (Azure resolves it from Entra ID). A principal floci-az does not know stays null.
+     * knows the principal as (Azure resolves it from Entra ID). The directory searched is the tenant's that owns the
+     * scope's subscription. A principal floci-az does not know stays null.
      */
-    private String principalType(Map<String, Object> props, Map<String, Object> previous, String principalId) {
+    private String principalType(Map<String, Object> props, Map<String, Object> previous, String principalId,
+                                 String tenant) {
         String requested = ArmJson.string(props, "principalType", null);
         if (requested != null) {
             return requested;
@@ -394,7 +412,6 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
         if (previous.get("principalType") instanceof String kept) {
             return kept;
         }
-        String tenant = config.services().entra().defaultTenantId();
         if (directory.user(tenant, principalId).isPresent()) {
             return "User";
         }
@@ -411,7 +428,9 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
     /**
      * {@code atScope()} lists the assignments at or above the scope; {@code principalId eq '{id}'} and
      * {@code assignedTo('{id}')} those of one principal at, above or below it (2022-04-01); no filter lists at, above
-     * and below. {@code assignedTo} does not expand group membership here. Other terms are ignored.
+     * and below. Above and below follow the scope hierarchy: a resource sits in its group and subscription, and a
+     * subscription in its management group and that group's ancestors, up to the tenant root.
+     * {@code assignedTo} does not expand group membership here. Other terms are ignored.
      */
     private Response listAssignments(AzureRequest req, RbacPath path) {
         String filter = filterOf(req);
@@ -428,12 +447,14 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
             principal = assignedTo.group(1);
         }
         String scope = path.scopeKey();
+        String callerTenant = callerTenantId(req);
+        Set<String> scopeAndAbove = scopeAndAncestors(scope, callerTenant);
         List<Map<String, Object>> value = new ArrayList<>();
         for (Map<String, Object> assignment : assignments.all()) {
             Map<String, Object> props = propertiesOf(assignment);
             String at = stripLeadingSlash(String.valueOf(props.get("scope")).toLowerCase(Locale.ROOT));
-            boolean atOrAbove = at.isEmpty() || scope.equals(at) || scope.startsWith(at + "/");
-            boolean below = scope.isEmpty() || at.startsWith(scope + "/");
+            boolean atOrAbove = scopeAndAbove.contains(at);
+            boolean below = !atOrAbove && scopeAndAncestors(at, callerTenant).contains(scope);
             if (!(atOrAbove || (!atScope && below))) {
                 continue;
             }
@@ -443,6 +464,53 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
             value.add(complete(assignment));
         }
         return json(200, Map.of("value", value));
+    }
+
+    /**
+     * {@code scopeKey} and every scope above it, lowercased and without a leading slash: its parent paths (a resource's
+     * group and subscription), the subscription's management group and that group's ancestors, and the tenant root
+     * ({@code ""}). A subscription that was never placed sits under the tenant root group.
+     */
+    private Set<String> scopeAndAncestors(String scopeKey, String callerTenant) {
+        Set<String> out = new LinkedHashSet<>();
+        out.add("");
+        StringBuilder prefix = new StringBuilder();
+        for (String segment : scopeKey.isEmpty() ? new String[0] : scopeKey.split("/")) {
+            if (!prefix.isEmpty()) {
+                prefix.append('/');
+            }
+            out.add(prefix.append(segment).toString());
+        }
+        String tenant = null;
+        String group = null;
+        Matcher subscription = SUBSCRIPTION_SCOPE.matcher(scopeKey);
+        Matcher managementGroup = MANAGEMENT_GROUP_SCOPE.matcher(scopeKey);
+        if (subscription.matches()) {
+            tenant = tenants.tenantOfSubscription(subscription.group(1));
+            group = managementGroups.parentOf(tenant, subscription.group(1)).name();
+        } else if (managementGroup.matches()) {
+            tenant = callerTenant;
+            group = managementGroup.group(1);
+        }
+        if (group != null) {
+            out.add(MANAGEMENT_GROUP_PREFIX + group.toLowerCase(Locale.ROOT));
+            for (Group ancestor : managementGroups.ancestors(tenant, group)) {
+                out.add(MANAGEMENT_GROUP_PREFIX + ancestor.name().toLowerCase(Locale.ROOT));
+            }
+        }
+        return out;
+    }
+
+    /** The directory a principal on this scope is looked up in: the tenant that owns the scope's subscription. */
+    private String directoryTenant(AzureRequest req, RbacPath path) {
+        String subscription = path.subscriptionId();
+        return subscription != null ? tenants.tenantOfSubscription(subscription) : callerTenantId(req);
+    }
+
+    /** The token's tenant when the directory holds it, else the default, as the management-group handler reads it. */
+    private String callerTenantId(AzureRequest req) {
+        String tokenTenantId = req.scope() == null ? null : req.scope().tokenTenantId();
+        return tenants.tenant(tokenTenantId).map(Tenant::id).orElse(tenants.defaultTenantId());
     }
 
     /** The code Azure answers for a missing assignment is not recorded; clients act on the 404. */
