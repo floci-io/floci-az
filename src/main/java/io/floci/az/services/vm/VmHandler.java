@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -339,6 +340,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
                 });
             }
             store.delete(id);
+            operations.settle(id, VmOperations.Status.FAILED, vmGoneMessage(id));
         }
         // Delete synchronously with 204 No Content. The azurerm provider's virtualmachines
         // DeleteThenPoll treats a 202/200 as a long-running operation and polls the collection
@@ -396,18 +398,23 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
             // Map the Azure power action onto the backing container. A failure leaves the VM as it
             // was and fails the operation, so a client polling it sees the error instead of a
             // power state the container never reached.
+            String failure;
             try {
-                switch (action) {
+                boolean reached = switch (action) {
                     case "powerOff", "deallocate"        -> containerManager.stopContainer(vm);
                     case "restart", "redeploy", "reapply" -> containerManager.restartContainer(vm);
                     default                               -> containerManager.startContainer(vm);
-                }
+                };
+                failure = reached ? null : "the backing container did not reach the requested state.";
             } catch (Exception e) {
-                LOG.warnv("Power action {0} on VM {1} failed: {2}", action, vmName, e.getMessage());
+                failure = e.getMessage();
+            }
+            if (failure != null) {
+                LOG.warnv("Power action {0} on VM {1} failed: {2}", action, vmName, failure);
                 String message = "The " + action + " operation on virtual machine '" + vmName + "' failed: "
-                        + e.getMessage();
+                        + failure;
                 return acceptedWithAsync(sub, vm.getLocation(),
-                        operations.issue(id, VmOperations.Status.FAILED, message), req);
+                        operations.issue(id, vm.getVmId(), VmOperations.Status.FAILED, message), req);
             }
         }
 
@@ -415,7 +422,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         vm.setProvisioningState("Succeeded");
         store.put(vm);
         return acceptedWithAsync(sub, vm.getLocation(),
-                operations.issue(id, VmOperations.Status.SUCCEEDED, null), req);
+                operations.issue(id, vm.getVmId(), VmOperations.Status.SUCCEEDED, null), req);
     }
 
     /** A VM whose provisioning failed has no backing container for a power action to act on. */
@@ -436,12 +443,16 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
             provisionContainer(vm);
             store.put(vm);
             operationId = FAILED.equals(vm.getProvisioningState())
-                    ? operations.issue(id, VmOperations.Status.FAILED, provisioningFailedMessage(vm))
-                    : operations.issue(id, VmOperations.Status.IN_PROGRESS, null);
+                    ? operations.issue(id, vm.getVmId(), VmOperations.Status.FAILED, provisioningFailedMessage(vm))
+                    : operations.issue(id, vm.getVmId(), VmOperations.Status.IN_PROGRESS, null);
         } else {
-            operationId = operations.issue(id, VmOperations.Status.SUCCEEDED, null);
+            operationId = operations.issue(id, vm.getVmId(), VmOperations.Status.SUCCEEDED, null);
         }
         return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation(), operationId, req);
+    }
+
+    private static String vmGoneMessage(ArmResourceId id) {
+        return "The virtual machine '" + id.name() + "' was deleted before the operation completed.";
     }
 
     private static String provisioningFailedMessage(VirtualMachine vm) {
@@ -547,7 +558,11 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
      * emulator's own container.
      */
     private Response operationStatus(AzureRequest req, String operationId) {
-        Optional<VmOperations.VmOperation> found = operations.get(operationId).map(this::resolve);
+        String sub = extractSubscriptionId(req.resourcePath());
+        // An operation belongs to its VM's subscription; under any other it does not exist.
+        Optional<VmOperations.VmOperation> found = operations.get(operationId)
+                .filter(operation -> sub.equalsIgnoreCase(operation.vmId().subscriptionId()))
+                .map(this::resolve);
         if (found.isEmpty()) {
             return ArmErrors.notFound("The operation '" + operationId + "' was not found.");
         }
@@ -556,7 +571,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         if (monitor) {
             return switch (operation.status()) {
                 case IN_PROGRESS -> Response.status(202)
-                        .header("Location", operationUrl(req, extractSubscriptionId(req.resourcePath()),
+                        .header("Location", operationUrl(req, sub,
                                 segment(extractComputePath(req.resourcePath()), 1), operationId) + MONITOR)
                         .header("Retry-After", RETRY_AFTER_SECONDS)
                         .build();
@@ -567,17 +582,25 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         return Response.ok(operationBody(operation)).type("application/json").build();
     }
 
-    /** An operation that follows a VM's provisioning takes its outcome from the VM once that settles. */
+    /**
+     * An operation that follows a VM's provisioning is settled when that provisioning ends: by the readiness
+     * poller when the VM comes up, and by a delete. This covers what neither saw (a PUT that settled the VM),
+     * from the same VM instance only: a VM deleted and recreated under the name is a different VM.
+     */
     private VmOperations.VmOperation resolve(VmOperations.VmOperation operation) {
         if (operation.status().terminal()) {
             return operation;
         }
         synchronized (lockFor(operation.vmId())) {
-            Optional<VirtualMachine> vm = getVm(operation.vmId());
+            Optional<VmOperations.VmOperation> settled = operations.get(operation.id());
+            if (settled.isPresent() && settled.get().status().terminal()) {
+                return settled.get();
+            }
+            Optional<VirtualMachine> vm = getVm(operation.vmId())
+                    .filter(found -> Objects.equals(found.getVmId(), operation.vmInstanceId()));
             VmOperations.VmOperation resolved;
             if (vm.isEmpty()) {
-                resolved = operation.resolved(VmOperations.Status.FAILED,
-                        "The virtual machine '" + operation.vmId().name() + "' no longer exists.");
+                resolved = operation.resolved(VmOperations.Status.FAILED, vmGoneMessage(operation.vmId()));
             } else if (FAILED.equals(vm.get().getProvisioningState())) {
                 resolved = operation.resolved(VmOperations.Status.FAILED, provisioningFailedMessage(vm.get()));
             } else if ("Creating".equals(vm.get().getProvisioningState())) {
@@ -630,6 +653,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
                 vm.setProvisioningState("Succeeded");
                 vm.setPowerState(PowerState.RUNNING.code());
                 store.put(vm);
+                operations.settle(id, VmOperations.Status.SUCCEEDED, null);
                 LOG.infov("VM {0} container is running; provisioningState=Succeeded", vm.getName());
             }
         }

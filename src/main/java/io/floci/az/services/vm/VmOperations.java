@@ -42,11 +42,11 @@ final class VmOperations {
      * One issued operation. An {@code IN_PROGRESS} operation follows its VM's provisioning: it is resolved from the
      * VM's state when it is polled.
      */
-    record VmOperation(String id, ArmResourceId vmId, Status status, String errorMessage,
+    record VmOperation(String id, ArmResourceId vmId, String vmInstanceId, Status status, String errorMessage,
                        Instant startTime, Instant endTime) {
 
         VmOperation resolved(Status outcome, String error) {
-            return new VmOperation(id, vmId, outcome, error, startTime, Instant.now());
+            return new VmOperation(id, vmId, vmInstanceId, outcome, error, startTime, Instant.now());
         }
     }
 
@@ -57,12 +57,25 @@ final class VmOperations {
         }
     };
 
-    /** Records an operation on {@code vmId} and returns its id. A terminal status is stamped with its end time. */
-    synchronized String issue(ArmResourceId vmId, Status status, String errorMessage) {
+    /**
+     * Records an operation on {@code vmId} and returns its id. {@code vmInstanceId} is the VM's {@code vmId}
+     * property, which a VM recreated under the same name does not share. A terminal status is stamped with its
+     * end time.
+     */
+    synchronized String issue(ArmResourceId vmId, String vmInstanceId, Status status, String errorMessage) {
         String id = UUID.randomUUID().toString();
         Instant now = Instant.now();
-        operations.put(id, new VmOperation(id, vmId, status, errorMessage, now, status.terminal() ? now : null));
+        operations.put(id, new VmOperation(id, vmId, vmInstanceId, status, errorMessage, now,
+                status.terminal() ? now : null));
         return id;
+    }
+
+    /** Settles every operation on {@code vmId} that is still in progress, when the provisioning it follows ends. */
+    synchronized void settle(ArmResourceId vmId, Status outcome, String errorMessage) {
+        operations.replaceAll((id, operation) -> !operation.status().terminal()
+                && operation.vmId().canonicalKey().equals(vmId.canonicalKey())
+                ? operation.resolved(outcome, errorMessage)
+                : operation);
     }
 
     synchronized Optional<VmOperation> get(String id) {

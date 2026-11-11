@@ -3,8 +3,8 @@ package io.floci.az.services.vm;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.StoredObject;
-import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.SyntheticHttpHeaders;
+import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.storage.InMemoryStorage;
 import io.floci.az.core.storage.StorageFactory;
@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -193,6 +194,54 @@ class VmPollingUrlsTest {
     }
 
     @Test
+    void aContainerActionThatDockerSwallowedFailsTheOperation() {
+        createVm("{\"location\":\"westus\"}");
+        when(config.services().vm().mocked()).thenReturn(false);
+        when(containers.stopContainer(any(VirtualMachine.class))).thenReturn(false);
+        Response action = power("powerOff");
+
+        assertEquals("Failed", body(poll(action, "Azure-AsyncOperation")).get("status"));
+        assertEquals(500, poll(action, "Location").getStatus());
+        Response instanceView = handler.handle(request("GET", VM_PATH + "/instanceView", false, null, Map.of(),
+                InputStream.nullInputStream()));
+        assertTrue(instanceView.getEntity().toString().contains("PowerState/running"));
+    }
+
+    @Test
+    void aStartThatCameUpStaysSucceededAfterItsVmIsDeleted() {
+        Response action = startAFailedVmThatComesUp();
+        when(containers.isRunning(any(VirtualMachine.class))).thenReturn(true);
+        handler.markSucceededOnceRunning(vmArmId());
+        deleteVm();
+
+        assertEquals("Succeeded", body(poll(action, "Azure-AsyncOperation")).get("status"));
+    }
+
+    @Test
+    void aStartStillRunningWhenItsVmIsDeletedFailsAndDoesNotFollowARecreatedVm() {
+        Response action = startAFailedVmThatComesUp();
+        deleteVm();
+        when(config.services().vm().mocked()).thenReturn(true);
+        createVm("{\"location\":\"westus\"}");
+
+        Response async = poll(action, "Azure-AsyncOperation");
+        assertEquals("Failed", body(async).get("status"));
+        assertTrue(((Map<?, ?>) body(async).get("error")).get("message").toString().contains("deleted"));
+    }
+
+    @Test
+    void anOperationPolledUnderAnotherSubscriptionIsNotFound() {
+        createVm("{\"location\":\"westus\"}");
+        Response action = power("restart");
+        for (String header : List.of("Azure-AsyncOperation", "Location")) {
+            String swapped = action.getHeaderString(header)
+                    .replace("/subscriptions/url-sub/", "/subscriptions/other-sub/");
+            assertEquals(404, poll(swapped).getStatus(), header);
+        }
+        assertEquals(200, poll(action, "Azure-AsyncOperation").getStatus());
+    }
+
+    @Test
     void aResetForgetsIssuedOperations() {
         createVm("{\"location\":\"westus\"}");
         Response action = power("restart");
@@ -244,7 +293,11 @@ class VmPollingUrlsTest {
 
     /** GETs the operation behind a power action's polling header, the way a client follows it. */
     private Response poll(Response action, String header) {
-        URI url = URI.create(action.getHeaderString(header));
+        return poll(action.getHeaderString(header));
+    }
+
+    private Response poll(String pollingUrl) {
+        URI url = URI.create(pollingUrl);
         Map<String, String> query = new LinkedHashMap<>();
         for (String pair : url.getRawQuery().split("&")) {
             String[] kv = pair.split("=", 2);
@@ -252,6 +305,23 @@ class VmPollingUrlsTest {
         }
         return handler.handle(request("GET", url.getPath().substring(1), query, true, "caller.example:8443",
                 Map.of(), InputStream.nullInputStream()));
+    }
+
+    /** Creates a VM whose container cannot start, then starts it with a container that launches. */
+    private Response startAFailedVmThatComesUp() {
+        when(config.services().vm().mocked()).thenReturn(false);
+        doThrow(new IllegalStateException("image unavailable")).when(containers).startVm(any(VirtualMachine.class));
+        createVm("{\"location\":\"westus\"}");
+        doNothing().when(containers).startVm(any(VirtualMachine.class));
+        Response action = power("start");
+        assertEquals("InProgress", body(poll(action, "Azure-AsyncOperation")).get("status"));
+        return action;
+    }
+
+    private void deleteVm() {
+        Response response = handler.handle(request("DELETE", VM_PATH, false, null, Map.of(),
+                InputStream.nullInputStream()));
+        assertEquals(204, response.getStatus());
     }
 
     private static ArmResourceId vmArmId() {
