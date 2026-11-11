@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -113,13 +114,19 @@ class VmHandlerContainerStartFailureTest {
                 .when().put(VM_PATH + API)
                 .then().statusCode(201);
 
-        given().when().post(VM_PATH + "/start" + API)
-                .then().statusCode(202);
+        String operation = given().when().post(VM_PATH + "/start" + API)
+                .then().statusCode(202)
+                .extract().header("Azure-AsyncOperation");
 
         given().when().get(VM_PATH + "/instanceView" + API)
                 .then().statusCode(200)
                 .body("statuses.code", hasItem("ProvisioningState/failed"))
                 .body("statuses.code", not(hasItem(startsWith("PowerState/"))));
+
+        given().when().get(URI.create(operation).getPath() + "?" + URI.create(operation).getRawQuery())
+                .then().statusCode(200)
+                .body("status", equalTo("Failed"))
+                .body("error.code", equalTo("InternalServerError"));
     }
 
     @Test

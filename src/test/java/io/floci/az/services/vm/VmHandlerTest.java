@@ -159,7 +159,7 @@ class VmHandlerTest {
                 .when().post(BASE + "/virtualMachines/vm1/restart" + API);
         response.then().statusCode(202)
                 .header("Azure-AsyncOperation", startsWith("https://"))
-                .header("Location", equalTo(response.header("Azure-AsyncOperation")));
+                .header("Location", equalTo(response.header("Azure-AsyncOperation") + "&monitor=true"));
     }
 
     @Test

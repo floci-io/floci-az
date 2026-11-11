@@ -57,7 +57,7 @@ import java.util.stream.Stream;
  *   DELETE .../virtualMachines/{vm}
  *   GET    .../virtualMachines/{vm}/instanceView
  *   POST   .../virtualMachines/{vm}/{start|powerOff|deallocate|restart|redeploy|reapply}
- *   GET    subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}   (LRO status)
+ *   GET    subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/operations/{opId}   (LRO status; &amp;monitor=true for the Location form)
  * </pre>
  *
  * <h2>Mocked mode</h2>
@@ -79,6 +79,11 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
     private static final String TYPE = "Microsoft.Compute/virtualMachines";
     private static final String FAILED = "Failed";
     private static final int LOCK_STRIPES = 64;
+    private static final String MONITOR = "&monitor=true";
+    private static final String RETRY_AFTER_SECONDS = "1";
+    private static final String OPERATION_ERROR_CODE = "InternalServerError";
+
+    private final VmOperations operations = new VmOperations();
 
     private final EmulatorConfig config;
     private final VmContainerManager containerManager;
@@ -178,9 +183,9 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
 
         LOG.debugf("VmHandler: %s %s (tail=%s)", method, fullPath, tail);
 
-        // ── LRO operation status (returns terminal Succeeded immediately) ──────
+        // ── LRO operation status: the outcome the power action recorded ─────────
         if (tail.matches("locations/[^/]+/operation(?:s|Results)/[^/?]+.*")) {
-            return Response.ok(Map.of("status", "Succeeded")).type("application/json").build();
+            return operationStatus(req, segment(tail, 3));
         }
 
         // ── List in subscription ───────────────────────────────────────────────
@@ -384,12 +389,13 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         };
 
         if (!config.services().vm().mocked() && lacksContainer(vm)) {
-            return handlePowerActionWithoutContainer(vm, target, req);
+            return handlePowerActionWithoutContainer(id, vm, target, req);
         }
 
         if (!config.services().vm().mocked()) {
-            // Map the Azure power action onto the backing container. Failures are non-fatal:
-            // the recorded power state still transitions so the control plane stays consistent.
+            // Map the Azure power action onto the backing container. A failure leaves the VM as it
+            // was and fails the operation, so a client polling it sees the error instead of a
+            // power state the container never reached.
             try {
                 switch (action) {
                     case "powerOff", "deallocate"        -> containerManager.stopContainer(vm);
@@ -398,13 +404,18 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
                 }
             } catch (Exception e) {
                 LOG.warnv("Power action {0} on VM {1} failed: {2}", action, vmName, e.getMessage());
+                String message = "The " + action + " operation on virtual machine '" + vmName + "' failed: "
+                        + e.getMessage();
+                return acceptedWithAsync(sub, vm.getLocation(),
+                        operations.issue(id, VmOperations.Status.FAILED, message), req);
             }
         }
 
         vm.setPowerState(target.code());
         vm.setProvisioningState("Succeeded");
         store.put(vm);
-        return acceptedWithAsync(sub, vm.getLocation(), req);
+        return acceptedWithAsync(sub, vm.getLocation(),
+                operations.issue(id, VmOperations.Status.SUCCEEDED, null), req);
     }
 
     /** A VM whose provisioning failed has no backing container for a power action to act on. */
@@ -415,14 +426,26 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
     /**
      * Power action on a {@code Failed} VM. Recording the target power state here would report a
      * running VM that has no container and hide the failure from the next PUT. An action that
-     * powers the VM on retries provisioning instead; one that powers it off leaves it as it is.
+     * powers the VM on retries provisioning instead, and its operation follows that provisioning;
+     * one that powers it off leaves it as it is and succeeds, since there is nothing to stop.
      */
-    private Response handlePowerActionWithoutContainer(VirtualMachine vm, PowerState target, AzureRequest req) {
+    private Response handlePowerActionWithoutContainer(ArmResourceId id, VirtualMachine vm, PowerState target,
+                                                       AzureRequest req) {
+        String operationId;
         if (target == PowerState.RUNNING) {
             provisionContainer(vm);
             store.put(vm);
+            operationId = FAILED.equals(vm.getProvisioningState())
+                    ? operations.issue(id, VmOperations.Status.FAILED, provisioningFailedMessage(vm))
+                    : operations.issue(id, VmOperations.Status.IN_PROGRESS, null);
+        } else {
+            operationId = operations.issue(id, VmOperations.Status.SUCCEEDED, null);
         }
-        return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation(), req);
+        return acceptedWithAsync(vm.getSubscriptionId(), vm.getLocation(), operationId, req);
+    }
+
+    private static String provisioningFailedMessage(VirtualMachine vm) {
+        return "The backing container for virtual machine '" + vm.getName() + "' could not be started.";
     }
 
     // ── ARM response builders ────────────────────────────────────────────────────
@@ -495,15 +518,90 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
         return vm.getName();
     }
 
-    private Response acceptedWithAsync(String sub, String location, AzureRequest req) {
+    /**
+     * 202 for an issued power action. As on Compute, the two headers are different URLs on one operation:
+     * {@code Azure-AsyncOperation} is the operation resource (always 200, outcome in {@code status}), and
+     * {@code Location} adds {@code monitor=true} and answers the way the action would have synchronously
+     * (202 while it runs). A Location poller reads any 200 as success, so one URL cannot serve both.
+     */
+    private Response acceptedWithAsync(String sub, String location, String operationId, AzureRequest req) {
         String loc = (location == null || location.isBlank()) ? defaults.defaultLocation() : location;
-        String url = RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
-                + "/providers/Microsoft.Compute/locations/" + loc
-                + "/operations/" + UUID.randomUUID() + "?api-version=" + API_VERSION + "&monitor=true";
+        String url = operationUrl(req, sub, loc, operationId);
         return Response.status(202)
                 .header("Azure-AsyncOperation", url)
-                .header("Location", url)
+                .header("Location", url + MONITOR)
+                .header("Retry-After", RETRY_AFTER_SECONDS)
                 .build();
+    }
+
+    private String operationUrl(AzureRequest req, String sub, String location, String operationId) {
+        return RequestUrls.resolveBaseUrl(req, config) + "/subscriptions/" + sub
+                + "/providers/Microsoft.Compute/locations/" + location
+                + "/operations/" + operationId + "?api-version=" + API_VERSION;
+    }
+
+    /**
+     * The poll of an issued power action. An id this handler never issued, or one evicted from the bounded
+     * record, is 404 rather than a success. The error code of a failed operation is {@code InternalServerError}:
+     * no reference settles the code Compute uses when a VM fails to start, and the failure here is the
+     * emulator's own container.
+     */
+    private Response operationStatus(AzureRequest req, String operationId) {
+        Optional<VmOperations.VmOperation> found = operations.get(operationId).map(this::resolve);
+        if (found.isEmpty()) {
+            return ArmErrors.notFound("The operation '" + operationId + "' was not found.");
+        }
+        VmOperations.VmOperation operation = found.get();
+        boolean monitor = req.queryParams() != null && "true".equalsIgnoreCase(req.queryParams().get("monitor"));
+        if (monitor) {
+            return switch (operation.status()) {
+                case IN_PROGRESS -> Response.status(202)
+                        .header("Location", operationUrl(req, extractSubscriptionId(req.resourcePath()),
+                                segment(extractComputePath(req.resourcePath()), 1), operationId) + MONITOR)
+                        .header("Retry-After", RETRY_AFTER_SECONDS)
+                        .build();
+                case SUCCEEDED -> Response.ok().build();
+                case FAILED -> ArmErrors.error(500, OPERATION_ERROR_CODE, operation.errorMessage());
+            };
+        }
+        return Response.ok(operationBody(operation)).type("application/json").build();
+    }
+
+    /** An operation that follows a VM's provisioning takes its outcome from the VM once that settles. */
+    private VmOperations.VmOperation resolve(VmOperations.VmOperation operation) {
+        if (operation.status().terminal()) {
+            return operation;
+        }
+        synchronized (lockFor(operation.vmId())) {
+            Optional<VirtualMachine> vm = getVm(operation.vmId());
+            VmOperations.VmOperation resolved;
+            if (vm.isEmpty()) {
+                resolved = operation.resolved(VmOperations.Status.FAILED,
+                        "The virtual machine '" + operation.vmId().name() + "' no longer exists.");
+            } else if (FAILED.equals(vm.get().getProvisioningState())) {
+                resolved = operation.resolved(VmOperations.Status.FAILED, provisioningFailedMessage(vm.get()));
+            } else if ("Creating".equals(vm.get().getProvisioningState())) {
+                return operation;
+            } else {
+                resolved = operation.resolved(VmOperations.Status.SUCCEEDED, null);
+            }
+            operations.update(resolved);
+            return resolved;
+        }
+    }
+
+    private static Map<String, Object> operationBody(VmOperations.VmOperation operation) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", operation.id());
+        body.put("status", operation.status().wireName());
+        body.put("startTime", OffsetDateTime.ofInstant(operation.startTime(), ZoneOffset.UTC).toString());
+        if (operation.endTime() != null) {
+            body.put("endTime", OffsetDateTime.ofInstant(operation.endTime(), ZoneOffset.UTC).toString());
+        }
+        if (operation.status() == VmOperations.Status.FAILED) {
+            body.put("error", Map.of("code", OPERATION_ERROR_CODE, "message", operation.errorMessage()));
+        }
+        return body;
     }
 
     // ── Readiness poller (non-mocked mode) ───────────────────────────────────────
@@ -521,7 +619,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
     }
 
     /** Re-reads the VM under its lock, so a request that changed it since the scan is not overwritten. */
-    private void markSucceededOnceRunning(ArmResourceId id) {
+    void markSucceededOnceRunning(ArmResourceId id) {
         synchronized (lockFor(id)) {
             Optional<VirtualMachine> found = getVm(id);
             if (found.isEmpty()) {
@@ -636,6 +734,7 @@ public class VmHandler implements AzureServiceHandler, Resettable, StoreIndexSou
     /** Wipes all VM data — used by {@code POST /_admin/reset}. */
     public void clear() {
         store.clear();
+        operations.clear();
     }
 
     // ── StoreIndexSource ────────────────────────────────────────────────

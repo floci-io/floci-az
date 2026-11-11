@@ -23,8 +23,14 @@ Compatible with the `azure-mgmt-compute` SDK, the `az vm` CLI, Terraform's `azur
 - **Network integration**: VM ARM resources can reference `Microsoft.Network` network
   interfaces. The Network emulator supplies VNet, subnet, NIC, public IP, and NSG ARM resources
   so `azurerm_linux_virtual_machine` and its dependencies apply end-to-end.
-- **Long-running operations**: power actions return `202` with an `Azure-AsyncOperation` header
-  pointing at an operation-status endpoint, so SDK pollers complete cleanly.
+- **Long-running operations**: power actions return `202` with `Azure-AsyncOperation`, `Location`
+  and `Retry-After`. `Azure-AsyncOperation` is the operation resource: `200` with a `status` of
+  `InProgress`, `Succeeded` or `Failed` (with an `error`). `Location` is the same URL with
+  `monitor=true`: `202` while the action runs, `200` when it succeeded, and `500` with the ARM
+  error envelope when it failed. The status is the action's real outcome: a power action whose
+  container action fails leaves the VM as it was and fails its operation, and a `start` on a
+  `Failed` VM follows the retried provisioning. An operation id that was never issued, or one of
+  more than the newest 1024, answers `404`.
   Both `Azure-AsyncOperation` and `Location` preserve the request's authority and scheme,
   including `X-Forwarded-Proto` behind a TLS-terminating proxy. Requests without an authority
   or `Host` header fall back to the configured base URL.
