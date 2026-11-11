@@ -4,6 +4,8 @@ import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerLifecycleManager;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerInfo;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerPresence;
+import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.docker.ContainerSpec;
 import io.floci.az.core.docker.ContainerStorageHelper;
 import io.floci.az.services.vm.VmModels.VirtualMachine;
@@ -14,6 +16,7 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Manages the Docker lifecycle of containers backing virtual machines in non-mocked mode
@@ -92,25 +95,50 @@ public class VmContainerManager {
                 && lifecycleManager.isContainerRunning(vm.getContainerId());
     }
 
-    /** Power-on: start the (stopped) backing container. */
-    public void startContainer(VirtualMachine vm) {
-        if (vm.getContainerId() != null) {
-            lifecycleManager.start(vm.getContainerId());
+    /*
+     * The power actions report whether Docker reached the target state. ContainerLifecycleManager logs and
+     * swallows a Docker error, so the outcome is read back from Docker afterwards, as AciContainerGroupManager
+     * does for container groups. Without that a failed action would look like a success to the VM's operation.
+     */
+
+    /** Power-on: start the (stopped) backing container. True once Docker reports it running. */
+    public boolean startContainer(VirtualMachine vm) {
+        if (vm.getContainerId() == null) {
+            return false;
         }
+        lifecycleManager.start(vm.getContainerId());
+        return lifecycleManager.isContainerRunning(vm.getContainerId());
     }
 
-    /** Power-off / deallocate: stop the backing container but keep it for a later start. */
-    public void stopContainer(VirtualMachine vm) {
-        if (vm.getContainerId() != null) {
-            lifecycleManager.stop(vm.getContainerId(), STOP_TIMEOUT_SECONDS);
+    /**
+     * Power-off / deallocate: stop the backing container but keep it for a later start. True once Docker
+     * confirms it is not running; an inspect that fails proves nothing, so it counts as not stopped.
+     */
+    public boolean stopContainer(VirtualMachine vm) {
+        if (vm.getContainerId() == null) {
+            return true;
         }
+        lifecycleManager.stop(vm.getContainerId(), STOP_TIMEOUT_SECONDS);
+        ContainerPresence presence = lifecycleManager.presence(vm.getContainerId());
+        return presence == ContainerPresence.STOPPED || presence == ContainerPresence.ABSENT;
     }
 
-    /** Restart: bounce the backing container in place. */
-    public void restartContainer(VirtualMachine vm) {
-        if (vm.getContainerId() != null) {
-            lifecycleManager.restart(vm.getContainerId(), STOP_TIMEOUT_SECONDS);
+    /**
+     * Restart: bounce the backing container in place. True when Docker reports it running with a start time
+     * other than the one it had before, since a container whose restart failed may still be running from before.
+     */
+    public boolean restartContainer(VirtualMachine vm) {
+        if (vm.getContainerId() == null) {
+            return false;
         }
+        String startedBefore = lifecycleManager.containerState(vm.getContainerId())
+                .map(ContainerStateInfo::startedAt)
+                .orElse(null);
+        lifecycleManager.restart(vm.getContainerId(), STOP_TIMEOUT_SECONDS);
+        return lifecycleManager.containerState(vm.getContainerId())
+                .filter(ContainerStateInfo::isRunning)
+                .filter(state -> startedBefore != null && !Objects.equals(startedBefore, state.startedAt()))
+                .isPresent();
     }
 
     /** Delete: stop and remove the backing container. */

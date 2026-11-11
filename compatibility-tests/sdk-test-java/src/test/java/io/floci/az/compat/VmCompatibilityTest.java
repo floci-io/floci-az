@@ -194,6 +194,17 @@ class VmCompatibilityTest {
         HttpResponse<String> statusResp = get(asyncUrl);
         assertEquals(200, statusResp.statusCode(), statusResp.body());
         assertEquals("Succeeded", mapper.readTree(statusResp.body()).get("status").asText());
+
+        // Location is the monitor form of the same operation: 200 once the action has succeeded.
+        String locationUrl = action.headers().firstValue("Location").orElseThrow();
+        assertEquals(asyncUrl + "&monitor=true", locationUrl);
+        HttpResponse<String> monitorResp = get(locationUrl);
+        assertEquals(200, monitorResp.statusCode(), monitorResp.body());
+
+        // An operation id that was never issued is not reported as a success.
+        String unknownUrl = asyncUrl.replaceFirst("/operations/[^?]+", "/operations/" + UUID.randomUUID());
+        HttpResponse<String> unknownResp = get(unknownUrl);
+        assertEquals(404, unknownResp.statusCode(), unknownResp.body());
     }
 
     @Test
