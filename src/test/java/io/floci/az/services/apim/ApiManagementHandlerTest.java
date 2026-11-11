@@ -25,6 +25,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -421,6 +422,58 @@ class ApiManagementHandlerTest {
         given().when().get(SERVICE_ID + "/backends/b1" + API).then().statusCode(404);
     }
 
+    @Test
+    void deletingTheServiceRemovesEveryChildSoARecreatedServiceStartsEmpty() throws IOException {
+        createService();
+        createApi("orders", "orders", false);
+        createOperation("orders", "get-order", "GET", "/items/{id}");
+        putPolicy("", "<set-header name=\"X-Service\" exists-action=\"override\"><value>svc</value></set-header>");
+        putPolicy("/apis/orders", "<set-header name=\"X-Api\" exists-action=\"override\"><value>api</value></set-header>");
+        put("/products/Starter", "{\"properties\":{}}");
+        put("/products/Starter/apis/orders", "{}");
+        put("/subscriptions/Sub1", "{\"properties\":{}}");
+        put("/namedValues/Greeting", "{\"properties\":{\"value\":\"hello\"}}");
+        put("/backends/Echo", "{\"properties\":{\"url\":\"http://backend\"}}");
+
+        String sibling = SERVICE_ID + "x";
+        given().contentType("application/json")
+                .body("{\"location\":\"westeurope\",\"properties\":{\"publisherEmail\":\"a@b.c\",\"publisherName\":\"unit\"}}")
+                .when().put(sibling + API).then().statusCode(200);
+        String xml = "<policies><inbound><base /></inbound><backend><base /></backend>"
+                + "<outbound><base /></outbound><on-error><base /></on-error></policies>";
+        given().contentType("application/json")
+                .body(MAPPER.writeValueAsString(Map.of("properties", Map.of("format", "rawxml", "value", xml))))
+                .when().put(sibling + "/policies/policy" + API).then().statusCode(200);
+
+        given().when().delete("/subscriptions/" + SUB + "/resourceGroups/" + RG.toUpperCase(Locale.ROOT)
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE.toUpperCase(Locale.ROOT) + API)
+                .then().statusCode(200);
+        createService();
+
+        for (String kind : List.of("/apis", "/products", "/subscriptions", "/namedValues", "/backends")) {
+            given().when().get(SERVICE_ID + kind + API).then().statusCode(200).body("value", hasSize(0));
+        }
+        for (String child : List.of("/apis/orders", "/apis/orders/operations/get-order", "/policies/policy",
+                "/apis/orders/policies/policy", "/products/Starter", "/products/Starter/apis/orders",
+                "/subscriptions/Sub1", "/namedValues/Greeting", "/backends/Echo")) {
+            given().when().get(SERVICE_ID + child + API).then().statusCode(404);
+        }
+        given().when().get(sibling + "/policies/policy" + API).then().statusCode(200);
+    }
+
+    @Test
+    void deletingAnApiKeepsThePoliciesOfAnApiWhoseIdExtendsIt() throws IOException {
+        createService();
+        createApi("orders", "orders", false);
+        createApi("orders2", "orders2", false);
+        putPolicy("/apis/orders", "<set-header name=\"X-Api\" exists-action=\"override\"><value>a</value></set-header>");
+        putPolicy("/apis/orders2", "<set-header name=\"X-Api\" exists-action=\"override\"><value>b</value></set-header>");
+
+        given().when().delete(SERVICE_ID + "/apis/orders" + API).then().statusCode(lessThan(300));
+
+        given().when().get(SERVICE_ID + "/apis/orders2/policies/policy" + API).then().statusCode(200);
+    }
+
     // ── Gateway ──────────────────────────────────────────────────────────────────
 
     @Test
@@ -531,6 +584,25 @@ class ApiManagementHandlerTest {
         given().when().get(GATEWAY + "/bare/items")
                 .then().statusCode(201)
                 .body("path", equalTo("/from-backend/items"));
+    }
+
+    @Test
+    void referencesFindABackendAndANamedValueRePutUnderAnotherCasing() throws IOException {
+        createService();
+        createApi("bare", "bare", false);
+        put("/backends/Echo", "{\"properties\":{\"url\":\"" + backendUrl() + "/first\"}}");
+        put("/namedValues/Greeting", "{\"properties\":{\"value\":\"hello\"}}");
+        putPolicy("/apis/bare", "<set-backend-service backend-id=\"Echo\" />"
+                + "<set-header name=\"X-Named\" exists-action=\"override\"><value>{{Greeting}}</value></set-header>");
+
+        put("/backends/echo", "{\"properties\":{\"url\":\"" + backendUrl() + "/second\"}}");
+        put("/namedValues/GREETING", "{\"properties\":{\"value\":\"hi\"}}");
+
+        given().when().get(SERVICE_ID + "/backends" + API).then().statusCode(200).body("value", hasSize(1));
+        given().when().get(GATEWAY + "/bare/items")
+                .then().statusCode(201)
+                .body("path", equalTo("/second/items"))
+                .body("headers.x-named", equalTo("hi"));
     }
 
     @Test

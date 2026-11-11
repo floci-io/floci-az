@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -63,14 +64,14 @@ public class ApiManagementService implements GlobalNameSource {
         this.defaults = defaults;
         this.services = ArmResourceStore.create(storageFactory, "apim", ApimService.class, ApimService::id,
                 key -> false);
-        this.apis = store.apis;
-        this.operations = store.operations;
-        this.policies = store.policies;
-        this.products = store.products;
-        this.subscriptions = store.subscriptions;
-        this.namedValues = store.namedValues;
-        this.backends = store.backends;
-        this.productApis = store.productApis;
+        this.apis = store.apis();
+        this.operations = store.operations();
+        this.policies = store.policies();
+        this.products = store.products();
+        this.subscriptions = store.subscriptions();
+        this.namedValues = store.namedValues();
+        this.backends = store.backends();
+        this.productApis = store.productApis();
     }
 
     public Response handleArm(AzureRequest request, String path, String method, String sub) {
@@ -391,43 +392,43 @@ public class ApiManagementService implements GlobalNameSource {
 
     private List<Map<String, Object>> listApis(String sub, String rg, String serviceName) {
         return apis.values().stream()
-                .filter(a -> sub.equals(a.get("_sub")) && rg.equals(a.get("_rg")) && serviceName.equals(a.get("_service")))
+                .filter(a -> same(sub, a.get("_sub")) && same(rg, a.get("_rg")) && same(serviceName, a.get("_service")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listOperations(String sub, String rg, String serviceName, String apiId) {
         return operations.values().stream()
-                .filter(o -> sub.equals(o.get("_sub")) && rg.equals(o.get("_rg"))
-                        && serviceName.equals(o.get("_service")) && apiId.equals(o.get("_api")))
+                .filter(o -> same(sub, o.get("_sub")) && same(rg, o.get("_rg"))
+                        && same(serviceName, o.get("_service")) && same(apiId, o.get("_api")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listProducts(String sub, String rg, String serviceName) {
         return products.values().stream()
-                .filter(p -> sub.equals(p.get("_sub")) && rg.equals(p.get("_rg")) && serviceName.equals(p.get("_service")))
+                .filter(p -> same(sub, p.get("_sub")) && same(rg, p.get("_rg")) && same(serviceName, p.get("_service")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listSubscriptions(String sub, String rg, String serviceName) {
         return subscriptions.values().stream()
-                .filter(s -> sub.equals(s.get("_sub")) && rg.equals(s.get("_rg")) && serviceName.equals(s.get("_service")))
+                .filter(s -> same(sub, s.get("_sub")) && same(rg, s.get("_rg")) && same(serviceName, s.get("_service")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listNamedValues(String sub, String rg, String serviceName) {
         return namedValues.values().stream()
-                .filter(n -> sub.equals(n.get("_sub")) && rg.equals(n.get("_rg")) && serviceName.equals(n.get("_service")))
+                .filter(n -> same(sub, n.get("_sub")) && same(rg, n.get("_rg")) && same(serviceName, n.get("_service")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
 
     private List<Map<String, Object>> listBackends(String sub, String rg, String serviceName) {
         return backends.values().stream()
-                .filter(b -> sub.equals(b.get("_sub")) && rg.equals(b.get("_rg")) && serviceName.equals(b.get("_service")))
+                .filter(b -> same(sub, b.get("_sub")) && same(rg, b.get("_rg")) && same(serviceName, b.get("_service")))
                 .map(ApiManagementService::stripInternal)
                 .toList();
     }
@@ -442,20 +443,19 @@ public class ApiManagementService implements GlobalNameSource {
         String sub = service.subscriptionId();
         String rg = service.resourceGroup();
         String serviceName = service.name();
-        apis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
-        operations.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/apis/"));
-        policies.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName)));
-        products.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
-        subscriptions.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/subscriptions/"));
-        namedValues.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/namedValues/"));
-        backends.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/backends/"));
-        productApis.keySet().removeIf(k -> k.startsWith(serviceKey(sub, rg, serviceName) + "/products/"));
+        // Each map holds one kind, so the service's own key prefix selects all of its children; spelling a kind's
+        // segment here would have to match the lowercased keys exactly.
+        String children = serviceKey(sub, rg, serviceName) + "/";
+        for (Map<String, ?> kind : List.of(apis, operations, policies, products, subscriptions, namedValues, backends,
+                productApis)) {
+            kind.keySet().removeIf(k -> k.startsWith(children));
+        }
     }
 
     private void deleteApi(String sub, String rg, String serviceName, String apiId) {
         apis.remove(apiKey(sub, rg, serviceName, apiId));
         operations.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId) + "/operations/"));
-        policies.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId)));
+        policies.keySet().removeIf(k -> k.startsWith(apiKey(sub, rg, serviceName, apiId) + "/"));
         productApis.entrySet().removeIf(e -> e.getValue().equals(apiKey(sub, rg, serviceName, apiId)));
     }
 
@@ -812,40 +812,45 @@ public class ApiManagementService implements GlobalNameSource {
         return ArmResourceId.parse(id).orElseThrow(() -> new IllegalArgumentException("not a service id: " + id));
     }
 
+    /** ARM paths are case-insensitive, so the casing a child was written with never decides whether it matches. */
+    static boolean same(String requested, Object stored) {
+        return stored instanceof String text && requested.equalsIgnoreCase(text);
+    }
+
     private static String serviceKey(String sub, String rg, String serviceName) {
-        return sub + "/" + rg + "/apim/" + serviceName;
+        return (sub + "/" + rg + "/apim/" + serviceName).toLowerCase(Locale.ROOT);
     }
 
     private static String apiKey(String sub, String rg, String serviceName, String apiId) {
-        return serviceKey(sub, rg, serviceName) + "/apis/" + apiId;
+        return (serviceKey(sub, rg, serviceName) + "/apis/" + apiId).toLowerCase(Locale.ROOT);
     }
 
     private static String operationKey(String sub, String rg, String serviceName, String apiId, String operationId) {
-        return apiKey(sub, rg, serviceName, apiId) + "/operations/" + operationId;
+        return (apiKey(sub, rg, serviceName, apiId) + "/operations/" + operationId).toLowerCase(Locale.ROOT);
     }
 
     private static String policyKey(String parentKey, String policyId) {
-        return parentKey + "/policies/" + policyId;
+        return (parentKey + "/policies/" + policyId).toLowerCase(Locale.ROOT);
     }
 
     private static String productKey(String sub, String rg, String serviceName, String productId) {
-        return serviceKey(sub, rg, serviceName) + "/products/" + productId;
+        return (serviceKey(sub, rg, serviceName) + "/products/" + productId).toLowerCase(Locale.ROOT);
     }
 
     private static String subscriptionKey(String sub, String rg, String serviceName, String subscriptionId) {
-        return serviceKey(sub, rg, serviceName) + "/subscriptions/" + subscriptionId;
+        return (serviceKey(sub, rg, serviceName) + "/subscriptions/" + subscriptionId).toLowerCase(Locale.ROOT);
     }
 
     private static String productApiKey(String sub, String rg, String serviceName, String productId, String apiId) {
-        return productKey(sub, rg, serviceName, productId) + "/apis/" + apiId;
+        return (productKey(sub, rg, serviceName, productId) + "/apis/" + apiId).toLowerCase(Locale.ROOT);
     }
 
     private static String namedValueKey(String sub, String rg, String serviceName, String namedValueId) {
-        return serviceKey(sub, rg, serviceName) + "/namedValues/" + namedValueId;
+        return (serviceKey(sub, rg, serviceName) + "/namedValues/" + namedValueId).toLowerCase(Locale.ROOT);
     }
 
     private static String backendKey(String sub, String rg, String serviceName, String backendId) {
-        return serviceKey(sub, rg, serviceName) + "/backends/" + backendId;
+        return (serviceKey(sub, rg, serviceName) + "/backends/" + backendId).toLowerCase(Locale.ROOT);
     }
 
     private static String generatedSubscriptionKey(String subscriptionId, String suffix) {

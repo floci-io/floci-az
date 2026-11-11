@@ -17,6 +17,7 @@ import java.io.StringReader;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -86,8 +87,8 @@ public class ApiManagementGateway {
     }
 
     private ApiMatch findApi(String serviceName, String gatewayPath) {
-        return store.apis.values().stream()
-                .filter(a -> serviceName.equals(a.get("_service")))
+        return store.apis().values().stream()
+                .filter(a -> ApiManagementService.same(serviceName, a.get("_service")))
                 .map(a -> new ApiMatch(a, apiPath(cast(a.get("properties"))), ""))
                 .filter(m -> routeMatches(m.apiPath(), gatewayPath))
                 .map(m -> new ApiMatch(m.api(), m.apiPath(), suffix(m.apiPath(), gatewayPath)))
@@ -98,22 +99,22 @@ public class ApiManagementGateway {
     private Optional<Map<String, Object>> matchedOperationResource(String serviceName, String apiId, String method,
                                                                   String suffix) {
         String normalized = suffix.isBlank() ? "/" : "/" + trimSlashes(suffix);
-        return store.operations.values().stream()
-                .filter(o -> serviceName.equals(o.get("_service")) && apiId.equals(o.get("_api")))
+        return store.operations().values().stream()
+                .filter(o -> ApiManagementService.same(serviceName, o.get("_service")) && ApiManagementService.same(apiId, o.get("_api")))
                 .filter(o -> method.equalsIgnoreCase(String.valueOf(cast(o.get("properties")).get("method"))))
                 .filter(o -> operationTemplateMatches(String.valueOf(cast(o.get("properties")).get("urlTemplate")), normalized))
                 .findFirst();
     }
 
     private boolean hasOperations(String serviceName, String apiId) {
-        return store.operations.values().stream()
-                .anyMatch(o -> serviceName.equals(o.get("_service")) && apiId.equals(o.get("_api")));
+        return store.operations().values().stream()
+                .anyMatch(o -> ApiManagementService.same(serviceName, o.get("_service")) && ApiManagementService.same(apiId, o.get("_api")));
     }
 
     private Response validateSubscriptionKey(AzureRequest request, String serviceName, String apiId) {
-        List<String> requiredProducts = store.productApis.entrySet().stream()
-                .filter(e -> e.getValue().endsWith("/apis/" + apiId))
-                .filter(e -> e.getKey().contains("/apim/" + serviceName + "/products/"))
+        List<String> requiredProducts = store.productApis().entrySet().stream()
+                .filter(e -> e.getValue().endsWith(("/apis/" + apiId).toLowerCase(Locale.ROOT)))
+                .filter(e -> e.getKey().contains(("/apim/" + serviceName + "/products/").toLowerCase(Locale.ROOT)))
                 .map(e -> productIdFromProductApiKey(e.getKey()))
                 .toList();
         if (requiredProducts.isEmpty()) {
@@ -125,8 +126,8 @@ public class ApiManagementGateway {
         if (key == null) {
             return unauthorized("Subscription key is required.");
         }
-        boolean valid = store.subscriptions.values().stream()
-                .filter(s -> serviceName.equals(s.get("_service")))
+        boolean valid = store.subscriptions().values().stream()
+                .filter(s -> ApiManagementService.same(serviceName, s.get("_service")))
                 .map(s -> cast(s.get("properties")))
                 .filter(p -> "active".equalsIgnoreCase(String.valueOf(p.getOrDefault("state", "active"))))
                 .filter(p -> subscriptionScopeMatches(requiredProducts, stringValue(p.get("scope"))))
@@ -138,8 +139,7 @@ public class ApiManagementGateway {
         if (scope == null || scope.isBlank()) {
             return false;
         }
-        return productIds.stream().anyMatch(productId -> scope.equals("/products/" + productId)
-                || scope.endsWith("/products/" + productId));
+        return productIds.stream().anyMatch(productId -> scope.toLowerCase(Locale.ROOT).endsWith("/products/" + productId));
     }
 
     private PolicyContext applyPolicies(String serviceName, String apiId, String operationId, String suffix,
@@ -303,40 +303,43 @@ public class ApiManagementGateway {
     }
 
     private Optional<String> findNamedValue(String serviceName, String namedValueId) {
-        return store.namedValues.values().stream()
-                .filter(n -> serviceName.equals(n.get("_service")) && namedValueId.equals(n.get("name")))
+        return store.namedValues().values().stream()
+                .filter(n -> ApiManagementService.same(serviceName, n.get("_service"))
+                        && ApiManagementService.same(namedValueId, n.get("name")))
                 .map(n -> stringValue(cast(n.get("properties")).get("value")))
                 .filter(v -> v != null)
                 .findFirst();
     }
 
     private Optional<String> resolveBackendUrl(String serviceName, String backendId) {
-        return store.backends.values().stream()
-                .filter(b -> serviceName.equals(b.get("_service")) && backendId.equals(b.get("name")))
+        return store.backends().values().stream()
+                .filter(b -> ApiManagementService.same(serviceName, b.get("_service"))
+                        && ApiManagementService.same(backendId, b.get("name")))
                 .map(b -> stringValue(cast(b.get("properties")).get("url")))
                 .filter(v -> v != null && !v.isBlank())
                 .findFirst();
     }
 
     private Optional<Map<String, Object>> findPolicyByScopeService(String serviceName) {
-        String marker = "/apim/" + serviceName + "/policies/";
-        return store.policies.entrySet().stream()
+        String marker = ("/apim/" + serviceName + "/policies/").toLowerCase(Locale.ROOT);
+        return store.policies().entrySet().stream()
                 .filter(e -> e.getKey().contains(marker) && !e.getKey().contains("/apis/"))
                 .map(Map.Entry::getValue)
                 .findFirst();
     }
 
     private Optional<Map<String, Object>> findPolicyByScopeApi(String serviceName, String apiId) {
-        String marker = "/apim/" + serviceName + "/apis/" + apiId + "/policies/";
-        return store.policies.entrySet().stream()
+        String marker = ("/apim/" + serviceName + "/apis/" + apiId + "/policies/").toLowerCase(Locale.ROOT);
+        return store.policies().entrySet().stream()
                 .filter(e -> e.getKey().contains(marker))
                 .map(Map.Entry::getValue)
                 .findFirst();
     }
 
     private Optional<Map<String, Object>> findPolicyByScopeOperation(String serviceName, String apiId, String operationId) {
-        String marker = "/apim/" + serviceName + "/apis/" + apiId + "/operations/" + operationId + "/policies/";
-        return store.policies.entrySet().stream()
+        String marker = ("/apim/" + serviceName + "/apis/" + apiId + "/operations/" + operationId + "/policies/")
+            .toLowerCase(Locale.ROOT);
+        return store.policies().entrySet().stream()
                 .filter(e -> e.getKey().contains(marker))
                 .map(Map.Entry::getValue)
                 .findFirst();

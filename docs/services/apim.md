@@ -64,8 +64,9 @@ service name rule below, and otherwise `nameAvailable: true` with reason `Valid`
 with a letter or digit, is refused with `400 InvalidResourceName` (see [ARM name syntax](arm.md#name-syntax)).
 
 Services are kept through the storage layer under the store name `apim`, so they follow the global `storage.mode`.
-Their child resources (APIs, operations, policies, products, subscriptions, named values and backends) are still kept
-in memory only, so under a persistent mode a restart keeps the services but not their children.
+Their child resources (APIs, operations, policies, products, subscriptions, named values and backends) are kept under
+the store name `apim-children`, so a restart under a persistent mode keeps them too, and paths that differ only in case
+address the same child.
 
 ## Configuration
 
