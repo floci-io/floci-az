@@ -67,7 +67,9 @@ class StorageAccountResourceStoreTest {
     @Test
     void aPutCannotSetReadOnlyPropertiesOrNulls() {
         String body = "{\"location\":\"westeurope\",\"properties\":{\"creationTime\":\"2020-01-01T00:00:00Z\","
-            + "\"secondaryEndpoints\":{\"blob\":\"http://x/\"},\"minimumTlsVersion\":null,\"accessTier\":null,"
+            + "\"secondaryEndpoints\":{\"blob\":\"http://x/\"},"
+            + "\"storageAccountSkuConversionStatus\":{\"skuConversionStatus\":\"InProgress\"},"
+            + "\"minimumTlsVersion\":null,\"accessTier\":null,"
             + "\"encryption\":{\"services\":{\"blob\":{\"lastEnabledTime\":\"2020-01-01T00:00:00Z\",\"keyType\":null}}}}}";
         given().contentType("application/json").body(body).when().put(account("sub-ro", "rg", "readonlysa") + API)
             .then().statusCode(200);
@@ -76,6 +78,7 @@ class StorageAccountResourceStoreTest {
             .then().statusCode(200)
             .body("properties", not(hasKey("creationTime")))
             .body("properties", not(hasKey("secondaryEndpoints")))
+            .body("properties", not(hasKey("storageAccountSkuConversionStatus")))
             .body("properties", not(hasKey("minimumTlsVersion")))
             .body("properties.accessTier", equalTo("Hot"))
             .body("properties.encryption.services.blob", not(hasKey("lastEnabledTime")))

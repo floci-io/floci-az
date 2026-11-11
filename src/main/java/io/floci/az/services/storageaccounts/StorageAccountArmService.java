@@ -71,7 +71,7 @@ public class StorageAccountArmService
             "provisioningState", "primaryEndpoints", "primaryLocation", "statusOfPrimary", "lastGeoFailoverTime",
             "secondaryLocation", "statusOfSecondary", "creationTime", "keyCreationTime", "secondaryEndpoints",
             "geoReplicationStats", "failoverInProgress", "privateEndpointConnections", "blobRestoreStatus",
-            "isSkuConversionBlocked", "accountMigrationInProgress");
+            "isSkuConversionBlocked", "accountMigrationInProgress", "storageAccountSkuConversionStatus");
 
     /**
      * A resource group's account collection, query stripped. The namespace matches in any casing, as clients
