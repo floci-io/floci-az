@@ -371,6 +371,8 @@ floci-az:
       enabled: true       # Microsoft.Authorization policy definitions, set definitions, assignments and exemptions
       enforcement: true   # FLOCI_AZ_SERVICES_POLICY_ENFORCEMENT: evaluate assigned rules on resource writes (deny, append, audit)
       insights: true      # FLOCI_AZ_SERVICES_POLICY_INSIGHTS: Microsoft.PolicyInsights compliance states, queries, summaries and scans
+    authorization:
+      enabled: true       # FLOCI_AZ_SERVICES_AUTHORIZATION_ENABLED: Microsoft.Authorization built-in role definitions and role assignments (stored, not enforced)
     resource-graph:
       enabled: true       # FLOCI_AZ_SERVICES_RESOURCE_GRAPH_ENABLED: Microsoft.ResourceGraph queries (KQL subset) over the emulator's resources
     management-groups:

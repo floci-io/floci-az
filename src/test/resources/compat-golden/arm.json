@@ -1351,6 +1351,16 @@
           "capabilities" : "None",
           "locations" : [ ],
           "resourceType" : "policySetDefinitions"
+        }, {
+          "apiVersions" : [ "2022-04-01", "2020-10-01-preview", "2020-08-01-preview", "2020-04-01-preview", "2020-03-01-preview", "2018-09-01-preview", "2018-01-01-preview", "2017-10-01-preview", "2015-07-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "roleAssignments"
+        }, {
+          "apiVersions" : [ "2022-05-01-preview", "2022-04-01", "2018-01-01-preview", "2015-07-01" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "roleDefinitions"
         } ]
       }, {
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Cache",

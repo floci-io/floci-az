@@ -68,6 +68,41 @@ resource "azurerm_key_vault_secret" "secret" {
   key_vault_id = azurerm_key_vault.kv.id
 }
 
+# RBAC (#567): a managed identity granted a built-in role on the Key Vault, looked up by name, and Reader on the
+# resource group by the role's id from the data source. azurerm lists the role by name, checks the name is free,
+# PUTs, then reads the assignment until it answers five times in a row.
+resource "azurerm_user_assigned_identity" "rbac" {
+  name                = "floci-test-rbac-id"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+data "azurerm_role_definition" "reader" {
+  name  = "Reader"
+  scope = azurerm_resource_group.rg.id
+}
+
+resource "azurerm_role_assignment" "kv_secrets_user" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.rbac.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "rg_reader" {
+  scope              = azurerm_resource_group.rg.id
+  role_definition_id = data.azurerm_role_definition.reader.id
+  principal_id       = azurerm_user_assigned_identity.rbac.principal_id
+}
+
+output "role_assignment_kv_id" {
+  value = azurerm_role_assignment.kv_secrets_user.id
+}
+
+output "role_definition_reader_id" {
+  value = data.azurerm_role_definition.reader.id
+}
+
 resource "azurerm_virtual_network" "vnet" {
   name                = "floci-test-vnet"
   address_space       = ["10.0.0.0/16"]

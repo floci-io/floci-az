@@ -147,6 +147,34 @@ setup() {
     assert_output --partial "hello-from-opentofu"
 }
 
+@test "OpenTofu: role assignment on the key vault stored with the role looked up by name" {
+    cd "$TOFU_DIR"
+    run tofu output -raw role_assignment_kv_id
+    assert_success
+    assignment="$output"
+    run arm_get "${assignment#/}?api-version=2022-04-01"
+    assert_success
+    assert_output --partial '/roleDefinitions/4633458b-17de-408a-b874-0445c86b69e6"'
+    assert_output --partial '"principalType":"ServicePrincipal"'
+    assert_output --partial '"scope":"/subscriptions/'
+}
+
+@test "OpenTofu: role definition data source answers Reader in its subscription form" {
+    cd "$TOFU_DIR"
+    run tofu output -raw role_definition_reader_id
+    assert_success
+    assert_output --partial "/subscriptions/"
+    assert_output --partial "/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7"
+}
+
+@test "OpenTofu: a plan after apply leaves the role assignments unchanged" {
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_role_assignment.kv_secrets_user -target=azurerm_role_assignment.rg_reader
+    assert_success
+    assert_output --partial "No changes"
+}
+
 @test "OpenTofu: virtual network created" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/virtualNetworks/${VNET_NAME}"
     assert_success

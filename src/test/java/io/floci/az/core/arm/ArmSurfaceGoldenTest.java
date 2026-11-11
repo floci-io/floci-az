@@ -38,6 +38,8 @@ class ArmSurfaceGoldenTest {
         Microsoft.Authorization/policyDefinitions                                      SUBSCRIPTION    NONE      FILTER
         Microsoft.Authorization/policyExemptions                                       EXTENSION       OPTIONAL  FILTER
         Microsoft.Authorization/policySetDefinitions                                   SUBSCRIPTION    NONE      FILTER
+        Microsoft.Authorization/roleAssignments                                        EXTENSION       NONE      FILTER
+        Microsoft.Authorization/roleDefinitions                                        EXTENSION       NONE      FILTER
         Microsoft.Cache/redis                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Communication/communicationServices                                  RESOURCE_GROUP  GLOBAL    FILTER
         Microsoft.Communication/emailServices                                          RESOURCE_GROUP  GLOBAL    FILTER
@@ -139,6 +141,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Authorization/policyDefinitions    1-64    null    0    null
         Microsoft.Authorization/policyExemptions    1-64    null    0    null
         Microsoft.Authorization/policySetDefinitions    1-64    null    0    null
+        Microsoft.Authorization/roleAssignments    36-36    null    0    null
         Microsoft.Cache/redis    1-63    REDIS    409    NameNotAvailable
         Microsoft.Communication/communicationServices    1-63     COMMUNICATION    409    Conflict
         Microsoft.Communication/emailServices            1-63     null    0    null

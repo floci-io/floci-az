@@ -76,7 +76,8 @@ public class ArmRouter {
 
     private static final Comparator<ResolvedProvider> GUARDED_FIRST_THEN_MARKER =
         Comparator.comparing((ResolvedProvider route) -> route.guard() == ServiceRoutes.ProviderRoute.ALWAYS)
-                  .thenComparing(ResolvedProvider::marker);
+                  .thenComparing(ResolvedProvider::marker)
+                  .thenComparing(ResolvedProvider::serviceType);
 
     private final AzureServiceRegistry serviceRegistry;
     private final RouteDispatcher dispatcher;
@@ -136,14 +137,22 @@ public class ArmRouter {
      * Fails fast when two handlers claim the same ARM provider namespace, the provider counterpart of
      * {@link AzureRoutingFilter#rejectDuplicateSuffixes}. Without this, a duplicate would resolve silently
      * by the guarded-first / marker sort order instead of surfacing the wiring bug.
+     *
+     * <p>One namespace may be shared by guarded routes only, each claiming its own resource types:
+     * {@code Microsoft.Authorization} is served by Azure Policy (the {@code policy*} types) and by RBAC (the
+     * {@code role*} types). An unguarded claim on a shared namespace would take every path, so it is still refused.</p>
      */
     static void rejectDuplicateProviders(List<ResolvedProvider> providers) {
-        Map<String, String> claimedBy = new HashMap<>();
+        Map<String, List<ResolvedProvider>> byMarker = new HashMap<>();
         for (ResolvedProvider provider : providers) {
-            String previous = claimedBy.putIfAbsent(provider.marker(), provider.serviceType());
-            if (previous != null) {
+            byMarker.computeIfAbsent(provider.marker(), marker -> new ArrayList<>()).add(provider);
+        }
+        for (List<ResolvedProvider> claimants : byMarker.values()) {
+            boolean anyUnguarded = claimants.stream().anyMatch(p -> p.guard() == ServiceRoutes.ProviderRoute.ALWAYS);
+            if (claimants.size() > 1 && anyUnguarded) {
                 throw new IllegalStateException("Two handlers claim the same ARM provider '"
-                    + provider.marker() + "': " + previous + " and " + provider.serviceType());
+                    + claimants.getFirst().marker() + "': " + claimants.get(0).serviceType() + " and "
+                    + claimants.get(1).serviceType());
             }
         }
     }

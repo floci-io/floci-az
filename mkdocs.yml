@@ -104,6 +104,7 @@ nav:
     - Communication Services Email: services/email.md
     - Managed Identity: services/managed-identity.md
     - Azure Policy: services/policy.md
+    - Azure RBAC: services/authorization.md
     - Azure Resource Graph: services/resourcegraph.md
     - Azure Management Groups: services/managementgroups.md
     - ARM Template Deployments: services/deployments.md

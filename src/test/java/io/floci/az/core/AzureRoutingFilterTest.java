@@ -259,12 +259,13 @@ class AzureRoutingFilterTest {
     @Test
     void managedIdentityNestedProviderFallsThroughToArm() {
         // A role assignment scoped to an identity has a LATER /providers/ segment: the managed-identity
-        // guard must let it fall through to ArmHandler (404), not capture it as an identity.
+        // guard must let it fall through to RBAC, not capture it as an identity. Deleting an assignment that
+        // does not exist is 204 (RoleAssignments_Delete).
         given().when().delete("/subscriptions/s/resourceGroups/rg"
                         + "/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id1"
                         + "/providers/Microsoft.Authorization/roleAssignments/"
                         + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
-                .then().statusCode(404);
+                .then().statusCode(204);
     }
 
     // ── Host-style addressing on emulator hostnames (#267) ──────────────────────
@@ -394,7 +395,7 @@ class AzureRoutingFilterTest {
     @Test
     void policyGuardLeavesOtherAuthorizationResourcesToArm() {
         // Role assignments share the Microsoft.Authorization namespace but are not policy resources:
-        // the policy guard must not capture them.
+        // the policy guard must not capture them; RBAC answers the missing assignment.
         given().when().get("/subscriptions/s/providers/Microsoft.Authorization/roleAssignments/"
                         + "11111111-1111-1111-1111-111111111111?api-version=2022-04-01")
                 .then().statusCode(404)
