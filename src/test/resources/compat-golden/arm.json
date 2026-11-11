@@ -121,6 +121,7 @@
         "displayName" : "East US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastus",
         "metadata" : {
+          "physicalLocation" : "Virginia",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -142,6 +143,7 @@
         "displayName" : "East US 2",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastus2",
         "metadata" : {
+          "physicalLocation" : "Virginia",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -163,6 +165,7 @@
         "displayName" : "South Central US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southcentralus",
         "metadata" : {
+          "physicalLocation" : "Texas",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -184,6 +187,7 @@
         "displayName" : "West US 2",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus2",
         "metadata" : {
+          "physicalLocation" : "Washington",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -205,6 +209,7 @@
         "displayName" : "Central US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/centralus",
         "metadata" : {
+          "physicalLocation" : "Iowa",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -226,6 +231,7 @@
         "displayName" : "North Central US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/northcentralus",
         "metadata" : {
+          "physicalLocation" : "Illinois",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -247,6 +253,7 @@
         "displayName" : "West US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus",
         "metadata" : {
+          "physicalLocation" : "California",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -268,6 +275,7 @@
         "displayName" : "West Central US",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westcentralus",
         "metadata" : {
+          "physicalLocation" : "Wyoming",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -289,6 +297,7 @@
         "displayName" : "West US 3",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westus3",
         "metadata" : {
+          "physicalLocation" : "Phoenix",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -310,6 +319,7 @@
         "displayName" : "Canada Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/canadacentral",
         "metadata" : {
+          "physicalLocation" : "Toronto",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -331,6 +341,7 @@
         "displayName" : "Canada East",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/canadaeast",
         "metadata" : {
+          "physicalLocation" : "Quebec",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -352,6 +363,7 @@
         "displayName" : "Brazil South",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/brazilsouth",
         "metadata" : {
+          "physicalLocation" : "Sao Paulo State",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -373,6 +385,7 @@
         "displayName" : "Brazil Southeast",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/brazilsoutheast",
         "metadata" : {
+          "physicalLocation" : "Rio",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -394,6 +407,7 @@
         "displayName" : "Mexico Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/mexicocentral",
         "metadata" : {
+          "physicalLocation" : "Querétaro State",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -415,6 +429,7 @@
         "displayName" : "North Europe",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/northeurope",
         "metadata" : {
+          "physicalLocation" : "Ireland",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -436,6 +451,7 @@
         "displayName" : "UK South",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uksouth",
         "metadata" : {
+          "physicalLocation" : "London",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -457,6 +473,7 @@
         "displayName" : "West Europe",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westeurope",
         "metadata" : {
+          "physicalLocation" : "Netherlands",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -478,6 +495,7 @@
         "displayName" : "France Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/francecentral",
         "metadata" : {
+          "physicalLocation" : "Paris",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -499,6 +517,7 @@
         "displayName" : "Germany West Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/germanywestcentral",
         "metadata" : {
+          "physicalLocation" : "Frankfurt",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -520,6 +539,7 @@
         "displayName" : "Norway East",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/norwayeast",
         "metadata" : {
+          "physicalLocation" : "Norway",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -541,6 +561,7 @@
         "displayName" : "Switzerland North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/switzerlandnorth",
         "metadata" : {
+          "physicalLocation" : "Zurich",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -562,6 +583,7 @@
         "displayName" : "Sweden Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/swedencentral",
         "metadata" : {
+          "physicalLocation" : "Gävle",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -583,6 +605,7 @@
         "displayName" : "France South",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/francesouth",
         "metadata" : {
+          "physicalLocation" : "Marseille",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -604,6 +627,7 @@
         "displayName" : "Germany North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/germanynorth",
         "metadata" : {
+          "physicalLocation" : "Berlin",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -625,6 +649,7 @@
         "displayName" : "Norway West",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/norwaywest",
         "metadata" : {
+          "physicalLocation" : "Norway",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -646,6 +671,7 @@
         "displayName" : "Switzerland West",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/switzerlandwest",
         "metadata" : {
+          "physicalLocation" : "Geneva",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -667,6 +693,7 @@
         "displayName" : "UK West",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/ukwest",
         "metadata" : {
+          "physicalLocation" : "Cardiff",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -688,6 +715,7 @@
         "displayName" : "Italy North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/italynorth",
         "metadata" : {
+          "physicalLocation" : "Milan",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -709,6 +737,7 @@
         "displayName" : "Spain Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/spaincentral",
         "metadata" : {
+          "physicalLocation" : "Madrid",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -730,6 +759,7 @@
         "displayName" : "Poland Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/polandcentral",
         "metadata" : {
+          "physicalLocation" : "Warsaw",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -751,6 +781,7 @@
         "displayName" : "Australia East",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiaeast",
         "metadata" : {
+          "physicalLocation" : "New South Wales",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -772,6 +803,7 @@
         "displayName" : "Southeast Asia",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southeastasia",
         "metadata" : {
+          "physicalLocation" : "Singapore",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -793,6 +825,7 @@
         "displayName" : "Central India",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/centralindia",
         "metadata" : {
+          "physicalLocation" : "Pune",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -814,6 +847,7 @@
         "displayName" : "East Asia",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/eastasia",
         "metadata" : {
+          "physicalLocation" : "Hong Kong",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -835,6 +869,7 @@
         "displayName" : "Japan East",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/japaneast",
         "metadata" : {
+          "physicalLocation" : "Tokyo, Saitama",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -856,6 +891,7 @@
         "displayName" : "Korea Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/koreacentral",
         "metadata" : {
+          "physicalLocation" : "Seoul",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -877,6 +913,7 @@
         "displayName" : "Australia Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiacentral",
         "metadata" : {
+          "physicalLocation" : "Canberra",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -898,6 +935,7 @@
         "displayName" : "Australia Central 2",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiacentral2",
         "metadata" : {
+          "physicalLocation" : "Canberra",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -919,6 +957,7 @@
         "displayName" : "Australia Southeast",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/australiasoutheast",
         "metadata" : {
+          "physicalLocation" : "Victoria",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -940,6 +979,7 @@
         "displayName" : "Japan West",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/japanwest",
         "metadata" : {
+          "physicalLocation" : "Osaka",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -961,6 +1001,7 @@
         "displayName" : "Korea South",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/koreasouth",
         "metadata" : {
+          "physicalLocation" : "Busan",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -982,6 +1023,7 @@
         "displayName" : "South India",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southindia",
         "metadata" : {
+          "physicalLocation" : "Chennai",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1003,6 +1045,7 @@
         "displayName" : "West India",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/westindia",
         "metadata" : {
+          "physicalLocation" : "Mumbai",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1024,6 +1067,7 @@
         "displayName" : "Indonesia Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/indonesiacentral",
         "metadata" : {
+          "physicalLocation" : "Jakarta",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1045,6 +1089,7 @@
         "displayName" : "New Zealand North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/newzealandnorth",
         "metadata" : {
+          "physicalLocation" : "Auckland",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1066,6 +1111,7 @@
         "displayName" : "UAE North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uaenorth",
         "metadata" : {
+          "physicalLocation" : "Dubai",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1087,6 +1133,7 @@
         "displayName" : "UAE Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/uaecentral",
         "metadata" : {
+          "physicalLocation" : "Abu Dhabi",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1108,6 +1155,7 @@
         "displayName" : "Israel Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/israelcentral",
         "metadata" : {
+          "physicalLocation" : "Israel",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1129,6 +1177,7 @@
         "displayName" : "Qatar Central",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/qatarcentral",
         "metadata" : {
+          "physicalLocation" : "Doha",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1150,6 +1199,7 @@
         "displayName" : "South Africa North",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southafricanorth",
         "metadata" : {
+          "physicalLocation" : "Johannesburg",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },
@@ -1171,6 +1221,7 @@
         "displayName" : "South Africa West",
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/locations/southafricawest",
         "metadata" : {
+          "physicalLocation" : "Cape Town",
           "regionCategory" : "Recommended",
           "regionType" : "Physical"
         },

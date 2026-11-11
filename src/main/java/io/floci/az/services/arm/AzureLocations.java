@@ -1,8 +1,13 @@
 package io.floci.az.services.arm;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.cloud.CloudProfile;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,11 +21,16 @@ import java.util.Map;
  * 51-region list this class once held itself.
  *
  * <p>Every entry is a physical region with zones 1 to 3, which is what {@code data.azurerm_location}
- * filters on. {@code geography}, {@code geographyGroup}, {@code latitude}, {@code longitude},
- * {@code physicalLocation} and {@code pairedRegion} are optional in the spec and have no local source,
- * so they are omitted rather than invented.
+ * filters on. {@code physicalLocation} comes from real Azure answers in the az CLI's recordings, for the public cloud,
+ * because azd's location list drops a region without one. {@code geography}, {@code geographyGroup},
+ * {@code latitude}, {@code longitude} and {@code pairedRegion} are optional in the spec and are omitted.
  */
 final class AzureLocations {
+
+    private static final String PHYSICAL_LOCATIONS_RESOURCE = "azure/physical-locations.json";
+
+    /** Each public region's {@code physicalLocation}, as real Azure answers it in the az CLI's recordings. */
+    private static final Map<String, String> PHYSICAL_LOCATIONS = physicalLocations();
 
     private AzureLocations() {
     }
@@ -47,11 +57,30 @@ final class AzureLocations {
         body.put("type", "Region");
         body.put("displayName", location.displayName());
         body.put("regionalDisplayName", location.displayName());
-        body.put("metadata", Map.of(
-                "regionType", "Physical",
-                "regionCategory", "Recommended"));
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("regionType", "Physical");
+        metadata.put("regionCategory", "Recommended");
+        String physicalLocation = PHYSICAL_LOCATIONS.get(location.name());
+        if (physicalLocation != null) {
+            metadata.put("physicalLocation", physicalLocation);
+        }
+        body.put("metadata", metadata);
         body.put("availabilityZoneMappings", zoneMappings(location.name()));
         return body;
+    }
+
+    private static Map<String, String> physicalLocations() {
+        try (InputStream in = AzureLocations.class.getClassLoader().getResourceAsStream(PHYSICAL_LOCATIONS_RESOURCE)) {
+            if (in == null) {
+                throw new IllegalStateException("Missing resource " + PHYSICAL_LOCATIONS_RESOURCE);
+            }
+            Map<String, String> locations = new HashMap<>();
+            new ObjectMapper().readTree(in).path("locations").properties()
+                .forEach(field -> locations.put(field.getKey(), field.getValue().asText()));
+            return Map.copyOf(locations);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not read " + PHYSICAL_LOCATIONS_RESOURCE, e);
+        }
     }
 
     private static List<Map<String, String>> zoneMappings(String name) {

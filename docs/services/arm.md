@@ -545,7 +545,8 @@ servers is not publicly documented either; `409` is the likeliest.
   belongs to (the public cloud's 51, US Gov's 6 or China's 6), with names and display names from the
   Azure SDK's region list; every entry is a physical region with zones 1 to 3 mapped to
   `<region>-az<n>`. `regionalDisplayName` repeats `displayName`, and `geography`, `geographyGroup`,
-  `latitude`, `longitude`, `physicalLocation` and `pairedRegion` are omitted. There are no edge zones,
+  `latitude`, `longitude` and `pairedRegion` are omitted. A public-cloud region carries `physicalLocation`, from real
+  Azure answers in the az CLI's recordings; US Gov and China regions have no source for it and omit it. There are no edge zones,
   so `includeExtendedLocations=true` returns the same list. Location values on resources are echoed as
   sent and not validated unless `location-normalize` or `strict-locations` is on (see
   [Resource locations](#resource-locations)).
