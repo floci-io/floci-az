@@ -7,12 +7,12 @@ import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResourceId;
-import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResourceStore.Stored;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -45,7 +45,7 @@ import java.util.regex.Pattern;
  * no older entries to read.
  */
 @ApplicationScoped
-public class WebArmService implements ArmProviderService, ResourceIndexContributor, GlobalNameSource, Resettable {
+public class WebArmService implements ArmProviderService, StoreIndexSource, GlobalNameSource, Resettable {
 
     private static final Logger LOG = Logger.getLogger(WebArmService.class);
 
@@ -324,17 +324,12 @@ public class WebArmService implements ArmProviderService, ResourceIndexContribut
         return String.valueOf(document.get("name"));
     }
 
-    // ── ResourceIndexContributor ────────────────────────────────────────────
+    // ── StoreIndexSource ────────────────────────────────────────────
 
     /** The full documents, as ArmHandler listed its own sites before. */
     @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return documents(new ArmScope(sub, rg));
-    }
-
-    @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return documents(new ArmScope(sub, null));
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return documents(scope);
     }
 
     // ── GlobalNameSource ────────────────────────────────────────────────────

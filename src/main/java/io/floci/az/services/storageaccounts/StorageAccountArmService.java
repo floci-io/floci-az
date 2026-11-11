@@ -8,12 +8,12 @@ import io.floci.az.core.arm.ArmJson;
 import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmProviderService;
 import io.floci.az.core.arm.ArmResourceId;
-import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmResourceStore.Stored;
+import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.cloud.CloudProfile;
@@ -57,7 +57,7 @@ import static io.floci.az.core.auth.StorageSasAuthorization.DEFAULT_STORAGE_ACCO
  */
 @ApplicationScoped
 public class StorageAccountArmService
-        implements ArmProviderService, ResourceIndexContributor, GlobalNameSource, Resettable {
+        implements ArmProviderService, StoreIndexSource, GlobalNameSource, Resettable {
 
     private static final Logger LOG = Logger.getLogger(StorageAccountArmService.class);
 
@@ -494,13 +494,8 @@ public class StorageAccountArmService
     // ── Resource index, global names, reset ─────────────────────────────────
 
     @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return documents(new ArmScope(sub, rg));
-    }
-
-    @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return documents(new ArmScope(sub, null));
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
+        return documents(scope);
     }
 
     @Override

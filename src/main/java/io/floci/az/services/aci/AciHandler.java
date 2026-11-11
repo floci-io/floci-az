@@ -15,7 +15,7 @@ import io.floci.az.core.arm.ArmPaths;
 import io.floci.az.core.arm.ArmResourceId;
 import io.floci.az.core.arm.ArmResourceStore;
 import io.floci.az.core.arm.ArmScope;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudDefaults;
 import io.floci.az.core.docker.ContainerLifecycleManager.ContainerStateInfo;
 import io.floci.az.core.storage.StorageFactory;
@@ -80,7 +80,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code Running} instance view. This keeps the service usable in CI without Docker.</p>
  */
 @ApplicationScoped
-public class AciHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor {
+public class AciHandler implements AzureServiceHandler, Resettable, StoreIndexSource {
 
     private static final Logger LOG = Logger.getLogger(AciHandler.class);
 
@@ -817,24 +817,16 @@ public class AciHandler implements AzureServiceHandler, Resettable, ResourceInde
                 .findFirst();
     }
 
-    // ── ResourceIndexContributor ────────────────────────────────────────────────
+    // ── StoreIndexSource ────────────────────────────────────────────────
 
     @Override
     public boolean indexEnabled() {
         return config.services().aci().enabled();
     }
 
-    @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(new ArmScope(sub, rg));
-    }
 
     @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(new ArmScope(sub, null));
-    }
-
-    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
         return store.list(scope).stream()
                 .map(ArmResourceStore.Stored::value)
                 .map(ContainerGroup::indexEntry)

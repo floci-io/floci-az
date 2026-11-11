@@ -18,7 +18,7 @@ import io.floci.az.core.arm.ArmResources;
 import io.floci.az.core.arm.ArmScope;
 import io.floci.az.core.arm.GlobalNameRegistry;
 import io.floci.az.core.arm.GlobalNameSource;
-import io.floci.az.core.arm.ResourceIndexContributor;
+import io.floci.az.core.arm.StoreIndexSource;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudSuffix;
@@ -68,7 +68,7 @@ import java.util.regex.Pattern;
  * <p>Emails are captured in-memory for local inspection; no actual delivery occurs.
  */
 @ApplicationScoped
-public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIndexContributor, GlobalNameSource {
+public class EmailHandler implements AzureServiceHandler, Resettable, StoreIndexSource, GlobalNameSource {
 
     private static final Logger LOG = Logger.getLogger(EmailHandler.class);
 
@@ -431,15 +431,6 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
 
     // ── Resource index ───────────────────────────────────────────────────────
 
-    @Override
-    public List<Map<String, Object>> listRgResources(String sub, String rg) {
-        return indexEntries(new ArmScope(sub, rg));
-    }
-
-    @Override
-    public List<Map<String, Object>> listSubscriptionResources(String sub) {
-        return indexEntries(new ArmScope(sub, null));
-    }
 
     @Override
     public boolean indexEnabled() {
@@ -453,7 +444,8 @@ public class EmailHandler implements AzureServiceHandler, Resettable, ResourceIn
     }
 
     /** Communication services, email services and their domains in a subscription, or one of its groups. */
-    private List<Map<String, Object>> indexEntries(ArmScope scope) {
+    @Override
+    public List<Map<String, Object>> indexEntries(ArmScope scope) {
         List<Map<String, Object>> entries = new ArrayList<>();
         for (ArmResourceStore<CommunicationResource> store : List.of(communicationServices, emailServices, emailDomains)) {
             store.list(scope).forEach(stored -> entries.add(ArmResources.indexEntry(stored.value().toArm())));
