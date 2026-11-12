@@ -71,6 +71,11 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
     private static final Pattern MANAGEMENT_GROUP_SCOPE =
             Pattern.compile("providers/microsoft\\.management/managementgroups/([^/]+)(?:/.*)?");
     private static final String MANAGEMENT_GROUP_PREFIX = "providers/microsoft.management/managementgroups/";
+    /**
+     * Internal: the tenant an assignment at a management group or the tenant root was made in. floci-az keeps one
+     * management-group hierarchy per tenant, and those scopes' ids do not name the tenant. Never answered.
+     */
+    private static final String TENANT_KEY = "_tenant";
     private static final Pattern GUID_AFTER_DEFINITIONS =
             Pattern.compile("(?i).*/roleDefinitions/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?");
     /** An assignment's properties, in the order Azure writes them; every one is present, absent ones as null. */
@@ -305,7 +310,7 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
         String caller = callerObjectId(req);
         return assignments.atomically(() -> {
             Optional<Map<String, Object>> existing = assignments.get(id);
-            Response conflict = conflict(path, id, principalId, roleGuid.get(), existing);
+            Response conflict = conflict(path, id, principalId, roleGuid.get(), existing, callerTenantId(req));
             if (conflict != null) {
                 return conflict;
             }
@@ -329,8 +334,11 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
             body.put("type", Type.ROLE_ASSIGNMENT.armType());
             body.put("name", path.name());
             body.put("properties", properties);
+            if (path.scopeKind() == ScopeKind.TENANT || path.scopeKind() == ScopeKind.MANAGEMENT_GROUP) {
+                body.put(TENANT_KEY, callerTenantId(req));
+            }
             assignments.put(body);
-            return json(existing.isEmpty() ? 201 : 200, body);
+            return json(existing.isEmpty() ? 201 : 200, complete(body));
         });
     }
 
@@ -341,12 +349,12 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
      * a second name is {@code 409 RoleAssignmentExists} (recorded by the az CLI tests, which treat it as success).
      */
     private Response conflict(RbacPath path, String id, String principalId, String roleGuid,
-                              Optional<Map<String, Object>> existing) {
+                              Optional<Map<String, Object>> existing, String callerTenant) {
         if (existing.isPresent() && !principalId.equalsIgnoreCase(
                 String.valueOf(propertiesOf(existing.get()).get("principalId")))) {
             return updateNotPermitted();
         }
-        String scopeKey = path.scopeId().toLowerCase(Locale.ROOT);
+        String scopeKey = qualified(path.scopeKey(), callerTenant);
         for (Map<String, Object> other : assignments.all()) {
             if (String.valueOf(other.get("id")).equalsIgnoreCase(id)) {
                 continue;
@@ -355,8 +363,10 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
                 return updateNotPermitted();
             }
             Map<String, Object> props = propertiesOf(other);
+            String otherTenant = other.get(TENANT_KEY) instanceof String t ? t : tenants.defaultTenantId();
+            String otherScope = stripLeadingSlash(String.valueOf(props.get("scope")).toLowerCase(Locale.ROOT));
             if (principalId.equalsIgnoreCase(String.valueOf(props.get("principalId")))
-                    && scopeKey.equals(String.valueOf(props.get("scope")).toLowerCase(Locale.ROOT))
+                    && scopeKey.equals(qualified(otherScope, otherTenant))
                     && roleGuid(String.valueOf(props.get("roleDefinitionId"))).map(roleGuid::equalsIgnoreCase)
                             .orElse(false)) {
                 return ArmErrors.error(409, "RoleAssignmentExists", "The role assignment already exists.");
@@ -449,12 +459,14 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
         String scope = path.scopeKey();
         String callerTenant = callerTenantId(req);
         Set<String> scopeAndAbove = scopeAndAncestors(scope, callerTenant);
+        String qualifiedScope = qualified(scope, callerTenant);
         List<Map<String, Object>> value = new ArrayList<>();
         for (Map<String, Object> assignment : assignments.all()) {
             Map<String, Object> props = propertiesOf(assignment);
             String at = stripLeadingSlash(String.valueOf(props.get("scope")).toLowerCase(Locale.ROOT));
-            boolean atOrAbove = scopeAndAbove.contains(at);
-            boolean below = !atOrAbove && scopeAndAncestors(at, callerTenant).contains(scope);
+            String atTenant = assignment.get(TENANT_KEY) instanceof String t ? t : tenants.defaultTenantId();
+            boolean atOrAbove = scopeAndAbove.contains(qualified(at, atTenant));
+            boolean below = !atOrAbove && scopeAndAncestors(at, atTenant).contains(qualifiedScope);
             if (!(atOrAbove || (!atScope && below))) {
                 continue;
             }
@@ -468,37 +480,47 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
 
     /**
      * {@code scopeKey} and every scope above it, lowercased and without a leading slash: its parent paths (a resource's
-     * group and subscription), the subscription's management group and that group's ancestors, and the tenant root
-     * ({@code ""}). A subscription that was never placed sits under the tenant root group.
+     * group and subscription), the subscription's management group and that group's ancestors, and the tenant root.
+     * A subscription that was never placed sits under the tenant root group. Management groups and the tenant root are
+     * {@link #qualified} with their tenant, since each tenant has its own hierarchy and those ids do not name it: the
+     * tenant is the subscription's own for a subscription scope, and {@code scopeTenant} for the rest.
      */
-    private Set<String> scopeAndAncestors(String scopeKey, String callerTenant) {
+    private Set<String> scopeAndAncestors(String scopeKey, String scopeTenant) {
         Set<String> out = new LinkedHashSet<>();
-        out.add("");
-        StringBuilder prefix = new StringBuilder();
-        for (String segment : scopeKey.isEmpty() ? new String[0] : scopeKey.split("/")) {
-            if (!prefix.isEmpty()) {
-                prefix.append('/');
-            }
-            out.add(prefix.append(segment).toString());
-        }
-        String tenant = null;
+        String tenant = scopeTenant;
         String group = null;
         Matcher subscription = SUBSCRIPTION_SCOPE.matcher(scopeKey);
         Matcher managementGroup = MANAGEMENT_GROUP_SCOPE.matcher(scopeKey);
         if (subscription.matches()) {
             tenant = tenants.tenantOfSubscription(subscription.group(1));
             group = managementGroups.parentOf(tenant, subscription.group(1)).name();
+            StringBuilder prefix = new StringBuilder();
+            for (String segment : scopeKey.split("/")) {
+                if (!prefix.isEmpty()) {
+                    prefix.append('/');
+                }
+                out.add(prefix.append(segment).toString());
+            }
         } else if (managementGroup.matches()) {
-            tenant = callerTenant;
             group = managementGroup.group(1);
         }
+        out.add(qualified("", tenant));
         if (group != null) {
-            out.add(MANAGEMENT_GROUP_PREFIX + group.toLowerCase(Locale.ROOT));
+            out.add(qualified(MANAGEMENT_GROUP_PREFIX + group.toLowerCase(Locale.ROOT), tenant));
             for (Group ancestor : managementGroups.ancestors(tenant, group)) {
-                out.add(MANAGEMENT_GROUP_PREFIX + ancestor.name().toLowerCase(Locale.ROOT));
+                out.add(qualified(MANAGEMENT_GROUP_PREFIX + ancestor.name().toLowerCase(Locale.ROOT), tenant));
             }
         }
         return out;
+    }
+
+    /**
+     * A scope key as {@link #scopeAndAncestors} compares it: a management group or the tenant root carries its tenant
+     * ({@code {tenant}|{key}}); any other scope is unique across tenants as it is.
+     */
+    private static String qualified(String scopeKey, String tenant) {
+        boolean tenantBound = scopeKey.isEmpty() || MANAGEMENT_GROUP_SCOPE.matcher(scopeKey).matches();
+        return tenantBound ? tenant.toLowerCase(Locale.ROOT) + "|" + scopeKey : scopeKey;
     }
 
     /** The directory a principal on this scope is looked up in: the tenant that owns the scope's subscription. */
