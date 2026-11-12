@@ -182,8 +182,8 @@ class CloudCatalogTest {
         CloudProfile cloud = CloudCatalog.forName("AzureCloud").orElseThrow();
         assertEquals(List.of("1", "2", "3"), cloud.location("eastus").orElseThrow().zones().value());
         assertEquals(List.of(), cloud.location("westus").orElseThrow().zones().value());
-        // regions-list.md counts zones still in preview for these two, so the count is not a fact.
-        assertTrue(cloud.location("eastus2").orElseThrow().zones().unsettled());
+        assertEquals(List.of("1", "2", "3", "4"), cloud.location("eastus2").orElseThrow().zones().value());
+        // regions-list.md counts zones still in preview here, so the count is not a fact.
         assertTrue(cloud.location("northcentralus").orElseThrow().zones().unsettled());
         CloudProfile gov = CloudCatalog.forName("AzureUSGovernment").orElseThrow();
         assertEquals(List.of(), gov.location("usgovtexas").orElseThrow().zones().value());

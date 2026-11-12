@@ -19,9 +19,10 @@ checkouts that is not part of this repository (`tools/cloud/README.md` says how 
   from `cloud.py`.
 - Azure SDK for Java `Region.java` (cloud membership from its section comments) and Azure SDK for
   .NET `AzureLocation.cs` (every name and display name must agree): the locations.
-- reliability-docs `regions-list.md` (public zones; a count that includes preview zones is left
-  unsettled) and azure-docs
-  `documentation-government-welcome.md` (US Gov zones).
+- The Microsoft Learn "List of Azure regions" page, saved as `reliability-docs/.../regions-list.md`
+  (public zones; a count that includes preview zones is left unsettled). Its repository is no longer
+  public, so the file is a download, not a checkout, and is pinned by content hash. azure-docs
+  `documentation-government-welcome.md` gives the US Gov zones.
 - azure-docs `compare-azure-government-global-azure.md`, entra-docs
   `authentication-national-cloud.md`, the azure-cli storage client factory and a few REST spec
   files: the suffixes and hosts the SDK tables do not carry. Each such value must appear verbatim
@@ -43,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import re
 import subprocess
@@ -151,7 +153,9 @@ JAVA_SECTION_RE = re.compile(r"^\s*\*\s*(Azure [A-Za-z ]+?)(?:\s*-.*)?$")
 NET_LOCATION_RE = re.compile(r'CreateStaticReference\("([a-z0-9]+)", "([^"]+)"\)')
 JAVA_CONSTANT_RE = re.compile(r'public static final String (\w+) = "([^"]+)";')
 TABLE_ROW_RE = re.compile(r"^\|(.*)\|\s*$")
-ICON_RE = re.compile(r":::image[^:]*:::")
+# An icon as the page's source wrote it (`:::image ...:::`) and as Microsoft Learn renders it (`![alt](src)`).
+ICON_RE = re.compile(r":::image[^:]*:::|!\[[^\]]*\]\([^)]*\)")
+ALL_REGIONS_TAB = "[All](#tab/all)"
 PREVIEW_ZONES_ICON = "icon-region-coming-soon.svg"
 
 
@@ -189,14 +193,21 @@ def unsettled(what: str) -> dict:
     return cell(None, f"UNSETTLED: {what}")
 
 
-def git_commit(root: Path, rel: str) -> str:
+def source_pin(root: Path, rel: str) -> str:
+    """What pins `rel`: the commit of its checkout, or `sha256:<digest>` of a file that has none.
+
+    A directory without its own `.git` is a download (the regions list), and asking git about it would answer
+    with the commit of whichever repository encloses `root`, so git is asked only about a checkout.
+    """
     repo = root / rel.split("/")[0]
-    try:
-        result = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True,
-                                check=False)
-    except OSError:
-        return "unknown"
-    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+    if (repo / ".git").exists():
+        try:
+            result = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True,
+                                    check=False)
+        except OSError:
+            return "unknown"
+        return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+    return "sha256:" + hashlib.sha256((root / rel).read_bytes()).hexdigest()
 
 
 def table_rows(text: str, start_marker: str | None = None) -> list[list[str]]:
@@ -329,7 +340,7 @@ def parse_public_zones(text: str) -> dict[str, int | None]:
     how many are available, so that region maps to None.
     """
     zones: dict[str, int | None] = {}
-    for row in table_rows(text, "#### [All]"):
+    for row in table_rows(text, ALL_REGIONS_TAB):
         if len(row) < 6:
             continue
         name = row[5]
@@ -690,7 +701,7 @@ def build(root: Path) -> dict:
         "_source": {
             "generator": "tools/cloud/gen_clouds.py",
             "root": "local/azure",
-            "files": {path: git_commit(root, path) for path in used},
+            "files": {path: source_pin(root, path) for path in used},
         },
         "clouds": clouds,
     }

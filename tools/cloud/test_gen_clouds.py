@@ -4,8 +4,10 @@ Run with: pytest tools/cloud -q  (or: make az-data-test)
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+import subprocess
 
 import pytest
 
@@ -146,6 +148,24 @@ REGIONS_LIST = f'''
 | North Europe | 3 | West Europe | Ireland | Europe | northeurope |
 '''
 
+# The same table as Microsoft Learn serves it with `?accept=text/markdown`: a level-one tab heading and
+# Markdown images for the icons.
+LEARN_ICON = "![Icon that shows that availability zone support in this region is coming soon.](media/icon-region-coming-soon.svg)"
+LEARN_RESTRICTED = "![Icon that shows that access to this region is restricted.](media/icon-region-restricted.svg)"
+REGIONS_LIST_LEARN = f'''
+# [All](#tab/all)
+| Region | Availability zones | Paired region | Physical location | Geography | Programmatic name |
+| --- | --- | --- | --- | --- | --- |
+| East US | 3 | West US | Virginia | United States | eastus |
+| East US 2 | 4 {LEARN_ICON} | Central US | Virginia | United States | eastus2 |
+| {LEARN_RESTRICTED} West US | N/A | East US | California | United States | westus |
+
+# [Americas](#tab/americas)
+| Region | Availability zones | Paired region | Physical location | Geography | Programmatic name |
+| --- | --- | --- | --- | --- | --- |
+| North Europe | 3 | West Europe | Ireland | Europe | northeurope |
+'''
+
 GOV_WELCOME = '''
 ## List of regions
 
@@ -226,6 +246,10 @@ def test_a_java_region_before_any_section_is_rejected():
 
 def test_public_zones_read_the_all_tab_only_and_leave_preview_counts_open():
     assert g.parse_public_zones(REGIONS_LIST) == {"eastus": 3, "eastus2": None, "westus": 0}
+
+
+def test_public_zones_read_the_page_as_microsoft_learn_renders_it():
+    assert g.parse_public_zones(REGIONS_LIST_LEARN) == g.parse_public_zones(REGIONS_LIST)
 
 
 def test_a_public_region_with_preview_zones_is_unsettled():
@@ -361,6 +385,26 @@ def test_check_without_sources_verifies_the_shape_only(tmp_path, capsys):
 def test_regenerating_without_sources_fails(tmp_path):
     with pytest.raises(SystemExit, match="reference checkouts"):
         g.main(["--local-root", str(tmp_path / "nowhere"), "--output", str(tmp_path / "out.json")])
+
+
+def test_a_checkout_is_pinned_by_its_commit(tmp_path):
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "file.md").write_text("content")
+    subprocess.run([*git, "add", "file.md"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "one"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    assert g.source_pin(tmp_path, "some-repo/file.md") == head
+
+
+def test_a_download_is_pinned_by_its_content_not_by_an_enclosing_repository(tmp_path):
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    download = tmp_path / "some-page" / "page.md"
+    download.parent.mkdir()
+    download.write_text("content")
+    assert g.source_pin(tmp_path, "some-page/page.md") == "sha256:" + hashlib.sha256(b"content").hexdigest()
 
 
 def local_sources_present() -> bool:

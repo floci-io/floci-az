@@ -7,7 +7,8 @@ floci-az serves (`AzureCloud`, `AzureUSGovernment`, `AzureChinaCloud`). The Java
 Every value comes from a file under `local/azure`, a directory of upstream checkouts that is not part
 of this repository; the module docstring lists the files. A value no local file settles is written as
 `{"value": null, "source": "UNSETTLED: <what to verify>"}`, never as fact. The `_source` block records
-each file read and the commit of its checkout.
+each file read and what pins it: the commit of its checkout, or `sha256:<digest>` for the one file that
+is a download.
 
 ## Recreating the sources
 
@@ -24,7 +25,20 @@ out to reproduce the vendored file exactly, or use newer ones to refresh it.
 | `azure-sdk-for-net` | [Azure/azure-sdk-for-net](https://github.com/Azure/azure-sdk-for-net) |
 | `entra-docs` | [MicrosoftDocs/entra-docs](https://github.com/MicrosoftDocs/entra-docs) |
 | `go-azure-sdk` | [hashicorp/go-azure-sdk](https://github.com/hashicorp/go-azure-sdk) |
-| `reliability-docs` | [MicrosoftDocs/reliability-docs](https://github.com/MicrosoftDocs/reliability-docs) |
+
+One source is a download, not a checkout. The repository behind the "List of Azure regions" page
+(`MicrosoftDocs/reliability-docs`) is no longer public, so the page is saved as Microsoft Learn serves it
+in Markdown. The directory keeps the repository's name and layout, and must not be a git repository:
+
+```bash
+mkdir -p local/azure/reliability-docs/articles/reliability
+curl -sL -o local/azure/reliability-docs/articles/reliability/regions-list.md \
+  'https://learn.microsoft.com/en-us/azure/reliability/regions-list?accept=text%2Fmarkdown'
+```
+
+A page has no commit to check out, so an older version cannot be reproduced: a fresh download whose
+digest differs from the recorded one may change the public availability zones in `clouds.json`. Review
+that diff like any other.
 
 ## Commands
 
