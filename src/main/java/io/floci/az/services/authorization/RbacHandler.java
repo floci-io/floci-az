@@ -347,12 +347,23 @@ public class RbacHandler implements AzureServiceHandler, Resettable, ResourceGro
      * scope cannot change: {@code 400 RoleAssignmentUpdateNotPermitted} ("Tenant ID, application ID, principal ID, and
      * scope are not allowed to be updated", the RBAC troubleshooting docs). The same principal, role and scope under
      * a second name is {@code 409 RoleAssignmentExists} (recorded by the az CLI tests, which treat it as success).
+     * The tenant is in the docs' list of what cannot be updated, so an assignment at a tenant-bound scope keeps the
+     * tenant that created it.
      */
     private Response conflict(RbacPath path, String id, String principalId, String roleGuid,
                               Optional<Map<String, Object>> existing, String callerTenant) {
         if (existing.isPresent() && !principalId.equalsIgnoreCase(
                 String.valueOf(propertiesOf(existing.get()).get("principalId")))) {
             return updateNotPermitted();
+        }
+        // The tenant cannot change either: at a management group or the tenant root, another tenant's re-PUT of the
+        // same id would otherwise move the assignment into its own hierarchy.
+        boolean tenantBound = path.scopeKind() == ScopeKind.TENANT || path.scopeKind() == ScopeKind.MANAGEMENT_GROUP;
+        if (existing.isPresent() && tenantBound) {
+            String recorded = existing.get().get(TENANT_KEY) instanceof String t ? t : tenants.defaultTenantId();
+            if (!recorded.equalsIgnoreCase(callerTenant)) {
+                return updateNotPermitted();
+            }
         }
         String scopeKey = qualified(path.scopeKey(), callerTenant);
         for (Map<String, Object> other : assignments.all()) {

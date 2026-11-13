@@ -64,6 +64,17 @@ class RbacTenantScopingTest {
         list(given(), "/subscriptions/" + TEAM_SUB, "atScope()")
                 .body("value.id", hasItems(atTeamGroup, atTeamSub))
                 .body("value.id", not(hasItem(atDefaultGroup)));
+
+        // Another tenant's re-PUT of an assignment cannot move it into its own hierarchy: the tenant cannot change.
+        given().header("Authorization", bearer(TEAM_TENANT)).contentType("application/json")
+                .queryParam("api-version", "2022-04-01")
+                .body("{\"properties\":{\"roleDefinitionId\":\"" + READER + "\",\"principalId\":\"" + PRINCIPAL + "\"}}")
+                .when().put(atDefaultGroup)
+                .then().statusCode(400)
+                .body("error.code", equalTo("RoleAssignmentUpdateNotPermitted"));
+        list(given(), GROUP, null).body("value.id", hasItem(atDefaultGroup));
+        list(given().header("Authorization", bearer(TEAM_TENANT)), GROUP, null)
+                .body("value.id", not(hasItem(atDefaultGroup)));
     }
 
     private static void createGroupWith(RequestSpecification as, String subscription) {
