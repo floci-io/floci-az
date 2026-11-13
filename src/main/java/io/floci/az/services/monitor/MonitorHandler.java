@@ -291,8 +291,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
 
     /** The tags a PUT carries, or null when it carries none: a PUT replaces the resource, so they are then cleared. */
     @SuppressWarnings("unchecked")
-    private static Map<String, String> bodyTags(Map<String, Object> body) {
-        return body.get("tags") instanceof Map<?, ?> tags ? new LinkedHashMap<>((Map<String, String>) tags) : null;
+    private static Map<String, Object> bodyTags(Map<String, Object> body) {
+        return body.get("tags") instanceof Map<?, ?> tags ? new LinkedHashMap<>((Map<String, Object>) tags) : null;
     }
 
     private static String bodyLocation(Map<String, Object> body, String defaultLocation) {

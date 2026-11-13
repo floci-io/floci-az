@@ -20,7 +20,7 @@ public final class MonitorModels {
     @RegisterForReflection
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record MonitorResource(String id, String name, String type, String location,
-                                  Map<String, String> tags, Map<String, Object> properties) {
+                                  Map<String, Object> tags, Map<String, Object> properties) {
 
         /** A string property, or null when it is missing or not a string. */
         public String property(String key) {
