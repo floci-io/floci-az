@@ -14,12 +14,13 @@ public final class MonitorModels {
     /**
      * A workspace, a data collection endpoint or rule, or a diagnostic setting, as its wire body. This is also the
      * shape the handler stored before the resource store, so entries written then decode unchanged. A diagnostic
-     * setting has no location, which the body leaves out.
+     * setting has no location and no tags, which the body leaves out, as it does the tags of an entry stored before
+     * they were kept.
      */
     @RegisterForReflection
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record MonitorResource(String id, String name, String type, String location,
-                                  Map<String, Object> properties) {
+                                  Map<String, String> tags, Map<String, Object> properties) {
 
         /** A string property, or null when it is missing or not a string. */
         public String property(String key) {
