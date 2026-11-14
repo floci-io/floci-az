@@ -219,7 +219,28 @@ public class BannerLogger {
         }
         LOGGER.info(sb.toString());
         LOGGER.info(webConsoleLine(config));
+        LOGGER.info(tlsLine(config));
         LOGGER.info("=== Local Azure Emulator Ready ===");
+    }
+
+    static final String TLS_TRUST_DOCS = "https://floci.io/floci-az/terraform/#2-trust-the-certificate";
+
+    /**
+     * Whether HTTPS is served and, for the generated certificate, where its CA is and how to trust it:
+     * a client that does not trust it (the azurerm provider, for one) fails with an x509 error that
+     * names neither floci-az nor the fix.
+     */
+    public static String tlsLine(EmulatorConfig config) {
+        if (!config.tls().enabled()) {
+            return "TLS: off (FLOCI_AZ_TLS_ENABLED=true serves HTTPS on the same port; Terraform needs it)";
+        }
+        boolean userCertificate = config.tls().certPath().filter(path -> !path.isBlank()).isPresent()
+                && config.tls().keyPath().filter(path -> !path.isBlank()).isPresent();
+        if (userCertificate) {
+            return "TLS: on, certificate " + config.tls().certPath().orElseThrow();
+        }
+        return "TLS: on, self-signed. Clients must trust the CA at " + config.effectiveBaseUrl()
+                + "/_floci/tls-cert, see " + TLS_TRUST_DOCS;
     }
 
     /**

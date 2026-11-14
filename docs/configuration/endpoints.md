@@ -65,8 +65,9 @@ startup to finish.
 When `FLOCI_AZ_TLS_ENABLED=true`, `GET /_floci/tls-cert` returns the certificate clients should trust:
 the generated CA certificate by default, or the supplied certificate file with custom TLS settings.
 With TLS off, or before the certificate exists, it answers
-`404` with a JSON body (`tlsEnabled`, `error`, `message`) that says which. See
-[Terraform / OpenTofu](../terraform.md) for a worked example.
+`404` with a JSON body (`tlsEnabled`, `error`, `message`) that says which. A successful answer is plain PEM, so
+`curl -o` output goes straight into a trust store. See
+[Trust the certificate](../terraform.md#2-trust-the-certificate) for the per-OS commands.
 
 
 ### Azure's own hosts

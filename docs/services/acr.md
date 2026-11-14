@@ -94,6 +94,8 @@ proxies to the shared container, and strips it again from upload `Location` head
 > curl -s http://localhost:4577/_floci/tls-cert -o floci-az.crt   # then trust it
 > ```
 >
+> The per-OS trust commands are in [Trust the certificate](../terraform.md#2-trust-the-certificate).
+>
 > Docker needs the certificate in `/etc/docker/certs.d/myregistry.azurecr.io/ca.crt`. Without name
 > resolution, use the published port instead: it needs none of this.
 >
