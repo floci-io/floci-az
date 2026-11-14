@@ -224,7 +224,7 @@ public class BannerLogger {
         LOGGER.info("=== Local Azure Emulator Ready ===");
     }
 
-    static final String TLS_TRUST_DOCS = "https://floci.io/floci-az/terraform/#2-trust-the-certificate";
+    public static final String TLS_TRUST_DOCS = "https://floci.io/floci-az/terraform/#2-trust-the-certificate";
 
     /**
      * Whether HTTPS is served and, for the generated certificate, where its CA is and how to trust it:

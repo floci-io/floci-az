@@ -228,6 +228,18 @@ older one. Re-do step 2. On Linux you can instead point `SSL_CERT_FILE` at a bun
 system roots plus `floci-az.crt` (`terraform init` still needs the public roots to download
 providers). On macOS `SSL_CERT_FILE` has no effect: use the Keychain.
 
+floci-az logs the same failure from its side, once a minute per client address, so the cause is
+visible even when the client's error is buried in a pipeline log:
+
+```
+WARN  TLS: a client at 172.18.0.3 rejected floci-az's certificate during the handshake (unknown_ca).
+      It must trust the CA served at http://localhost:4577/_floci/tls-cert, see ...
+```
+
+The reason in parentheses is the TLS alert the client sent (`unknown_ca`, `bad_certificate`,
+`certificate_expired`, ...). Go clients such as the provider, and Java, negotiate TLS 1.3, which
+encrypts the alert, so their line says `TLS 1.3 hides the alert` instead.
+
 **`GET /_floci/tls-cert` returns `"tlsEnabled": false`**
 
 → Confirms TLS is off. Enable it as in step 1.
