@@ -603,6 +603,35 @@ public class BlobServiceTest {
     }
 
     @Test
+    void setBlobPropertiesReplacesHttpHeaders() {
+        putTestBlob(BLOB_CONTENT);
+
+        given()
+            .header("x-ms-blob-content-type", "text/html")
+            .header("x-ms-blob-cache-control", "no-store")
+            .when().put("/{account}/{container}/{blob}?comp=properties", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Content-Type", startsWith("text/html"))
+            .header("Cache-Control", "no-store");
+
+        given()
+            .header("x-ms-blob-content-type", "text/plain")
+            .when().put("/{account}/{container}/{blob}?comp=properties", ACCOUNT, CONTAINER, BLOB)
+            .then().statusCode(200);
+
+        given()
+            .when().head("/{account}/{container}/{blob}", ACCOUNT, CONTAINER, BLOB)
+            .then()
+            .statusCode(200)
+            .header("Cache-Control", nullValue());
+    }
+
+    @Test
     void appendOnlySasCannotMutateMetadataOrBlockList() {
         putTestBlob(BLOB_CONTENT);
         String appendOnlySas = sas("a", "b", CONTAINER, BLOB);

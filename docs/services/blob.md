@@ -58,6 +58,8 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   `GET /{container}?restype=container&comp=blobs&where=...` within one container, with `=`, `>`,
   `>=`, `<`, `<=`, `AND`, parentheses and `@container`, and `maxresults`/`marker` paging. Each result
   lists the blob's values for the tags the expression names. Snapshots are not indexed
+- **Set Blob Properties**: `PUT ?comp=properties` replaces the blob's HTTP headers (`x-ms-blob-content-type`,
+  `x-ms-blob-cache-control`, and the other `x-ms-blob-content-*` headers)
 - **`x-ms-if-tags` conditions**: honored on Get Blob, Get Blob Properties, Put Blob, Append Block,
   Delete Blob, Get/Set Blob Metadata, Snapshot Blob and Get/Set Blob Tags (which also take `x-ms-blob-if-match` and
   `x-ms-blob-if-none-match`); the expression also accepts `OR` and `<>`
