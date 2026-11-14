@@ -122,10 +122,13 @@ public class GraphTables implements KqlEngine.Tables {
 
     private List<Map<String, Object>> resourceContainers() {
         List<Map<String, Object>> rows = new ArrayList<>();
+        // One snapshot of each tenant's hierarchy per query: every row of the answer describes the same tree.
+        Map<String, ManagementGroupStore.Snapshot> hierarchies = new LinkedHashMap<>();
         if (managementGroupsEnabled()) {
             for (Tenant tenant : directory.tenants()) {
-                for (Group group : managementGroups.list(tenant.id())) {
-                    rows.add(managementGroupRow(tenant.id(), group));
+                ManagementGroupStore.Snapshot hierarchy = hierarchies.computeIfAbsent(tenant.id(), managementGroups::snapshot);
+                for (Group group : hierarchy.list()) {
+                    rows.add(managementGroupRow(hierarchy, group));
                 }
             }
         }
@@ -148,7 +151,8 @@ public class GraphTables implements KqlEngine.Tables {
             properties.put("subscriptionId", subscriptionId);
             properties.put("displayName", row.get("name"));
             properties.put("state", subscription == null ? "Enabled" : subscription.state().toString());
-            properties.put("managementGroupAncestorsChain", ancestorsChain(tenantId, subscriptionId));
+            properties.put("managementGroupAncestorsChain", managementGroupsEnabled()
+                ? ancestorsChain(hierarchies.computeIfAbsent(tenantId, managementGroups::snapshot), subscriptionId) : List.of());
             row.put("properties", properties);
             row.put("tags", null);
             row.put("identity", null);
@@ -186,14 +190,11 @@ public class GraphTables implements KqlEngine.Tables {
     }
 
     /** A subscription's management-group ancestors, direct parent first up to the tenant root, as Resource Graph publishes them. */
-    private List<Map<String, Object>> ancestorsChain(String tenantId, String subscriptionId) {
-        if (!managementGroupsEnabled()) {
-            return List.of();
-        }
-        Group parent = managementGroups.parentOf(tenantId, subscriptionId);
+    private static List<Map<String, Object>> ancestorsChain(ManagementGroupStore.Snapshot hierarchy, String subscriptionId) {
+        Group parent = hierarchy.parentOf(subscriptionId);
         List<Map<String, Object>> chain = new ArrayList<>();
         chain.add(pathElement(parent));
-        for (Group ancestor : managementGroups.ancestors(tenantId, parent.name())) {
+        for (Group ancestor : hierarchy.ancestors(parent.name())) {
             chain.add(pathElement(ancestor));
         }
         return chain;
@@ -207,7 +208,8 @@ public class GraphTables implements KqlEngine.Tables {
     }
 
     /** A {@code microsoft.management/managementgroups} container row: tenant-level, so no subscription or location. */
-    private Map<String, Object> managementGroupRow(String tenantId, Group group) {
+    private static Map<String, Object> managementGroupRow(ManagementGroupStore.Snapshot hierarchy, Group group) {
+        String tenantId = hierarchy.tenantId();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", group.id());
         row.put("name", group.name());
@@ -221,7 +223,7 @@ public class GraphTables implements KqlEngine.Tables {
         row.put("sku", null);
         row.put("plan", null);
         Map<String, Object> details = new LinkedHashMap<>();
-        Group parent = group.parent() == null ? null : managementGroups.get(tenantId, group.parent()).orElse(null);
+        Group parent = group.parent() == null ? null : hierarchy.get(group.parent()).orElse(null);
         if (parent != null) {
             Map<String, Object> parentElement = pathElement(parent);
             parentElement.put("id", parent.id());
@@ -231,7 +233,7 @@ public class GraphTables implements KqlEngine.Tables {
         details.put("updatedTime", group.updatedTime() == null ? null : group.updatedTime().toString());
         details.put("updatedBy", group.updatedBy());
         List<Map<String, Object>> chain = new ArrayList<>();
-        for (Group ancestor : managementGroups.ancestors(tenantId, group.name())) {
+        for (Group ancestor : hierarchy.ancestors(group.name())) {
             chain.add(pathElement(ancestor));
         }
         details.put("managementGroupAncestorsChain", chain);

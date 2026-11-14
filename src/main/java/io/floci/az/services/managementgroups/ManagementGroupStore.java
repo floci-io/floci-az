@@ -52,6 +52,48 @@ public class ManagementGroupStore implements Resettable {
         }
     }
 
+    /**
+     * One tenant's hierarchy as it was at one instant: its groups and subscription placements, read under the
+     * store's lock in a single step, so a reader that walks parents and ancestors sees one consistent tree
+     * whatever moves land while it works.
+     */
+    public record Snapshot(String tenantId, Map<String, Group> groups, Map<String, String> subscriptionParents) {
+
+        public Group root() {
+            return groups.get(key(tenantId));
+        }
+
+        public Optional<Group> get(String name) {
+            return Optional.ofNullable(groups.get(key(name)));
+        }
+
+        /** Every group, the tenant root first, in creation order. */
+        public List<Group> list() {
+            return new ArrayList<>(groups.values());
+        }
+
+        /** The group a subscription belongs to: where it was placed, else the tenant root group. */
+        public Group parentOf(String subscriptionId) {
+            String parent = subscriptionParents.get(key(subscriptionId));
+            return parent == null ? root() : groups.getOrDefault(key(parent), root());
+        }
+
+        /** The ancestors of a group from its parent up to the root. */
+        public List<Group> ancestors(String name) {
+            List<Group> out = new ArrayList<>();
+            Group current = groups.get(key(name));
+            while (current != null && current.parent() != null && out.size() <= groups.size()) {
+                Group parent = groups.get(key(current.parent()));
+                if (parent == null) {
+                    break;
+                }
+                out.add(parent);
+                current = parent;
+            }
+            return out;
+        }
+    }
+
     /** One tenant's groups and the placements of its subscriptions, both keyed case-insensitively. */
     private static final class Hierarchy {
         private final Map<String, Group> groups = new LinkedHashMap<>();
@@ -219,6 +261,12 @@ public class ManagementGroupStore implements Resettable {
         }
         hierarchy.subscriptionParents.remove(key(subscriptionId));
         return true;
+    }
+
+    /** A consistent copy of the tenant's hierarchy, for readers that derive several rows from one tree. */
+    public synchronized Snapshot snapshot(String tenantId) {
+        Hierarchy hierarchy = hierarchy(tenantId);
+        return new Snapshot(tenantId, Map.copyOf(hierarchy.groups), Map.copyOf(hierarchy.subscriptionParents));
     }
 
     /** The ancestors of a group from its parent up to the root. */
