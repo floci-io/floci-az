@@ -19,7 +19,7 @@
       "go-azure-sdk/sdk/environments/azure_gov.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
       "go-azure-sdk/sdk/environments/azure_public.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
       "go-azure-sdk/sdk/internal/metadata/client_test.go": "680e7b535dc61f43185bdf1f7c66a65c4ef674e6",
-      "reliability-docs/articles/reliability/regions-list.md": "f7ca0e795ae928e68c9a2c20e7b071eeaf577fc7"
+      "reliability-docs/articles/reliability/regions-list.md": "sha256:499cdf823bfd06a8b1f01e5b271f3cd702efe0f12be3d0cd79628fa026c84457"
     },
     "generator": "tools/cloud/gen_clouds.py",
     "root": "local/azure"
@@ -60,8 +60,13 @@
           "displayName": "East US 2",
           "name": "eastus2",
           "zones": {
-            "source": "UNSETTLED: zone count for eastus2; reliability-docs/articles/reliability/regions-list.md counts zones still in preview",
-            "value": null
+            "source": "reliability-docs/articles/reliability/regions-list.md",
+            "value": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
           }
         },
         {
