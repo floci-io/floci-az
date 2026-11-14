@@ -6,7 +6,7 @@
         test-entra-node test-entra-node-local \
         test-apim-java \
         test-cosmos test-cosmos-mongo test-cosmos-postgresql test-cosmos-cassandra test-cosmos-gremlin test-cosmos-table test-cosmos-nosql test-cosmos-all \
-        test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-iac-compat compat-docker test-compat clean \
+        test-sql test-mysql test-mariadb test-terraform-compat test-opentofu-compat test-azcli test-azd test-iac-compat compat-docker test-compat clean \
         smoke-native-crypto \
         az-data-sync az-data-check az-data-test arm-data-sync arm-data-check arm-data-test \
         cloud-literals-check cloud-literals-audit cloud-literals-baseline
@@ -23,6 +23,7 @@ CPP_DIR        = compatibility-tests/sdk-test-cpp
 TERRAFORM_DIR  = compatibility-tests/compat-terraform
 OPENTOFU_DIR   = compatibility-tests/compat-opentofu
 AZCLI_DIR      = compatibility-tests/compat-azcli
+AZD_DIR        = compatibility-tests/compat-azd
 COMPAT_NETWORK = compat-net
 COMPAT_RESULTS = test-results
 FLOCI_AZ_IMAGE = floci-az:test
@@ -38,6 +39,7 @@ CPP_IMAGE      = $(COMPAT_IMAGE_PREFIX)sdk-test-cpp
 TERRAFORM_IMAGE = $(COMPAT_IMAGE_PREFIX)compat-terraform
 OPENTOFU_IMAGE  = $(COMPAT_IMAGE_PREFIX)compat-opentofu
 AZCLI_IMAGE     = $(COMPAT_IMAGE_PREFIX)compat-azcli
+AZD_IMAGE       = $(COMPAT_IMAGE_PREFIX)compat-azd
 
 # ── Per-suite container env — single source of truth ─────────────────────────
 # Every docker run for a suite (individual test-*-compat targets AND compat-docker)
@@ -68,6 +70,9 @@ JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
 # AksCompatibilityTest drives the mocked AKS control plane; real mode would start a k3s container.
 JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+# azd cannot be pointed at a custom cloud, so its emulator answers for Azure's own hosts.
+AZD_EMULATOR_ENV = -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
+
 # PARITY=azure (or strict) starts the emulator of any Docker compat session at that floci-az.parity
 # level: `make test-terraform-compat PARITY=azure`. Empty keeps the default level. The nightly parity
 # legs in .github/workflows/compatibility.yml set the same variable (emulator axis, see AGENTS.md).
@@ -75,7 +80,7 @@ PARITY ?=
 PARITY_EMULATOR_ENV = $(if $(PARITY),-e FLOCI_AZ_PARITY=$(PARITY))
 
 # Per-suite build context and image tag, keyed by suite name.
-SUITES = python java dotnet node cpp terraform opentofu azcli
+SUITES = python java dotnet node cpp terraform opentofu azcli azd
 SUITE_DIR_python    = $(PYTHON_DIR)
 SUITE_DIR_java      = $(JAVA_DIR)
 SUITE_DIR_node      = $(NODE_DIR)
@@ -84,6 +89,7 @@ SUITE_DIR_cpp       = $(CPP_DIR)
 SUITE_DIR_terraform = $(TERRAFORM_DIR)
 SUITE_DIR_opentofu  = $(OPENTOFU_DIR)
 SUITE_DIR_azcli     = $(AZCLI_DIR)
+SUITE_DIR_azd       = $(AZD_DIR)
 SUITE_IMAGE_python    = $(PYTHON_IMAGE)
 SUITE_IMAGE_java      = $(JAVA_IMAGE)
 SUITE_IMAGE_node      = $(NODE_IMAGE)
@@ -92,6 +98,7 @@ SUITE_IMAGE_cpp       = $(CPP_IMAGE)
 SUITE_IMAGE_terraform = $(TERRAFORM_IMAGE)
 SUITE_IMAGE_opentofu  = $(OPENTOFU_IMAGE)
 SUITE_IMAGE_azcli     = $(AZCLI_IMAGE)
+SUITE_IMAGE_azd       = $(AZD_IMAGE)
 
 # ── Canned recipes for Docker compat sessions ─────────────────────────────────
 # One docker run for a suite container against the running emulator, then the same
@@ -437,12 +444,16 @@ test-azcli:
 	@echo "==> Azure CLI compatibility tests (Docker)"
 	$(call COMPAT_SESSION,azcli,azcli,,,)
 
+test-azd:
+	@echo "==> azd compatibility tests (Docker)"
+	$(call COMPAT_SESSION,azd,azd,,,,$(AZD_EMULATOR_ENV))
+
 # ── Full compatibility suite ──────────────────────────────────────────────────
 
 compat-docker:
 	$(MAKE) compat-build
-	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_EMULATOR_ENV)"
-	@mkdir -p $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/cpp $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_EMULATOR_ENV) $(AZD_EMULATOR_ENV)"
+	@mkdir -p $(COMPAT_RESULTS)/azd $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/cpp $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-node-image || EXIT=$$?; fi; \
@@ -452,6 +463,7 @@ compat-docker:
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-terraform-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-opentofu-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-azcli-image || EXIT=$$?; fi; \
+	if [ $$EXIT -eq 0 ]; then $(MAKE) compat-azd-image || EXIT=$$?; fi; \
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Python SDK tests"; \
 		$(call RUN_SUITE,python,python,$(SUITE_ENV_PYTHON),,); \
@@ -490,6 +502,11 @@ compat-docker:
 	if [ $$EXIT -eq 0 ]; then \
 		echo "==> Azure CLI tests"; \
 		$(call RUN_SUITE,azcli,azcli,,,); \
+		EXIT=$$?; \
+	fi; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "==> azd tests"; \
+		$(call RUN_SUITE,azd,azd,,,); \
 		EXIT=$$?; \
 	fi; \
 	$(MAKE) -C $(CURDIR) compat-stop; exit $$EXIT

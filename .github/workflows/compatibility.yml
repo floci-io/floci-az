@@ -164,6 +164,7 @@ jobs:
           - compat-terraform
           - compat-opentofu
           - compat-azcli
+          - compat-azd
         # floci-az.parity level the emulator starts at; empty is the default level. Same switch
         # as PARITY in the Makefile (PARITY_EMULATOR_ENV).
         parity: ${{ fromJSON(github.event_name == 'pull_request' && '[""]' || '["azure"]') }}
@@ -221,6 +222,10 @@ jobs:
             min_tests: 7
           - test: compat-azcli
             min_tests: 10
+          - test: compat-azd
+            min_tests: 8
+            emulator_env: >-
+              -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
 
     steps:
       - name: Download native floci-az image
