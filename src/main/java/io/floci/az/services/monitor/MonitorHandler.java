@@ -289,6 +289,12 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
             ? new LinkedHashMap<>((Map<String, Object>) props) : new LinkedHashMap<>();
     }
 
+    /** The tags a PUT carries, or null when it carries none: a PUT replaces the resource, so they are then cleared. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> bodyTags(Map<String, Object> body) {
+        return body.get("tags") instanceof Map<?, ?> tags ? new LinkedHashMap<>((Map<String, Object>) tags) : null;
+    }
+
     private static String bodyLocation(Map<String, Object> body, String defaultLocation) {
         return (String) body.getOrDefault("location", defaultLocation);
     }
@@ -329,7 +335,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                     newProps.put("customerId", customerId);
                     return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
                         existing.map(MonitorResource::name).orElse(id.name()), WORKSPACE_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())),
-                        newProps);
+                        bodyTags(body), newProps);
                 }).stored().value();
                 workspaceIndex().put(workspace.property("customerId"), id);
             }
@@ -399,7 +405,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 props.put("logsIngestion", Map.of("endpoint", ingestUrl));
                 props.put("configurationAccess", Map.of("endpoint", ingestUrl));
                 return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                    existing.map(MonitorResource::name).orElse(id.name()), DCE_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())), props);
+                    existing.map(MonitorResource::name).orElse(id.name()), DCE_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())),
+                    bodyTags(body), props);
             }).stored().value();
             return Response.status(201).entity(dce).type(MediaType.APPLICATION_JSON).build();
         } else if ("GET".equals(method)) {
@@ -442,7 +449,8 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                     newProps.put("provisioningState", "Succeeded");
                     newProps.put("immutableId", immutableId);
                     return new MonitorResource(existing.map(MonitorResource::id).orElse(id.id()),
-                        existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())), newProps);
+                        existing.map(MonitorResource::name).orElse(id.name()), DCR_TYPE, bodyLocation(body, defaults.defaultLocation(req.scope())),
+                        bodyTags(body), newProps);
                 }).stored().value();
                 ruleIndex().put(dcr.property("immutableId"), id);
             }
@@ -807,7 +815,7 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
                 MonitorResource setting = diagnosticSettings.createOrUpdate(id, existing -> new MonitorResource(
                     existing.map(MonitorResource::id).orElse(id.id()),
                     existing.map(MonitorResource::name).orElse(settingsName),
-                    DIAGNOSTIC_SETTINGS_TYPE, null, settingProps)).stored().value();
+                    DIAGNOSTIC_SETTINGS_TYPE, null, null, settingProps)).stored().value();
 
                 LOG.infof("Diagnostic settings configured: resource=%s name=%s", resourceUri, settingsName);
                 yield Response.ok(setting).type(MediaType.APPLICATION_JSON).build();
