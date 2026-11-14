@@ -32,13 +32,14 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.math.BigInteger;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
+import java.security.Signature;
 import java.security.cert.X509Certificate;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -54,8 +55,9 @@ public class CertificateGenerator {
 
     private static final Logger LOG = Logger.getLogger(CertificateGenerator.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final byte[] KEY_PROBE = "floci-az CA key check".getBytes(StandardCharsets.US_ASCII);
 
-    /** How long a leaf from {@link #issue} is valid; a CA must outlive it to issue one. */
+    /** How long a leaf from {@link #issue} is valid, unless its CA expires sooner ({@link #leafNotAfter}). */
     public static final Duration LEAF_VALIDITY = Duration.ofDays(365);
 
     private static final Pattern IP_ADDRESS_PATTERN = Pattern.compile(
@@ -72,11 +74,22 @@ public class CertificateGenerator {
     /** A CA that can issue leaves: its certificate and the private key that signs them. */
     public record CertificateAuthority(X509Certificate certificate, PrivateKey privateKey) {
 
-        /** Whether the private key is the one the certificate was issued for. */
+        /** Whether the private key is the one the certificate was issued for (RSA, EC or Ed25519). */
         public boolean keyMatchesCertificate() {
-            return privateKey instanceof RSAPrivateKey key
-                    && certificate.getPublicKey() instanceof RSAPublicKey publicKey
-                    && key.getModulus().equals(publicKey.getModulus());
+            try {
+                String algorithm = signatureAlgorithm(privateKey);
+                Signature signer = Signature.getInstance(algorithm);
+                signer.initSign(privateKey);
+                signer.update(KEY_PROBE);
+                byte[] signature = signer.sign();
+                Signature verifier = Signature.getInstance(algorithm);
+                verifier.initVerify(certificate.getPublicKey());
+                verifier.update(KEY_PROBE);
+                return verifier.verify(signature);
+            } catch (GeneralSecurityException | IllegalArgumentException e) {
+                LOG.debugv("TLS: the CA key does not verify against its certificate: {0}", e.getMessage());
+                return false;
+            }
         }
     }
 
@@ -146,9 +159,10 @@ public class CertificateGenerator {
     }
 
     /**
-     * Issues a non-CA leaf (CN=floci-az, valid for one year) signed by {@code ca}, carrying the SANs
-     * and serverAuth EKU. The leaf must not be a CA, because strict validators (e.g. rustls) reject
-     * a CA-flagged certificate in the end-entity position.
+     * Issues a non-CA leaf (CN=floci-az, valid for a year or until {@code ca} expires, whichever is
+     * sooner) signed by {@code ca} with its key's own algorithm, carrying the SANs and serverAuth EKU.
+     * The leaf must not be a CA, because strict validators (e.g. rustls) reject a CA-flagged
+     * certificate in the end-entity position.
      */
     public GeneratedCertificate issue(CertificateAuthority ca, List<String> sans) {
         try {
@@ -161,7 +175,7 @@ public class CertificateGenerator {
 
             JcaX509v3CertificateBuilder leafBuilder = new JcaX509v3CertificateBuilder(
                     caName, leafSerial,
-                    Date.from(now), Date.from(now.plus(LEAF_VALIDITY)),
+                    Date.from(now), Date.from(leafNotAfter(ca.certificate(), now)),
                     leafName, leafKeyPair.getPublic());
 
             GeneralName[] sanEntries = sans.stream()
@@ -179,7 +193,7 @@ public class CertificateGenerator {
             leafBuilder.addExtension(Extension.subjectKeyIdentifier, false,
                     extensionUtils.createSubjectKeyIdentifier(leafKeyPair.getPublic()));
 
-            ContentSigner leafSigner = new JcaContentSignerBuilder("SHA512WithRSA")
+            ContentSigner leafSigner = new JcaContentSignerBuilder(signatureAlgorithm(ca.privateKey()))
                     .build(ca.privateKey());
             X509Certificate leafCert = new JcaX509CertificateConverter()
                     .getCertificate(leafBuilder.build(leafSigner));
@@ -192,6 +206,26 @@ public class CertificateGenerator {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to generate TLS certificate chain", e);
         }
+    }
+
+    /** A leaf never outlives its CA: clients reject a chain whose issuer expired first. */
+    static Instant leafNotAfter(X509Certificate ca, Instant now) {
+        Instant full = now.plus(LEAF_VALIDITY);
+        Instant caExpiry = ca.getNotAfter().toInstant();
+        return caExpiry.isBefore(full) ? caExpiry : full;
+    }
+
+    /**
+     * The signature a CA key signs leaves with. floci-az's own CAs are RSA; a CA the user brings may be
+     * EC (step-ca's default) or Ed25519.
+     */
+    static String signatureAlgorithm(PrivateKey key) {
+        return switch (key.getAlgorithm()) {
+            case "RSA" -> "SHA512WithRSA";
+            case "EC", "ECDSA" -> "SHA256WithECDSA";
+            case "Ed25519", "EdDSA" -> "Ed25519";
+            default -> throw new IllegalArgumentException("unsupported CA key algorithm " + key.getAlgorithm());
+        };
     }
 
     /** The CA's private key in PEM, for persisting it next to the CA certificate. */
@@ -219,7 +253,8 @@ public class CertificateGenerator {
                 Object parsed = parser.readObject();
                 JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
                 privateKey = switch (parsed) {
-                    case PEMKeyPair pair -> converter.getKeyPair(pair).getPrivate();
+                    // Only the private part: a SEC1 EC key may omit its public key (RFC 5915).
+                    case PEMKeyPair pair -> converter.getPrivateKey(pair.getPrivateKeyInfo());
                     case PrivateKeyInfo info -> converter.getPrivateKey(info);
                     case null, default -> throw new IllegalStateException("CA key PEM holds no private key");
                 };

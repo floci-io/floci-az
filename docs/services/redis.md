@@ -161,9 +161,12 @@ The SSL port is trusted the same way as floci-az's own HTTPS endpoint:
     Issuing those certificates needs the CA's private key, which floci-az keeps next to the CA
     (`tls/floci-az-selfsigned-ca.key` under the persistent path, owner-only). The CA's name
     constraints limit it to the names floci-az serves, which is why the certificate names Azure's
-    host name and not the container's. With a certificate of your own (`FLOCI_AZ_TLS_CERT_PATH` and
-    `FLOCI_AZ_TLS_KEY_PATH`), or a CA written by an older floci-az, which kept no key, the caches
-    serve the emulator's own certificate and key unchanged until the CA is next replaced.
+    host name and not the container's. With a CA of your own (`FLOCI_AZ_TLS_CA_CERT_PATH` and
+    `FLOCI_AZ_TLS_CA_KEY_PATH`, see [Use a CA you already trust](../terraform.md#use-a-ca-you-already-trust-mkcert)),
+    the cache certificates are issued from that CA instead. With a certificate of your own
+    (`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`) the caches serve it unchanged, and with a
+    CA written by an older floci-az, which kept no key, they serve the emulator's own certificate
+    until the CA is next replaced.
 
 - **floci-az TLS off** (the default): floci-az generates a CA in memory when it starts and issues
   each cache's certificate from it. Nothing is written to disk, and the CA changes on every

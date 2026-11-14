@@ -51,6 +51,10 @@ import java.util.Set;
  * certificate: a new name falls outside its constraints, its key is missing or not its own, or it
  * expires first.
  *
+ * <p>With {@code floci-az.tls.ca-cert-path} and {@code ca-key-path} set, the server certificate is
+ * issued from that CA instead (mkcert's root, say), reissued at every start, and the CA itself is
+ * the trust anchor. Its key is only read, never copied, and no constraints are added to it.
+ *
  * <p>Both HTTP and HTTPS are served on the same public port via a
  * {@link TlsProxyServer} that detects the protocol from the first byte of each
  * incoming connection.
@@ -101,6 +105,9 @@ public class TlsConfigSource implements ConfigSource {
     static final String SELF_SIGNED_CA_KEY_NAME   = "floci-az-selfsigned-ca.key";
     static final String SELF_SIGNED_KEY_NAME      = "floci-az-selfsigned.key";
     static final String SELF_SIGNED_METADATA_NAME = "floci-az-selfsigned.metadata.json";
+    /** The server certificate issued from a CA the user brings, and its key (floci-az's own, not the CA's). */
+    static final String USER_CA_ISSUED_CERT_NAME = "floci-az-user-ca-issued.crt";
+    static final String USER_CA_ISSUED_KEY_NAME  = "floci-az-user-ca-issued.key";
     private static final String TLS_DIR = "tls";
 
     /** A server certificate this close to expiry is reissued at startup. */
@@ -151,11 +158,13 @@ public class TlsConfigSource implements ConfigSource {
 
         String certPath       = resolveProperty("floci-az.tls.cert-path", "");
         String keyPath        = resolveProperty("floci-az.tls.key-path", "");
+        String caCertPath     = resolveProperty("floci-az.tls.ca-cert-path", "");
+        String caKeyPath      = resolveProperty("floci-az.tls.ca-key-path", "");
         String selfSigned     = resolveProperty("floci-az.tls.self-signed", "true");
         String persistentPath = resolveProperty("floci-az.storage.persistent-path", "./data");
 
         // The PEM served at GET /_floci/tls-cert (the client trust anchor): the generated CA in
-        // self-signed mode, or the user-provided cert file itself.
+        // self-signed mode, the user's CA, or the user-provided cert file itself.
         String anchorPath = null;
 
         if (!certPath.isBlank() && !keyPath.isBlank()) {
@@ -163,6 +172,21 @@ public class TlsConfigSource implements ConfigSource {
             validateFileExists(keyPath, "TLS private key");
             anchorPath = certPath;
             LOG.infov("TLS: using user-provided certificate: {0}", certPath);
+            if (!caCertPath.isBlank() || !caKeyPath.isBlank()) {
+                LOG.warnv("TLS: FLOCI_AZ_TLS_CERT_PATH is set, so the CA in FLOCI_AZ_TLS_CA_CERT_PATH ({0}) is ignored",
+                        caCertPath);
+            }
+        } else if (!caCertPath.isBlank() || !caKeyPath.isBlank()) {
+            Path tlsDir = selfSignedDir(persistentPath);
+            Path certFile = tlsDir.resolve(USER_CA_ISSUED_CERT_NAME);
+            Path keyFile = tlsDir.resolve(USER_CA_ISSUED_KEY_NAME);
+            CertificateGenerator.CertificateAuthority authority = userAuthority(caCertPath, caKeyPath);
+            List<String> sans = buildSanList(extractCustomHostnames());
+            issueFromUserCa(tlsDir, certFile, keyFile, authority, sans);
+            LOG.infov("TLS: issued the server certificate from your CA {0}", caCertPath);
+            certPath = certFile.toAbsolutePath().toString();
+            keyPath = keyFile.toAbsolutePath().toString();
+            anchorPath = caCertPath;
         } else if ("true".equalsIgnoreCase(selfSigned)) {
             Path tlsDir   = selfSignedDir(persistentPath);
             Path certFile = tlsDir.resolve(SELF_SIGNED_CERT_NAME);
@@ -195,7 +219,8 @@ public class TlsConfigSource implements ConfigSource {
         } else {
             throw new IllegalStateException(
                     "TLS enabled but no certificate provided and self-signed generation disabled. "
-                            + "Set FLOCI_AZ_TLS_CERT_PATH + FLOCI_AZ_TLS_KEY_PATH, or enable FLOCI_AZ_TLS_SELF_SIGNED.");
+                            + "Set FLOCI_AZ_TLS_CERT_PATH + FLOCI_AZ_TLS_KEY_PATH, FLOCI_AZ_TLS_CA_CERT_PATH + "
+                            + "FLOCI_AZ_TLS_CA_KEY_PATH, or enable FLOCI_AZ_TLS_SELF_SIGNED.");
         }
 
         properties.put("quarkus.http.ssl.certificate.files", toConfigPath(certPath));
@@ -376,6 +401,60 @@ public class TlsConfigSource implements ConfigSource {
             persistMetadata(tlsDir, sans);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to write self-signed TLS certificate", e);
+        }
+    }
+
+    /**
+     * The CA the user brings, read and checked up front: a CA that cannot issue a certificate clients
+     * accept is a configuration error, so startup fails with what to fix rather than serving one.
+     */
+    static CertificateGenerator.CertificateAuthority userAuthority(String caCertPath, String caKeyPath) {
+        if (caCertPath.isBlank() || caKeyPath.isBlank()) {
+            throw new IllegalStateException("TLS: set both FLOCI_AZ_TLS_CA_CERT_PATH and FLOCI_AZ_TLS_CA_KEY_PATH "
+                    + "to issue the server certificate from your CA (only one is set)");
+        }
+        validateFileExists(caCertPath, "TLS CA certificate");
+        validateFileExists(caKeyPath, "TLS CA private key");
+        CertificateGenerator.CertificateAuthority authority;
+        try {
+            authority = CertificateGenerator.readAuthority(Files.readString(Path.of(caCertPath)),
+                    Files.readString(Path.of(caKeyPath)));
+        } catch (IOException | IllegalStateException e) {
+            throw new IllegalStateException("TLS: could not read the CA in " + caCertPath + " and " + caKeyPath
+                    + ": " + e.getMessage(), e);
+        }
+        X509Certificate ca = authority.certificate();
+        if (ca.getBasicConstraints() < 0) {
+            throw new IllegalStateException("TLS: " + caCertPath + " is not a CA certificate (no CA basic "
+                    + "constraint); point FLOCI_AZ_TLS_CA_CERT_PATH at the root, such as mkcert's rootCA.pem");
+        }
+        if (!authority.keyMatchesCertificate()) {
+            throw new IllegalStateException("TLS: " + caKeyPath + " is not the private key of " + caCertPath);
+        }
+        if (ca.getNotAfter().toInstant().isBefore(Instant.now())) {
+            throw new IllegalStateException("TLS: the CA in " + caCertPath + " expired on "
+                    + ca.getNotAfter().toInstant());
+        }
+        return authority;
+    }
+
+    /** Issues the server certificate from the user's CA; a name its own constraints exclude is only warned about. */
+    private static void issueFromUserCa(Path tlsDir, Path certFile, Path keyFile,
+                                        CertificateGenerator.CertificateAuthority authority, List<String> sans) {
+        List<String> outside = sans.stream()
+                .filter(san -> !CertificateGenerator.permits(authority.certificate(), san))
+                .toList();
+        if (!outside.isEmpty()) {
+            LOG.warnv("TLS: your CA''s name constraints exclude {0}; clients that enforce them reject the "
+                    + "certificate for those names", outside);
+        }
+        try {
+            Files.createDirectories(tlsDir);
+            CertificateGenerator.GeneratedCertificate generated = new CertificateGenerator().issue(authority, sans);
+            Files.writeString(certFile, generated.chainPem());
+            writeOwnerOnly(keyFile, generated.privateKeyPem());
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to write the TLS certificate issued from your CA", e);
         }
     }
 

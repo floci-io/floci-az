@@ -1174,7 +1174,21 @@ public interface EmulatorConfig {
         /** Path to PEM private key file. */
         Optional<String> keyPath();
 
-        /** Auto-generate a self-signed certificate when no cert-path/key-path provided. */
+        /**
+         * Path to the PEM certificate of a CA of your own (mkcert's {@code rootCA.pem}, say). With
+         * {@link #caKeyPath()}, floci-az issues its server certificates from that CA instead of
+         * generating one, so clients that already trust it need no extra step. Ignored when
+         * {@link #certPath()} and {@link #keyPath()} are set. Env: FLOCI_AZ_TLS_CA_CERT_PATH
+         */
+        Optional<String> caCertPath();
+
+        /**
+         * Path to that CA's PEM private key (PKCS#1, PKCS#8 or SEC1). floci-az reads it and never
+         * copies it. Env: FLOCI_AZ_TLS_CA_KEY_PATH
+         */
+        Optional<String> caKeyPath();
+
+        /** Auto-generate a self-signed certificate when no cert-path/key-path or CA paths are provided. */
         @WithDefault("true")
         boolean selfSigned();
 

@@ -40,6 +40,14 @@ class BannerLoggerTlsLineTest {
     }
 
     @Test
+    void withACaOfTheUsersTheLineNamesIt() {
+        EmulatorConfig config = config(true, Optional.empty(), Optional.empty());
+        when(config.tls().caCertPath()).thenReturn(Optional.of("/certs/rootCA.pem"));
+
+        assertEquals("TLS: on, certificate issued by your CA /certs/rootCA.pem", BannerLogger.tlsLine(config));
+    }
+
+    @Test
     void aBlankCertificatePathCountsAsSelfSigned() {
         EmulatorConfig config = config(true, Optional.of(""), Optional.of(""));
 

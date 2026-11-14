@@ -83,6 +83,37 @@ answers for. Download and trust it again then. On macOS, remove the old one firs
 Keychain does not keep both:
 `sudo security delete-certificate -c floci-az-ca /Library/Keychains/System.keychain`.
 
+### Use a CA you already trust (mkcert)
+
+If your machines already trust a local development CA, floci-az can issue its certificate from
+that CA instead, and there is nothing to download or trust. With [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+mkcert -install          # once per machine: creates the CA and adds it to the OS trust stores
+mkcert -CAROOT           # where rootCA.pem and rootCA-key.pem live
+```
+
+```yaml
+# docker-compose.yml
+services:
+  floci-az:
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+      FLOCI_AZ_TLS_CA_CERT_PATH: /mkcert/rootCA.pem
+      FLOCI_AZ_TLS_CA_KEY_PATH: /mkcert/rootCA-key.pem
+    volumes:
+      - ./data:/app/data
+      - "${MKCERT_CAROOT}:/mkcert:ro"   # MKCERT_CAROOT=$(mkcert -CAROOT) docker compose up
+```
+
+Any CA works the same way: the certificate and its PEM key (PKCS#1, PKCS#8 or SEC1; RSA, EC or
+Ed25519). floci-az issues a new server certificate from it at every start (Redis caches with TLS
+get theirs from it too), serves the CA at `GET /_floci/tls-cert`, and reads the key without
+copying it. It adds no name constraints, since the CA is yours: keep its key private, as mkcert
+advises. Startup fails, naming the problem, when only one of the two paths is set, a file is
+missing, the key does not belong to the certificate, or the certificate is not a CA.
+`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`, when set, take precedence over the CA paths.
+
 ## 3: Configure the provider
 
 ```hcl

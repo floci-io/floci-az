@@ -23,6 +23,8 @@ import java.util.Set;
  * <ul>
  *   <li>Emulator TLS on, self-signed: a leaf for the sidecar's host names, issued by the emulator
  *       CA, which is what {@code GET /_floci/tls-cert} serves.</li>
+ *   <li>Emulator TLS on with a CA of the user's ({@code FLOCI_AZ_TLS_CA_CERT_PATH}): a leaf issued
+ *       by that CA, which clients already trust.</li>
  *   <li>Emulator TLS on with a user-provided certificate, or a self-signed CA written by an older
  *       floci-az, which did not keep its key: the emulator's own certificate and key, as the HTTPS
  *       endpoint serves them.</li>
@@ -71,8 +73,9 @@ public class SidecarCertificates {
 
     /**
      * A name outside the CA's constraints makes clients that enforce them (Go, OpenSSL, Apple) reject
-     * the whole certificate. The CA is replaced at the next start when the name is one floci-az knows
-     * about up front; a sidecar name that is not, is a bug worth seeing in the log.
+     * the whole certificate. floci-az's own CA is replaced at the next start when the name is one it
+     * knows about up front, so a sidecar name outside it is a bug worth seeing in the log. A CA the
+     * user brings is never replaced; its constraints are theirs.
      */
     private static void warnOutsideConstraints(CertificateGenerator.CertificateAuthority authority, List<String> sans) {
         List<String> outside = sans.stream()
@@ -102,10 +105,14 @@ public class SidecarCertificates {
         return processAuthority;
     }
 
-    /** The self-signed emulator CA, when floci-az generated it and kept its key. */
+    /** The CA the emulator's own certificate comes from, when floci-az holds its key: the user's, or its own. */
     private Optional<CertificateGenerator.CertificateAuthority> emulatorAuthority() {
         if (userProvidedCertificate()) {
             return Optional.empty();
+        }
+        if (userAuthorityConfigured()) {
+            return Optional.of(TlsConfigSource.userAuthority(config.tls().caCertPath().orElse(""),
+                    config.tls().caKeyPath().orElse("")));
         }
         Path dir = TlsConfigSource.selfSignedDir(config.storage().persistentPath());
         Path caFile = dir.resolve(TlsConfigSource.SELF_SIGNED_CA_NAME);
@@ -142,6 +149,11 @@ public class SidecarCertificates {
     private boolean userProvidedCertificate() {
         return config.tls().certPath().filter(p -> !p.isBlank()).isPresent()
                 && config.tls().keyPath().filter(p -> !p.isBlank()).isPresent();
+    }
+
+    private boolean userAuthorityConfigured() {
+        return config.tls().caCertPath().filter(p -> !p.isBlank()).isPresent()
+                || config.tls().caKeyPath().filter(p -> !p.isBlank()).isPresent();
     }
 
     private static ServerCertificate fromGenerated(CertificateGenerator.GeneratedCertificate generated) {

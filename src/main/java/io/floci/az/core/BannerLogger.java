@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 @ApplicationScoped
 public class BannerLogger {
@@ -238,6 +239,10 @@ public class BannerLogger {
                 && config.tls().keyPath().filter(path -> !path.isBlank()).isPresent();
         if (userCertificate) {
             return "TLS: on, certificate " + config.tls().certPath().orElseThrow();
+        }
+        Optional<String> userCa = config.tls().caCertPath().filter(path -> !path.isBlank());
+        if (userCa.isPresent()) {
+            return "TLS: on, certificate issued by your CA " + userCa.get();
         }
         return "TLS: on, self-signed. Clients must trust the CA at " + config.effectiveBaseUrl()
                 + "/_floci/tls-cert, see " + TLS_TRUST_DOCS;
