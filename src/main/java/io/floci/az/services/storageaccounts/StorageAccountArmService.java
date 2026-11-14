@@ -66,6 +66,12 @@ public class StorageAccountArmService
 
     private static final String NAMESPACE = "Microsoft.Storage";
     private static final String ACCOUNT_TYPE = NAMESPACE + "/storageAccounts";
+    /** What {@code StorageAccountProperties} marks readOnly and the create parameters do not accept. */
+    private static final Set<String> READ_ONLY_PROPERTIES = Set.of(
+            "provisioningState", "primaryEndpoints", "primaryLocation", "statusOfPrimary", "lastGeoFailoverTime",
+            "secondaryLocation", "statusOfSecondary", "creationTime", "keyCreationTime", "secondaryEndpoints",
+            "geoReplicationStats", "failoverInProgress", "privateEndpointConnections", "blobRestoreStatus",
+            "isSkuConversionBlocked", "accountMigrationInProgress", "storageAccountSkuConversionStatus");
 
     /**
      * A resource group's account collection, query stripped. The namespace matches in any casing, as clients
@@ -337,29 +343,55 @@ public class StorageAccountArmService
         if (tags != null) {
             resource.put("tags", tags);
         }
-        resource.put("sku", Map.of("name", "Standard_LRS", "tier", "Standard"));
-        resource.put("kind", "StorageV2");
-        resource.put("properties", Map.of(
-                "provisioningState", "Succeeded",
-                "isHnsEnabled", hnsEnabled,
-                "primaryEndpoints", Map.of(
-                        "blob",  "http://" + account + ".blob.core.windows.net/",
-                        "dfs",   "http://" + account + ".dfs.core.windows.net/",
-                        "queue", "http://" + account + ".queue.core.windows.net/",
-                        "table", "http://" + account + ".table.core.windows.net/"),
-                "primaryLocation", location,
-                "statusOfPrimary", "available",
-                "supportsHttpsTrafficOnly", false,
-                "accessTier", "Hot",
-                "encryption", Map.of(
-                        "services", Map.of(
-                                "blob",  Map.of("enabled", true, "keyType", "Account"),
-                                "file",  Map.of("enabled", true, "keyType", "Account"),
-                                "queue", Map.of("enabled", true, "keyType", "Account"),
-                                "table", Map.of("enabled", true, "keyType", "Account")),
-                        "keySource", "Microsoft.Storage")
-        ));
+        String skuName = ArmJson.string(ArmJson.cast(body.get("sku")), "name", "Standard_LRS");
+        resource.put("sku", Map.of("name", skuName, "tier", skuName.startsWith("Premium") ? "Premium" : "Standard"));
+        String kind = ArmJson.string(body, "kind", "StorageV2");
+        resource.put("kind", kind);
+        Map<String, Object> requested = ArmJson.cast(body.get("properties"));
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("supportsHttpsTrafficOnly", false);
+        // azurerm rejects an access tier on the kinds that do not have one.
+        if (Set.of("StorageV2", "BlobStorage", "FileStorage").contains(kind)) {
+            properties.put("accessTier", "Hot");
+        }
+        putWritable(properties, requested, READ_ONLY_PROPERTIES);
+        properties.put("encryption", encryption(ArmJson.cast(requested.get("encryption"))));
+        properties.put("provisioningState", "Succeeded");
+        properties.put("isHnsEnabled", hnsEnabled);
+        properties.put("primaryEndpoints", Map.of(
+                "blob",  "http://" + account + ".blob.core.windows.net/",
+                "dfs",   "http://" + account + ".dfs.core.windows.net/",
+                "queue", "http://" + account + ".queue.core.windows.net/",
+                "table", "http://" + account + ".table.core.windows.net/"));
+        properties.put("primaryLocation", location);
+        properties.put("statusOfPrimary", "available");
+        resource.put("properties", properties);
         return resource;
+    }
+
+    /** Lays {@code requested} over {@code target}, leaving out explicit nulls and the {@code readOnly} names. */
+    private static void putWritable(Map<String, Object> target, Map<String, Object> requested, Set<String> readOnly) {
+        requested.forEach((name, value) -> {
+            if (value != null && !readOnly.contains(name)) {
+                target.put(name, value);
+            }
+        });
+    }
+
+    /** The default encryption settings with {@code requested} laid over them, service by service. */
+    private static Map<String, Object> encryption(Map<String, Object> requested) {
+        Map<String, Object> requestedServices = ArmJson.cast(requested.get("services"));
+        Map<String, Object> services = new LinkedHashMap<>();
+        for (String service : List.of("blob", "file", "queue", "table")) {
+            Map<String, Object> settings = new LinkedHashMap<>(Map.of("enabled", true, "keyType", "Account"));
+            putWritable(settings, ArmJson.cast(requestedServices.get(service)), Set.of("lastEnabledTime"));
+            services.put(service, settings);
+        }
+        Map<String, Object> encryption = new LinkedHashMap<>();
+        putWritable(encryption, requested, Set.of());
+        encryption.put("services", services);
+        encryption.putIfAbsent("keySource", "Microsoft.Storage");
+        return encryption;
     }
 
     /**

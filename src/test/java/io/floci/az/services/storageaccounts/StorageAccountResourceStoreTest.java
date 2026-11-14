@@ -14,7 +14,10 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,6 +42,47 @@ class StorageAccountResourceStoreTest {
     private static String account(String sub, String rg, String name) {
         return "/subscriptions/" + sub + "/resourceGroups/" + rg + "/providers/Microsoft.Storage/storageAccounts/"
             + name;
+    }
+
+    @Test
+    void aGetReturnsWhatThePutSet() {
+        String body = "{\"location\":\"westeurope\",\"kind\":\"BlockBlobStorage\",\"sku\":{\"name\":\"Premium_ZRS\"},"
+            + "\"properties\":{\"minimumTlsVersion\":\"TLS1_2\",\"allowSharedKeyAccess\":false,"
+            + "\"encryption\":{\"services\":{\"queue\":{\"keyType\":\"Service\"}}}}}";
+        given().contentType("application/json").body(body).when().put(account("sub-echo", "rg", "echosa") + API)
+            .then().statusCode(200);
+
+        given().when().get(account("sub-echo", "rg", "echosa") + API)
+            .then().statusCode(200)
+            .body("sku.name", equalTo("Premium_ZRS"))
+            .body("sku.tier", equalTo("Premium"))
+            .body("kind", equalTo("BlockBlobStorage"))
+            .body("properties.accessTier", nullValue())
+            .body("properties.minimumTlsVersion", equalTo("TLS1_2"))
+            .body("properties.allowSharedKeyAccess", equalTo(false))
+            .body("properties.encryption.services.queue.keyType", equalTo("Service"))
+            .body("properties.encryption.services.blob.keyType", equalTo("Account"));
+    }
+
+    @Test
+    void aPutCannotSetReadOnlyPropertiesOrNulls() {
+        String body = "{\"location\":\"westeurope\",\"properties\":{\"creationTime\":\"2020-01-01T00:00:00Z\","
+            + "\"secondaryEndpoints\":{\"blob\":\"http://x/\"},"
+            + "\"storageAccountSkuConversionStatus\":{\"skuConversionStatus\":\"InProgress\"},"
+            + "\"minimumTlsVersion\":null,\"accessTier\":null,"
+            + "\"encryption\":{\"services\":{\"blob\":{\"lastEnabledTime\":\"2020-01-01T00:00:00Z\",\"keyType\":null}}}}}";
+        given().contentType("application/json").body(body).when().put(account("sub-ro", "rg", "readonlysa") + API)
+            .then().statusCode(200);
+
+        given().when().get(account("sub-ro", "rg", "readonlysa") + API)
+            .then().statusCode(200)
+            .body("properties", not(hasKey("creationTime")))
+            .body("properties", not(hasKey("secondaryEndpoints")))
+            .body("properties", not(hasKey("storageAccountSkuConversionStatus")))
+            .body("properties", not(hasKey("minimumTlsVersion")))
+            .body("properties.accessTier", equalTo("Hot"))
+            .body("properties.encryption.services.blob", not(hasKey("lastEnabledTime")))
+            .body("properties.encryption.services.blob.keyType", equalTo("Account"));
     }
 
     @Test
