@@ -5,6 +5,8 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.model.Frame;
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -25,7 +27,9 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -82,15 +86,16 @@ public class RedisCacheManager {
      * on a second host port from the same range, and sslPort reports that port, so the connection
      * strings Azure tooling builds ({@code host:sslPort,password=...,ssl=True}) connect.</p>
      */
-    public void startCache(RedisCache cache) {
+    public void startCache(RedisCache cache, CloudProfile cloud) {
         EmulatorConfig.RedisConfig redisConfig = config.services().redis();
         boolean tlsEnabled = redisConfig.tlsEnabled();
         String image = redisConfig.defaultImage();
         String containerName = containerName(cache);
+        Optional<String> azureHostName = azureHostName(cache, cloud, ContainerStorageHelper.namespaceDnsLabel(config));
 
         LOG.infov("Starting Redis container for cache: {0} using image {1}", cache.getName(), image);
 
-        SidecarCertificates.ServerCertificate tls = tlsEnabled ? certificates.issue(tlsHosts(containerName)) : null;
+        SidecarCertificates.ServerCertificate tls = tlsEnabled ? certificates.issue(tlsHosts(azureHostName)) : null;
 
         releaseHostPorts(cache.getContainerId());
         int hostPort = portAllocator.allocate(redisConfig.basePort(), redisConfig.maxPort());
@@ -112,6 +117,7 @@ public class RedisCacheManager {
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels("redis", cache.getName(),
                         cache.getSubscriptionId(), cache.getResourceGroup(), cache.getLocation()))
                 .withCmd(command(cache, redisConfig))
+                .withNetworkAlias(azureHostName.orElse(null))
                 .withPortBinding(REDIS_PORT, hostPort);
         if (tlsEnabled) {
             specBuilder.withPortBinding(REDIS_TLS_PORT, tlsHostPort);
@@ -141,7 +147,11 @@ public class RedisCacheManager {
             cache.setInternalEndpoint(ep != null ? ep.host() + ":" + ep.port()
                     : lifecycleManager.daemonHost() + ":" + hostPort);
         } else if (containerDetector.isRunningInContainer()) {
-            cache.setHostName(containerName);
+            // Azure's own host name, which the container answers to as a network alias. Docker's
+            // default bridge resolves neither that nor the container name, so it keeps the container
+            // name, as before, and so does a cloud whose Redis suffix the catalog does not settle.
+            cache.setHostName(ContainerLifecycleManager.resolvesContainerNames(spec.networkMode())
+                    ? azureHostName.orElse(containerName) : containerName);
             cache.setPort(REDIS_PORT);
             if (tlsEnabled) {
                 cache.setSslPort(REDIS_TLS_PORT);
@@ -212,13 +222,19 @@ public class RedisCacheManager {
     }
 
     /**
-     * Host names a TLS client may address the cache by besides the loopback names: its container
-     * name and, in published endpoint mode, the Docker daemon's address.
+     * The certificate names besides the loopback ones: Azure's host name, never the container name,
+     * because the emulator CA's name constraints admit each cloud's Redis suffix but no single-label
+     * name made up at run time, and a client that enforces them rejects a certificate with any name
+     * outside, even one connecting through localhost. A cloud with no settled Redis suffix gets
+     * the loopback names alone.
      */
-    private List<String> tlsHosts(String containerName) {
-        return lifecycleManager.publishedEndpoints()
-                ? List.of(containerName, lifecycleManager.daemonAddress())
-                : List.of(containerName);
+    private List<String> tlsHosts(Optional<String> azureHostName) {
+        List<String> hosts = new ArrayList<>();
+        azureHostName.ifPresent(hosts::add);
+        if (lifecycleManager.publishedEndpoints()) {
+            hosts.add(lifecycleManager.daemonAddress());
+        }
+        return hosts;
     }
 
     private void removeQuietly(String containerId) {
@@ -308,6 +324,19 @@ public class RedisCacheManager {
         if (ports != null) {
             ports.forEach(portAllocator::release);
         }
+    }
+
+    /**
+     * The host name Azure gives the cache in its cloud, {@code <name>.redis.cache.windows.net} in the public cloud.
+     * Cache names are unique per cloud, so the suffix keeps two clouds' caches of one name apart on a shared Docker
+     * network. A resource namespace goes between the name and the suffix ({@code <name>.<namespace>.redis.cache
+     * .windows.net}), so two emulator instances sharing that network never alias one name either; the CA's
+     * constraints cover it as a subdomain. Empty for a cloud whose Redis suffix the catalog does not settle.
+     */
+    static Optional<String> azureHostName(RedisCache cache, CloudProfile cloud, String namespaceLabel) {
+        String namespace = namespaceLabel.isEmpty() ? "" : namespaceLabel + ".";
+        return cloud.suffix(CloudSuffix.REDIS)
+                .map(suffix -> cache.getName().toLowerCase(Locale.ROOT) + "." + namespace + suffix);
     }
 
     String containerName(RedisCache cache) {

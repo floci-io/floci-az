@@ -73,36 +73,37 @@ class SidecarCertificatesTest {
     }
 
     @Test
-    void withRedisTlsOffTheEmulatorCaKeyIsNotWritten() {
+    void theEmulatorCaKeyIsKeptWithRedisTlsOff() {
         enableSelfSignedTls();
 
         assertTrue(Files.exists(tempDir.resolve("tls/floci-az-selfsigned-ca.crt")));
-        assertFalse(Files.exists(tempDir.resolve("tls/floci-az-selfsigned-ca.key")),
-                "only a sidecar serving TLS needs the CA key on disk");
+        assertTrue(Files.exists(tempDir.resolve("tls/floci-az-selfsigned-ca.key")),
+                "the key lets the CA issue later server certificates, so it is kept whatever Redis TLS says");
     }
 
     @Test
     void withSelfSignedTlsTheLeafChainsToTheCaTheHttpsEndpointServes() throws Exception {
-        System.setProperty("floci-az.services.redis.tls-enabled", "true");
         enableSelfSignedTls();
-        Path caKey = tempDir.resolve("tls/floci-az-selfsigned-ca.key");
-        assertTrue(Files.exists(caKey), "the emulator CA key is kept for sidecar leaves");
 
-        SidecarCertificates.ServerCertificate issued =
-                new SidecarCertificates(config, new CertificateGenerator()).issue(List.of("floci-az-redis-a"));
+        SidecarCertificates.ServerCertificate issued = new SidecarCertificates(config, new CertificateGenerator())
+                .issue(List.of("cache-a.redis.cache.windows.net"));
 
         String servedAnchor = TlsConfigSource.currentCertPem;
         assertEquals(servedAnchor, issued.caPem());
         X509Certificate leaf = chain(issued.chainPem()).getFirst();
         assertDoesNotThrow(() -> leaf.verify(single(servedAnchor).getPublicKey()));
-        assertTrue(sans(leaf).contains("floci-az-redis-a"));
+        assertTrue(sans(leaf).contains("cache-a.redis.cache.windows.net"));
         assertNotEquals(Files.readString(tempDir.resolve("tls/floci-az-selfsigned.key")), issued.privateKeyPem());
+        X509Certificate ca = single(servedAnchor);
+        for (String san : sans(leaf)) {
+            assertTrue(CertificateGenerator.permits(ca, san), "outside the CA's name constraints: " + san);
+        }
     }
 
     @Test
-    void withSelfSignedTlsButNoCaKeyTheEmulatorCertificateIsServedAsIs() throws Exception {
-        // Generated while Redis TLS was off, so the CA key was not kept.
+    void withACaFromAnOlderFlociAzWithoutItsKeyTheEmulatorCertificateIsServedAsIs() throws Exception {
         enableSelfSignedTls();
+        Files.delete(tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_CA_KEY_NAME));
 
         SidecarCertificates.ServerCertificate issued =
                 new SidecarCertificates(config, new CertificateGenerator()).issue(List.of("floci-az-redis-a"));
@@ -112,36 +113,25 @@ class SidecarCertificatesTest {
         assertEquals(TlsConfigSource.currentCertPem, issued.caPem());
     }
 
-    /**
-     * Redis TLS on, then a regeneration with it off (what a hostname change causes), then on again:
-     * the key of the replaced CA must not survive to sign leaves under the new one.
-     */
+    /** A hostname change reissues the server certificate under the same CA, so sidecar leaves still verify. */
     @Test
-    void aCaKeyFromAnEarlierRunIsRemovedWhenTheCertificateIsRegeneratedWithoutIt() throws Exception {
-        System.setProperty("floci-az.services.redis.tls-enabled", "true");
+    void aRegeneratedCertificateKeepsTheCaThatSidecarLeavesChainTo() throws Exception {
         enableSelfSignedTls();
-        Path caKey = tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_CA_KEY_NAME);
-        assertTrue(Files.exists(caKey));
+        String caBefore = TlsConfigSource.currentCertPem;
 
-        System.clearProperty("floci-az.services.redis.tls-enabled");
         Files.delete(tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_METADATA_NAME));
         new TlsConfigSource();
-        assertFalse(Files.exists(caKey), "the replaced CA's key must not stay next to the new CA");
+        SidecarCertificates.ServerCertificate issued = new SidecarCertificates(config, new CertificateGenerator())
+                .issue(List.of("cache-a.redis.cache.windows.net"));
 
-        System.setProperty("floci-az.services.redis.tls-enabled", "true");
-        new TlsConfigSource();
-        SidecarCertificates.ServerCertificate issued =
-                new SidecarCertificates(config, new CertificateGenerator()).issue(List.of("floci-az-redis-a"));
-
-        String servedAnchor = TlsConfigSource.currentCertPem;
-        assertEquals(servedAnchor, issued.caPem());
+        assertEquals(caBefore, TlsConfigSource.currentCertPem, "the CA clients trust must survive a reissue");
+        assertEquals(caBefore, issued.caPem());
         X509Certificate leaf = chain(issued.chainPem()).getFirst();
-        assertDoesNotThrow(() -> leaf.verify(single(servedAnchor).getPublicKey()));
+        assertDoesNotThrow(() -> leaf.verify(single(caBefore).getPublicKey()));
     }
 
     @Test
     void aCaKeyThatDoesNotBelongToTheCaIsNotUsedToSignLeaves() throws Exception {
-        System.setProperty("floci-az.services.redis.tls-enabled", "true");
         enableSelfSignedTls();
         CertificateGenerator generator = new CertificateGenerator();
         Files.writeString(tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_CA_KEY_NAME),
@@ -157,7 +147,6 @@ class SidecarCertificatesTest {
 
     @Test
     void theCaKeyIsReadableByItsOwnerOnly() throws Exception {
-        System.setProperty("floci-az.services.redis.tls-enabled", "true");
         enableSelfSignedTls();
         Path caKey = tempDir.resolve("tls/" + TlsConfigSource.SELF_SIGNED_CA_KEY_NAME);
         assumeTrue(Files.getFileStore(caKey).supportsFileAttributeView("posix"));

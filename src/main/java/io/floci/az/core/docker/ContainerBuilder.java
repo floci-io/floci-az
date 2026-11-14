@@ -128,6 +128,7 @@ public class ContainerBuilder {
         private String user;
         private final List<String> groupAdd = new ArrayList<>();
         private final List<String> dnsServers = new ArrayList<>();
+        private final List<String> networkAliases = new ArrayList<>();
 
         Builder(String image, EmulatorConfig config, DockerHostResolver dockerHostResolver,
                 EmbeddedDnsServer embeddedDnsServer,
@@ -397,6 +398,17 @@ public class ContainerBuilder {
          * so it can access group-owned resources without changing its primary uid/gid. Blank
          * ids are ignored.
          */
+        /**
+         * Adds a name the container answers to on its Docker network, besides its container name.
+         * Takes effect on a user-defined network only.
+         */
+        public Builder withNetworkAlias(String alias) {
+            if (alias != null && !alias.isBlank()) {
+                this.networkAliases.add(alias);
+            }
+            return this;
+        }
+
         public Builder withGroupAdd(String groupId) {
             if (groupId != null && !groupId.isBlank()) {
                 this.groupAdd.add(groupId);
@@ -438,7 +450,8 @@ public class ContainerBuilder {
                     List.copyOf(dnsServers),
                     workingDir,
                     user,
-                    List.copyOf(groupAdd)
+                    List.copyOf(groupAdd),
+                    List.copyOf(networkAliases)
             );
         }
     }

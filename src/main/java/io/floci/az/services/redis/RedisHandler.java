@@ -63,13 +63,14 @@ import java.util.function.Consumer;
  * </pre>
  *
  * <h2>Mocked mode</h2>
- * <p>When {@code floci-az.services.redis.mocked=true} (default), no Redis container is started.
+ * <p>When {@code floci-az.services.redis.mocked=true} (off by default), no Redis container is started.
  * Caches transition immediately to "Succeeded" with {@code hostName=localhost}.</p>
  *
  * <h2>Endpoint resolution</h2>
- * <p>{@code hostName} returns the actually-reachable host (localhost, or the container name when
- * floci-az itself runs in Docker), not the real {@code {name}.redis.cache.windows.net} FQDN, so
- * standard Redis clients can connect to the sidecar.</p>
+ * <p>{@code hostName} returns the actually-reachable host: localhost on the host, the Docker
+ * daemon's address in published mode, and inside Docker Azure's own
+ * {@code {name}.redis.cache.windows.net}, which the container answers to as a network alias on a
+ * user-defined network (the container name on the default bridge, which resolves neither).</p>
  */
 @ApplicationScoped
 public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndexSource, GlobalNameSource {
@@ -268,7 +269,7 @@ public class RedisHandler implements AzureServiceHandler, Resettable, StoreIndex
 
             if (!mocked && isNew) {
                 try {
-                    cacheManager.startCache(cache);
+                    cacheManager.startCache(cache, cloud(req));
                 } catch (Exception e) {
                     LOG.errorf(e, "Failed to start Redis container for cache %s", cacheName);
                     cache.setProvisioningState("Failed");

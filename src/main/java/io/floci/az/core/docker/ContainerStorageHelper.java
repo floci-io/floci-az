@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -57,6 +58,19 @@ public final class ContainerStorageHelper {
      */
     public static String resourceName(EmulatorConfig config, String service, String volumeId, String fallbackId) {
         return dockerName(config, service + "-" + (volumeId != null ? volumeId : fallbackId));
+    }
+
+    /**
+     * The configured resource namespace as one DNS label (lowercase letters, digits and hyphens, at most 63
+     * characters), or empty when none is set: what a sidecar's host name carries so that two emulator
+     * instances sharing a Docker network never answer to the same name.
+     */
+    public static String namespaceDnsLabel(EmulatorConfig config) {
+        String label = resourceNamespace(config).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]+", "-");
+        if (label.length() > 63) {
+            label = label.substring(0, 63);
+        }
+        return label.replaceAll("^-+|-+$", "");
     }
 
     /**

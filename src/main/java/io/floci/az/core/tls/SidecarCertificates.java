@@ -23,8 +23,8 @@ import java.util.Set;
  * <ul>
  *   <li>Emulator TLS on, self-signed: a leaf for the sidecar's host names, issued by the emulator
  *       CA, which is what {@code GET /_floci/tls-cert} serves.</li>
- *   <li>Emulator TLS on with a user-provided certificate, or a self-signed CA generated without its
- *       key (sidecar TLS was off then): the emulator's own certificate and key, as the HTTPS
+ *   <li>Emulator TLS on with a user-provided certificate, or a self-signed CA written by an older
+ *       floci-az, which did not keep its key: the emulator's own certificate and key, as the HTTPS
  *       endpoint serves them.</li>
  *   <li>Emulator TLS off: a leaf issued by a CA generated once per process and never written to
  *       disk. The caller ships the CA with the sidecar so clients can fetch it.</li>
@@ -63,9 +63,25 @@ public class SidecarCertificates {
         }
         Optional<CertificateGenerator.CertificateAuthority> emulatorAuthority = emulatorAuthority();
         if (emulatorAuthority.isPresent()) {
+            warnOutsideConstraints(emulatorAuthority.get(), sans);
             return fromGenerated(generator.issue(emulatorAuthority.get(), sans));
         }
         return emulatorCertificate();
+    }
+
+    /**
+     * A name outside the CA's constraints makes clients that enforce them (Go, OpenSSL, Apple) reject
+     * the whole certificate. The CA is replaced at the next start when the name is one floci-az knows
+     * about up front; a sidecar name that is not, is a bug worth seeing in the log.
+     */
+    private static void warnOutsideConstraints(CertificateGenerator.CertificateAuthority authority, List<String> sans) {
+        List<String> outside = sans.stream()
+                .filter(san -> !CertificateGenerator.permits(authority.certificate(), san))
+                .toList();
+        if (!outside.isEmpty()) {
+            LOG.warnv("TLS: the emulator CA may not issue for {0}; clients that enforce its name constraints "
+                    + "will reject this sidecar certificate", outside);
+        }
     }
 
     static List<String> sans(Collection<String> hosts) {
@@ -115,8 +131,8 @@ public class SidecarCertificates {
             return new ServerCertificate(chain, read(Path.of(config.tls().keyPath().orElseThrow())), chain);
         }
         Path dir = TlsConfigSource.selfSignedDir(config.storage().persistentPath());
-        LOG.infov("TLS: {0} has no CA key, so sidecars serve the emulator certificate as is; "
-                + "delete that directory to regenerate it with one", dir);
+        LOG.infov("TLS: {0} has no CA key (written by an older floci-az), so sidecars serve the emulator "
+                + "certificate as is until the CA is next replaced", dir);
         return new ServerCertificate(
                 read(dir.resolve(TlsConfigSource.SELF_SIGNED_CERT_NAME)),
                 read(dir.resolve(TlsConfigSource.SELF_SIGNED_KEY_NAME)),

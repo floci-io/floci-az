@@ -1,6 +1,8 @@
 package io.floci.az.services;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -41,6 +43,8 @@ import static org.mockito.Mockito.when;
 @DisplayName("Range-allocated sidecars release their host port")
 class SidecarPortReleaseTest {
 
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
+
     private static final int HOST_PORT = 6390;
     private static final int TLS_HOST_PORT = 6391;
 
@@ -70,7 +74,7 @@ class SidecarPortReleaseTest {
     void redisReleasesItsPortWhenTheStartFails() {
         when(lifecycleManager.createAndStart(any())).thenThrow(new RuntimeException("port is already allocated"));
 
-        assertThrows(RuntimeException.class, () -> redis().startCache(cache()));
+        assertThrows(RuntimeException.class, () -> redis().startCache(cache(), PUBLIC));
 
         verify(portAllocator).release(HOST_PORT);
         verify(portAllocator, times(1)).allocate(anyInt(), anyInt());
@@ -82,7 +86,7 @@ class SidecarPortReleaseTest {
         RedisCacheManager manager = redis();
         RedisCache cache = cache();
 
-        manager.startCache(cache);
+        manager.startCache(cache, PUBLIC);
         verify(portAllocator, never()).release(anyInt());
         manager.stopCache(cache);
 
@@ -96,7 +100,7 @@ class SidecarPortReleaseTest {
         when(lifecycleManager.create(any())).thenReturn("redis-container");
         when(lifecycleManager.startCreated(any(), any())).thenThrow(new RuntimeException("port is already allocated"));
 
-        assertThrows(RuntimeException.class, () -> redis().startCache(cache()));
+        assertThrows(RuntimeException.class, () -> redis().startCache(cache(), PUBLIC));
 
         verify(lifecycleManager).removeIfExists("redis-container");
         verify(portAllocator).release(HOST_PORT);
@@ -110,7 +114,7 @@ class SidecarPortReleaseTest {
                 .thenReturn(HOST_PORT)
                 .thenThrow(new IllegalStateException("No free port in range 6379-6399"));
 
-        assertThrows(IllegalStateException.class, () -> redis().startCache(cache()));
+        assertThrows(IllegalStateException.class, () -> redis().startCache(cache(), PUBLIC));
 
         verify(lifecycleManager, never()).create(any());
         verify(portAllocator).release(HOST_PORT);
@@ -124,7 +128,7 @@ class SidecarPortReleaseTest {
         RedisCacheManager manager = redis();
         RedisCache cache = cache();
 
-        manager.startCache(cache);
+        manager.startCache(cache, PUBLIC);
         verify(portAllocator, never()).release(anyInt());
         manager.stopCache(cache);
 

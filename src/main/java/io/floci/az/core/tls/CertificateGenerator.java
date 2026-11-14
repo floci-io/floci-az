@@ -1,6 +1,8 @@
 package io.floci.az.core.tls;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.DERIA5String;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -9,8 +11,10 @@ import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.GeneralSubtree;
 import org.bouncycastle.asn1.x509.KeyPurposeId;
 import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.asn1.x509.NameConstraints;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
@@ -35,10 +39,14 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
@@ -46,6 +54,9 @@ public class CertificateGenerator {
 
     private static final Logger LOG = Logger.getLogger(CertificateGenerator.class);
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    /** How long a leaf from {@link #issue} is valid; a CA must outlive it to issue one. */
+    public static final Duration LEAF_VALIDITY = Duration.ofDays(365);
 
     private static final Pattern IP_ADDRESS_PATTERN = Pattern.compile(
             "^\\[?([0-9a-fA-F:]+)]?$|^(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})$"
@@ -77,8 +88,30 @@ public class CertificateGenerator {
         return issue(generateAuthority(), sans);
     }
 
-    /** Generates a self-signed CA (CN=floci-az-ca, valid for ten years) that can issue leaves. */
+    /**
+     * The names a CA may issue leaves for, written into its critical name-constraints extension
+     * (RFC 5280 section 4.2.1.10): DNS subtrees (a name and every name under it) and IP ranges in
+     * CIDR form. A client that enforces them rejects a leaf with any name outside, so a leaked CA
+     * key cannot be turned against unrelated sites by a machine that trusts the CA.
+     */
+    public record PermittedNames(List<String> dnsSubtrees, List<String> ipRanges) {
+        public PermittedNames {
+            dnsSubtrees = List.copyOf(dnsSubtrees);
+            ipRanges = List.copyOf(ipRanges);
+        }
+    }
+
+    /** Generates an unconstrained CA (CN=floci-az-ca, valid for ten years) that can issue leaves. */
     public CertificateAuthority generateAuthority() {
+        return buildAuthority(null);
+    }
+
+    /** Generates a CA (CN=floci-az-ca, valid for ten years) that may issue leaves only for {@code permitted}. */
+    public CertificateAuthority generateAuthority(PermittedNames permitted) {
+        return buildAuthority(permitted);
+    }
+
+    private CertificateAuthority buildAuthority(PermittedNames permitted) {
         try {
             // Use the JDK's built-in RSA provider: BC's RSA JCA registration is
             // unreliable in GraalVM native image; BC is only needed for the X.509
@@ -98,6 +131,9 @@ public class CertificateGenerator {
                     new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
             caBuilder.addExtension(Extension.subjectKeyIdentifier, false,
                     extensionUtils.createSubjectKeyIdentifier(caKeyPair.getPublic()));
+            if (permitted != null) {
+                caBuilder.addExtension(Extension.nameConstraints, true, nameConstraints(permitted));
+            }
 
             ContentSigner caSigner = new JcaContentSignerBuilder("SHA512WithRSA")
                     .build(caKeyPair.getPrivate());
@@ -125,7 +161,7 @@ public class CertificateGenerator {
 
             JcaX509v3CertificateBuilder leafBuilder = new JcaX509v3CertificateBuilder(
                     caName, leafSerial,
-                    Date.from(now), Date.from(now.plus(365, ChronoUnit.DAYS)),
+                    Date.from(now), Date.from(now.plus(LEAF_VALIDITY)),
                     leafName, leafKeyPair.getPublic());
 
             GeneralName[] sanEntries = sans.stream()
@@ -246,6 +282,151 @@ public class CertificateGenerator {
             LOG.warnv("TLS: skipping invalid SAN entry '{0}': {1}", san, e.getMessage());
             return null;
         }
+    }
+
+    private static NameConstraints nameConstraints(PermittedNames permitted) throws Exception {
+        List<GeneralSubtree> subtrees = new ArrayList<>();
+        for (String dns : permitted.dnsSubtrees()) {
+            subtrees.add(new GeneralSubtree(new GeneralName(GeneralName.dNSName, dns)));
+        }
+        for (String range : permitted.ipRanges()) {
+            subtrees.add(new GeneralSubtree(new GeneralName(GeneralName.iPAddress,
+                    new DEROctetString(addressAndMask(range)))));
+        }
+        return new NameConstraints(subtrees.toArray(GeneralSubtree[]::new), null);
+    }
+
+    /** {@code 10.0.0.0/8} as the address bytes followed by the mask bytes, the iPAddress subtree encoding. */
+    static byte[] addressAndMask(String cidr) throws Exception {
+        int slash = cidr.indexOf('/');
+        if (slash < 0) {
+            throw new IllegalArgumentException("IP range without a prefix length: " + cidr);
+        }
+        byte[] address = InetAddress.getByName(cidr.substring(0, slash)).getAddress();
+        int prefix = Integer.parseInt(cidr.substring(slash + 1));
+        if (prefix < 0 || prefix > address.length * 8) {
+            throw new IllegalArgumentException("IP range prefix out of bounds: " + cidr);
+        }
+        byte[] encoded = Arrays.copyOf(address, address.length * 2);
+        for (int bit = 0; bit < prefix; bit++) {
+            encoded[address.length + bit / 8] |= (byte) (0x80 >>> (bit % 8));
+        }
+        return encoded;
+    }
+
+    /** Whether {@code ca} carries a name-constraints extension. */
+    public static boolean hasNameConstraints(X509Certificate ca) {
+        return ca.getExtensionValue(Extension.nameConstraints.getId()) != null;
+    }
+
+    /**
+     * The permitted subtrees of {@code ca} that {@code wanted} does not list, so a CA kept from an earlier
+     * configuration can be told apart from one constrained to the names floci-az serves now. Empty for a CA
+     * without name constraints.
+     */
+    public static List<String> subtreesBeyond(X509Certificate ca, PermittedNames wanted) {
+        byte[] extension = ca.getExtensionValue(Extension.nameConstraints.getId());
+        if (extension == null) {
+            return List.of();
+        }
+        GeneralSubtree[] permitted = NameConstraints.getInstance(
+                ASN1OctetString.getInstance(extension).getOctets()).getPermittedSubtrees();
+        if (permitted == null) {
+            return List.of();
+        }
+        List<GeneralName> allowed;
+        try {
+            allowed = Arrays.stream(nameConstraints(wanted).getPermittedSubtrees()).map(GeneralSubtree::getBase).toList();
+        } catch (Exception e) {
+            throw new IllegalStateException("TLS: cannot encode the permitted names " + wanted, e);
+        }
+        return Arrays.stream(permitted)
+                .map(GeneralSubtree::getBase)
+                .filter(base -> !allowed.contains(base))
+                .map(CertificateGenerator::describe)
+                .toList();
+    }
+
+    private static String describe(GeneralName base) {
+        return base.getTagNo() == GeneralName.dNSName
+                ? DERIA5String.getInstance(base.getName()).getString()
+                : base.toString();
+    }
+
+    /** An IP literal without the brackets a URL host wraps an IPv6 address in; anything else unchanged. */
+    public static String bareAddress(String host) {
+        return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+    }
+
+    /** Whether the IP literal {@code ip} falls inside the CIDR range {@code cidr}; false when either does not parse. */
+    public static boolean ipInRange(String ip, String cidr) {
+        try {
+            return within(InetAddress.getByName(bareAddress(ip)).getAddress(), addressAndMask(cidr));
+        } catch (Exception e) {
+            LOG.debugv("TLS: cannot place {0} in {1}: {2}", ip, cidr, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Whether a leaf issued by {@code ca} may carry {@code san}: always for a CA without name
+     * constraints, or for a name type the constraints leave open (RFC 5280: only the types listed
+     * are constrained); otherwise when the name falls inside one of the permitted subtrees.
+     */
+    public static boolean permits(X509Certificate ca, String san) {
+        byte[] extension = ca.getExtensionValue(Extension.nameConstraints.getId());
+        if (extension == null || san == null || san.isBlank()) {
+            return true;
+        }
+        GeneralSubtree[] permitted = NameConstraints.getInstance(
+                ASN1OctetString.getInstance(extension).getOctets()).getPermittedSubtrees();
+        if (permitted == null) {
+            return true;
+        }
+        boolean ip = isIpAddress(san);
+        int type = ip ? GeneralName.iPAddress : GeneralName.dNSName;
+        List<GeneralName> bases = Arrays.stream(permitted)
+                .map(GeneralSubtree::getBase)
+                .filter(base -> base.getTagNo() == type)
+                .toList();
+        if (bases.isEmpty()) {
+            return true;
+        }
+        return ip ? bases.stream().anyMatch(base -> ipWithin(san, base))
+                : bases.stream().anyMatch(base -> dnsWithin(san, base));
+    }
+
+    private static boolean dnsWithin(String san, GeneralName base) {
+        String name = san.toLowerCase(Locale.ROOT);
+        if (name.startsWith("*.")) {
+            name = name.substring(2);
+        }
+        String subtree = DERIA5String.getInstance(base.getName()).getString().toLowerCase(Locale.ROOT);
+        return name.equals(subtree) || name.endsWith("." + subtree);
+    }
+
+    private static boolean ipWithin(String san, GeneralName base) {
+        try {
+            return within(InetAddress.getByName(bareAddress(san)).getAddress(),
+                    ASN1OctetString.getInstance(base.getName()).getOctets());
+        } catch (Exception e) {
+            LOG.debugv("TLS: {0} is not a usable IP address: {1}", san, e.getMessage());
+            return false;
+        }
+    }
+
+    /** {@code range} is address bytes then mask bytes; a range of the other address family never matches. */
+    private static boolean within(byte[] address, byte[] range) {
+        if (range.length != address.length * 2) {
+            return false;
+        }
+        for (int i = 0; i < address.length; i++) {
+            byte mask = range[address.length + i];
+            if ((address[i] & mask) != (range[i] & mask)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static boolean isIpAddress(String value) {

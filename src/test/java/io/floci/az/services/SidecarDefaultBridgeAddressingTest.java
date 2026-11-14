@@ -1,6 +1,8 @@
 package io.floci.az.services;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -34,6 +36,8 @@ import static org.mockito.Mockito.when;
  */
 @DisplayName("Sidecars on the default bridge are reached by container IP")
 class SidecarDefaultBridgeAddressingTest {
+
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
 
     private static final String SIDECAR_IP = "172.17.0.5";
     private static final int HOST_PORT = 6390;
@@ -80,11 +84,11 @@ class SidecarDefaultBridgeAddressingTest {
     }
 
     @Test
-    void redisOnAUserDefinedNetworkKeepsItsContainerName() {
+    void redisOnAUserDefinedNetworkIsProbedByContainerNameAndReportsAzuresHostName() {
         RedisCache cache = startRedis("app-net");
 
         assertEquals("floci-az-redis-abc123:6379", cache.getInternalEndpoint());
-        assertEquals("floci-az-redis-abc123", cache.getHostName());
+        assertEquals("cache.redis.cache.windows.net", cache.getHostName());
     }
 
     @Test
@@ -105,7 +109,7 @@ class SidecarDefaultBridgeAddressingTest {
         cache.setInstanceId("abc123");
         cache.setPrimaryKey("primary-key");
         new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator,
-                certificates(), config).startCache(cache);
+                certificates(), config).startCache(cache, PUBLIC);
         return cache;
     }
 

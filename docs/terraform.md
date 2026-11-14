@@ -66,10 +66,21 @@ Then add it to the trust store of the OS that runs the provider:
 
 The startup log prints the same URL (`TLS: on, self-signed. Clients must trust the CA at ...`).
 
-**The CA can change.** floci-az keeps it under `tls/` in the data directory, but generates a new
-one when that directory is not persisted (the `./data:/app/data` volume above) or when the
-hostname configuration (`FLOCI_AZ_HOSTNAME`, `FLOCI_AZ_BASE_URL`) changes. After either, download
-and trust it again. On macOS, remove the old one first so the Keychain does not keep both:
+**Trust it once.** floci-az keeps the CA and its key under `tls/` in the data directory and
+issues every later server certificate from it: when the certificate nears expiry, or after a
+hostname change (`FLOCI_AZ_HOSTNAME`, `FLOCI_AZ_BASE_URL`) to a name the CA covers, the CA you
+trusted stays valid. The CA
+carries name constraints, so it can only vouch for the names floci-az serves (`localhost`,
+`*.vault.azure.net`, `*.azurecr.io`, each cloud's Redis suffix such as `*.redis.cache.windows.net`,
+private and loopback addresses,
+and your configured hostnames), not for any other site, even if its key leaks.
+
+floci-az generates a new CA, and logs a `WARN` saying so, in three cases: the data directory is not
+persisted (the `./data:/app/data` volume above), a new hostname falls outside the existing CA's
+constraints, or a name the CA covers is no longer served (a hostname you removed, or
+`FLOCI_AZ_TLS_PUBLIC_HOSTS` turned off), so the CA you trust never vouches for more than floci-az
+answers for. Download and trust it again then. On macOS, remove the old one first so the
+Keychain does not keep both:
 `sudo security delete-certificate -c floci-az-ca /Library/Keychains/System.keychain`.
 
 ## 3: Configure the provider
@@ -162,8 +173,8 @@ docker run --rm -it --network <floci-az network> \
 
 From inside that network the provider reaches floci-az by its service name, so set
 `metadata_host = "floci-az:4577"` and start floci-az with `FLOCI_AZ_HOSTNAME=floci-az`, which adds
-that name to the certificate. Download the CA after that restart, since the hostname change
-generates a new one.
+that name to the certificate. Set it before you trust the CA: a name added later falls outside the
+CA's constraints and makes floci-az generate a new one.
 
 ---
 
