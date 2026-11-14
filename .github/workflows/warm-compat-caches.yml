@@ -72,6 +72,7 @@ jobs:
           - compat-terraform
           - compat-opentofu
           - compat-azcli
+          - compat-azd
 
     steps:
       # SHA-pinned rather than tag-pinned: this workflow runs on main and writes the

@@ -252,6 +252,7 @@ compatibility-tests/
   compat-terraform/     : hashicorp/azurerm Terraform provider (BATS)
   compat-opentofu/      : OpenTofu with the azurerm provider (BATS)
   compat-azcli/         : real `az` CLI against a custom registered cloud (BATS)
+  compat-azd/           : real `azd` against Azure's public hostnames, resolved to floci-az (BATS)
 ```
 
 Guidelines:
@@ -299,8 +300,8 @@ from the 6th `COMPAT_SESSION` argument in the Makefile and `emulator_env` in the
 miss, because a var set only there does not appear in any `SUITE_ENV_*` variable.
 
 **One exception on the emulator axis: `compat-docker`.** It starts a single shared emulator with
-`JAVA_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5` and
-`FLOCI_AZ_SERVICES_AKS_MOCKED=true`) and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
+`JAVA_EMULATOR_ENV` and `AZD_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5`,
+`FLOCI_AZ_SERVICES_AKS_MOCKED=true` and `FLOCI_AZ_TLS_PUBLIC_HOSTS=true`) and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
 than under their own `test-*-compat` targets or in CI, where they get `SERVICEBUS_EMULATOR_ENV` alone.
 The table below is the per-suite contract that CI and the individual targets honour; `compat-docker` is
 a convenience runner that deliberately shares one emulator, so a Service Bus timing behaviour that only
@@ -338,6 +339,7 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `compat-azd` | `-e FLOCI_AZ_TLS_PUBLIC_HOSTS=true` (`AZD_EMULATOR_ENV`) | ✓ |
 | every suite, parity legs only | `-e FLOCI_AZ_PARITY=azure` (`PARITY_EMULATOR_ENV`, from `PARITY=azure`) | ✓ (`matrix.parity`, scheduled and manual runs only) |
 
 The parity legs run every suite against an emulator started at `floci-az.parity=azure`. In CI

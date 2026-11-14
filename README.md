@@ -672,6 +672,7 @@ The [`compatibility-tests`](./compatibility-tests/) directory validates Floci AZ
 | `compat-terraform`  | Terraform       | `azurerm` provider apply/destroy (resource group, storage, key vault, VNet, VM, Redis, ACR) |
 | `compat-opentofu`   | OpenTofu        | Same `azurerm` suite via `tofu`, plus PostgreSQL Flexible Server (server + database) |
 | `compat-azcli` ‡    | Azure CLI       | `az` against a custom cloud with Entra service-principal login |
+| `compat-azd`        | azd             | `azd auth`, `azd provision` with Terraform and Bicep, `azd down` against Azure's public hostnames |
 
 † Built from source via vcpkg, so the image takes ~6 min cold (seconds if warm).
 
