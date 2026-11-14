@@ -25,6 +25,7 @@ setup() {
         while (( ${#payload} % 4 )); do payload+="="; done
         claims="$(base64 -d <<<"${payload}")"
         assert_equal "$(jq -r .tid <<<"${claims}")" "${AZURE_TENANT_ID}"
-        [[ -n "$(jq -r .oid <<<"${claims}")" ]]
+        assert_equal "$(jq -r .aud <<<"${claims}")" "${scope%/.default}"
+        [[ -n "$(jq -r '.oid // empty' <<<"${claims}")" ]]
     done
 }
