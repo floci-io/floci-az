@@ -116,6 +116,11 @@ public class DirectoryReader {
                 }).orElse(false);
     }
 
+    /** The service principal whose object id is {@code id}. */
+    public Optional<DirectoryServicePrincipal> servicePrincipal(String tenantId, String id) {
+        return store.get(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, id).map(DirectoryReader::toServicePrincipal);
+    }
+
     public Optional<DirectoryServicePrincipal> servicePrincipalByAppId(String tenantId, String appId) {
         return store.findByAlternateKey(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, "appId", appId)
                 .map(DirectoryReader::toServicePrincipal);

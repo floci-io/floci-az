@@ -1,0 +1,9 @@
+{
+  "tenantId": "dddddddd-0000-0000-0000-000000000002",
+  "users": [{
+    "id": "dddddddd-1111-1111-1111-000000000001",
+    "userPrincipalName": "rbac-user@other.example",
+    "displayName": "RBAC other-tenant user",
+    "mail": "rbac-user@other.example"
+  }]
+}

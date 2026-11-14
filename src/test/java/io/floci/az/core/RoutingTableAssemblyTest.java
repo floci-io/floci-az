@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -83,12 +84,13 @@ class RoutingTableAssemblyTest {
      * A4's PROVIDER_ROUTES plus later services, minus {@code Microsoft.EventGrid}: A6 moved Event Grid's control plane out
      * of the filter's provider lane into the ArmHandler lane (it implements {@code ArmProviderService}),
      * so it is no longer a filter provider route. {@code Microsoft.Authorization} was added later for
-     * the guarded Azure Policy route, {@code Microsoft.ResourceGraph} for the tenant-rooted Resource Graph
+     * the guarded Azure Policy route and again for the guarded role (RBAC) route, {@code Microsoft.ResourceGraph} for the tenant-rooted Resource Graph
      * query endpoint, and {@code Microsoft.Management} for management groups. Every other entry is unchanged from A4.
      */
     private static final Set<Map.Entry<String, String>> GOLDEN_PROVIDER_ROUTES = Set.of(
         Map.entry("/providers/Microsoft.ManagedIdentity/", "managedidentity"),
         Map.entry("/providers/Microsoft.Authorization/", "policy"),
+        Map.entry("/providers/Microsoft.Authorization/", "rbac"),
         Map.entry("/providers/Microsoft.ResourceGraph/", "resourcegraph"),
         Map.entry("/providers/Microsoft.Management/", "managementgroups"),
         Map.entry("/providers/Microsoft.PolicyInsights/", "policyinsights"),
@@ -132,7 +134,8 @@ class RoutingTableAssemblyTest {
     /**
      * ARM resolves a provider namespace however a client spells it, so every provider route must claim the
      * lowercased and uppercased spellings of its namespace exactly as it claims the declared one. The type
-     * segment is a policy type for Microsoft.Authorization and deployments for Microsoft.Resources, whose guards
+     * segment is a policy or a role type for Microsoft.Authorization (Policy and RBAC share the namespace) and
+     * deployments for Microsoft.Resources, whose guards
      * claim only those.
      */
     @Test
@@ -141,7 +144,7 @@ class RoutingTableAssemblyTest {
             String marker = route.getKey();
             String namespace = marker.substring("/providers/".length(), marker.length() - 1);
             String type = switch (namespace) {
-                case "Microsoft.Authorization" -> "policyAssignments";
+                case "Microsoft.Authorization" -> "rbac".equals(route.getValue()) ? "roleAssignments" : "policyAssignments";
                 case "Microsoft.Resources" -> "deployments";
                 default -> "widgets";
             };
@@ -178,7 +181,7 @@ class RoutingTableAssemblyTest {
     }
 
     /**
-     * The guarded routes (Managed Identity, Azure Policy) must be tried before the broader providers: a
+     * The guarded routes (Managed Identity, Azure Policy, RBAC) must be tried before the broader providers: a
      * path may carry both a Compute/ContainerService segment and a trailing ManagedIdentity or
      * Authorization segment. Handler discovery order is arbitrary, so ArmRouter's guarded-first sort is
      * what guarantees this.
@@ -186,9 +189,9 @@ class RoutingTableAssemblyTest {
     @Test
     void guardedProvidersAreTriedBeforeUnguardedOnes() {
         List<Map.Entry<String, String>> providers = armRouter.providerRoutesInMatchOrder();
-        assertEquals(Set.of("managedidentity", "policy"),
-            Set.of(providers.get(0).getValue(), providers.get(1).getValue()),
-            "the guarded Managed Identity and Azure Policy routes must sort first, got " + providers);
+        assertEquals(Set.of("managedidentity", "policy", "rbac"),
+            Set.of(providers.get(0).getValue(), providers.get(1).getValue(), providers.get(2).getValue()),
+            "the guarded Managed Identity, Azure Policy and RBAC routes must sort first, got " + providers);
     }
 
     /**
@@ -241,6 +244,20 @@ class RoutingTableAssemblyTest {
         ArmRouter.rejectDuplicateProviders(List.of(
             new ArmRouter.ResolvedProvider("/providers/Microsoft.Cache/", "redis", always),
             new ArmRouter.ResolvedProvider("/providers/Microsoft.Sql/", "sql", always)));
+    }
+
+    /** Guarded routes may share a namespace, each claiming its own types; an unguarded one beside them may not. */
+    @Test
+    void onlyGuardedRoutesMayShareANamespace() {
+        Predicate<String> policyTypes = path -> path.contains("/policy");
+        Predicate<String> roleTypes = path -> path.contains("/role");
+        ArmRouter.rejectDuplicateProviders(List.of(
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Authorization/", "policy", policyTypes),
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Authorization/", "rbac", roleTypes)));
+        Assertions.assertThrows(IllegalStateException.class, () -> ArmRouter.rejectDuplicateProviders(List.of(
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Authorization/", "policy", policyTypes),
+            new ArmRouter.ResolvedProvider("/providers/Microsoft.Authorization/", "other",
+                ServiceRoutes.ProviderRoute.ALWAYS))));
     }
 
     private static int indexOfSuffix(List<SuffixRoute> routes, String suffix) {

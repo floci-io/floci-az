@@ -147,11 +147,11 @@ class ManagedIdentityTest {
                 .when().put(BASE + "/scoped" + API)
                 .then().statusCode(201);
 
-        // A role assignment scoped to the identity is not a ManagedIdentity resource:
-        // deleting it must 404 harmlessly instead of deleting the identity itself.
+        // A role assignment scoped to the identity is not a ManagedIdentity resource: deleting one that does
+        // not exist is RBAC's 204 (RoleAssignments_Delete) and must not delete the identity itself.
         given().when().delete(BASE + "/scoped/providers/Microsoft.Authorization/roleAssignments/"
                         + "22222222-2222-2222-2222-222222222222?api-version=2022-04-01")
-                .then().statusCode(404);
+                .then().statusCode(204);
 
         given().when().get(BASE + "/scoped" + API)
                 .then().statusCode(200)

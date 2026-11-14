@@ -549,11 +549,18 @@ az-data-test:
 
 arm-data-sync:
 	$(PYTHON) tools/arm/gen_providers.py
+	$(PYTHON) tools/arm/gen_roles.py
 
 arm-data-check:
 	@$(PYTHON) tools/arm/gen_providers.py --check || { \
 		echo ""; \
 		echo "error: src/main/resources/azure/providers.json is out of date or malformed."; \
+		echo "       Run 'make arm-data-sync' with local/azure checked out and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/arm/gen_roles.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/azure/role-definitions.json is out of date or malformed."; \
 		echo "       Run 'make arm-data-sync' with local/azure checked out and commit the result."; \
 		exit 1; \
 	}

@@ -368,6 +368,7 @@ public interface EmulatorConfig {
         DeploymentsConfig      deployments();
         ContainerAppsConfig    containerApps();
         PolicyConfig           policy();
+        AuthorizationConfig    authorization();
         ResourceGraphConfig    resourceGraph();
         ManagementGroupsConfig managementGroups();
 
@@ -512,6 +513,15 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean insights();
+    }
+
+    /**
+     * Azure role-based access control under {@code Microsoft.Authorization}: Azure's built-in role definitions and
+     * the role assignments clients create. Assignments are stored and answered as Azure does; nothing enforces them.
+     */
+    interface AuthorizationConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     /**

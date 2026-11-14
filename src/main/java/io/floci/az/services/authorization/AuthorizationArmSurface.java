@@ -1,4 +1,4 @@
-package io.floci.az.services.policy;
+package io.floci.az.services.authorization;
 
 import io.floci.az.core.arm.ArmLane;
 import io.floci.az.core.arm.ArmResourceType;
@@ -12,9 +12,13 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
 import java.util.regex.Pattern;
 
-/** The ARM resource types {@link PolicyHandler} serves. */
+/**
+ * The ARM resource types of {@code Microsoft.Authorization}: the policy types {@code PolicyHandler} serves and the
+ * role types {@link RbacHandler} serves. The registry holds one surface per namespace, so both handlers declare
+ * their types here.
+ */
 @ApplicationScoped
-public class PolicyArmSurface implements ArmSurfaceProvider {
+public class AuthorizationArmSurface implements ArmSurfaceProvider {
 
     private static final String NAMESPACE = "Microsoft.Authorization";
 
@@ -30,6 +34,16 @@ public class PolicyArmSurface implements ArmSurfaceProvider {
         "The resource name '%s' is invalid: a policy resource name is 1 to 64 characters, none of <>%%&:\\?/, "
             + "and does not end with a space.");
 
+    /**
+     * A role assignment name is a GUID ({@code roleAssignmentName}: "It can be any valid GUID", 2022-04-01
+     * {@code authorization-RoleAssignmentsCalls.json}). The code Azure answers for any other name is not in the
+     * spec, the RBAC docs or the SDKs; {@code InvalidResourceName} is the gate's own.
+     */
+    static final NameRule ROLE_ASSIGNMENT_NAME = new NameRule(36, 36,
+        Pattern.compile("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),
+        "InvalidResourceName",
+        "The resource name '%s' is invalid: a role assignment name must be a GUID.");
+
     private static final List<ArmSurface> SURFACES = List.of(
         new ArmSurface(NAMESPACE, ArmLane.FILTER, List.of(
             new ArmResourceType(NAMESPACE, "policyAssignments", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL)
@@ -39,7 +53,10 @@ public class PolicyArmSurface implements ArmSurfaceProvider {
             new ArmResourceType(NAMESPACE, "policyExemptions", ArmScopeKind.EXTENSION, LocationPolicy.OPTIONAL)
                 .withName(POLICY_NAME),
             new ArmResourceType(NAMESPACE, "policySetDefinitions", ArmScopeKind.SUBSCRIPTION, LocationPolicy.NONE)
-                .withName(POLICY_NAME))));
+                .withName(POLICY_NAME),
+            new ArmResourceType(NAMESPACE, "roleAssignments", ArmScopeKind.EXTENSION, LocationPolicy.NONE)
+                .withName(ROLE_ASSIGNMENT_NAME),
+            new ArmResourceType(NAMESPACE, "roleDefinitions", ArmScopeKind.EXTENSION, LocationPolicy.NONE))));
 
     @Override
     public List<ArmSurface> armSurfaces() {
