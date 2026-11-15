@@ -2,6 +2,7 @@ package io.floci.az.core;
 
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.tls.TlsConfigSource;
+import io.floci.az.core.ui.ConsoleEnvironment;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -21,16 +22,18 @@ public class HealthController {
     private final EmulatorConfig config;
     private final Instance<ServiceHealth> serviceHealth;
     private final EmulatorReadiness readiness;
+    private final AzureServiceRegistry registry;
     // Resolved per instance, never in a static initializer: native image runs those at build
     // time, where FLOCI_AZ_VERSION is unset, and would bake "dev" into every release binary.
     private final String version;
 
     @Inject
     public HealthController(EmulatorConfig config, Instance<ServiceHealth> serviceHealth,
-                            EmulatorReadiness readiness) {
+                            EmulatorReadiness readiness, AzureServiceRegistry registry) {
         this.config = config;
         this.serviceHealth = serviceHealth;
         this.readiness = readiness;
+        this.registry = registry;
         this.version = resolveVersion();
     }
 
@@ -42,13 +45,30 @@ public class HealthController {
         return "dev";
     }
 
+    // A literal path, not a regex template: the /_floci/{any} catch-all in ControlPlaneController has more
+    // literal characters than any template, so it would outrank one.
     @GET
-    @Path("{path:(health|_floci/health)}")
+    @Path("_floci/health")
+    public Response flociHealth() {
+        return health();
+    }
+
+    @GET
+    @Path("health")
     public Response health() {
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("cloud", ConsoleEnvironment.CLOUD);
         body.put("version", version);
         body.put("edition", "floci-az-always-free");
+        body.put("services", services());
         return status(body);
+    }
+
+    /** The floci-loft 0022 health shape, as floci-aws serves it: {@code running} when enabled, else {@code available}. */
+    private Map<String, String> services() {
+        Map<String, String> services = new TreeMap<>();
+        registry.serviceEnablement().forEach((type, enabled) -> services.put(type, enabled ? "running" : "available"));
+        return services;
     }
 
     @GET

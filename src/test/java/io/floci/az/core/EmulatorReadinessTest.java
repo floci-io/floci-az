@@ -27,12 +27,27 @@ class EmulatorReadinessTest {
     }
 
     @Test
+    void startedStaysTrueAndShuttingDownTurnsTrueOnlyAfterAStartedEmulatorStops() {
+        EmulatorReadiness readiness = new EmulatorReadiness();
+        assertFalse(readiness.hasStarted());
+        assertFalse(readiness.isShuttingDown());
+
+        readiness.onStart(null);
+        assertTrue(readiness.hasStarted());
+        assertFalse(readiness.isShuttingDown());
+
+        readiness.onShutdown(null);
+        assertTrue(readiness.hasStarted());
+        assertTrue(readiness.isShuttingDown());
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void readyAnswers503BeforeStartupCompletesAnd200After() {
         EmulatorReadiness readiness = new EmulatorReadiness();
         Instance<ServiceHealth> noServiceHealth = mock(Instance.class);
         when(noServiceHealth.iterator()).thenAnswer(invocation -> Collections.emptyIterator());
-        HealthController controller = new HealthController(null, noServiceHealth, readiness);
+        HealthController controller = new HealthController(null, noServiceHealth, readiness, HealthControllerTest.registryWithNoHandlers());
 
         try (Response before = controller.ready()) {
             assertEquals(503, before.getStatus());

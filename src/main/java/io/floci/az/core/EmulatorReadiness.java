@@ -25,6 +25,7 @@ public class EmulatorReadiness {
     private static final Logger LOG = Logger.getLogger(EmulatorReadiness.class);
 
     private final AtomicBoolean ready = new AtomicBoolean(false);
+    private final AtomicBoolean started = new AtomicBoolean(false);
 
     void onStart(@Observes @Priority(Interceptor.Priority.PLATFORM_AFTER + 1000) StartupEvent ev) {
         markReady();
@@ -39,7 +40,18 @@ public class EmulatorReadiness {
         return ready.get();
     }
 
+    /** Whether startup has finished at least once; stays true after shutdown begins. */
+    public boolean hasStarted() {
+        return started.get();
+    }
+
+    /** Whether shutdown has begun after a completed startup. */
+    public boolean isShuttingDown() {
+        return started.get() && !ready.get();
+    }
+
     void markReady() {
+        started.set(true);
         ready.set(true);
     }
 

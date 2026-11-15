@@ -23,8 +23,12 @@ import java.util.Map;
  * <p>The console runs on its own published port, so the browser is redirected to it rather than proxied: the
  * redirect URL keeps the host the browser used for floci-az, swaps in the console's port, and points at the
  * console's Azure view.
+ *
+ * <p>Mounted at {@code /} with full method paths, like the other control-plane classes, so the routes share one
+ * tree with {@code ControlPlaneController}'s {@code /_floci/*} catch-all. A class at {@code _floci/ui} would win
+ * the class match for {@code /_floci/ui/<anything>} and, finding no method, answer the framework's HTML 404.
  */
-@Path("_floci/ui")
+@Path("/")
 public class UiController {
 
     private static final Logger LOG = Logger.getLogger(UiController.class);
@@ -40,6 +44,7 @@ public class UiController {
 
     /** The wait view: starts the console and polls until it can redirect to it. */
     @GET
+    @Path("_floci/ui")
     @Produces(MediaType.TEXT_HTML)
     public Response ui() {
         manager.ensureStartedAsync();
@@ -51,7 +56,7 @@ public class UiController {
      * console. The page picks its view from the browser's path, which stays {@code /}.
      */
     @GET
-    @Path("dashboard")
+    @Path("_floci/ui/dashboard")
     @Produces(MediaType.TEXT_HTML)
     public Response dashboard() {
         return html();
@@ -62,7 +67,7 @@ public class UiController {
     }
 
     @GET
-    @Path("status")
+    @Path("_floci/ui/status")
     @Produces(MediaType.APPLICATION_JSON)
     public Response status(@HeaderParam("Host") String host) {
         FlociUiManager.UiStatus status = manager.status();
