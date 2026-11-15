@@ -469,7 +469,8 @@ restarting floci-az clears it.
 
 **NoSQL engine**: activating this endpoint enables the same embedded SQL engine already powering
 `/{account}-cosmos`. The `/connect` endpoint returns `https://localhost:4577` as the connection URL
-(Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`).
+(Java SDK requires TLS; enable `FLOCI_AZ_TLS_ENABLED=true` and fetch the runtime cert from `GET /_floci/tls-cert`; see
+[Trust the certificate](../terraform.md#2-trust-the-certificate)).
 
 **Table engine**: supported operations: create/delete table · insert/get/replace/merge/delete entity ·
 OData `$filter` · `$top` · `$select`. OData operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`.

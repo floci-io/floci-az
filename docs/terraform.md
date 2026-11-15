@@ -31,16 +31,88 @@ A self-signed certificate is generated at startup and served at `GET /_floci/tls
 
 ## 2: Trust the certificate
 
-The provider validates the TLS chain, so the self-signed cert must be trusted by the machine
-running `tofu`/`terraform`:
+The provider validates the TLS chain, so every machine that runs `terraform`/`tofu` must trust
+floci-az's CA. Download it once (the port answers plain HTTP too):
 
 ```bash
 curl -sf http://localhost:4577/_floci/tls-cert -o floci-az.crt
-# Linux: copy into the system trust store, then refresh
-sudo cp floci-az.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
 ```
 
-(Adjust for your OS trust store; on a CI runner you typically install it the same way.)
+Then add it to the trust store of the OS that runs the provider:
+
+=== "macOS"
+
+    ```bash
+    sudo security add-trusted-cert -d -r trustRoot \
+      -k /Library/Keychains/System.keychain floci-az.crt
+    ```
+
+    On macOS the provider verifies certificates through the Keychain only: `SSL_CERT_FILE` and
+    `SSL_CERT_DIR` are ignored there.
+
+=== "Linux"
+
+    ```bash
+    # Debian / Ubuntu (other distributions: /etc/pki/ca-trust/source/anchors + update-ca-trust)
+    sudo cp floci-az.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+    ```
+
+=== "Windows"
+
+    ```powershell
+    # From an elevated prompt
+    certutil -addstore -f ROOT floci-az.crt
+    ```
+
+The startup log prints the same URL (`TLS: on, self-signed. Clients must trust the CA at ...`).
+
+**Trust it once.** floci-az keeps the CA and its key under `tls/` in the data directory and
+issues every later server certificate from it: when the certificate nears expiry, or after a
+hostname change (`FLOCI_AZ_HOSTNAME`, `FLOCI_AZ_BASE_URL`) to a name the CA covers, the CA you
+trusted stays valid. The CA
+carries name constraints, so it can only vouch for the names floci-az serves (`localhost`,
+`*.vault.azure.net`, `*.azurecr.io`, each cloud's Redis suffix such as `*.redis.cache.windows.net`,
+private and loopback addresses,
+and your configured hostnames), not for any other site, even if its key leaks.
+
+floci-az generates a new CA, and logs a `WARN` saying so, in three cases: the data directory is not
+persisted (the `./data:/app/data` volume above), a new hostname falls outside the existing CA's
+constraints, or a name the CA covers is no longer served (a hostname you removed, or
+`FLOCI_AZ_TLS_PUBLIC_HOSTS` turned off), so the CA you trust never vouches for more than floci-az
+answers for. Download and trust it again then. On macOS, remove the old one first so the
+Keychain does not keep both:
+`sudo security delete-certificate -c floci-az-ca /Library/Keychains/System.keychain`.
+
+### Use a CA you already trust (mkcert)
+
+If your machines already trust a local development CA, floci-az can issue its certificate from
+that CA instead, and there is nothing to download or trust. With [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+mkcert -install          # once per machine: creates the CA and adds it to the OS trust stores
+mkcert -CAROOT           # where rootCA.pem and rootCA-key.pem live
+```
+
+```yaml
+# docker-compose.yml
+services:
+  floci-az:
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+      FLOCI_AZ_TLS_CA_CERT_PATH: /mkcert/rootCA.pem
+      FLOCI_AZ_TLS_CA_KEY_PATH: /mkcert/rootCA-key.pem
+    volumes:
+      - ./data:/app/data
+      - "${MKCERT_CAROOT}:/mkcert:ro"   # MKCERT_CAROOT=$(mkcert -CAROOT) docker compose up
+```
+
+Any CA works the same way: the certificate and its PEM key (PKCS#1, PKCS#8 or SEC1; RSA, EC or
+Ed25519). floci-az issues a new server certificate from it at every start (Redis caches with TLS
+get theirs from it too), serves the CA at `GET /_floci/tls-cert`, and reads the key without
+copying it. It adds no name constraints, since the CA is yours: keep its key private, as mkcert
+advises. Startup fails, naming the problem, when only one of the two paths is set, a file is
+missing, the key does not belong to the certificate, or the certificate is not a CA.
+`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`, when set, take precedence over the CA paths.
 
 ## 3: Configure the provider
 
@@ -83,6 +155,58 @@ tofu destroy
 See the `compatibility-tests/compat-opentofu` directory in the repo for a complete, CI-verified
 example (resource group, storage, Key Vault, VNet, VM, Redis, ACR, PostgreSQL Flexible Server).
 
+## Data-plane hostnames
+
+Most resources talk only to the management endpoint (`localhost:4577`). A few also call a
+service's data plane at its real Azure hostname, on the standard port:
+
+| Resource | Calls | Port |
+|---|---|---|
+| `azurerm_key_vault` and its secrets, keys and certificates | `https://<vault>.vault.azure.net/` | 443 (HTTPS) |
+| `azurerm_storage_blob`, and `azurerm_storage_container` / `azurerm_storage_queue` when given `storage_account_name` | `http://<account>.blob.core.windows.net/`, `http://<account>.queue.core.windows.net/` | 80 (HTTP) |
+
+floci-az answers those hostnames on its own port, so two things make them work:
+
+1. **Resolve each name to floci-az.** `/etc/hosts` takes no wildcards, so list every vault and
+   account the configuration creates:
+
+    ```text
+    127.0.0.1  myvault.vault.azure.net  myaccount.blob.core.windows.net  myaccount.queue.core.windows.net
+    ```
+
+2. **Publish ports 80 and 443 to floci-az.** Both can go to the main port, which tells HTTP and
+   HTTPS apart:
+
+    ```yaml
+        ports:
+          - "4577:4577"
+          - "80:4577"
+          - "443:4577"
+    ```
+
+The self-signed certificate already covers `*.vault.azure.net`. The CI suites do the same with
+`/etc/hosts` entries and `socat` (`compatibility-tests/compat-terraform/run-bats-in-container.sh`).
+
+## Running Terraform in Docker
+
+To leave the host trust store alone, run Terraform in a container that trusts the CA. The
+`hashicorp/terraform` image ships `update-ca-certificates`, so mount the downloaded CA where it
+looks and refresh the bundle before running:
+
+```bash
+curl -sf http://localhost:4577/_floci/tls-cert -o floci-az.crt
+docker run --rm -it --network <floci-az network> \
+  -v "$PWD:/work" -w /work \
+  -v "$PWD/floci-az.crt:/usr/local/share/ca-certificates/floci-az.crt:ro" \
+  --entrypoint sh hashicorp/terraform:1.9.8 \
+  -c 'update-ca-certificates >/dev/null 2>&1 && terraform init && terraform apply'
+```
+
+From inside that network the provider reaches floci-az by its service name, so set
+`metadata_host = "floci-az:4577"` and start floci-az with `FLOCI_AZ_HOSTNAME=floci-az`, which adds
+that name to the certificate. Set it before you trust the CA: a name added later falls outside the
+CA's constraints and makes floci-az generate a new one.
+
 ---
 
 ## Troubleshooting
@@ -99,8 +223,22 @@ Configuring cloud environment from Metadata Service at localhost:4577
 
 **`x509: certificate signed by unknown authority`**
 
-→ TLS is enabled but the self-signed certificate is not trusted on the machine running the
-provider. Re-do step 2, or point `SSL_CERT_FILE` at the downloaded `floci-az.crt`.
+→ TLS is enabled but the machine running the provider does not trust floci-az's CA, or trusts an
+older one. Re-do step 2. On Linux you can instead point `SSL_CERT_FILE` at a bundle that holds the
+system roots plus `floci-az.crt` (`terraform init` still needs the public roots to download
+providers). On macOS `SSL_CERT_FILE` has no effect: use the Keychain.
+
+floci-az logs the same failure from its side, once a minute per client address, so the cause is
+visible even when the client's error is buried in a pipeline log:
+
+```
+WARN  TLS: a client at 172.18.0.3 rejected floci-az's certificate during the handshake (unknown_ca).
+      It must trust the CA served at http://localhost:4577/_floci/tls-cert, see ...
+```
+
+The reason in parentheses is the TLS alert the client sent (`unknown_ca`, `bad_certificate`,
+`certificate_expired`, ...). Go clients such as the provider, and Java, negotiate TLS 1.3, which
+encrypts the alert, so their line says `TLS 1.3 hides the alert` instead.
 
 **`GET /_floci/tls-cert` returns `"tlsEnabled": false`**
 

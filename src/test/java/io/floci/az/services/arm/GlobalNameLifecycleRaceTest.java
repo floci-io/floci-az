@@ -77,7 +77,7 @@ class GlobalNameLifecycleRaceTest {
             starting.countDown();
             release.await(10, TimeUnit.SECONDS);
             return null;
-        }).when(cacheManager).startCache(any());
+        }).when(cacheManager).startCache(any(), any());
 
         String cache = "/subscriptions/" + SUB + "/resourceGroups/" + RG
                 + "/providers/Microsoft.Cache/redis/lifecycle-redis?api-version=2023-08-01";
@@ -125,7 +125,7 @@ class GlobalNameLifecycleRaceTest {
             starting.countDown();
             release.await(10, TimeUnit.SECONDS);
             return null;
-        }).when(cacheManager).startCache(any());
+        }).when(cacheManager).startCache(any(), any());
 
         String cache = "/subscriptions/" + SUB + "/resourceGroups/" + RG
                 + "/providers/Microsoft.Cache/redis/updated-redis?api-version=2023-08-01";

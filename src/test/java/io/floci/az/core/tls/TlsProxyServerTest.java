@@ -2,22 +2,36 @@ package io.floci.az.core.tls;
 
 import io.floci.az.config.EmulatorConfig;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetServer;
+import io.vertx.core.net.NetServerOptions;
+import io.vertx.core.net.PemKeyCertOptions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
@@ -112,7 +126,92 @@ class TlsProxyServerTest {
         assertFalse(portAccepts(publicPort), "no proxy should listen when TLS is disabled");
     }
 
+    @Test
+    @Timeout(30)
+    void aClientRejectingTheCertificateUnderTls13IsReported() throws Exception {
+        CompletableFuture<TlsHandshakeObserver.Rejection> reported = proxyToTlsEcho();
+
+        assertThrows(SSLHandshakeException.class, () -> handshake(SSLContext.getDefault(), "TLSv1.3"));
+
+        TlsHandshakeObserver.Rejection rejection = reported.get(10, TimeUnit.SECONDS);
+        assertNull(rejection.alert(), "TLS 1.3 encrypts the alert");
+    }
+
+    @Test
+    @Timeout(30)
+    void aClientRejectingTheCertificateUnderTls12IsReportedWithTheAlert() throws Exception {
+        CompletableFuture<TlsHandshakeObserver.Rejection> reported = proxyToTlsEcho();
+
+        assertThrows(SSLHandshakeException.class, () -> handshake(SSLContext.getDefault(), "TLSv1.2"));
+
+        assertEquals("certificate_unknown", reported.get(10, TimeUnit.SECONDS).alert());
+    }
+
+    @Test
+    @Timeout(30)
+    void aClientThatTrustsTheCertificateIsNotReportedAndItsTrafficPassesUnchanged() throws Exception {
+        CompletableFuture<TlsHandshakeObserver.Rejection> reported = proxyToTlsEcho();
+        SSLContext trusting = trusting(tlsBackendCertificate.caPem());
+
+        for (String protocol : List.of("TLSv1.3", "TLSv1.2")) {
+            try (SSLSocket socket = handshake(trusting, protocol)) {
+                socket.getOutputStream().write("ping".getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().flush();
+                byte[] echoed = socket.getInputStream().readNBytes(4);
+                assertEquals("ping", new String(echoed, StandardCharsets.UTF_8), protocol);
+            }
+        }
+
+        assertThrows(TimeoutException.class, () -> reported.get(1, TimeUnit.SECONDS));
+    }
+
     // ---- helpers ----
+
+    private CertificateGenerator.GeneratedCertificate tlsBackendCertificate;
+    private int tlsProxyPort;
+
+    /** A TLS echo server behind the proxy; the future completes with the first rejection reported. */
+    private CompletableFuture<TlsHandshakeObserver.Rejection> proxyToTlsEcho() throws Exception {
+        tlsBackendCertificate = new CertificateGenerator().generateCertificate(List.of("localhost", "127.0.0.1"));
+        int httpsBe = freePort();
+        httpsBackend = vertx.createNetServer(new NetServerOptions().setSsl(true).setKeyCertOptions(new PemKeyCertOptions()
+                .setCertValue(Buffer.buffer(tlsBackendCertificate.chainPem()))
+                .setKeyValue(Buffer.buffer(tlsBackendCertificate.privateKeyPem()))));
+        httpsBackend.connectHandler(sock -> sock.handler(sock::write));
+        httpsBackend.listen(httpsBe, "127.0.0.1").toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        CompletableFuture<TlsHandshakeObserver.Rejection> reported = new CompletableFuture<>();
+        tlsProxyPort = freePort();
+        proxy = new TlsProxyServer(vertx, configWith(true, tlsProxyPort, 0), freePort(), httpsBe,
+                (address, rejection) -> reported.complete(rejection));
+        awaitListening(tlsProxyPort);
+        return reported;
+    }
+
+    private SSLSocket handshake(SSLContext context, String protocol) throws IOException {
+        SSLSocket socket = (SSLSocket) context.getSocketFactory().createSocket("127.0.0.1", tlsProxyPort);
+        socket.setEnabledProtocols(new String[] {protocol});
+        socket.setSoTimeout(5_000);
+        try {
+            socket.startHandshake();
+        } catch (IOException e) {
+            socket.close();
+            throw e;
+        }
+        return socket;
+    }
+
+    private static SSLContext trusting(String caPem) throws Exception {
+        KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
+        store.load(null, null);
+        store.setCertificateEntry("floci-az", CertificateFactory.getInstance("X.509")
+                .generateCertificate(new ByteArrayInputStream(caPem.getBytes(StandardCharsets.UTF_8))));
+        TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        factory.init(store);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, factory.getTrustManagers(), null);
+        return context;
+    }
 
     private NetServer startMarkerBackend(int port, String marker) throws Exception {
         NetServer server = vertx.createNetServer();

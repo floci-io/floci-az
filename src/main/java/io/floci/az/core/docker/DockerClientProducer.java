@@ -60,7 +60,7 @@ public class DockerClientProducer {
      *
      * Both the configured value and the env var are normalized to ensure a valid URI scheme.
      */
-    static String resolveEffectiveDockerHost(String configuredHost, String dockerHostEnv) {
+    public static String resolveEffectiveDockerHost(String configuredHost, String dockerHostEnv) {
         String normalizedEnvHost = normalizeDockerHost(dockerHostEnv);
         if ("unix:///var/run/docker.sock".equals(configuredHost)
                 && normalizedEnvHost != null && !normalizedEnvHost.isBlank()) {

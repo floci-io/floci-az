@@ -31,6 +31,8 @@ import java.util.Map;
  * @param workingDir Working directory inside the container (overrides image WORKDIR)
  * @param user User the container process runs as, formatted "uid[:gid]" (null = image USER)
  * @param groupAdd Supplementary group IDs added to the container process
+ * @param networkAliases Extra names the container answers to on {@code networkMode}, when that is a
+ *        user-defined network (the daemon refuses aliases on a built-in one, so none are sent there)
  */
 public record ContainerSpec(
         String image,
@@ -52,8 +54,20 @@ public record ContainerSpec(
         List<String> dnsServers,
         String workingDir,
         String user,
-        List<String> groupAdd
+        List<String> groupAdd,
+        List<String> networkAliases
 ) {
+    /** A spec without network aliases, for callers that predate them. */
+    public ContainerSpec(String image, String name, List<String> env, List<String> cmd, List<String> entrypoint,
+                         Long memoryBytes, Map<Integer, Integer> portBindings, List<Integer> exposedPorts,
+                         String networkMode, List<Mount> mounts, List<Bind> binds, List<String> extraHosts,
+                         Map<String, String> labels, LogConfig logConfig, boolean privileged, String cgroupnsMode,
+                         List<String> dnsServers, String workingDir, String user, List<String> groupAdd) {
+        this(image, name, env, cmd, entrypoint, memoryBytes, portBindings, exposedPorts, networkMode, mounts, binds,
+                extraHosts, labels, logConfig, privileged, cgroupnsMode, dnsServers, workingDir, user, groupAdd,
+                List.of());
+    }
+
     /**
      * Creates a minimal spec with just the image name.
      * All other fields will be null or empty collections.
@@ -61,7 +75,7 @@ public record ContainerSpec(
     public ContainerSpec(String image) {
         this(image, null, List.of(), null, null, null, Map.of(), List.of(), null,
                 List.of(), List.of(), List.of(), Map.of(), null, false, null, List.of(),
-                null, null, List.of());
+                null, null, List.of(), List.of());
     }
 
     /**

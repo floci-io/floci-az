@@ -1,6 +1,8 @@
 package io.floci.az.services.redis;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -37,9 +39,12 @@ import static org.mockito.Mockito.when;
 @DisplayName("Redis caches with TLS enabled serve TLS on the reported SSL port")
 class RedisCacheManagerTlsTest {
 
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
+
     private static final int HOST_PORT = 6390;
     private static final int TLS_HOST_PORT = 6391;
     private static final String CONTAINER_NAME = "floci-az-redis-abc123";
+    private static final String AZURE_HOST_NAME = "cache.redis.cache.windows.net";
     private static final SidecarCertificates.ServerCertificate ISSUED =
             new SidecarCertificates.ServerCertificate("chain-pem", "key-pem", "ca-pem");
 
@@ -105,7 +110,7 @@ class RedisCacheManagerTlsTest {
         assertEquals(TLS_HOST_PORT, cache.getSslPort());
         verify(builder).withPortBinding(6379, HOST_PORT);
         verify(builder).withPortBinding(6380, TLS_HOST_PORT);
-        verify(certificates).issue(List.of(CONTAINER_NAME));
+        verify(certificates).issue(List.of(AZURE_HOST_NAME));
     }
 
     @Test
@@ -114,9 +119,23 @@ class RedisCacheManagerTlsTest {
 
         RedisCache cache = start();
 
-        assertEquals(CONTAINER_NAME, cache.getHostName());
+        assertEquals(AZURE_HOST_NAME, cache.getHostName());
         assertEquals(6379, cache.getPort());
         assertEquals(6380, cache.getSslPort());
+        verify(builder).withNetworkAlias(AZURE_HOST_NAME);
+    }
+
+    /**
+     * The emulator CA's name constraints admit redis.cache.windows.net but no container name, so a
+     * certificate carrying one would be rejected whole by Go, OpenSSL and Apple clients.
+     */
+    @Test
+    void theCertificateNeverNamesTheContainer() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+
+        start();
+
+        verify(certificates).issue(List.of(AZURE_HOST_NAME));
     }
 
     @Test
@@ -129,7 +148,7 @@ class RedisCacheManagerTlsTest {
         assertEquals("10.0.0.7", cache.getHostName());
         assertEquals(HOST_PORT, cache.getPort());
         assertEquals(TLS_HOST_PORT, cache.getSslPort());
-        verify(certificates).issue(List.of(CONTAINER_NAME, "10.0.0.7"));
+        verify(certificates).issue(List.of(AZURE_HOST_NAME, "10.0.0.7"));
     }
 
     @Test
@@ -144,10 +163,28 @@ class RedisCacheManagerTlsTest {
         order.verify(lifecycleManager).startCreated(eq("redis-container"), any());
     }
 
+    /**
+     * A cloud whose Redis suffix the catalog does not record has no Azure name to put in the certificate, and
+     * the container name falls outside the CA's constraints, so the certificate carries the loopback names alone.
+     */
+    @Test
+    void aCloudWithNoSettledRedisSuffixGetsALoopbackOnlyCertificate() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+
+        RedisCache cache = start(CloudCatalog.forName("AzureChinaCloud").orElseThrow());
+
+        verify(certificates).issue(List.of());
+        assertEquals(CONTAINER_NAME, cache.getHostName());
+    }
+
     private RedisCache start() {
+        return start(PUBLIC);
+    }
+
+    private RedisCache start(CloudProfile cloud) {
         RedisCache cache = cache();
         new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator,
-                certificates, config).startCache(cache);
+                certificates, config).startCache(cache, cloud);
         return cache;
     }
 

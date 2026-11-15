@@ -149,7 +149,8 @@ redis-cli -h localhost -p <sslPort> -a "<primaryKey>" --tls --cacert floci-az-re
 The SSL port is trusted the same way as floci-az's own HTTPS endpoint:
 
 - **floci-az TLS on** (`FLOCI_AZ_TLS_ENABLED=true`): the cache's certificate is issued by the CA
-  that `GET /_floci/tls-cert` serves, for the cache's `hostName`, its container name,
+  that `GET /_floci/tls-cert` serves, for the cache's Azure host name (`{name}.redis.cache.windows.net`,
+  or `{name}.redis.cache.usgovcloudapi.net` in `AzureUSGovernment`),
   `localhost`, `127.0.0.1` and `host.docker.internal`. Trust that CA once and both the HTTPS
   endpoint and every cache verify:
 
@@ -158,13 +159,14 @@ The SSL port is trusted the same way as floci-az's own HTTPS endpoint:
     ```
 
     Issuing those certificates needs the CA's private key, which floci-az keeps next to the CA
-    (`tls/floci-az-selfsigned-ca.key` under the persistent path, owner-only) only when it
-    generates the CA with `FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true` set in the environment.
-    With a certificate of your own (`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`), or a CA
-    generated without its key (Redis TLS was off then, or enabled only in `application.yml`), the
-    caches serve the emulator's own certificate and key unchanged; delete the `tls` directory under
-    the persistent path and restart with the environment variable set to regenerate the CA with
-    its key.
+    (`tls/floci-az-selfsigned-ca.key` under the persistent path, owner-only). The CA's name
+    constraints limit it to the names floci-az serves, which is why the certificate names Azure's
+    host name and not the container's. With a CA of your own (`FLOCI_AZ_TLS_CA_CERT_PATH` and
+    `FLOCI_AZ_TLS_CA_KEY_PATH`, see [Use a CA you already trust](../terraform.md#use-a-ca-you-already-trust-mkcert)),
+    the cache certificates are issued from that CA instead. With a certificate of your own
+    (`FLOCI_AZ_TLS_CERT_PATH` and `FLOCI_AZ_TLS_KEY_PATH`) the caches serve it unchanged, and with a
+    CA written by an older floci-az, which kept no key, they serve the emulator's own certificate
+    until the CA is next replaced.
 
 - **floci-az TLS off** (the default): floci-az generates a CA in memory when it starts and issues
   each cache's certificate from it. Nothing is written to disk, and the CA changes on every
@@ -210,10 +212,17 @@ floci-az:
 
 ## Notes & limitations
 
-- **Endpoint resolution.** `hostName` returns the actually-reachable host: `localhost` natively,
-  or the container name when floci-az itself runs in Docker, not the real
-  `{name}.redis.cache.windows.net` FQDN, so standard Redis clients can connect to the sidecar.
-  `port` is the host port allocated from the range for the container's `6379` (the container
+- **Endpoint resolution.** `hostName` returns a host clients can actually reach: `localhost`
+  natively, the Docker daemon's address in published mode, and Azure's own host name in the cache's
+  cloud (`{name}.redis.cache.windows.net`, `{name}.redis.cache.usgovcloudapi.net` in
+  `AzureUSGovernment`) when floci-az itself runs in Docker on a user-defined network, where the
+  cache container answers to that name as a network alias. Cache names are unique per cloud, so
+  two clouds' caches of one name never share an alias. With `FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE`
+  set, the namespace goes between the name and the suffix (`{name}.{namespace}.redis.cache.windows.net`),
+  so two emulator instances sharing a Docker network never answer to the same name. On the default
+  bridge, which resolves no names, it stays the container name, and so it does in `AzureChinaCloud`,
+  whose Redis suffix the cloud catalog does not record yet; there the cache certificate names only
+  `localhost`, `127.0.0.1` and `host.docker.internal`. `port` is the host port allocated from the range for the container's `6379` (the container
   port itself when floci-az runs in Docker).
 - **SSL port only with TLS enabled.** By default `sslPort` (6380) is reported for API fidelity but
   nothing serves it: connect over the non-SSL port, or enable [TLS](#tls).

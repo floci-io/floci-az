@@ -93,6 +93,18 @@
   "allDeclaredFields": true
  },
  {
+  "name": "com.github.dockerjava.core.command.CreateContainerCmdImpl$NetworkingConfig",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "com.github.dockerjava.core.command.ConnectToNetworkCmdImpl",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
   "name": "com.github.dockerjava.core.command.ExecCreateCmdImpl",
   "allDeclaredConstructors": true,
   "allDeclaredMethods": true,

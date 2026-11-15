@@ -1,6 +1,8 @@
 package io.floci.az.services.redis;
 
 import io.floci.az.config.EmulatorConfig;
+import io.floci.az.core.cloud.CloudCatalog;
+import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.docker.ContainerBuilder;
 import io.floci.az.core.docker.ContainerDetector;
 import io.floci.az.core.docker.ContainerLifecycleManager;
@@ -37,6 +39,8 @@ import static org.mockito.Mockito.when;
  */
 @DisplayName("Redis caches without TLS enabled keep one port and the plain command line")
 class RedisCacheManagerDefaultTest {
+
+    private static final CloudProfile PUBLIC = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
 
     private static final int HOST_PORT = 6390;
     private static final String CONTAINER_NAME = "floci-az-redis-abc123";
@@ -112,15 +116,52 @@ class RedisCacheManagerDefaultTest {
 
         RedisCache cache = start();
 
-        assertEquals(CONTAINER_NAME, cache.getHostName());
+        assertEquals("cache.redis.cache.windows.net", cache.getHostName());
         assertEquals(6379, cache.getPort());
         assertEquals(6380, cache.getSslPort());
     }
 
+    @Test
+    void aGovernmentCacheIsNamedAndAliasedInItsOwnCloud() {
+        // Cache names are unique per cloud: a public-cloud cache of the same name must not share this alias.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+
+        RedisCache cache = start(CloudCatalog.forName("AzureUSGovernment").orElseThrow());
+
+        assertEquals("cache.redis.cache.usgovcloudapi.net", cache.getHostName());
+        verify(builder).withNetworkAlias("cache.redis.cache.usgovcloudapi.net");
+    }
+
+    @Test
+    void aResourceNamespaceKeepsTwoInstancesCachesOfOneNameApart() {
+        // Two emulator instances sharing a Docker network each create "cache"; the namespace keeps the aliases apart.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(config.docker().resourceNamespace()).thenReturn(Optional.of("Team_A"));
+
+        RedisCache cache = start();
+
+        assertEquals("cache.team-a.redis.cache.windows.net", cache.getHostName());
+        verify(builder).withNetworkAlias("cache.team-a.redis.cache.windows.net");
+    }
+
+    @Test
+    void aCloudWhoseRedisSuffixIsUnsettledKeepsTheContainerName() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+
+        RedisCache cache = start(CloudCatalog.forName("AzureChinaCloud").orElseThrow());
+
+        assertEquals(CONTAINER_NAME, cache.getHostName());
+        verify(builder).withNetworkAlias(null);
+    }
+
     private RedisCache start() {
+        return start(PUBLIC);
+    }
+
+    private RedisCache start(CloudProfile cloud) {
         RedisCache cache = cache();
         new RedisCacheManager(containerBuilder, lifecycleManager, containerDetector, portAllocator,
-                certificates, config).startCache(cache);
+                certificates, config).startCache(cache, cloud);
         return cache;
     }
 

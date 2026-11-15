@@ -3,10 +3,14 @@ package io.floci.az.core.tls;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.az.core.cloud.CloudCatalog;
 import io.floci.az.core.cloud.CloudProfile;
+import io.floci.az.core.cloud.CloudSuffix;
+import io.floci.az.core.docker.ContainerLifecycleManager;
+import io.floci.az.core.docker.DockerClientProducer;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -15,11 +19,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.Security;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -33,8 +43,17 @@ import java.util.Set;
  *
  * <p>When TLS is enabled with self-signed mode, a certificate is generated using
  * {@link CertificateGenerator} and persisted under {@code {storage.persistent-path}/tls/}
- * for reuse across restarts. Hostname changes (via {@code floci-az.hostname} or
- * {@code floci-az.base-url}) trigger automatic certificate regeneration.
+ * for reuse across restarts, next to the CA that issued it and that CA's key. Clients trust the
+ * CA, so the CA outlives the server certificate: a hostname change (via {@code floci-az.hostname}
+ * or {@code floci-az.base-url}) or an expiring certificate gets a new server certificate from the
+ * same CA. The CA carries name constraints, so its key can only sign for the names floci-az
+ * serves. It is replaced, and must be trusted again, only when it cannot issue the next server
+ * certificate: a new name falls outside its constraints, its key is missing or not its own, or it
+ * expires first.
+ *
+ * <p>With {@code floci-az.tls.ca-cert-path} and {@code ca-key-path} set, the server certificate is
+ * issued from that CA instead (mkcert's root, say), reissued at every start, and the CA itself is
+ * the trust anchor. Its key is only read, never copied, and no constraints are added to it.
  *
  * <p>Both HTTP and HTTPS are served on the same public port via a
  * {@link TlsProxyServer} that detects the protocol from the first byte of each
@@ -42,11 +61,23 @@ import java.util.Set;
  */
 public class TlsConfigSource implements ConfigSource {
 
+    /** The public cloud, whose hosts and data-plane suffixes the certificate names. */
+    private static final CloudProfile PUBLIC_PROFILE = CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD);
+
     /**
      * Azure's public-cloud hosts a client that cannot be pointed at a custom cloud calls, served when
      * {@code floci-az.tls.public-hosts} is on. floci-az routes these by path, so only the certificate and DNS need them.
      */
-    public static final List<String> PUBLIC_HOSTS = publicHosts(CloudCatalog.forNameOrPublic(CloudCatalog.PUBLIC_CLOUD));
+    public static final List<String> PUBLIC_HOSTS = publicHosts(PUBLIC_PROFILE);
+
+    /**
+     * The public cloud's DNS suffix for {@code suffix}, without a leading dot: the data-plane names the
+     * certificate carries and its CA may issue for. The bundled catalog settles every suffix asked for here.
+     */
+    private static String publicSuffix(CloudSuffix suffix) {
+        return PUBLIC_PROFILE.suffix(suffix).orElseThrow(() ->
+                new IllegalStateException("TLS: the cloud catalog names no " + suffix + " suffix for the public cloud"));
+    }
 
     /**
      * Whether {@code floci-az.tls.public-hosts} is on. Like every TLS setting it is read from a system property or the
@@ -74,7 +105,33 @@ public class TlsConfigSource implements ConfigSource {
     static final String SELF_SIGNED_CA_KEY_NAME   = "floci-az-selfsigned-ca.key";
     static final String SELF_SIGNED_KEY_NAME      = "floci-az-selfsigned.key";
     static final String SELF_SIGNED_METADATA_NAME = "floci-az-selfsigned.metadata.json";
+    /** The server certificate issued from a CA the user brings, and its key (floci-az's own, not the CA's). */
+    static final String USER_CA_ISSUED_CERT_NAME = "floci-az-user-ca-issued.crt";
+    static final String USER_CA_ISSUED_KEY_NAME  = "floci-az-user-ca-issued.key";
     private static final String TLS_DIR = "tls";
+
+    /** A server certificate this close to expiry is reissued at startup. */
+    static final Duration RENEW_BEFORE_EXPIRY = Duration.ofDays(30);
+
+    /**
+     * The DNS subtrees the self-signed CA may issue for besides the custom hostnames: every name
+     * {@link #buildSanList} and the sidecar certificates carry, each covering its subdomains.
+     */
+    static final List<String> PERMITTED_DNS = permittedDns();
+
+    private static List<String> permittedDns() {
+        List<String> dns = new ArrayList<>(List.of("localhost", "floci-az.io", publicSuffix(CloudSuffix.KEYVAULT),
+                publicSuffix(CloudSuffix.MHSM), publicSuffix(CloudSuffix.ACR)));
+        // A Redis cache is named in its own cloud (RedisCacheManager.azureHostName), so the CA covers every
+        // cloud's Redis suffix the catalog settles.
+        CloudCatalog.all().forEach(cloud -> cloud.suffix(CloudSuffix.REDIS).ifPresent(dns::add));
+        dns.add("host.docker.internal");
+        return List.copyOf(dns);
+    }
+
+    /** Loopback, unspecified and private ranges: where floci-az and its sidecars can be reached. */
+    static final List<String> PERMITTED_IP_RANGES = List.of("127.0.0.0/8", "::1/128", "0.0.0.0/32",
+            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16");
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -101,11 +158,13 @@ public class TlsConfigSource implements ConfigSource {
 
         String certPath       = resolveProperty("floci-az.tls.cert-path", "");
         String keyPath        = resolveProperty("floci-az.tls.key-path", "");
+        String caCertPath     = resolveProperty("floci-az.tls.ca-cert-path", "");
+        String caKeyPath      = resolveProperty("floci-az.tls.ca-key-path", "");
         String selfSigned     = resolveProperty("floci-az.tls.self-signed", "true");
         String persistentPath = resolveProperty("floci-az.storage.persistent-path", "./data");
 
         // The PEM served at GET /_floci/tls-cert (the client trust anchor): the generated CA in
-        // self-signed mode, or the user-provided cert file itself.
+        // self-signed mode, the user's CA, or the user-provided cert file itself.
         String anchorPath = null;
 
         if (!certPath.isBlank() && !keyPath.isBlank()) {
@@ -113,6 +172,21 @@ public class TlsConfigSource implements ConfigSource {
             validateFileExists(keyPath, "TLS private key");
             anchorPath = certPath;
             LOG.infov("TLS: using user-provided certificate: {0}", certPath);
+            if (!caCertPath.isBlank() || !caKeyPath.isBlank()) {
+                LOG.warnv("TLS: FLOCI_AZ_TLS_CERT_PATH is set, so the CA in FLOCI_AZ_TLS_CA_CERT_PATH ({0}) is ignored",
+                        caCertPath);
+            }
+        } else if (!caCertPath.isBlank() || !caKeyPath.isBlank()) {
+            Path tlsDir = selfSignedDir(persistentPath);
+            Path certFile = tlsDir.resolve(USER_CA_ISSUED_CERT_NAME);
+            Path keyFile = tlsDir.resolve(USER_CA_ISSUED_KEY_NAME);
+            CertificateGenerator.CertificateAuthority authority = userAuthority(caCertPath, caKeyPath);
+            List<String> sans = buildSanList(extractCustomHostnames());
+            issueFromUserCa(tlsDir, certFile, keyFile, authority, sans);
+            LOG.infov("TLS: issued the server certificate from your CA {0}", caCertPath);
+            certPath = certFile.toAbsolutePath().toString();
+            keyPath = keyFile.toAbsolutePath().toString();
+            anchorPath = caCertPath;
         } else if ("true".equalsIgnoreCase(selfSigned)) {
             Path tlsDir   = selfSignedDir(persistentPath);
             Path certFile = tlsDir.resolve(SELF_SIGNED_CERT_NAME);
@@ -121,15 +195,22 @@ public class TlsConfigSource implements ConfigSource {
 
             List<String> customHostnames = extractCustomHostnames();
             List<String> allSans = buildSanList(customHostnames);
+            List<String> requiredNames = requiredNames(allSans);
+            Path caKeyFile = tlsDir.resolve(SELF_SIGNED_CA_KEY_NAME);
 
-            if (Files.exists(certFile) && Files.exists(keyFile) && Files.exists(caFile)) {
-                if (hostnameConfigChanged(tlsDir, allSans)) {
-                    generateSelfSignedCert(tlsDir, certFile, caFile, keyFile, allSans);
-                } else {
-                    LOG.infov("TLS: reusing existing self-signed certificate: {0}", certFile);
-                }
+            // A CA written by an older floci-az has no key next to it: it cannot issue, but clients
+            // may trust it, so its certificate is kept until it has to be replaced anyway.
+            boolean keylessCa = Files.exists(caFile) && !Files.exists(caKeyFile);
+            Optional<CertificateGenerator.CertificateAuthority> authority = keylessCa
+                    ? Optional.empty() : reusableAuthority(caFile, caKeyFile, requiredNames);
+
+            if (Files.exists(certFile) && Files.exists(keyFile) && Files.exists(caFile)
+                    && (keylessCa || authority.isPresent())
+                    && !hostnameConfigChanged(tlsDir, allSans) && !expiresSoon(certFile)) {
+                LOG.infov("TLS: reusing existing self-signed certificate: {0}", certFile);
             } else {
-                generateSelfSignedCert(tlsDir, certFile, caFile, keyFile, allSans);
+                generateSelfSignedCert(tlsDir, certFile, caFile, keyFile, allSans,
+                        authority, permittedNames(requiredNames));
             }
 
             certPath = certFile.toAbsolutePath().toString();
@@ -138,7 +219,8 @@ public class TlsConfigSource implements ConfigSource {
         } else {
             throw new IllegalStateException(
                     "TLS enabled but no certificate provided and self-signed generation disabled. "
-                            + "Set FLOCI_AZ_TLS_CERT_PATH + FLOCI_AZ_TLS_KEY_PATH, or enable FLOCI_AZ_TLS_SELF_SIGNED.");
+                            + "Set FLOCI_AZ_TLS_CERT_PATH + FLOCI_AZ_TLS_KEY_PATH, FLOCI_AZ_TLS_CA_CERT_PATH + "
+                            + "FLOCI_AZ_TLS_CA_KEY_PATH, or enable FLOCI_AZ_TLS_SELF_SIGNED.");
         }
 
         properties.put("quarkus.http.ssl.certificate.files", toConfigPath(certPath));
@@ -233,8 +315,8 @@ public class TlsConfigSource implements ConfigSource {
         // (not in a container).
         all.addAll(List.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci-az.io", "*.localhost.floci-az.io",
-                "*.vault.azure.net", "*.managedhsm.azure.net", "*.azurecr.io",
-                "host.docker.internal"));
+                "*." + publicSuffix(CloudSuffix.KEYVAULT), "*." + publicSuffix(CloudSuffix.MHSM),
+                "*." + publicSuffix(CloudSuffix.ACR), "host.docker.internal"));
         all.addAll(customHostnames);
         return all;
     }
@@ -285,41 +367,185 @@ public class TlsConfigSource implements ConfigSource {
         }
     }
 
-    private void generateSelfSignedCert(Path tlsDir, Path certFile, Path caFile, Path keyFile, List<String> sans) {
+    private void generateSelfSignedCert(Path tlsDir, Path certFile, Path caFile, Path keyFile, List<String> sans,
+                                        Optional<CertificateGenerator.CertificateAuthority> existing,
+                                        CertificateGenerator.PermittedNames permitted) {
         try {
             Files.createDirectories(tlsDir);
             ensureBouncyCastleRegistered();
 
             CertificateGenerator generator = new CertificateGenerator();
-            CertificateGenerator.CertificateAuthority authority = generator.generateAuthority();
+            boolean replacing = Files.exists(caFile);
+            CertificateGenerator.CertificateAuthority authority =
+                    existing.orElseGet(() -> generator.generateAuthority(permitted));
             CertificateGenerator.GeneratedCertificate generated = generator.issue(authority, sans);
 
             // certFile holds the leaf+CA chain (same filename as before); caFile holds the CA alone.
             Files.writeString(certFile, generated.chainPem());
-            Files.writeString(caFile, generated.caPem());
             Files.writeString(keyFile, generated.privateKeyPem());
-            // The CA key lets sidecars serving TLS (Redis, when its TLS is on) get leaves for their
-            // own host names that chain to the same trust anchor as the HTTPS endpoint. Nothing
-            // else needs it, so it is only kept then.
-            // A key left from an earlier run belongs to the CA just replaced: kept next to the new
-            // CA it would sign leaves no client can verify, so it goes whenever the new one is not kept.
-            Path caKeyFile = tlsDir.resolve(SELF_SIGNED_CA_KEY_NAME);
-            if (sidecarLeavesNeeded()) {
-                writeOwnerOnly(caKeyFile, CertificateGenerator.privateKeyPem(authority));
-            } else {
-                Files.deleteIfExists(caKeyFile);
+            if (existing.isEmpty()) {
+                Files.writeString(caFile, generated.caPem());
+                // Kept so later server certificates, and those of sidecars serving TLS (Redis), chain
+                // to the CA clients already trust. The name constraints bound what it can sign.
+                writeOwnerOnly(tlsDir.resolve(SELF_SIGNED_CA_KEY_NAME), CertificateGenerator.privateKeyPem(authority));
+                if (replacing) {
+                    LOG.warnv("TLS: generated a new self-signed CA in {0}; clients that trusted the previous one "
+                            + "must download it from GET /_floci/tls-cert and trust it again", caFile);
+                } else {
+                    LOG.infov("TLS: generated a self-signed CA in {0}; clients trust it from GET /_floci/tls-cert",
+                            caFile);
+                }
             }
 
-            LOG.infov("TLS: generated self-signed certificate: {0}", certFile);
+            LOG.infov("TLS: issued self-signed certificate {0}", certFile);
             persistMetadata(tlsDir, sans);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to write self-signed TLS certificate", e);
         }
     }
 
-    /** Whether a sidecar serves TLS itself and so needs leaves issued by the emulator CA. */
-    static boolean sidecarLeavesNeeded() {
-        return "true".equalsIgnoreCase(resolveProperty("floci-az.services.redis.tls-enabled", "false"));
+    /**
+     * The CA the user brings, read and checked up front: a CA that cannot issue a certificate clients
+     * accept is a configuration error, so startup fails with what to fix rather than serving one.
+     */
+    static CertificateGenerator.CertificateAuthority userAuthority(String caCertPath, String caKeyPath) {
+        if (caCertPath.isBlank() || caKeyPath.isBlank()) {
+            throw new IllegalStateException("TLS: set both FLOCI_AZ_TLS_CA_CERT_PATH and FLOCI_AZ_TLS_CA_KEY_PATH "
+                    + "to issue the server certificate from your CA (only one is set)");
+        }
+        validateFileExists(caCertPath, "TLS CA certificate");
+        validateFileExists(caKeyPath, "TLS CA private key");
+        CertificateGenerator.CertificateAuthority authority;
+        try {
+            authority = CertificateGenerator.readAuthority(Files.readString(Path.of(caCertPath)),
+                    Files.readString(Path.of(caKeyPath)));
+        } catch (IOException | IllegalStateException e) {
+            throw new IllegalStateException("TLS: could not read the CA in " + caCertPath + " and " + caKeyPath
+                    + ": " + e.getMessage(), e);
+        }
+        X509Certificate ca = authority.certificate();
+        if (ca.getBasicConstraints() < 0) {
+            throw new IllegalStateException("TLS: " + caCertPath + " is not a CA certificate (no CA basic "
+                    + "constraint); point FLOCI_AZ_TLS_CA_CERT_PATH at the root, such as mkcert's rootCA.pem");
+        }
+        if (!authority.keyMatchesCertificate()) {
+            throw new IllegalStateException("TLS: " + caKeyPath + " is not the private key of " + caCertPath);
+        }
+        if (ca.getNotAfter().toInstant().isBefore(Instant.now())) {
+            throw new IllegalStateException("TLS: the CA in " + caCertPath + " expired on "
+                    + ca.getNotAfter().toInstant());
+        }
+        return authority;
+    }
+
+    /** Issues the server certificate from the user's CA; a name its own constraints exclude is only warned about. */
+    private static void issueFromUserCa(Path tlsDir, Path certFile, Path keyFile,
+                                        CertificateGenerator.CertificateAuthority authority, List<String> sans) {
+        List<String> outside = sans.stream()
+                .filter(san -> !CertificateGenerator.permits(authority.certificate(), san))
+                .toList();
+        if (!outside.isEmpty()) {
+            LOG.warnv("TLS: your CA''s name constraints exclude {0}; clients that enforce them reject the "
+                    + "certificate for those names", outside);
+        }
+        try {
+            Files.createDirectories(tlsDir);
+            CertificateGenerator.GeneratedCertificate generated = new CertificateGenerator().issue(authority, sans);
+            Files.writeString(certFile, generated.chainPem());
+            writeOwnerOnly(keyFile, generated.privateKeyPem());
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to write the TLS certificate issued from your CA", e);
+        }
+    }
+
+    /**
+     * The CA on disk, when it can issue the next server certificate: its key is there and belongs to
+     * it, it carries name constraints that admit every required name and no name floci-az no longer
+     * serves, and it outlives a new leaf.
+     * Anything else means a new CA, which clients have to trust again; the reason is logged.
+     */
+    private static Optional<CertificateGenerator.CertificateAuthority> reusableAuthority(
+            Path caFile, Path caKeyFile, List<String> requiredNames) {
+        if (!Files.isReadable(caFile) || !Files.isReadable(caKeyFile)) {
+            return Optional.empty();
+        }
+        CertificateGenerator.CertificateAuthority authority;
+        try {
+            authority = CertificateGenerator.readAuthority(Files.readString(caFile), Files.readString(caKeyFile));
+        } catch (IOException | IllegalStateException e) {
+            LOG.warnv("TLS: could not read the CA in {0} ({1}), so it is replaced", caFile, e.getMessage());
+            return Optional.empty();
+        }
+        X509Certificate ca = authority.certificate();
+        if (!authority.keyMatchesCertificate()) {
+            LOG.warnv("TLS: {0} is not the key of {1}, so the CA is replaced", caKeyFile, caFile);
+            return Optional.empty();
+        }
+        if (!CertificateGenerator.hasNameConstraints(ca)) {
+            LOG.infov("TLS: the CA in {0} has no name constraints, so it is replaced by one that has", caFile);
+            return Optional.empty();
+        }
+        List<String> outside = requiredNames.stream().filter(name -> !CertificateGenerator.permits(ca, name)).toList();
+        if (!outside.isEmpty()) {
+            LOG.infov("TLS: the CA in {0} may not issue for {1}, so it is replaced", caFile, outside);
+            return Optional.empty();
+        }
+        List<String> beyond = CertificateGenerator.subtreesBeyond(ca, permittedNames(requiredNames));
+        if (!beyond.isEmpty()) {
+            LOG.infov("TLS: the CA in {0} may also issue for {1}, which floci-az no longer serves, so it is replaced",
+                    caFile, beyond);
+            return Optional.empty();
+        }
+        if (ca.getNotAfter().toInstant().isBefore(Instant.now().plus(CertificateGenerator.LEAF_VALIDITY))) {
+            LOG.infov("TLS: the CA in {0} expires before a new certificate would, so it is replaced", caFile);
+            return Optional.empty();
+        }
+        return Optional.of(authority);
+    }
+
+    /** Whether the server certificate (the first one in {@code certFile}) is due for renewal, or unreadable. */
+    private static boolean expiresSoon(Path certFile) {
+        try (ByteArrayInputStream in = new ByteArrayInputStream(Files.readAllBytes(certFile))) {
+            X509Certificate leaf = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(in);
+            if (leaf.getNotAfter().toInstant().isBefore(Instant.now().plus(RENEW_BEFORE_EXPIRY))) {
+                LOG.infov("TLS: {0} expires on {1}, so it is reissued", certFile, leaf.getNotAfter().toInstant());
+                return true;
+            }
+            return false;
+        } catch (IOException | CertificateException e) {
+            LOG.warnv("TLS: could not read {0} ({1}), so it is reissued", certFile, e.getMessage());
+            return true;
+        }
+    }
+
+    /** Every name a certificate under the CA carries: the server SANs and, when it is a name, the Docker host. */
+    private static List<String> requiredNames(List<String> sans) {
+        Set<String> names = new LinkedHashSet<>(sans);
+        String dockerHost = ContainerLifecycleManager.daemonHostname(DockerClientProducer.resolveEffectiveDockerHost(
+                resolveProperty("floci-az.docker.docker-host", "unix:///var/run/docker.sock"),
+                System.getenv("DOCKER_HOST")));
+        names.add(CertificateGenerator.bareAddress(dockerHost));
+        return new ArrayList<>(names);
+    }
+
+    /** The fixed subtrees plus each required name they do not already cover, as its own subtree or /32 (/128). */
+    static CertificateGenerator.PermittedNames permittedNames(List<String> requiredNames) {
+        List<String> dns = new ArrayList<>(PERMITTED_DNS);
+        List<String> ips = new ArrayList<>(PERMITTED_IP_RANGES);
+        for (String name : requiredNames) {
+            if (!CertificateGenerator.isIpAddress(name)) {
+                String subtree = name.startsWith("*.") ? name.substring(2) : name;
+                if (dns.stream().noneMatch(base -> subtree.equals(base) || subtree.endsWith("." + base))) {
+                    dns.add(subtree);
+                }
+            } else {
+                String address = CertificateGenerator.bareAddress(name);
+                if (PERMITTED_IP_RANGES.stream().noneMatch(range -> CertificateGenerator.ipInRange(address, range))) {
+                    ips.add(address + (address.contains(":") ? "/128" : "/32"));
+                }
+            }
+        }
+        return new CertificateGenerator.PermittedNames(dns, ips);
     }
 
     /** Writes a secret so that it never exists with wider permissions than its owner's. */

@@ -51,7 +51,8 @@ POD_IDENTITY_ENV = -e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577
 SUITE_ENV_PYTHON = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQP_PORT=5672 \
-	-e SERVICEBUS_NAMESPACE=default
+	-e SERVICEBUS_NAMESPACE=default \
+	-e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true
 SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	--add-host devstoreaccount1.dfs.core.windows.net:127.0.0.1 \
 	-e FLOCI_AZ_ABFS_LOOPBACK=true \
@@ -72,6 +73,9 @@ JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
 # azd cannot be pointed at a custom cloud, so its emulator answers for Azure's own hosts.
 AZD_EMULATOR_ENV = -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
+# test_redis.py checks the cache's SSL port against floci-az's CA, so the python emulator serves Redis TLS.
+REDIS_TLS_EMULATOR_ENV = -e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true
+PYTHON_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) $(REDIS_TLS_EMULATOR_ENV)
 
 # PARITY=azure (or strict) starts the emulator of any Docker compat session at that floci-az.parity
 # level: `make test-terraform-compat PARITY=azure`. Empty keeps the default level. The nightly parity
@@ -262,7 +266,7 @@ run-sql:
 
 test-python-compat:
 	@echo "==> Python SDK compatibility tests (Docker)"
-	$(call COMPAT_SESSION,python,python,$(SUITE_ENV_PYTHON),,,$(SERVICEBUS_EMULATOR_ENV))
+	$(call COMPAT_SESSION,python,python,$(SUITE_ENV_PYTHON),,,$(PYTHON_EMULATOR_ENV))
 
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
@@ -452,7 +456,7 @@ test-azd:
 
 compat-docker:
 	$(MAKE) compat-build
-	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_EMULATOR_ENV) $(AZD_EMULATOR_ENV)"
+	$(MAKE) compat-run FLOCI_AZ_COMPAT_EXTRA_ENV="$(JAVA_EMULATOR_ENV) $(AZD_EMULATOR_ENV) $(REDIS_TLS_EMULATOR_ENV)"
 	@mkdir -p $(COMPAT_RESULTS)/azd $(COMPAT_RESULTS)/python $(COMPAT_RESULTS)/node $(COMPAT_RESULTS)/java $(COMPAT_RESULTS)/dotnet $(COMPAT_RESULTS)/cpp $(COMPAT_RESULTS)/terraform $(COMPAT_RESULTS)/opentofu $(COMPAT_RESULTS)/azcli
 	@EXIT=0; \
 	$(MAKE) compat-python-image || EXIT=$$?; \

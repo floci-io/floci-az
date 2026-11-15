@@ -2,6 +2,7 @@ package io.floci.az.core.docker;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.ConnectToNetworkCmd;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
@@ -147,6 +148,11 @@ public class ContainerLifecycleManager {
             createCmd.withExposedPorts(exposed);
         }
         createCmd.withLabels(mergedLabels(spec.labels()));
+        if (takesNetworkAliases(spec) && joinsNetworkAtCreate(spec)) {
+            // docker-java files these under hostConfig's network mode. A container that publishes ports from
+            // the host joins its network after start instead, and the connect carries the aliases.
+            createCmd.withAliases(spec.networkAliases());
+        }
 
         CreateContainerResponse response = createCmd.exec();
         String containerId = response.getId();
@@ -168,10 +174,13 @@ public class ContainerLifecycleManager {
         if (spec.networkMode() != null && !spec.networkMode().isBlank()
                 && spec.hasPortBindings() && !containerDetector.isRunningInContainer()) {
             try {
-                dockerClient.connectToNetworkCmd()
+                ConnectToNetworkCmd connect = dockerClient.connectToNetworkCmd()
                         .withContainerId(containerId)
-                        .withNetworkId(spec.networkMode())
-                        .exec();
+                        .withNetworkId(spec.networkMode());
+                if (takesNetworkAliases(spec)) {
+                    connect.withContainerNetwork(new ContainerNetwork().withAliases(spec.networkAliases()));
+                }
+                connect.exec();
                 LOG.debugv("Connected container {0} to network {1}", containerId, spec.networkMode());
             } catch (Exception e) {
                 LOG.warnv("Could not connect container {0} to network {1}: {2}",
@@ -986,8 +995,7 @@ public class ContainerLifecycleManager {
         // Only set networkMode during creation when there are no host port bindings;
         // containers with port bindings connect to the named network via connectToNetworkCmd()
         // after start to avoid suppressing port publishing on Docker Desktop (macOS).
-        if (spec.networkMode() != null && !spec.networkMode().isBlank()
-                && (!spec.hasPortBindings() || containerDetector.isRunningInContainer())) {
+        if (joinsNetworkAtCreate(spec)) {
             hostConfig.withNetworkMode(spec.networkMode());
         }
 
@@ -1079,6 +1087,26 @@ public class ContainerLifecycleManager {
     }
 
     /**
+     * Whether the container joins {@code networkMode} at creation. One that publishes host ports from a host-run
+     * floci-az is created on the default bridge and connected after start, so port publishing survives on Docker
+     * Desktop.
+     */
+    private boolean joinsNetworkAtCreate(ContainerSpec spec) {
+        return spec.networkMode() != null && !spec.networkMode().isBlank()
+                && (!spec.hasPortBindings() || containerDetector.isRunningInContainer());
+    }
+
+    /**
+     * Whether the spec's aliases can be sent: the daemon refuses the create, or the connect, with
+     * aliases on a built-in network ("network-scoped alias is supported only for containers in user
+     * defined networks"), and such a network would not resolve them anyway.
+     */
+    static boolean takesNetworkAliases(ContainerSpec spec) {
+        return spec.networkAliases() != null && !spec.networkAliases().isEmpty()
+                && resolvesContainerNames(spec.networkMode());
+    }
+
+    /**
      * Where floci-az, running in a container in {@code auto} mode, connects to a sidecar's
      * container port: the container name on a user-defined network, where it stays valid across
      * a restart of the sidecar, and otherwise the container IP {@link #startCreated} resolved,
@@ -1128,7 +1156,7 @@ public class ContainerLifecycleManager {
         return HostLiterals.bare(daemonHost());
     }
 
-    static String daemonHostname(String dockerHost) {
+    public static String daemonHostname(String dockerHost) {
         if (dockerHost != null && !dockerHost.isBlank()) {
             try {
                 URI uri = URI.create(dockerHost);

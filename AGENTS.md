@@ -301,7 +301,8 @@ miss, because a var set only there does not appear in any `SUITE_ENV_*` variable
 
 **One exception on the emulator axis: `compat-docker`.** It starts a single shared emulator with
 `JAVA_EMULATOR_ENV` and `AZD_EMULATOR_ENV` (so including `FLOCI_AZ_SERVICES_SERVICE_BUS_LOCK_DURATION_SECONDS=5`,
-`FLOCI_AZ_SERVICES_AKS_MOCKED=true` and `FLOCI_AZ_TLS_PUBLIC_HOSTS=true`) and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
+`FLOCI_AZ_SERVICES_AKS_MOCKED=true`, `FLOCI_AZ_TLS_PUBLIC_HOSTS=true` and, through `REDIS_TLS_EMULATOR_ENV`,
+`FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true`) and runs every suite against it. The python, node and dotnet suites therefore see a longer lock duration there
 than under their own `test-*-compat` targets or in CI, where they get `SERVICEBUS_EMULATOR_ENV` alone.
 The table below is the per-suite contract that CI and the individual targets honour; `compat-docker` is
 a convenience runner that deliberately shares one emulator, so a Service Bus timing behaviour that only
@@ -323,6 +324,7 @@ Suite container (`SUITE_ENV_*` ↔ `extra_env`):
 | `sdk-test-python` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-python` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
 | `sdk-test-python` | `-e SERVICEBUS_NAMESPACE=default` | ✓ |
+| `sdk-test-python` | `-e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true` | ✓ |
 | `sdk-test-node` | `-e AZURE_POD_IDENTITY_AUTHORITY_HOST=http://floci-az:4577` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_HOST=floci-az-servicebus-default` | ✓ |
 | `sdk-test-node` | `-e SERVICEBUS_AMQP_PORT=5672` | ✓ |
@@ -338,6 +340,7 @@ Emulator container (6th `COMPAT_SESSION` argument ↔ `emulator_env`):
 | `sdk-test-java` | `-e FLOCI_AZ_SERVICES_AKS_MOCKED=true` | ✓ |
 | `sdk-test-dotnet` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `sdk-test-python` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
+| `sdk-test-python` | `-e FLOCI_AZ_SERVICES_REDIS_TLS_ENABLED=true` (`REDIS_TLS_EMULATOR_ENV`, in `PYTHON_EMULATOR_ENV`) | ✓ |
 | `sdk-test-node` | `-e FLOCI_AZ_SERVICES_SERVICE_BUS_MOCKED=false` (`SERVICEBUS_EMULATOR_ENV`) | ✓ |
 | `compat-azd` | `-e FLOCI_AZ_TLS_PUBLIC_HOSTS=true` (`AZD_EMULATOR_ENV`) | ✓ |
 | every suite, parity legs only | `-e FLOCI_AZ_PARITY=azure` (`PARITY_EMULATOR_ENV`, from `PARITY=azure`) | ✓ (`matrix.parity`, scheduled and manual runs only) |
