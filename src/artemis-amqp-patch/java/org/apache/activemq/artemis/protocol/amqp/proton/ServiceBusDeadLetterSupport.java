@@ -4,6 +4,7 @@ import org.apache.activemq.artemis.api.core.ActiveMQPropertyConversionException;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.paging.PagingStore;
+import org.apache.activemq.artemis.protocol.amqp.broker.AMQPMessage;
 import org.apache.qpid.proton.amqp.messaging.Modified;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
@@ -25,16 +26,18 @@ public final class ServiceBusDeadLetterSupport {
       throws ActiveMQPropertyConversionException {
       ErrorCondition error = rejected.getError();
       if (error != null) {
-         applyProperties(message, error.getInfo());
+         applyProperties(message, error.getInfo(), true);
       }
    }
 
    public static void apply(Message message, Modified modified)
       throws ActiveMQPropertyConversionException {
-      applyProperties(message, modified.getMessageAnnotations());
+      // An AMQP message keeps native AMQP values (timestamps, UUIDs) in its application properties,
+      // so abandon redelivers them with the type the client sent, as Azure does.
+      applyProperties(message, modified.getMessageAnnotations(), !(message instanceof AMQPMessage));
    }
 
-   private static void applyProperties(Message message, Map<?, ?> properties)
+   private static void applyProperties(Message message, Map<?, ?> properties, boolean convert)
       throws ActiveMQPropertyConversionException {
       if (properties == null) {
          return;
@@ -42,7 +45,8 @@ public final class ServiceBusDeadLetterSupport {
 
       for (Object rawEntry : properties.entrySet()) {
          Map.Entry<?, ?> entry = (Map.Entry<?, ?>) rawEntry;
-         message.putObjectProperty(entry.getKey().toString(), compatiblePropertyValue(entry.getValue()));
+         Object value = entry.getValue();
+         message.putObjectProperty(entry.getKey().toString(), convert ? compatiblePropertyValue(value) : value);
       }
       // Reencoding resets AMQPStandardMessage's cached estimate. QueueImpl.refDown
       // later releases the new estimate, so keep its existing paging owner in balance.

@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -120,6 +121,31 @@ class ServiceBusDeadLetterSupportTest {
         Message redelivered = message.copy(2, true);
         assertEquals("retry-1", redelivered.getObjectProperty("attempt-note"));
         assertEquals("preserved", redelivered.getObjectProperty("custom"));
+    }
+
+    @Test
+    void abandonKeepsTimestampAndUuidPropertyTypes() throws Exception {
+        org.apache.qpid.proton.message.Message encoded = Proton.message();
+        encoded.setBody(new AmqpValue("payload"));
+        byte[] bytes = new byte[4096];
+        int length = encoded.encode(bytes, 0, bytes.length);
+        Message message = new AMQPStandardMessage(0, Arrays.copyOf(bytes, length), null);
+        Date retriedAt = Date.from(Instant.parse("2026-11-15T00:00:00Z"));
+        UUID attemptId = UUID.fromString("6f9619ff-8b86-d011-b42d-00c04fc964ff");
+        Modified modified = new Modified();
+        modified.setDeliveryFailed(true);
+        modified.setMessageAnnotations(Map.of(
+                Symbol.valueOf("retried-at"), retriedAt, Symbol.valueOf("attempt-id"), attemptId));
+
+        try (URLClassLoader loader = PatchJarLoader.open()) {
+            Class<?> support = Class.forName(
+                    "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusDeadLetterSupport", true, loader);
+            support.getMethod("apply", Message.class, Modified.class).invoke(null, message, modified);
+        }
+
+        Message redelivered = message.copy(2, true);
+        assertEquals(retriedAt, redelivered.getObjectProperty("retried-at"));
+        assertEquals(attemptId, redelivered.getObjectProperty("attempt-id"));
     }
 
     @Test
