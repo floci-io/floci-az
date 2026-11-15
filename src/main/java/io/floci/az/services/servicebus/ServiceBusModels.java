@@ -27,9 +27,15 @@ public final class ServiceBusModels {
             long defaultMessageTtlMillis,
             boolean deadLetteringOnMessageExpiration,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String autoDeleteOnIdle,
+            Boolean enableBatchedOperations,
+            String userMetadata) {
 
         public QueueEntity {
+            if (maxSizeInMegabytes == 0) {
+                maxSizeInMegabytes = ServiceBusEntityXml.EntityMetadata.DEFAULT_MAX_SIZE_IN_MEGABYTES;
+            }
             if (duplicateDetectionHistorySeconds == 0) {
                 duplicateDetectionHistorySeconds =
                         ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
@@ -43,11 +49,21 @@ public final class ServiceBusModels {
                                      long lockDurationSeconds, boolean requiresSession,
                                      ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                      ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+            return defaults(name, maxDeliveryCount, lockDurationSeconds, requiresSession,
+                    duplicateDetection, lifetime, ServiceBusEntityXml.EntityMetadata.DEFAULTS);
+        }
+
+        static QueueEntity defaults(String name, int maxDeliveryCount,
+                                     long lockDurationSeconds, boolean requiresSession,
+                                     ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                                     ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                     ServiceBusEntityXml.EntityMetadata metadata) {
             Instant now = Instant.now();
             return new QueueEntity(name, maxDeliveryCount, lockDurationSeconds,
-                    1024, requiresSession, duplicateDetection.enabled(),
+                    metadata.maxSizeInMegabytes(), requiresSession, duplicateDetection.enabled(),
                     duplicateDetection.historySeconds(), lifetime.ttlMillis(),
-                    lifetime.deadLetterOnExpiration(), now, now);
+                    lifetime.deadLetterOnExpiration(), now, now, metadata.autoDeleteOnIdle(),
+                    metadata.enableBatchedOperations(), metadata.userMetadata());
         }
     }
 
@@ -59,9 +75,16 @@ public final class ServiceBusModels {
             long duplicateDetectionHistorySeconds,
             long defaultMessageTtlMillis,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String autoDeleteOnIdle,
+            Boolean enableBatchedOperations,
+            String userMetadata,
+            boolean supportOrdering) {
 
         public TopicEntity {
+            if (maxSizeInMegabytes == 0) {
+                maxSizeInMegabytes = ServiceBusEntityXml.EntityMetadata.DEFAULT_MAX_SIZE_IN_MEGABYTES;
+            }
             if (duplicateDetectionHistorySeconds == 0) {
                 duplicateDetectionHistorySeconds =
                         ServiceBusEntityXml.DEFAULT_DUPLICATE_DETECTION_HISTORY_SECONDS;
@@ -75,9 +98,19 @@ public final class ServiceBusModels {
                 String name,
                 ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                 ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+            return defaults(name, duplicateDetection, lifetime, ServiceBusEntityXml.EntityMetadata.DEFAULTS);
+        }
+
+        static TopicEntity defaults(
+                String name,
+                ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                ServiceBusEntityXml.EntityMetadata metadata) {
             Instant now = Instant.now();
-            return new TopicEntity(name, 1024, duplicateDetection.enabled(),
-                    duplicateDetection.historySeconds(), lifetime.ttlMillis(), now, now);
+            return new TopicEntity(name, metadata.maxSizeInMegabytes(), duplicateDetection.enabled(),
+                    duplicateDetection.historySeconds(), lifetime.ttlMillis(), now, now,
+                    metadata.autoDeleteOnIdle(), metadata.enableBatchedOperations(),
+                    metadata.userMetadata(), metadata.supportOrdering());
         }
     }
 
@@ -133,7 +166,10 @@ public final class ServiceBusModels {
             long defaultMessageTtlMillis,
             boolean deadLetteringOnMessageExpiration,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String autoDeleteOnIdle,
+            Boolean enableBatchedOperations,
+            String userMetadata) {
 
         public SubscriptionEntity {
             if (defaultMessageTtlMillis == 0) {
@@ -145,10 +181,20 @@ public final class ServiceBusModels {
                                             int maxDeliveryCount, long lockDurationSeconds,
                                             boolean requiresSession,
                                             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+            return defaults(topicName, name, maxDeliveryCount, lockDurationSeconds, requiresSession,
+                    lifetime, ServiceBusEntityXml.EntityMetadata.DEFAULTS);
+        }
+
+        static SubscriptionEntity defaults(String topicName, String name,
+                                            int maxDeliveryCount, long lockDurationSeconds,
+                                            boolean requiresSession,
+                                            ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                            ServiceBusEntityXml.EntityMetadata metadata) {
             Instant now = Instant.now();
             return new SubscriptionEntity(topicName, name, maxDeliveryCount, lockDurationSeconds,
                     requiresSession, lifetime.ttlMillis(),
-                    lifetime.deadLetterOnExpiration(), now, now);
+                    lifetime.deadLetterOnExpiration(), now, now, metadata.autoDeleteOnIdle(),
+                    metadata.enableBatchedOperations(), metadata.userMetadata());
         }
     }
 }

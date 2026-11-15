@@ -128,4 +128,51 @@ final class ServiceBusEntityXml {
     }
 
     record DeliverySettings(Integer maxDeliveryCount, Long lockDurationSeconds) {}
+
+    /**
+     * Parses the descriptive settings Azure stores and echoes back but the broker does not act on:
+     * MaxSizeInMegabytes, AutoDeleteOnIdle, EnableBatchedOperations, UserMetadata and (topics only)
+     * SupportOrdering. Absent elements take the Azure defaults.
+     */
+    static EntityMetadata parseMetadata(String xml) {
+        long maxSize = EntityMetadata.DEFAULT_MAX_SIZE_IN_MEGABYTES;
+        String rawSize = XmlParser.extractFirst(xml, "MaxSizeInMegabytes", null);
+        if (rawSize != null) {
+            try {
+                maxSize = Long.parseLong(rawSize.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("MaxSizeInMegabytes must be an integer", e);
+            }
+            if (maxSize <= 0) {
+                throw new IllegalArgumentException("MaxSizeInMegabytes must be positive");
+            }
+        }
+        String autoDelete = XmlParser.extractFirst(xml, "AutoDeleteOnIdle", null);
+        if (autoDelete != null) {
+            autoDelete = autoDelete.trim();
+            try {
+                if (Duration.parse(autoDelete).compareTo(Duration.ofMinutes(5)) < 0) {
+                    throw new IllegalArgumentException("AutoDeleteOnIdle must be at least PT5M");
+                }
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("AutoDeleteOnIdle must be an ISO-8601 duration", e);
+            }
+        }
+        boolean batched = Boolean.parseBoolean(
+                XmlParser.extractFirst(xml, "EnableBatchedOperations", "true").trim());
+        String userMetadata = XmlParser.extractFirst(xml, "UserMetadata", null);
+        boolean supportOrdering = Boolean.parseBoolean(
+                XmlParser.extractFirst(xml, "SupportOrdering", "false").trim());
+        return new EntityMetadata(maxSize, autoDelete, batched, userMetadata, supportOrdering);
+    }
+
+    record EntityMetadata(long maxSizeInMegabytes, String autoDeleteOnIdle,
+                          boolean enableBatchedOperations, String userMetadata,
+                          boolean supportOrdering) {
+        static final long DEFAULT_MAX_SIZE_IN_MEGABYTES = 1024;
+        /** TimeSpan.MaxValue, the Azure default for AutoDeleteOnIdle. */
+        static final String DEFAULT_AUTO_DELETE_ON_IDLE = "P10675199DT2H48M5.4775807S";
+        static final EntityMetadata DEFAULTS =
+                new EntityMetadata(DEFAULT_MAX_SIZE_IN_MEGABYTES, null, true, null, false);
+    }
 }

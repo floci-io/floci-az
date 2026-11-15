@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ServiceBusModelsTest {
 
@@ -71,5 +73,27 @@ class ServiceBusModelsTest {
                 topic.defaultMessageTtlMillis());
         assertEquals(ServiceBusEntityXml.DEFAULT_MESSAGE_TTL_MILLIS,
                 subscription.defaultMessageTtlMillis());
+    }
+
+    @Test
+    void legacyEntitiesUseDefaultDescriptiveSettings() throws Exception {
+        ServiceBusModels.QueueEntity queue = objectMapper.readValue("""
+                {
+                  "name": "legacy-queue",
+                  "maxDeliveryCount": 10,
+                  "lockDurationSeconds": 60,
+                  "requiresSession": false
+                }
+                """, ServiceBusModels.QueueEntity.class);
+        ServiceBusModels.TopicEntity topic = objectMapper.readValue("""
+                { "name": "legacy-topic" }
+                """, ServiceBusModels.TopicEntity.class);
+
+        assertEquals(1024, queue.maxSizeInMegabytes());
+        assertEquals(1024, topic.maxSizeInMegabytes());
+        assertNull(queue.autoDeleteOnIdle());
+        assertNull(queue.enableBatchedOperations());
+        assertNull(queue.userMetadata());
+        assertFalse(topic.supportOrdering());
     }
 }
