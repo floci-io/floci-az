@@ -4,13 +4,18 @@ import org.apache.activemq.artemis.api.core.ActiveMQPropertyConversionException;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.paging.PagingStore;
+import org.apache.qpid.proton.amqp.messaging.Modified;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 
 import java.util.Date;
 import java.util.Map;
 
-/** Applies Azure dead-letter outcome metadata to the message before Artemis reroutes it. */
+/**
+ * Applies Azure settlement properties to the message before Artemis reroutes or redelivers it:
+ * dead-letter metadata from a rejected outcome, and abandon's properties to modify from a
+ * modified outcome's message annotations.
+ */
 public final class ServiceBusDeadLetterSupport {
 
    private ServiceBusDeadLetterSupport() {
@@ -19,11 +24,23 @@ public final class ServiceBusDeadLetterSupport {
    public static void apply(Message message, Rejected rejected)
       throws ActiveMQPropertyConversionException {
       ErrorCondition error = rejected.getError();
-      if (error == null || error.getInfo() == null) {
+      if (error != null) {
+         applyProperties(message, error.getInfo());
+      }
+   }
+
+   public static void apply(Message message, Modified modified)
+      throws ActiveMQPropertyConversionException {
+      applyProperties(message, modified.getMessageAnnotations());
+   }
+
+   private static void applyProperties(Message message, Map<?, ?> properties)
+      throws ActiveMQPropertyConversionException {
+      if (properties == null) {
          return;
       }
 
-      for (Object rawEntry : error.getInfo().entrySet()) {
+      for (Object rawEntry : properties.entrySet()) {
          Map.Entry<?, ?> entry = (Map.Entry<?, ?>) rawEntry;
          message.putObjectProperty(entry.getKey().toString(), compatiblePropertyValue(entry.getValue()));
       }

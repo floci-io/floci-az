@@ -7,6 +7,7 @@ import org.apache.qpid.proton.Proton;
 import org.apache.qpid.proton.amqp.Symbol;
 import org.apache.qpid.proton.amqp.messaging.AmqpValue;
 import org.apache.qpid.proton.amqp.messaging.ApplicationProperties;
+import org.apache.qpid.proton.amqp.messaging.Modified;
 import org.apache.qpid.proton.amqp.messaging.Rejected;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.junit.jupiter.api.Test;
@@ -94,5 +95,43 @@ class ServiceBusDeadLetterSupportTest {
         verify(message).putObjectProperty("modified-at", modifiedAt.toString());
         verify(message).putObjectProperty("attempt", 3);
         verify(message).reencode();
+    }
+
+    @Test
+    void abandonAppliesPropertiesToModifyBeforeRedelivery() throws Exception {
+        org.apache.qpid.proton.message.Message encoded = Proton.message();
+        encoded.setBody(new AmqpValue("payload"));
+        encoded.setApplicationProperties(new ApplicationProperties(Map.of("custom", "preserved")));
+        byte[] bytes = new byte[4096];
+        int length = encoded.encode(bytes, 0, bytes.length);
+        Message message = new AMQPStandardMessage(0, Arrays.copyOf(bytes, length), null);
+        // The Service Bus SDKs send abandon's properties to modify as the modified outcome's annotations.
+        Modified modified = new Modified();
+        modified.setDeliveryFailed(true);
+        modified.setUndeliverableHere(false);
+        modified.setMessageAnnotations(Map.of(Symbol.valueOf("attempt-note"), "retry-1"));
+
+        try (URLClassLoader loader = PatchJarLoader.open()) {
+            Class<?> support = Class.forName(
+                    "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusDeadLetterSupport", true, loader);
+            support.getMethod("apply", Message.class, Modified.class).invoke(null, message, modified);
+        }
+
+        Message redelivered = message.copy(2, true);
+        assertEquals("retry-1", redelivered.getObjectProperty("attempt-note"));
+        assertEquals("preserved", redelivered.getObjectProperty("custom"));
+    }
+
+    @Test
+    void abandonWithoutPropertiesLeavesTheMessageUnchanged() throws Exception {
+        Message message = mock(Message.class);
+
+        try (URLClassLoader loader = PatchJarLoader.open()) {
+            Class<?> support = Class.forName(
+                    "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusDeadLetterSupport", true, loader);
+            support.getMethod("apply", Message.class, Modified.class).invoke(null, message, new Modified());
+        }
+
+        verifyNoInteractions(message);
     }
 }

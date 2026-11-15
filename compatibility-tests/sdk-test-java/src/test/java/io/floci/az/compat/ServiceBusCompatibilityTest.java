@@ -5,6 +5,7 @@ import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import com.azure.messaging.servicebus.ServiceBusSessionReceiverClient;
+import com.azure.messaging.servicebus.models.AbandonOptions;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
 import com.azure.messaging.servicebus.models.SubQueue;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -154,6 +156,34 @@ class ServiceBusCompatibilityTest {
             assertEquals(payload, msg.getBody().toString());
             assertEquals(1, msg.getDeliveryCount(),
                     "One abandon should increment the AMQP delivery count once");
+            receiver.complete(msg);
+        }
+    }
+
+    @Test
+    @DisplayName("abandon applies properties to modify to the redelivered message")
+    void abandonAppliesPropertiesToModify() throws Exception {
+        String queue = uniqueQueue();
+        ServiceBusMessage sent = new ServiceBusMessage("abandon-props-" + UUID.randomUUID());
+        sent.getApplicationProperties().put("custom", "preserved");
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            sender.sendMessage(sent);
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            receiver.abandon(msg, new AbandonOptions().setPropertiesToModify(Map.of("attempt-note", "retry-1")));
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Message should be requeued after abandon");
+            assertEquals("retry-1", msg.getApplicationProperties().get("attempt-note"));
+            assertEquals("preserved", msg.getApplicationProperties().get("custom"));
             receiver.complete(msg);
         }
     }
