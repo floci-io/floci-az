@@ -5,9 +5,12 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
@@ -47,6 +50,38 @@ public class AzureServiceRegistry {
     /** Every discovered handler, in CDI discovery order. Used to assemble the routing tables. */
     public List<AzureServiceHandler> handlers() {
         return handlers;
+    }
+
+    /**
+     * Every service type the emulator answers for, sorted, mapped to whether it is enabled right now. The
+     * health body ({@code running} / {@code available}) and the {@code /_floci/info} manifest
+     * ({@code enabled} / {@code disabled}) both list services from this.
+     */
+    public Map<String, Boolean> serviceEnablement() {
+        Map<String, Boolean> services = new TreeMap<>();
+        for (AzureServiceHandler handler : handlers) {
+            for (String type : serviceTypes(handler)) {
+                services.put(type, isEnabled(type));
+            }
+        }
+        return services;
+    }
+
+    /**
+     * The service types a handler answers for. A handler whose account routes name other types and never its
+     * own (the Cosmos engines: {@code -cosmos-mongo} is {@code cosmos-mongo}) is listed by those types, since
+     * its own type routes nothing and each engine is enabled on its own.
+     */
+    static Set<String> serviceTypes(AzureServiceHandler handler) {
+        String own = handler.getServiceType();
+        Set<String> routed = new LinkedHashSet<>();
+        for (ServiceRoutes.SuffixRoute route : handler.routes().accountSuffixes()) {
+            routed.add(route.serviceType());
+        }
+        if (routed.isEmpty() || routed.contains(own)) {
+            return Set.of(own);
+        }
+        return routed;
     }
 
     /** True when some handler implements {@code serviceType}, regardless of whether it is enabled. */

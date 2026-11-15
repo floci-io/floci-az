@@ -60,6 +60,13 @@ class HealthControllerTest {
         if (ready) {
             readiness.markReady();
         }
-        return new HealthController(mock(EmulatorConfig.class), instance, readiness);
+        return new HealthController(mock(EmulatorConfig.class), instance, readiness, registryWithNoHandlers());
+    }
+
+    @SuppressWarnings("unchecked")
+    static AzureServiceRegistry registryWithNoHandlers() {
+        Instance<AzureServiceHandler> handlers = mock(Instance.class);
+        when(handlers.iterator()).thenAnswer(invocation -> List.<AzureServiceHandler>of().iterator());
+        return new AzureServiceRegistry(handlers);
     }
 }

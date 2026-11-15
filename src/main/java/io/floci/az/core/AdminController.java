@@ -1,6 +1,5 @@
 package io.floci.az.core;
 
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -10,7 +9,6 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
 
 import java.util.List;
 
@@ -18,13 +16,11 @@ import java.util.List;
 @Produces(MediaType.APPLICATION_JSON)
 public class AdminController {
 
-    private static final Logger LOG = Logger.getLogger(AdminController.class);
-
-    private final Instance<Resettable> resettables;
+    private final EmulatorStateReset stateReset;
 
     @Inject
-    public AdminController(Instance<Resettable> resettables) {
-        this.resettables = resettables;
+    public AdminController(EmulatorStateReset stateReset) {
+        this.stateReset = stateReset;
     }
 
     @GET
@@ -40,26 +36,14 @@ public class AdminController {
     }
 
     /**
-     * Wipes all emulator state across every service. Every state-holding
-     * component self-registers by implementing {@link Resettable}; each
-     * {@code clear()} is self-contained (services with sidecar containers
-     * stop them themselves). The reset is best-effort: a failing handler is
-     * logged and skipped so the remaining services still get cleared — CDI
-     * iteration order is non-deterministic, so one failure must not decide
-     * which services reset. Intended for test isolation — call at the start
-     * of each test suite.
+     * Wipes all emulator state across every service (see {@link EmulatorStateReset}). Intended for test
+     * isolation: call at the start of each test suite. {@code POST /_floci/state/reset} does the same and
+     * answers 200; this path keeps its 204.
      */
     @POST
     @Path("/reset")
     public Response reset() {
-        for (Resettable resettable : resettables) {
-            try {
-                resettable.clear();
-            } catch (Exception e) {
-                LOG.errorf(e, "Reset failed for %s — continuing with remaining services",
-                        resettable.getClass().getSimpleName());
-            }
-        }
+        stateReset.resetAll();
         return Response.noContent().build();
     }
 }

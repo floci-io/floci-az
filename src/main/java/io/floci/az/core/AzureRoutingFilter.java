@@ -352,7 +352,7 @@ public class AzureRoutingFilter {
     /** Health and admin endpoints bypass routing entirely. */
     private static boolean isEmulatorAdminPath(String path) {
         return path.equals("health") || path.equals("ready")
-            || path.startsWith("_floci/") || path.startsWith("_admin");
+            || path.equals("_floci") || path.startsWith("_floci/") || path.startsWith("_admin");
     }
 
     private static String trimLeadingSlash(String path) {

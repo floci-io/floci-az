@@ -12,21 +12,33 @@ are not part of any Azure contract: use them for health probes, test isolation a
 | `GET` | `/_floci/ui` | Starts the [web console](../ui/index.md) and serves the page that waits for it |
 | `GET` | `/_floci/ui/status` | `200` `{"ready", "url", "error"}`: the console's state, polled by that page |
 | `GET` | `/_floci/tls-cert` | `200` with the TLS certificate (`application/x-pem-file`), or `404` with a JSON explanation when TLS is off |
-| `POST` | `/_admin/reset` | `204`, after clearing the state of every service |
+| `GET` | `/_floci/init` | `200` with the [init status](#init-status) |
+| `POST` | `/_floci/state/reset` | `200` `{"status": "OK"}`, after clearing the state of every service |
+| `POST` | `/_floci/state/nuke` | Same as `/_floci/state/reset` |
+| `POST` | `/_admin/reset` | `204`, after clearing the state of every service (the same reset) |
+| any | any other `/_floci/...` path | `404` `{"error": "NotFound", "path": "<path>"}` |
+
+The `/_floci` paths are the control-plane contract every Floci emulator serves (floci-aws, floci-gcp, floci-oci
+and floci-az), so one client can probe, wait for and reset any of them the same way. `/health`, `/ready` and
+`/_admin/*` are kept as aliases. A request for a `/_floci` path is never routed to a storage account, whatever
+its `Host` header names.
 
 ## Health
 
 `GET /_floci/health` answers as soon as the HTTP server is up:
 
 ```json
-{"status": "UP", "version": "0.14.0", "edition": "floci-az-always-free"}
+{"status": "UP", "cloud": "az", "version": "0.14.0", "edition": "floci-az-always-free",
+ "services": {"appconfig": "running", "blob": "running", "cosmos-mongo": "available", "...": "..."}}
 ```
 
 | Field | Meaning |
 |---|---|
 | `status` | `UP`, or `DOWN` with a `503` and a `problems` map when a service reports a problem |
+| `cloud` | Always `az`, the same emulator id as the [emulator manifest](#emulator-manifest) |
 | `version` | The floci-az release the image was built from (`FLOCI_AZ_VERSION`), or `dev` for a local build |
 | `edition` | Always `floci-az-always-free` |
+| `services` | Every service, `running` when it is enabled and `available` when it is not. The same services as the [emulator manifest](#emulator-manifest) |
 
 The image's `HEALTHCHECK` (`/usr/local/bin/healthcheck.sh`) probes this path. `/health` is an alias
 with the same body. See [Health Check](docker-compose.md#health-check) for using it from Docker Compose.
@@ -60,6 +72,19 @@ example Service Bus `start-on-boot` or eager Cosmos engines) and again once shut
 answers `200` with `{"status": "UP"}`, or `503` when a service reports a problem. `/health` does not wait for
 startup to finish.
 
+## Init status
+
+`GET /_floci/init` reports the startup stages in the shape every Floci emulator shares. floci-az runs no init
+scripts, so every `scripts` list is empty:
+
+```json
+{"completed": {"boot": true, "start": true, "ready": true, "shutdown": false},
+ "scripts": {"boot": [], "start": [], "ready": [], "shutdown": []}}
+```
+
+`completed.ready` follows [readiness](#readiness): it is `false` until startup has finished and again once shutdown
+begins, when `completed.shutdown` turns `true`. Wait on it, or on `/ready`, before sending work.
+
 ## TLS certificate
 
 When `FLOCI_AZ_TLS_ENABLED=true`, `GET /_floci/tls-cert` returns the certificate clients should trust:
@@ -91,12 +116,15 @@ the configuration files load, so a value in `application.yml` is ignored.
 
 ## Reset
 
-`POST /_admin/reset` wipes all emulator state across every service and returns `204 No Content`.
-Call it between test suites to start from a clean emulator without restarting the container:
+`POST /_floci/state/reset` wipes all emulator state across every service and returns `200` with
+`{"status": "OK"}`. Call it between test suites to start from a clean emulator without restarting the container:
 
 ```bash
-curl -X POST http://localhost:4577/_admin/reset
+curl -X POST http://localhost:4577/_floci/state/reset
 ```
+
+`POST /_floci/state/nuke` is an alias. `POST /_admin/reset` performs the same reset and keeps answering
+`204 No Content`.
 
 The reset is best effort: a service whose reset fails is logged and skipped, and the others are still
 cleared.
