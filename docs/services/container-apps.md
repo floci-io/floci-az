@@ -18,6 +18,9 @@ Real mode runs each active revision replica as Docker containers. Mocked mode ke
 - Mocked mode for Docker-free tests
 
 Scale rules beyond minimum/maximum replicas are retained in ARM responses but are not evaluated locally.
+Ingress forwards to the replica over HTTP/1.1, or over HTTP/2 when `ingress.transport` is `http2`. HTTP/2 to the
+replica starts with an `Upgrade: h2c` request, so an app that accepts only prior-knowledge h2c is not reachable
+through its FQDN.
 Internal ingress accepts only transport peers whose source IP belongs to a Docker IPAM subnet used by a running Container App replica. Forwarded headers cannot make a public caller internal.
 
 ## ARM endpoints

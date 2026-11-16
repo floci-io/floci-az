@@ -613,7 +613,8 @@ public class ContainerAppsHandler implements AzureServiceHandler, Resettable, Re
                 LOG.errorf(e, "Failed to scale Container App revision %s from zero", revision.getName());
             }
         }
-        return endpoint.map(value -> ingressProxy.proxy(request, value))
+        boolean http2 = "http2".equalsIgnoreCase(ingress.path("transport").asText());
+        return endpoint.map(value -> ingressProxy.proxy(request, value, http2))
                 .orElseGet(() -> ArmErrors.error(503, "ContainerAppUnavailable",
                         "Active revision has no running ingress replica."));
     }

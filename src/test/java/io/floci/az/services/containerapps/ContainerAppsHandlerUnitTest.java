@@ -30,7 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -132,10 +134,10 @@ class ContainerAppsHandlerUnitTest {
             return null;
         }).when(runtimeManager).startRevision(any(), any(), any(), anyInt(), anyInt());
         when(runtimeManager.isInternalCaller("172.18.0.4", ENVIRONMENT_ID)).thenReturn(true);
-        var endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
+        ContainerLifecycleManager.EndpointInfo endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
         when(runtimeManager.endpoint(any(), any()))
                 .thenAnswer(ignored -> runtimeStarted.get() ? Optional.of(endpoint) : Optional.empty());
-        when(ingressProxy.proxy(any(), any())).thenReturn(Response.noContent().build());
+        when(ingressProxy.proxy(any(), any(), anyBoolean())).thenReturn(Response.noContent().build());
 
         ObjectNode environment = (ObjectNode) createEnvironment("sub", "rg", "env").getEntity();
         String internalBody = appBody("v1").replace("\"external\":true", "\"external\":false");
@@ -149,6 +151,25 @@ class ContainerAppsHandlerUnitTest {
 
         assertEquals(204, response.getStatus());
         assertTrue(runtimeStarted.get());
+    }
+
+    @Test
+    void ingressForwardsOverHttp2OnlyWhenTransportIsHttp2() {
+        ContainerLifecycleManager.EndpointInfo endpoint = new ContainerLifecycleManager.EndpointInfo("localhost", 8080);
+        when(runtimeManager.endpoint(any(), any())).thenReturn(Optional.of(endpoint));
+        when(ingressProxy.proxy(any(), any(), anyBoolean())).thenReturn(Response.noContent().build());
+        ObjectNode environment = (ObjectNode) createEnvironment("sub", "rg", "env").getEntity();
+        String http2Body = appBody("v1").replace("\"targetPort\":8080", "\"targetPort\":8080,\"transport\":\"http2\"");
+        assertEquals(201, handler.handle(request("PUT", PROVIDER + "containerApps/grpc-app", http2Body)).getStatus());
+        assertEquals(201, handler.handle(request("PUT", PROVIDER + "containerApps/web-app", appBody("v1")))
+                .getStatus());
+
+        handler.handle(new AzureRequest("GET", ingressAccountName(environment, "grpc-app"), "containerapps", "hello",
+                null, null, Map.of(), null, false, "203.0.113.7"));
+        verify(ingressProxy).proxy(any(), any(), eq(true));
+        handler.handle(new AzureRequest("GET", ingressAccountName(environment, "web-app"), "containerapps", "hello",
+                null, null, Map.of(), null, false, "203.0.113.7"));
+        verify(ingressProxy).proxy(any(), any(), eq(false));
     }
 
     @Test

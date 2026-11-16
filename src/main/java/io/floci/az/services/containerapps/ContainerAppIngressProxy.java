@@ -34,15 +34,21 @@ public class ContainerAppIngressProxy {
     @Inject
     public ContainerAppIngressProxy(EmulatorConfig config) {
         this.timeout = Duration.ofSeconds(config.services().containerApps().ingressTimeoutSeconds());
-        this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
+        // HTTP/1.1 unless the app sets ingress.transport http2: the JDK's HTTP_2 sends "Upgrade: h2c" on
+        // cleartext, which servers with an upgrade listener (Next.js, ws, Socket.IO) treat as an upgrade and drop.
+        this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(timeout)
+                .build();
     }
 
-    public Response proxy(AzureRequest request, ContainerLifecycleManager.EndpointInfo endpoint) {
+    public Response proxy(AzureRequest request, ContainerLifecycleManager.EndpointInfo endpoint, boolean http2) {
         try {
             URI target = URI.create("http://" + endpoint.host() + ":" + endpoint.port()
                     + "/" + trimLeadingSlash(request.rawPath()) + queryString(request.queryParamsMulti()));
             byte[] body = request.bodyStream() == null ? new byte[0] : request.bodyStream().readAllBytes();
             HttpRequest.Builder outgoing = HttpRequest.newBuilder(target)
+                    .version(http2 ? HttpClient.Version.HTTP_2 : HttpClient.Version.HTTP_1_1)
                     .timeout(timeout)
                     .method(request.method(), body.length == 0
                             ? HttpRequest.BodyPublishers.noBody()
