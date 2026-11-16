@@ -70,6 +70,9 @@ public final class ServiceBusLockRenewalSupport {
             for (Object token : values) {
                long until = ServiceBusMessageLockSupport.renew(connection, entity, link, (UUID) token);
                if (until == 0) {
+                  until = ServiceBusDeferralSupport.renew(connection, entity, link, (UUID) token);
+               }
+               if (until == 0) {
                   expirations.clear();
                   break;
                }

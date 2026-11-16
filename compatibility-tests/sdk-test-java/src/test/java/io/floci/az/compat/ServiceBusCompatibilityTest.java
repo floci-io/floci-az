@@ -222,6 +222,61 @@ class ServiceBusCompatibilityTest {
     }
 
     @Test
+    @DisplayName("a deferred message lock can be renewed and the message is not received twice while locked")
+    void deferredMessageLockIsRenewedAndExclusive() throws Exception {
+        String queue = uniqueQueue();
+        send(queue, "deferred-lock-" + UUID.randomUUID());
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue);
+             ServiceBusReceiverClient other = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            receiver.defer(msg);
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(msg.getSequenceNumber());
+            assertThrows(RuntimeException.class, () -> other.receiveDeferredMessage(msg.getSequenceNumber()),
+                    "A locked deferred message must not be handed out again");
+
+            OffsetDateTime firstDeadline = deferred.getLockedUntil();
+            Thread.sleep(1_000);
+            OffsetDateTime renewed = receiver.renewMessageLock(deferred);
+            assertTrue(renewed.isAfter(firstDeadline), "Renewal should extend the lock");
+            receiver.complete(deferred);
+        }
+    }
+
+    @Test
+    @DisplayName("a session receiver receives and completes a deferred session message")
+    void sessionReceiverReceivesDeferredMessage() throws Exception {
+        String queue = uniqueSessionQueue();
+        String sessionId = "session-" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            ServiceBusMessage message = new ServiceBusMessage("deferred-session");
+            message.setSessionId(sessionId);
+            sender.sendMessage(message);
+        }
+
+        try (ServiceBusSessionReceiverClient sessionReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .sessionReceiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+             ServiceBusReceiverClient receiver = sessionReceiver.acceptSession(sessionId)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Session message should be received");
+            receiver.defer(msg);
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(msg.getSequenceNumber());
+            assertEquals("deferred-session", deferred.getBody().toString());
+            assertEquals(sessionId, deferred.getSessionId());
+            receiver.complete(deferred);
+        }
+    }
+
+    @Test
     @DisplayName("receiving a message that was not deferred by sequence number fails")
     void receivingAMessageThatWasNotDeferredFails() throws Exception {
         String queue = uniqueQueue();

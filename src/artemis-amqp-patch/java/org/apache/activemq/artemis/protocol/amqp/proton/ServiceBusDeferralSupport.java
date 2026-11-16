@@ -1,6 +1,7 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.security.SecurityAuth;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
@@ -27,13 +28,16 @@ import java.nio.BufferOverflowException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Service Bus message deferral.
@@ -43,6 +47,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code $management} node, and settles it there with {@code update-disposition}, using the lock
  * token that request handed out. Both operations run on the requesting connection's event loop,
  * like lock renewal, before the request reaches routing.
+ *
+ * <p>A deferred message holds at most one lock at a time: while it is locked, receiving it again
+ * finds nothing, as Azure documents for {@code MessageNotFound}. The lock is renewed through
+ * {@code renew-lock} like a delivery lock, and on a session entity both operations require the
+ * caller to hold the session. One reply carries at most what a peek reply does.
  *
  * <p>Deferral is per entity: a topic message deferred on one subscription is still delivered on
  * the others, which hold their own reference to the same broker message. The state is held in
@@ -63,8 +72,14 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
    private static final Symbol INVALID_FIELD = Symbol.valueOf("amqp:invalid-field");
    private static final UnsignedInteger RECEIVE_AND_DELETE = UnsignedInteger.ZERO;
 
+   private static final Symbol SESSION_LOCK_LOST = Symbol.valueOf("com.microsoft:session-lock-lost");
+   /** The bound peek applies to one reply (ServiceBusManagementPlugin): 250 messages and about 1 MiB. */
+   static final int MAX_MESSAGE_COUNT = 250;
+   static final int MAX_RESPONSE_PAYLOAD_BYTES = 1_048_576;
+
    private static final Set<DeferredKey> DEFERRED = ConcurrentHashMap.newKeySet();
-   private static final Map<UUID, DeferredLock> LOCKS = new ConcurrentHashMap<>();
+   /** Active locks, keyed by message, so claiming or settling one is a single atomic map operation. */
+   private static final ConcurrentMap<DeferredKey, DeferredLock> LOCKS = new ConcurrentHashMap<>();
 
    /** Called when a receiver defers a delivery: a modified outcome with undeliverable-here. */
    public static void defer(ServerConsumer consumer, long messageId) {
@@ -72,6 +87,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       if (lockDurationMillis(queue) > 0) {
          DEFERRED.add(new DeferredKey(queue.getName().toString(), messageId));
       }
+      sweepExpiredLocks(System.currentTimeMillis());
    }
 
    static boolean isDeferred(String queueName, long messageId) {
@@ -86,7 +102,17 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
    @Override
    public void messageAcknowledged(Transaction tx, MessageReference reference, AckReason reason,
                                    ServerConsumer consumer) {
-      DEFERRED.remove(new DeferredKey(reference.getQueue().getName().toString(), reference.getMessageID()));
+      DeferredKey key = new DeferredKey(reference.getQueue().getName().toString(), reference.getMessageID());
+      DEFERRED.remove(key);
+      LOCKS.remove(key);
+   }
+
+   @Override
+   public void afterDestroyQueue(Queue queue, SimpleString address, SecurityAuth session,
+                                 boolean checkConsumerCount, boolean removeConsumers, boolean autoDeleteAddress) {
+      String queueName = queue.getName().toString();
+      DEFERRED.removeIf(key -> key.queueName().equals(queueName));
+      LOCKS.keySet().removeIf(key -> key.queueName().equals(queueName));
    }
 
    public static boolean handle(ProtonServerReceiverContext receiver, SimpleString address,
@@ -94,11 +120,14 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       if (address == null || !address.toString().endsWith(SUFFIX) || request.getApplicationProperties() == null) {
          return false;
       }
-      Object operation = request.getApplicationProperties().getValue().get("operation");
+      Map<?, ?> properties = request.getApplicationProperties().getValue();
+      Object operation = properties.get("operation");
       if (!RECEIVE_BY_SEQUENCE_NUMBER.equals(operation) && !UPDATE_DISPOSITION.equals(operation)) {
          return false;
       }
-      ActiveMQServer server = receiver.connection.getProtocolManager().getServer();
+      AMQPConnectionContext connection = receiver.connection;
+      String linkName = properties.get("associated-link-name") instanceof String name ? name : null;
+      ActiveMQServer server = connection.getProtocolManager().getServer();
       Reply reply;
       try {
          if (!(request.getBody() instanceof AmqpValue value) || !(value.getValue() instanceof Map<?, ?> body)) {
@@ -108,9 +137,9 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
          if (queue == null) {
             reply = Reply.error(404, "The messaging entity could not be found", Symbol.valueOf("amqp:not-found"));
          } else if (RECEIVE_BY_SEQUENCE_NUMBER.equals(operation)) {
-            reply = receive(queue, body);
+            reply = receive(queue, body, connection, linkName);
          } else {
-            reply = updateDisposition(queue, body);
+            reply = updateDisposition(queue, body, connection, linkName);
          }
       } catch (IllegalArgumentException e) {
          LOGGER.warn("Invalid Service Bus deferral request", e);
@@ -121,62 +150,170 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       return true;
    }
 
-   static Reply receive(Queue queue, Map<?, ?> body) throws Exception {
+   static Reply receive(Queue queue, Map<?, ?> body, AMQPConnectionContext connection, String linkName)
+      throws Exception {
+      long now = System.currentTimeMillis();
+      sweepExpiredLocks(now);
       List<Long> sequenceNumbers = sequenceNumbers(body.get("sequence-numbers"));
       boolean receiveAndDelete = RECEIVE_AND_DELETE.equals(body.get("receiver-settle-mode"));
       String sessionId = body.get("session-id") instanceof String value && !value.isEmpty() ? value : null;
       String queueName = queue.getName().toString();
+      if (isSessionEntity(queue) && !ownsSession(connection, queueName, linkName, sessionId)) {
+         return sessionLockLost();
+      }
 
       Map<Long, MessageReference> found = deferredReferences(queue, sequenceNumbers, sessionId);
       if (found.size() < sequenceNumbers.size()) {
          List<Long> missing = new ArrayList<>(sequenceNumbers);
          missing.removeAll(found.keySet());
-         return Reply.error(404, "Failed to retrieve the deferred message(s) with sequence number(s) " + missing,
-            MESSAGE_NOT_FOUND);
+         return messageNotFound(missing);
       }
 
-      long now = System.currentTimeMillis();
-      long until = now + lockDurationMillis(queue);
-      List<Map<String, Object>> messages = new ArrayList<>(sequenceNumbers.size());
-      for (long sequenceNumber : sequenceNumbers) {
-         MessageReference reference = found.get(sequenceNumber);
+      // Claim every message before anything is handed out or deleted. A message another
+      // receiver holds a lock on is not found, as Azure documents for MessageNotFound.
+      long duration = lockDurationMillis(queue);
+      Map<MessageReference, DeferredLock> claimed = new LinkedHashMap<>();
+      for (MessageReference reference : boundedBatch(sequenceNumbers, found)) {
+         DeferredKey key = new DeferredKey(queueName, reference.getMessageID());
+         DeferredLock lock = new DeferredLock(UUID.randomUUID(), now + duration, duration, sessionId);
+         if (LOCKS.compute(key, (ignored, held) -> held == null || held.until() <= now ? lock : held) != lock) {
+            claimed.forEach((claimedReference, claimedLock) -> LOCKS.remove(
+               new DeferredKey(queueName, claimedReference.getMessageID()), claimedLock));
+            return messageNotFound(List.of(reference.getMessageID()));
+         }
+         claimed.put(reference, lock);
+      }
+
+      List<Map<String, Object>> messages = new ArrayList<>(claimed.size());
+      for (Map.Entry<MessageReference, DeferredLock> claim : claimed.entrySet()) {
+         MessageReference reference = claim.getKey();
+         DeferredLock lock = claim.getValue();
          Map<String, Object> entry = new HashMap<>();
          if (receiveAndDelete) {
+            DeferredKey key = new DeferredKey(queueName, reference.getMessageID());
             entry.put("message", new Binary(encode(reference, 0)));
-            DEFERRED.remove(new DeferredKey(queueName, sequenceNumber));
-            queue.deleteReference(sequenceNumber);
+            DEFERRED.remove(key);
+            queue.deleteReference(reference.getMessageID());
+            LOCKS.remove(key, lock);
          } else {
-            UUID lockToken = UUID.randomUUID();
-            entry.put("message", new Binary(encode(reference, until)));
-            entry.put("lock-token", lockToken);
+            entry.put("message", new Binary(encode(reference, lock.until())));
+            entry.put("lock-token", lock.token());
             reference.incrementDeliveryCount();
-            LOCKS.put(lockToken, new DeferredLock(new DeferredKey(queueName, sequenceNumber), until));
          }
          messages.add(entry);
       }
-      LOCKS.values().removeIf(lock -> lock.until() <= now);
       return Reply.ok(Map.of("messages", messages));
    }
 
-   static Reply updateDisposition(Queue queue, Map<?, ?> body) throws Exception {
+   /**
+    * The first requested messages that fit one reply. The client receives the rest by asking
+    * again with their sequence numbers, which stay deferred and unlocked.
+    */
+   private static List<MessageReference> boundedBatch(List<Long> sequenceNumbers,
+                                                      Map<Long, MessageReference> found) {
+      List<MessageReference> batch = new ArrayList<>();
+      long bytes = 0;
+      for (long sequenceNumber : sequenceNumbers) {
+         MessageReference reference = found.get(sequenceNumber);
+         int size = ((AMQPMessage) reference.getMessage()).getEncodeSize();
+         if (batch.size() == MAX_MESSAGE_COUNT
+             || (!batch.isEmpty() && bytes + size > MAX_RESPONSE_PAYLOAD_BYTES)) {
+            break;
+         }
+         batch.add(reference);
+         bytes += size;
+      }
+      return batch;
+   }
+
+   static Reply updateDisposition(Queue queue, Map<?, ?> body, AMQPConnectionContext connection,
+                                  String linkName) throws Exception {
+      long now = System.currentTimeMillis();
+      sweepExpiredLocks(now);
       String status = body.get("disposition-status") instanceof String value ? value.toLowerCase(Locale.ROOT) : "";
       if (!Set.of("completed", "abandoned", "suspended", "defered").contains(status)) {
          throw new IllegalArgumentException("disposition-status '" + status + "' is not valid");
       }
       List<UUID> lockTokens = lockTokens(body.get("lock-tokens"));
-      String queueName = queue.getName().toString();
-      long now = System.currentTimeMillis();
-      for (UUID lockToken : lockTokens) {
-         DeferredLock lock = LOCKS.get(lockToken);
-         if (lock == null || lock.until() <= now || !lock.key().queueName().equals(queueName)) {
-            return Reply.error(410, "The lock supplied is invalid. Either the lock expired, or the message has "
-               + "already been removed from the queue", MESSAGE_LOCK_LOST);
-         }
+      if (new HashSet<>(lockTokens).size() < lockTokens.size()) {
+         return lockLost();
       }
+      String queueName = queue.getName().toString();
+      // Claim every token first, so a concurrent or repeated settlement of the same lock loses
+      // the race cleanly instead of settling twice.
+      List<HeldLock> claimed = new ArrayList<>();
       for (UUID lockToken : lockTokens) {
-         settle(queue, LOCKS.remove(lockToken).key().messageId(), status, body);
+         HeldLock held = heldLock(queueName, lockToken, now);
+         Reply refusal = null;
+         if (held == null) {
+            refusal = lockLost();
+         } else if (held.lock().sessionId() != null
+            && !ownsSession(connection, queueName, linkName, held.lock().sessionId())) {
+            refusal = sessionLockLost();
+         } else if (!LOCKS.remove(held.key(), held.lock())) {
+            refusal = lockLost();
+         }
+         if (refusal != null) {
+            claimed.forEach(lock -> LOCKS.putIfAbsent(lock.key(), lock.lock()));
+            return refusal;
+         }
+         claimed.add(held);
+      }
+      for (HeldLock held : claimed) {
+         settle(queue, held.key().messageId(), status, body);
       }
       return Reply.ok(Map.of());
+   }
+
+   /** Renews a deferred message's lock: the new deadline, or 0 when the token holds no active lock there. */
+   static long renew(AMQPConnectionContext connection, String entity, String linkName, UUID lockToken) {
+      long now = System.currentTimeMillis();
+      sweepExpiredLocks(now);
+      HeldLock held = heldLock(entity, lockToken, now);
+      if (held == null || (held.lock().sessionId() != null
+         && !ownsSession(connection, entity, linkName, held.lock().sessionId()))) {
+         return 0;
+      }
+      DeferredLock renewed = new DeferredLock(lockToken, now + held.lock().duration(), held.lock().duration(),
+         held.lock().sessionId());
+      return LOCKS.replace(held.key(), held.lock(), renewed) ? renewed.until() : 0;
+   }
+
+   private static HeldLock heldLock(String queueName, UUID lockToken, long now) {
+      for (Map.Entry<DeferredKey, DeferredLock> entry : LOCKS.entrySet()) {
+         DeferredLock lock = entry.getValue();
+         if (lock.token().equals(lockToken) && entry.getKey().queueName().equals(queueName) && lock.until() > now) {
+            return new HeldLock(entry.getKey(), lock);
+         }
+      }
+      return null;
+   }
+
+   private static void sweepExpiredLocks(long now) {
+      LOCKS.values().removeIf(lock -> lock.until() <= now);
+   }
+
+   private static boolean isSessionEntity(Queue queue) {
+      return queue.getUser() != null && queue.getUser().toString().startsWith(SESSION_PREFIX);
+   }
+
+   private static boolean ownsSession(AMQPConnectionContext connection, String queueName, String linkName,
+                                      String sessionId) {
+      return sessionId != null && ServiceBusSessionSupport.owns(connection, queueName, linkName, sessionId);
+   }
+
+   private static Reply messageNotFound(List<Long> sequenceNumbers) {
+      return Reply.error(404, "Failed to retrieve the deferred message(s) with sequence number(s) " + sequenceNumbers,
+         MESSAGE_NOT_FOUND);
+   }
+
+   private static Reply lockLost() {
+      return Reply.error(410, "The lock supplied is invalid. Either the lock expired, or the message has "
+         + "already been removed from the queue", MESSAGE_LOCK_LOST);
+   }
+
+   private static Reply sessionLockLost() {
+      return Reply.error(410, "The session lock has expired or is not held by this receiver", SESSION_LOCK_LOST);
    }
 
    private static void settle(Queue queue, long messageId, String status, Map<?, ?> body) throws Exception {
@@ -299,7 +436,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       if (numbers.isEmpty()) {
          throw new IllegalArgumentException("sequence-numbers is required");
       }
-      return numbers;
+      return new ArrayList<>(new LinkedHashSet<>(numbers));
    }
 
    private static List<UUID> lockTokens(Object value) {
@@ -345,7 +482,10 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
    private record DeferredKey(String queueName, long messageId) {
    }
 
-   private record DeferredLock(DeferredKey key, long until) {
+   private record DeferredLock(UUID token, long until, long duration, String sessionId) {
+   }
+
+   private record HeldLock(DeferredKey key, DeferredLock lock) {
    }
 
    record Reply(Map<String, Object> applicationProperties, Map<String, Object> body) {

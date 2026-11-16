@@ -321,8 +321,15 @@ A deferred message stays in its queue or subscription but is not delivered to re
 mode, and a peek-locked deferred message is settled through `update-disposition`: complete removes
 it, dead-letter moves it to the dead-letter queue with its reason and description, and abandon or
 defer release the lock and leave it deferred. Asking for a sequence number that is not deferred in
-that entity fails with `MessageNotFound`, and settling with an expired lock fails with
-`MessageLockLost`, as in Azure.
+that entity, or for a deferred message another receiver currently holds a lock on, fails with
+`MessageNotFound`, and settling with an expired lock fails with `MessageLockLost`, as in Azure.
+`RenewMessageLock` extends a deferred message's lock like any other. On a session entity, both
+receiving and settling require the caller to hold the session lock, and fail with `SessionLockLost`
+otherwise.
+
+One reply carries at most 250 messages and about 1 MiB, the same bound peek uses. When more are
+requested, the first ones that fit are returned and the rest stay deferred and unlocked, so the
+client asks for them again.
 
 Deferral is tracked per entity, so a topic message deferred on one subscription is still delivered
 on the others. The deferred state is held in broker memory: after a broker restart, deferred
