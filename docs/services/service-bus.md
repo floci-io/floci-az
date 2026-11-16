@@ -323,7 +323,7 @@ it, dead-letter moves it to the dead-letter queue with its reason and descriptio
 defer release the lock and leave it deferred. Asking for a sequence number that is not deferred in
 that entity, or for a deferred message another receiver currently holds a lock on, fails with
 `MessageNotFound`, and settling with an expired lock fails with `MessageLockLost`, as in Azure.
-`RenewMessageLock` extends a deferred message's lock like any other. On a session entity, both
+The lock belongs to the receiver that took it, which renews it with `RenewMessageLock` like any other lock. On a session entity, both
 receiving and settling require the caller to hold the session lock, and fail with `SessionLockLost`
 otherwise.
 

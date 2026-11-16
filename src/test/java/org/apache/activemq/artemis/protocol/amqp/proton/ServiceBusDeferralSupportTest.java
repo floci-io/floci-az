@@ -277,6 +277,79 @@ class ServiceBusDeferralSupportTest {
         verify(queue, never()).deleteReference(2L);
     }
 
+    @Test
+    void aMessageBeingCompletedCannotBeReceivedRenewedOrSettledAgain() throws Exception {
+        defer(queue);
+        UUID lockToken = receiveLocked();
+        List<Object> concurrent = new ArrayList<>();
+        // Runs the competing requests at the point the completion is still deleting the message.
+        when(queue.deleteReference(SEQUENCE_NUMBER)).thenAnswer(call -> {
+            concurrent.add(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER},
+                    "receiver-settle-mode", UnsignedInteger.ZERO)));
+            concurrent.add(renew(lockToken));
+            concurrent.add(updateDisposition(complete(lockToken)));
+            return true;
+        });
+
+        assertEquals(200, status(updateDisposition(complete(lockToken))));
+
+        assertEquals(404, status(concurrent.get(0)));
+        assertEquals(0L, concurrent.get(1));
+        assertEquals(410, status(concurrent.get(2)));
+        verify(queue, times(1)).deleteReference(SEQUENCE_NUMBER);
+        assertTrue(canAccept(consumer(queue), reference));
+    }
+
+    @Test
+    void aMessageBeingReceivedAndDeletedCannotBeClaimedByAnotherReceive() throws Exception {
+        defer(queue);
+        List<Object> concurrent = new ArrayList<>();
+        when(queue.deleteReference(SEQUENCE_NUMBER)).thenAnswer(call -> {
+            concurrent.add(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER})));
+            return true;
+        });
+
+        assertEquals(200, status(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER},
+                "receiver-settle-mode", UnsignedInteger.ZERO))));
+
+        assertEquals(404, status(concurrent.get(0)));
+        verify(queue, times(1)).deleteReference(SEQUENCE_NUMBER);
+    }
+
+    @Test
+    void aRefusedSettlementRestoresOnlyTheLocksItTook() throws Exception {
+        defer(queue);
+        UUID lockToken = receiveLocked();
+
+        assertEquals(410, status(updateDisposition(complete(lockToken, UUID.randomUUID()))));
+
+        verify(queue, never()).deleteReference(SEQUENCE_NUMBER);
+        assertEquals(404, status(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}))));
+        assertTrue(renew(lockToken) > 0);
+        assertEquals(200, status(updateDisposition(complete(lockToken))));
+    }
+
+    @Test
+    void onlyTheReceiverThatTookADeferredLockCanRenewOrSettleIt() throws Exception {
+        AMQPConnectionContext owner = mock(AMQPConnectionContext.class);
+        AMQPConnectionContext other = mock(AMQPConnectionContext.class);
+        defer(queue);
+        UUID lockToken = (UUID) onlyMessage(invokeStatic("receive", queue,
+                Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}), owner, "link-a")).get("lock-token");
+
+        assertEquals(0L, renew(lockToken, other, "link-a"));
+        assertEquals(0L, renew(lockToken, owner, "link-b"));
+        Object wrongReceiver = invokeStatic("updateDisposition", queue, complete(lockToken), other, null);
+        assertEquals(410, status(wrongReceiver));
+        assertEquals(Symbol.valueOf("com.microsoft:message-lock-lost"),
+                properties(wrongReceiver).get("errorCondition"));
+        verify(queue, never()).deleteReference(SEQUENCE_NUMBER);
+
+        assertTrue(renew(lockToken, owner, "link-a") > 0);
+        assertTrue(renew(lockToken, owner, null) > 0);
+        assertEquals(200, status(invokeStatic("updateDisposition", queue, complete(lockToken), owner, "link-a")));
+    }
+
     private void defer(Queue target) throws Exception {
         type.getMethod("defer", ServerConsumer.class, long.class).invoke(null, consumer(target), SEQUENCE_NUMBER);
     }
@@ -299,17 +372,30 @@ class ServiceBusDeferralSupportTest {
     }
 
     private Object invokeStatic(String name, Queue target, Map<String, Object> body) throws Exception {
+        return invokeStatic(name, target, body, null, null);
+    }
+
+    private Object invokeStatic(String name, Queue target, Map<String, Object> body,
+                                AMQPConnectionContext connection, String linkName) throws Exception {
         Method method = type.getDeclaredMethod(name, Queue.class, Map.class, AMQPConnectionContext.class,
                 String.class);
         method.setAccessible(true);
-        return method.invoke(null, target, body, null, null);
+        return method.invoke(null, target, body, connection, linkName);
     }
 
     private long renew(UUID lockToken) throws Exception {
+        return renew(lockToken, null, null);
+    }
+
+    private long renew(UUID lockToken, AMQPConnectionContext connection, String linkName) throws Exception {
         Method method = type.getDeclaredMethod("renew", AMQPConnectionContext.class, String.class, String.class,
                 UUID.class);
         method.setAccessible(true);
-        return (long) method.invoke(null, null, "orders", null, lockToken);
+        return (long) method.invoke(null, connection, "orders", linkName, lockToken);
+    }
+
+    private static Map<String, Object> complete(UUID... lockTokens) {
+        return Map.of("disposition-status", "completed", "lock-tokens", lockTokens);
     }
 
     private UUID receiveLocked() throws Exception {
