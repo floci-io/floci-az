@@ -143,6 +143,10 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       } catch (IllegalArgumentException e) {
          LOGGER.warn("Invalid Service Bus deferral request", e);
          reply = Reply.error(400, e.getMessage() == null ? "Bad Request" : e.getMessage(), INVALID_FIELD);
+      } catch (Exception e) {
+         // As the management plugin answers a request it fails to process.
+         LOGGER.error("Could not process Service Bus deferral request", e);
+         reply = Reply.error(500, "Internal Server Error", Symbol.valueOf("amqp:internal-error"));
       }
       ServiceBusLockRenewalSupport.reply(receiver, address, request, delivery, reply.applicationProperties(),
          reply.body());
@@ -175,7 +179,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
       for (MessageReference reference : boundedBatch(sequenceNumbers, found)) {
          DeferredKey key = new DeferredKey(queueName, reference.getMessageID());
          DeferredState claim = new DeferredState(new DeferredLock(UUID.randomUUID(), now + duration, duration,
-            sessionId, connection, linkName), receiveAndDelete);
+            sessionId, AmqpReplyRouting.connectionId(connection), linkName), receiveAndDelete);
          if (DEFERRED.computeIfPresent(key, (ignored, current) -> current.claimable(now) ? claim : current) != claim) {
             claimed.forEach((claimedReference, claimedState) -> DEFERRED.replace(
                new DeferredKey(queueName, claimedReference.getMessageID()), claimedState, DeferredState.AVAILABLE));
@@ -262,8 +266,16 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
             return refusal;
          }
       }
-      for (Settlement settlement : settlements) {
-         settle(queue, settlement, status, body);
+      for (int settled = 0; settled < settlements.size(); settled++) {
+         try {
+            settle(queue, settlements.get(settled), status, body);
+         } catch (Exception e) {
+            // Messages already settled stay settled. This one and the rest go back to their lock,
+            // so they are not left settling, where nothing could ever move them on.
+            settlements.subList(settled, settlements.size()).forEach(settlement ->
+               DEFERRED.replace(settlement.key(), settlement.settling(), settlement.locked()));
+            throw e;
+         }
       }
       return Reply.ok(Map.of());
    }
@@ -280,7 +292,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
          return 0;
       }
       DeferredState renewed = new DeferredState(new DeferredLock(lock.token(), now + lock.duration(),
-         lock.duration(), lock.sessionId(), lock.connection(), lock.linkName()), false);
+         lock.duration(), lock.sessionId(), lock.connectionId(), lock.linkName()), false);
       return DEFERRED.replace(held.key(), held.state(), renewed) ? renewed.lock().until() : 0;
    }
 
@@ -300,7 +312,7 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
     * Ordinary lock renewal (ServiceBusMessageLockSupport) scopes a lock the same way.
     */
    private static boolean heldByCaller(DeferredLock lock, AMQPConnectionContext connection, String linkName) {
-      return lock.connection() == connection
+      return lock.connectionId().equals(AmqpReplyRouting.connectionId(connection))
          && (linkName == null || lock.linkName() == null || linkName.equals(lock.linkName()));
    }
 
@@ -494,9 +506,13 @@ public final class ServiceBusDeferralSupport implements ActiveMQServerPlugin {
    private record DeferredKey(String queueName, long messageId) {
    }
 
-   /** A lock handed out by receive-by-sequence-number, scoped to the receiver that asked for it. */
+   /**
+    * A lock handed out by receive-by-sequence-number, scoped to the receiver that asked for it. It
+    * keeps the connection's id (AmqpReplyRouting) rather than the connection, so an expired lock
+    * holds nothing of a client that has gone.
+    */
    private record DeferredLock(UUID token, long until, long duration, String sessionId,
-                               AMQPConnectionContext connection, String linkName) {
+                               String connectionId, String linkName) {
    }
 
    /** A deferred message's state: available, locked (an unexpired lock) or being settled. */

@@ -16,17 +16,20 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -43,6 +46,7 @@ class ServiceBusDeferralSupportTest {
     private Object plugin;
     private Queue queue;
     private MessageReference reference;
+    private final AMQPConnectionContext receiver = connection("receiver-connection");
 
     @BeforeEach
     void openPatchJar() throws Exception {
@@ -331,8 +335,8 @@ class ServiceBusDeferralSupportTest {
 
     @Test
     void onlyTheReceiverThatTookADeferredLockCanRenewOrSettleIt() throws Exception {
-        AMQPConnectionContext owner = mock(AMQPConnectionContext.class);
-        AMQPConnectionContext other = mock(AMQPConnectionContext.class);
+        AMQPConnectionContext owner = connection("owner");
+        AMQPConnectionContext other = connection("other");
         defer(queue);
         UUID lockToken = (UUID) onlyMessage(invokeStatic("receive", queue,
                 Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}), owner, "link-a")).get("lock-token");
@@ -348,6 +352,34 @@ class ServiceBusDeferralSupportTest {
         assertTrue(renew(lockToken, owner, "link-a") > 0);
         assertTrue(renew(lockToken, owner, null) > 0);
         assertEquals(200, status(invokeStatic("updateDisposition", queue, complete(lockToken), owner, "link-a")));
+    }
+
+    @Test
+    void aSettlementThatFailsPartWayPutsItsMessageBackUnderItsLock() throws Exception {
+        defer(queue);
+        UUID lockToken = receiveLocked();
+        Map<Object, Object> invalidProperties = new HashMap<>();
+        invalidProperties.put(null, "no name");
+
+        assertThrows(InvocationTargetException.class, () -> updateDisposition(Map.of(
+                "disposition-status", "abandoned", "lock-tokens", new UUID[]{lockToken},
+                "properties-to-modify", invalidProperties)));
+
+        assertEquals(404, status(receive(Map.of("sequence-numbers", new long[]{SEQUENCE_NUMBER}))));
+        assertTrue(renew(lockToken) > 0);
+        assertEquals(200, status(updateDisposition(complete(lockToken))));
+        verify(queue).deleteReference(SEQUENCE_NUMBER);
+    }
+
+    @Test
+    void aDeferredLockKeepsTheConnectionIdNotTheConnection() throws Exception {
+        defer(queue);
+        UUID lockToken = receiveLocked();
+
+        // A different connection object with the same id is the same receiver; a lock holding the
+        // connection itself would refuse it, and would keep a closed client's connection alive.
+        assertTrue(renew(lockToken, connection("receiver-connection"), null) > 0);
+        assertEquals(0L, renew(lockToken, connection("another-connection"), null));
     }
 
     private void defer(Queue target) throws Exception {
@@ -372,7 +404,7 @@ class ServiceBusDeferralSupportTest {
     }
 
     private Object invokeStatic(String name, Queue target, Map<String, Object> body) throws Exception {
-        return invokeStatic(name, target, body, null, null);
+        return invokeStatic(name, target, body, receiver, null);
     }
 
     private Object invokeStatic(String name, Queue target, Map<String, Object> body,
@@ -384,7 +416,7 @@ class ServiceBusDeferralSupportTest {
     }
 
     private long renew(UUID lockToken) throws Exception {
-        return renew(lockToken, null, null);
+        return renew(lockToken, receiver, null);
     }
 
     private long renew(UUID lockToken, AMQPConnectionContext connection, String linkName) throws Exception {
@@ -430,6 +462,13 @@ class ServiceBusDeferralSupportTest {
         org.apache.qpid.proton.message.Message message = Proton.message();
         message.decode(binary.getArray(), binary.getArrayOffset(), binary.getLength());
         return message;
+    }
+
+    /** A connection carrying the id AmqpReplyRouting stamps on it, which a deferred lock keeps. */
+    private static AMQPConnectionContext connection(String id) {
+        AMQPConnectionContext connection = mock(AMQPConnectionContext.class, RETURNS_DEEP_STUBS);
+        when(connection.getHandler().getConnection().attachments().get(any(), eq(String.class))).thenReturn(id);
+        return connection;
     }
 
     private static Queue queue(String name, String user) {
