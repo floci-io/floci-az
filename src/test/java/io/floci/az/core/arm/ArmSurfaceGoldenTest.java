@@ -127,6 +127,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Storage/storageAccounts                                              RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE
         Microsoft.Storage/storageAccounts/blobServices                                 RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.Storage/storageAccounts/blobServices/containers                      RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
+        Microsoft.Storage/storageAccounts/managementPolicies                           RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.Storage/storageAccounts/queueServices                                RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.Storage/storageAccounts/queueServices/queues                         RESOURCE_GROUP  OPTIONAL  PROVIDER_SERVICE
         Microsoft.Web/sites                                                            RESOURCE_GROUP  REQUIRED  PROVIDER_SERVICE

@@ -28,6 +28,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -66,6 +67,8 @@ public class StorageAccountArmService
 
     private static final String NAMESPACE = "Microsoft.Storage";
     private static final String ACCOUNT_TYPE = NAMESPACE + "/storageAccounts";
+    private static final String MANAGEMENT_POLICY_TYPE = ACCOUNT_TYPE + "/managementPolicies";
+    private static final String BLOB_SERVICE_TYPE = ACCOUNT_TYPE + "/blobServices";
     /** What {@code StorageAccountProperties} marks readOnly and the create parameters do not accept. */
     private static final Set<String> READ_ONLY_PROPERTIES = Set.of(
             "provisioningState", "primaryEndpoints", "primaryLocation", "statusOfPrimary", "lastGeoFailoverTime",
@@ -86,6 +89,7 @@ public class StorageAccountArmService
     /** The account sub-paths this service serves; every other one is a 404. */
     private enum Child {
         LIST_KEYS("listKeys"),
+        MANAGEMENT_POLICY("managementPolicies/default"),
         BLOB_SERVICE("blobServices/default"),
         BLOB_CONTAINER("blobServices/default/containers/[^/]+"),
         QUEUE_SERVICE("queueServices/default"),
@@ -100,6 +104,10 @@ public class StorageAccountArmService
     }
 
     private final ArmResourceStore<Map<String, Object>> accounts;
+    /** Each account's {@code managementPolicies/default}, in the accounts' backend. */
+    private final ArmResourceStore<Map<String, Object>> managementPolicies;
+    /** Each account's {@code blobServices/default} as last set, in the accounts' backend. */
+    private final ArmResourceStore<Map<String, Object>> blobServices;
     private final GlobalNameRegistry names;
     private final EmulatorConfig config;
     private final BlobServiceHandler blobHandler;
@@ -112,7 +120,13 @@ public class StorageAccountArmService
                                     BlobServiceHandler blobHandler, QueueServiceHandler queueHandler,
                                     CloudDefaults defaults) {
         this.defaults = defaults;
-        this.accounts = ArmResourceStore.create(storageFactory, STORE, documentType(),
+        // Typed, so the account's child documents can share the backend: accounts were only ever written under
+        // canonical account ids, which the typed store still owns.
+        this.accounts = ArmResourceStore.create(storageFactory, STORE, ACCOUNT_TYPE, documentType(),
+            StorageAccountArmService::idOf, key -> false);
+        this.managementPolicies = ArmResourceStore.create(storageFactory, STORE, MANAGEMENT_POLICY_TYPE,
+            documentType(), StorageAccountArmService::idOf, key -> false);
+        this.blobServices = ArmResourceStore.create(storageFactory, STORE, BLOB_SERVICE_TYPE, documentType(),
             StorageAccountArmService::idOf, key -> false);
         this.names = names;
         this.config = config;
@@ -222,9 +236,10 @@ public class StorageAccountArmService
         }
         return switch (child) {
             case LIST_KEYS -> listKeys(account);
+            case MANAGEMENT_POLICY -> handleManagementPolicy(req, path, method, accountId(sub, rg, account));
             case BLOB_CONTAINER -> handleBlobContainer(req, path, method);
             case QUEUE -> handleQueueResource(path, method);
-            case BLOB_SERVICE -> serviceProperties(path, "blobServices");
+            case BLOB_SERVICE -> handleBlobService(req, path, method, accountId(sub, rg, account));
             case QUEUE_SERVICE -> serviceProperties(path, "queueServices");
             case FILE_SERVICE -> serviceProperties(path, "fileServices");
         };
@@ -252,9 +267,78 @@ public class StorageAccountArmService
         return null;
     }
 
+    // ── Management policy and blob service properties ───────────────────────
+
     /**
-     * The synthesized {@code default} service of an account: {@code blobServices} and {@code queueServices}, and
-     * {@code fileServices}, which azurerm reads back for every StorageV2 account.
+     * {@code ManagementPolicies_CreateOrUpdate}, {@code _Get} and {@code _Delete} (2025-08-01): the account's one
+     * lifecycle policy, named {@code default}. The PUT keeps {@code properties.policy} as sent and answers 200, the
+     * only status the spec declares; the GET answers 404 until a policy is set; the DELETE answers 200 when it removed
+     * one and 204 when there was none, both of which the spec declares.
+     */
+    private Response handleManagementPolicy(AzureRequest req, String path, String method, ArmResourceId accountId) {
+        ArmResourceId id = childId(path);
+        return switch (method) {
+            case "PUT" -> {
+                if (accounts.get(accountId).isEmpty()) {
+                    yield armNotFound("storageAccounts/" + accountId.name());
+                }
+                Map<String, Object> properties = new LinkedHashMap<>();
+                properties.put("lastModifiedTime", Instant.now().toString());
+                properties.put("policy", ArmJson.cast(ArmJson.cast(ArmJson.parseBodyLenient(req).get("properties"))
+                        .get("policy")));
+                Map<String, Object> written = managementPolicies.createOrUpdate(id,
+                        ignored -> childDocument(id.id(), MANAGEMENT_POLICY_TYPE, properties)).stored().value();
+                yield Response.ok(written).build();
+            }
+            case "GET" -> managementPolicies.get(id)
+                    .map(stored -> Response.ok(stored.value()).build())
+                    .orElseGet(() -> armNotFound("storageAccounts/" + accountId.name() + "/managementPolicies/default"));
+            case "DELETE" -> Response.status(managementPolicies.delete(id).isPresent() ? 200 : 204).build();
+            default -> Response.status(405).build();
+        };
+    }
+
+    /**
+     * {@code BlobServices_SetServiceProperties} and {@code _GetServiceProperties} (2025-08-01), both 200. The PUT's
+     * {@code properties} replace the ones set before, as a PUT does; azurerm always sends the whole set. Until one is
+     * set the GET answers the synthesized empty service, which azurerm reads back for every account.
+     */
+    private Response handleBlobService(AzureRequest req, String path, String method, ArmResourceId accountId) {
+        ArmResourceId id = childId(path);
+        return switch (method) {
+            case "PUT" -> {
+                if (accounts.get(accountId).isEmpty()) {
+                    yield armNotFound("storageAccounts/" + accountId.name());
+                }
+                Map<String, Object> properties = new LinkedHashMap<>(
+                        ArmJson.cast(ArmJson.parseBodyLenient(req).get("properties")));
+                Map<String, Object> written = blobServices.createOrUpdate(id,
+                        ignored -> childDocument(id.id(), BLOB_SERVICE_TYPE, properties)).stored().value();
+                yield Response.ok(written).build();
+            }
+            case "GET" -> blobServices.get(id)
+                    .map(stored -> Response.ok(stored.value()).build())
+                    .orElseGet(() -> serviceProperties(path, "blobServices"));
+            default -> Response.status(405).build();
+        };
+    }
+
+    private static ArmResourceId childId(String path) {
+        return ArmResourceId.parse("/" + withoutQuery(path).replaceFirst("^/+", "")).orElseThrow();
+    }
+
+    private static Map<String, Object> childDocument(String id, String type, Map<String, Object> properties) {
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("id", id);
+        document.put("name", "default");
+        document.put("type", type);
+        document.put("properties", properties);
+        return document;
+    }
+
+    /**
+     * The synthesized {@code default} service of an account: {@code blobServices} until its properties are set,
+     * {@code queueServices}, and {@code fileServices}, which azurerm reads back for every StorageV2 account.
      */
     private static Response serviceProperties(String path, String service) {
         return Response.ok(Map.of("id", withoutQuery(path), "name", "default",
@@ -432,10 +516,12 @@ public class StorageAccountArmService
         return tags;
     }
 
-    /** {@code StorageAccounts_Delete}: 200 whether or not there was an account. */
+    /** {@code StorageAccounts_Delete}: 200 whether or not there was an account. Its policy and service go with it. */
     private synchronized Response delete(ArmResourceId id) {
         accounts.delete(id).ifPresent(stored ->
                 blobHandler.removeHierarchicalNamespaceOverride(String.valueOf(stored.value().get("name"))));
+        managementPolicies.delete(childId(id.id() + "/managementPolicies/default"));
+        blobServices.delete(childId(id.id() + "/blobServices/default"));
         return Response.ok().build();
     }
 
@@ -546,6 +632,8 @@ public class StorageAccountArmService
     @Override
     public void clear() {
         accounts.clear();
+        managementPolicies.clear();
+        blobServices.clear();
     }
 
     private static CloudProfile cloud(AzureRequest req) {
