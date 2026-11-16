@@ -5,8 +5,9 @@ the `armmanagementgroups` / `azure-mgmt-managementgroups` SDKs and the `azurerm_
 Terraform resource. Models the tenant hierarchy: the tenant root group, the groups under it and the
 subscriptions placed in them.
 
-> **HTTP-only, no Docker.** The hierarchy is in-memory and ephemeral, like the rest of the ARM control
-> plane.
+> **HTTP-only, no Docker.** Groups and subscription placements are kept in the `managementgroups`
+> store, which follows the configured storage mode: in memory by default, and surviving a restart
+> with persistent storage, as the subscriptions a placement registers do.
 
 ---
 
