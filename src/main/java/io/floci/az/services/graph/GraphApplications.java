@@ -160,15 +160,18 @@ final class GraphApplications {
         if (ownerId == null) {
             return graphError(400, "Request_BadRequest", "@odata.id is required.");
         }
-        if (principal(ownerId).isEmpty()) {
+        Optional<Map<String, Object>> principal = principal(ownerId);
+        if (principal.isEmpty()) {
             return notFound(ownerId);
         }
+        // The link holds the principal's own id, whatever casing the reference was written in.
+        String canonicalId = String.valueOf(principal.get().get("id"));
         synchronized (store) {
-            if (store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS).stream().anyMatch(ownerId::equalsIgnoreCase)) {
+            if (store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS).stream().anyMatch(canonicalId::equalsIgnoreCase)) {
                 return graphError(400, "Request_BadRequest",
                     "One or more added object references already exist for the following modified properties: 'owners'.");
             }
-            store.addLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, ownerId);
+            store.addLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, canonicalId);
         }
         return Response.status(204).build();
     }
@@ -185,9 +188,14 @@ final class GraphApplications {
         return Response.status(204).build();
     }
 
+    /** An object by id, which Graph compares without regard to the casing of the GUID. */
+    private Optional<DirectoryObject> byId(DirectoryEntitySet set, String id) {
+        return store.get(tenantId, set, id).or(() -> store.get(tenantId, set, id.toLowerCase(Locale.ROOT)));
+    }
+
     /** A user or service principal of the tenant as a {@code directoryObject}, typed the way Graph lists owners. */
     private Optional<Map<String, Object>> principal(String id) {
-        Optional<DirectoryObject> user = store.get(tenantId, DirectoryEntitySet.USERS, id);
+        Optional<DirectoryObject> user = byId(DirectoryEntitySet.USERS, id);
         if (user.isPresent()) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("@odata.type", "#microsoft.graph.user");
@@ -197,7 +205,7 @@ final class GraphApplications {
             out.put("mail", user.get().text("mail"));
             return Optional.of(out);
         }
-        return store.get(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, id).map(sp -> {
+        return byId(DirectoryEntitySet.SERVICE_PRINCIPALS, id).map(sp -> {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("@odata.type", "#microsoft.graph.servicePrincipal");
             out.put("id", sp.id());
@@ -388,10 +396,7 @@ final class GraphApplications {
 
     private Response delete(DirectoryObject app) {
         synchronized (store) {
-            for (String ownerId : store.links(tenantId, app.id(), GraphDirectoryStore.OWNERS)) {
-                store.removeLink(tenantId, app.id(), GraphDirectoryStore.OWNERS, ownerId);
-            }
-            store.delete(tenantId, DirectoryEntitySet.APPLICATIONS, app.id());
+            store.delete(tenantId, DirectoryEntitySet.APPLICATIONS, app.id()); // drops its owner links too
             store.findByAlternateKey(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, "appId", app.text("appId"))
                 .ifPresent(sp -> store.delete(tenantId, DirectoryEntitySet.SERVICE_PRINCIPALS, sp.id()));
         }

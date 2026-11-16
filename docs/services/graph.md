@@ -110,5 +110,5 @@ as Graph makes the signed-in principal one; a client that then sets its own owne
 
 Full Graph CRUD beyond the slice above (service principals beyond discovery, users and groups
 management, directory roles, conditional access, application `keyCredentials`, API permissions and
-`requiredResourceAccess`, owners, federated identity credentials) remains open
+`requiredResourceAccess`, federated identity credentials) remains open
 ([#23](https://github.com/floci-io/floci-az/issues/23)).

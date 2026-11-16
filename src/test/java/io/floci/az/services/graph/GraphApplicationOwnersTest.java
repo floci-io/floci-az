@@ -70,6 +70,25 @@ class GraphApplicationOwnersTest {
                 .when().post("/v1.0/applications/" + objectId + "/owners/$ref/extra").then().statusCode(400);
         given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(200).body("value", hasSize(1));
 
+        // A reference written in another casing names the same principal: it is a duplicate, and the link keeps the canonical id.
+        given().contentType("application/json")
+                .body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + EntraStore.DEV_USER_OBJECT_ID.toUpperCase() + "\"}")
+                .when().post("/v1.0/applications/" + objectId + "/owners/$ref").then().statusCode(400);
+        given().contentType("application/json")
+                .body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + EntraStore.DEV_SP_OBJECT_ID.toUpperCase() + "\"}")
+                .when().post("/v1.0/applications/" + objectId + "/owners/$ref").then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId + "/owners")
+                .then().statusCode(200)
+                .body("value", hasSize(2))
+                .body("value[1].id", equalTo(EntraStore.DEV_SP_OBJECT_ID));
+        given().when().delete("/v1.0/applications/" + objectId + "/owners/" + EntraStore.DEV_SP_OBJECT_ID.toUpperCase() + "/$ref")
+                .then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(200).body("value", hasSize(1));
+
+        // Deleting the registration drops its owner links: a new one under the same lookups starts clean.
+        given().when().delete("/v1.0/applications/" + objectId).then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(404);
+
         // Without a token nobody is named, so a registration starts with no owner.
         String anonymous = given().contentType("application/json").body("{\"displayName\": \"unowned\"}")
                 .when().post("/v1.0/applications").then().statusCode(201).extract().path("id");
