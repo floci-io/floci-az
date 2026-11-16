@@ -4,6 +4,9 @@ import com.sun.net.httpserver.HttpServer;
 import io.floci.az.config.EmulatorConfig;
 import io.floci.az.core.AzureRequest;
 import io.floci.az.core.docker.ContainerLifecycleManager;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.http.HttpVersion;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.Response;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -92,19 +96,19 @@ class ContainerAppIngressProxyTest {
     }
 
     @Test
-    void http2TransportForwardsOverHttp2() throws Exception {
-        AtomicReference<String> upgrade = new AtomicReference<>();
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/", exchange -> {
-            upgrade.set(exchange.getRequestHeaders().getFirst("Upgrade"));
-            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-        server.start();
-
+    void http2TransportCompletesTheExchangeOverHttp2() throws Exception {
+        AtomicReference<HttpVersion> version = new AtomicReference<>();
+        Vertx vertx = Vertx.vertx();
         try {
+            // Vert.x accepts the JDK client's cleartext h2c upgrade, so the exchange really runs over HTTP/2.
+            int port = vertx.createHttpServer(new HttpServerOptions().setHttp2ClearTextEnabled(true))
+                    .requestHandler(req -> {
+                        version.set(req.version());
+                        req.response().setStatusCode(200).end("ok");
+                    })
+                    .listen(0, "127.0.0.1")
+                    .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                    .actualPort();
             EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
             when(config.services().containerApps().ingressTimeoutSeconds()).thenReturn(5);
             HttpHeaders headers = mock(HttpHeaders.class);
@@ -113,15 +117,15 @@ class ContainerAppIngressProxyTest {
                     headers, null, Map.of(), Map.of(), null, false, "app.azurecontainerapps.io", "127.0.0.1",
                     "readyz", null).withAuthContext(null);
             ContainerLifecycleManager.EndpointInfo endpoint = new ContainerLifecycleManager.EndpointInfo(
-                    "127.0.0.1", server.getAddress().getPort());
+                    "127.0.0.1", port);
 
             Response response = new ContainerAppIngressProxy(config).proxy(request, endpoint, true);
 
             assertEquals(200, response.getStatus());
-            // The JDK reaches a cleartext HTTP/2 server through an h2c upgrade.
-            assertEquals("h2c", upgrade.get());
+            assertEquals("ok", new String((byte[]) response.getEntity(), StandardCharsets.UTF_8));
+            assertEquals(HttpVersion.HTTP_2, version.get());
         } finally {
-            server.stop(0);
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 }
