@@ -273,19 +273,26 @@ public class StorageAccountArmService
      * {@code ManagementPolicies_CreateOrUpdate}, {@code _Get} and {@code _Delete} (2025-08-01): the account's one
      * lifecycle policy, named {@code default}. The PUT keeps {@code properties.policy} as sent and answers 200, the
      * only status the spec declares; the GET answers 404 until a policy is set; the DELETE answers 200 when it removed
-     * one and 204 when there was none, both of which the spec declares.
+     * one and 204 when there was none, both of which the spec declares. Synchronized with {@link #delete}, so a write
+     * cannot land between an account's delete and the removal of its policy.
      */
-    private Response handleManagementPolicy(AzureRequest req, String path, String method, ArmResourceId accountId) {
+    private synchronized Response handleManagementPolicy(AzureRequest req, String path, String method,
+                                                         ArmResourceId accountId) {
         ArmResourceId id = childId(path);
         return switch (method) {
             case "PUT" -> {
                 if (accounts.get(accountId).isEmpty()) {
                     yield armNotFound("storageAccounts/" + accountId.name());
                 }
+                // A malformed body throws, which ArmHandler answers as 400 InvalidRequestContent.
+                Object policy = ArmJson.cast(ArmJson.parseBodyStrict(req).get("properties")).get("policy");
+                if (!(policy instanceof Map<?, ?>)) {
+                    // ManagementPolicyProperties requires policy (2025-08-01).
+                    yield invalidContent("properties.policy is required and must be an object.");
+                }
                 Map<String, Object> properties = new LinkedHashMap<>();
                 properties.put("lastModifiedTime", Instant.now().toString());
-                properties.put("policy", ArmJson.cast(ArmJson.cast(ArmJson.parseBodyLenient(req).get("properties"))
-                        .get("policy")));
+                properties.put("policy", ArmJson.cast(policy));
                 Map<String, Object> written = managementPolicies.createOrUpdate(id,
                         ignored -> childDocument(id.id(), MANAGEMENT_POLICY_TYPE, properties)).stored().value();
                 yield Response.ok(written).build();
@@ -301,17 +308,22 @@ public class StorageAccountArmService
     /**
      * {@code BlobServices_SetServiceProperties} and {@code _GetServiceProperties} (2025-08-01), both 200. The PUT's
      * {@code properties} replace the ones set before, as a PUT does; azurerm always sends the whole set. Until one is
-     * set the GET answers the synthesized empty service, which azurerm reads back for every account.
+     * set the GET answers the synthesized empty service, which azurerm reads back for every account. Synchronized
+     * with {@link #delete} like the policy.
      */
-    private Response handleBlobService(AzureRequest req, String path, String method, ArmResourceId accountId) {
+    private synchronized Response handleBlobService(AzureRequest req, String path, String method,
+                                                    ArmResourceId accountId) {
         ArmResourceId id = childId(path);
         return switch (method) {
             case "PUT" -> {
                 if (accounts.get(accountId).isEmpty()) {
                     yield armNotFound("storageAccounts/" + accountId.name());
                 }
-                Map<String, Object> properties = new LinkedHashMap<>(
-                        ArmJson.cast(ArmJson.parseBodyLenient(req).get("properties")));
+                Object requested = ArmJson.parseBodyStrict(req).get("properties");
+                if (requested != null && !(requested instanceof Map<?, ?>)) {
+                    yield invalidContent("properties must be an object.");
+                }
+                Map<String, Object> properties = new LinkedHashMap<>(ArmJson.cast(requested));
                 Map<String, Object> written = blobServices.createOrUpdate(id,
                         ignored -> childDocument(id.id(), BLOB_SERVICE_TYPE, properties)).stored().value();
                 yield Response.ok(written).build();
@@ -321,6 +333,12 @@ public class StorageAccountArmService
                     .orElseGet(() -> serviceProperties(path, "blobServices"));
             default -> Response.status(405).build();
         };
+    }
+
+    /** A body that parsed but has the wrong shape: refused before either store changes. */
+    private static Response invalidContent(String detail) {
+        return ArmErrors.error(400, "InvalidRequestContent",
+                "The request content was invalid and could not be deserialized: " + detail);
     }
 
     private static ArmResourceId childId(String path) {

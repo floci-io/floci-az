@@ -123,6 +123,27 @@ class StorageAccountChildPropertiesTest {
     }
 
     @Test
+    void aMalformedOrMisshapenWriteIsRefusedAndKeepsWhatWasSet() {
+        createAccount("keepsa");
+        String policy = account("keepsa") + "/managementPolicies/default" + API;
+        String service = account("keepsa") + "/blobServices/default" + API;
+        given().contentType("application/json").body(POLICY_BODY).when().put(policy).then().statusCode(200);
+        given().contentType("application/json").body(BLOB_SERVICE_BODY).when().put(service).then().statusCode(200);
+
+        for (String body : List.of("{ not json", "{\"properties\":{\"policy\":\"rules\"}}", "{\"properties\":{}}")) {
+            given().contentType("application/json").body(body).when().put(policy)
+                .then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
+        }
+        for (String body : List.of("{ not json", "{\"properties\":[]}")) {
+            given().contentType("application/json").body(body).when().put(service)
+                .then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
+        }
+
+        given().when().get(policy).then().statusCode(200).body("properties.policy.rules[0].name", equalTo("expire-logs"));
+        given().when().get(service).then().statusCode(200).body("properties.isVersioningEnabled", equalTo(true));
+    }
+
+    @Test
     void deletingTheAccountTakesItsPolicyAndBlobServiceWithIt() {
         createAccount("gonesa");
         given().contentType("application/json").body(POLICY_BODY)
