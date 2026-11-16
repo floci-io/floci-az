@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class ServiceBusOrphanCleanupTest {
 
     @Test
-    void scopesCleanupToConfiguredResourceNamespaceAndServicePrefix() {
+    void reapsOwnNamespaceAndExitedOrphansFromAnyNamespace() {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.DockerConfig docker = mock(EmulatorConfig.DockerConfig.class);
         when(config.docker()).thenReturn(docker);
@@ -32,6 +32,13 @@ class ServiceBusOrphanCleanupTest {
                         "floci_namespace", "run-one"),
                 "floci_owner_container"))
                 .thenReturn(2);
+        when(lifecycleManager.removeExitedContainersWithMissingOwner(
+                Map.of(
+                        "floci", "true",
+                        "floci_emulator", "floci-az",
+                        "io.floci.service", "servicebus"),
+                "floci_owner_container"))
+                .thenReturn(1);
 
         ServiceBusNamespaceManager manager = new ServiceBusNamespaceManager(
                 config,
@@ -41,7 +48,7 @@ class ServiceBusOrphanCleanupTest {
                 mock(ServiceBusConfigGenerator.class),
                 mock(ArtemisTlsGenerator.class));
 
-        assertEquals(2, manager.reapOrphanedContainers());
+        assertEquals(3, manager.reapOrphanedContainers());
         verify(lifecycleManager).removeOrphanedContainers(
                 "floci-az-run-one-servicebus-",
                 Map.of(
