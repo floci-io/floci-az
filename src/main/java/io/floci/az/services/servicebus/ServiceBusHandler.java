@@ -272,20 +272,22 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
         ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection;
         ServiceBusEntityXml.MessageLifetimeSettings lifetime;
         ServiceBusEntityXml.DeliverySettings delivery;
+        ServiceBusEntityXml.EntityMetadata metadata;
         try {
             duplicateDetection = ServiceBusEntityXml.duplicateDetection(body);
             lifetime = ServiceBusEntityXml.parseMessageLifetime(body);
             delivery = ServiceBusEntityXml.parseDelivery(body);
+            metadata = ServiceBusEntityXml.parseMetadata(body);
         } catch (IllegalArgumentException e) {
             return badRequestAtom(e.getMessage());
         }
 
         if (isTopic) {
-            return handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime);
+            return handleCreateTopic(account, ns, entityName, duplicateDetection, lifetime, metadata);
         }
         // Default to queue (empty body, QueueDescription, or ambiguous)
         return handleCreateQueue(
-                account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery);
+                account, ns, entityName, requiresSession, duplicateDetection, lifetime, delivery, metadata);
     }
 
     private Response handleSpecEntityDelete(String account, String ns, String entityName) {
@@ -488,7 +490,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                     yield handleCreateQueue(account, namespace, queueName, requiresSession,
                             ServiceBusEntityXml.duplicateDetection(body),
                             ServiceBusEntityXml.parseMessageLifetime(body),
-                            ServiceBusEntityXml.parseDelivery(body));
+                            ServiceBusEntityXml.parseDelivery(body),
+                            ServiceBusEntityXml.parseMetadata(body));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -513,6 +516,16 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                 ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
                                 ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                 ServiceBusEntityXml.DeliverySettings delivery) {
+        return handleCreateQueue(account, namespace, queueName, requiresSession, duplicateDetection,
+                lifetime, delivery, ServiceBusEntityXml.EntityMetadata.DEFAULTS);
+    }
+
+    Response handleCreateQueue(String account, String namespace, String queueName,
+                                boolean requiresSession,
+                                ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+                                ServiceBusEntityXml.DeliverySettings delivery,
+                                ServiceBusEntityXml.EntityMetadata metadata) {
         String key = queueKey(account, namespace, queueName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.QueueEntity existing =
@@ -528,7 +541,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 queueName,
                 delivery.maxDeliveryCount() != null ? delivery.maxDeliveryCount() : sb.maxDeliveryCount(),
                 delivery.lockDurationSeconds() != null ? delivery.lockDurationSeconds() : sb.lockDurationSeconds(),
-                requiresSession, duplicateDetection, lifetime);
+                requiresSession, duplicateDetection, lifetime, metadata);
         store.put(key, toStoredObject(key, queue));
 
         try {
@@ -576,7 +589,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 try {
                     yield handleCreateTopic(account, namespace, topicName,
                             ServiceBusEntityXml.duplicateDetection(body),
-                            ServiceBusEntityXml.parseMessageLifetime(body));
+                            ServiceBusEntityXml.parseMessageLifetime(body),
+                            ServiceBusEntityXml.parseMetadata(body));
                 } catch (IllegalArgumentException e) {
                     yield badRequestAtom(e.getMessage());
                 }
@@ -600,6 +614,15 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             String account, String namespace, String topicName,
             ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
             ServiceBusEntityXml.MessageLifetimeSettings lifetime) {
+        return handleCreateTopic(account, namespace, topicName, duplicateDetection, lifetime,
+                ServiceBusEntityXml.EntityMetadata.DEFAULTS);
+    }
+
+    Response handleCreateTopic(
+            String account, String namespace, String topicName,
+            ServiceBusEntityXml.DuplicateDetectionSettings duplicateDetection,
+            ServiceBusEntityXml.MessageLifetimeSettings lifetime,
+            ServiceBusEntityXml.EntityMetadata metadata) {
         String key = topicKey(account, namespace, topicName);
         if (store.get(key).isPresent()) {
             ServiceBusModels.TopicEntity existing =
@@ -611,7 +634,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             lazyStartNamespace(namespace);
         }
         ServiceBusModels.TopicEntity topic =
-                ServiceBusModels.TopicEntity.defaults(topicName, duplicateDetection, lifetime);
+                ServiceBusModels.TopicEntity.defaults(topicName, duplicateDetection, lifetime, metadata);
         store.put(key, toStoredObject(key, topic));
 
         try {
@@ -702,7 +725,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                        ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                        ServiceBusEntityXml.DeliverySettings delivery) {
         return handleCreateSubscription(account, namespace, topicName, subName,
-                requiresSession, lifetime, delivery,
+                requiresSession, lifetime, delivery, ServiceBusEntityXml.parseMetadata(body),
                 () -> ServiceBusRuleXml.parseDefaultRule(topicName, subName, body)
                         .orElseGet(() -> ServiceBusModels.RuleEntity.trueFilter(
                                 topicName, subName, "$Default")));
@@ -715,7 +738,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                        ServiceBusEntityXml.DeliverySettings delivery,
                                        ServiceBusModels.RuleEntity initialRule) {
         return handleCreateSubscription(account, namespace, topicName, subName,
-                requiresSession, lifetime, delivery, () -> initialRule);
+                requiresSession, lifetime, delivery, ServiceBusEntityXml.EntityMetadata.DEFAULTS,
+                () -> initialRule);
     }
 
     private Response handleCreateSubscription(String account, String namespace,
@@ -723,6 +747,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                                                boolean requiresSession,
                                                ServiceBusEntityXml.MessageLifetimeSettings lifetime,
                                                ServiceBusEntityXml.DeliverySettings delivery,
+                                               ServiceBusEntityXml.EntityMetadata metadata,
                                                Supplier<ServiceBusModels.RuleEntity> initialRuleSupplier) {
         Optional<StoredObject> storedTopic = store.get(topicKey(account, namespace, topicName));
         if (storedTopic.isEmpty()) {
@@ -751,7 +776,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 topicName, subName,
                 delivery.maxDeliveryCount() != null ? delivery.maxDeliveryCount() : sb.maxDeliveryCount(),
                 delivery.lockDurationSeconds() != null ? delivery.lockDurationSeconds() : sb.lockDurationSeconds(),
-                requiresSession, lifetime);
+                requiresSession, lifetime, metadata);
         store.put(key, toStoredObject(key, sub));
         String ruleStoreKey = ruleKey(account, namespace, topicName, subName, initialRule.name());
         store.put(ruleStoreKey, toStoredObject(ruleStoreKey, initialRule));
@@ -1099,8 +1124,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<RequiresSession>" + q.requiresSession() + "</RequiresSession>"
                 + "<DeadLetteringOnMessageExpiration>" + q.deadLetteringOnMessageExpiration()
                 + "</DeadLetteringOnMessageExpiration>"
-                + "<EnableBatchedOperations>true</EnableBatchedOperations>"
-                + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
+                + metadataXml(q.enableBatchedOperations(), q.autoDeleteOnIdle(), q.userMetadata())
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + "<MessageCount>" + counts.total() + "</MessageCount>"
@@ -1152,8 +1176,8 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<DuplicateDetectionHistoryTimeWindow>"
                 + isoDuration(t.duplicateDetectionHistorySeconds())
                 + "</DuplicateDetectionHistoryTimeWindow>"
-                + "<EnableBatchedOperations>true</EnableBatchedOperations>"
-                + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
+                + metadataXml(t.enableBatchedOperations(), t.autoDeleteOnIdle(), t.userMetadata())
+                + "<SupportOrdering>" + t.supportOrdering() + "</SupportOrdering>"
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + runtimeMetadataXml(t.createdAt(), t.updatedAt())
@@ -1215,8 +1239,7 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
                 + "<DeadLetteringOnMessageExpiration>" + s.deadLetteringOnMessageExpiration()
                 + "</DeadLetteringOnMessageExpiration>"
                 + "<DeadLetteringOnFilterEvaluationExceptions>true</DeadLetteringOnFilterEvaluationExceptions>"
-                + "<EnableBatchedOperations>true</EnableBatchedOperations>"
-                + "<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"
+                + metadataXml(s.enableBatchedOperations(), s.autoDeleteOnIdle(), s.userMetadata())
                 + "<Status>Active</Status>"
                 + "<EntityAvailabilityStatus>Available</EntityAvailabilityStatus>"
                 + "<MessageCount>" + counts.total() + "</MessageCount>"
@@ -1429,6 +1452,22 @@ public class ServiceBusHandler implements AzureServiceHandler, Resettable {
             return "P14D";
         }
         return Duration.ofMillis(millis).toString();
+    }
+
+    /**
+     * The stored descriptive settings; {@code null} components (entities stored before these were
+     * kept) render as the Azure defaults.
+     */
+    private static String metadataXml(Boolean enableBatchedOperations, String autoDeleteOnIdle,
+                                      String userMetadata) {
+        return "<EnableBatchedOperations>" + (enableBatchedOperations == null || enableBatchedOperations)
+                + "</EnableBatchedOperations>"
+                + "<AutoDeleteOnIdle>"
+                + (autoDeleteOnIdle == null
+                        ? ServiceBusEntityXml.EntityMetadata.DEFAULT_AUTO_DELETE_ON_IDLE
+                        : xmlEsc(autoDeleteOnIdle))
+                + "</AutoDeleteOnIdle>"
+                + (userMetadata == null ? "" : "<UserMetadata>" + xmlEsc(userMetadata) + "</UserMetadata>");
     }
 
     /** Minimal XML attribute/content escaping. */

@@ -353,6 +353,80 @@ public class ServiceBusServiceTest {
                 .body(containsString("LockDuration must be between PT1S and PT5M"));
     }
 
+    @Test
+    void queuePersistsDescriptiveSettings() {
+        String body = entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                + "<MaxSizeInMegabytes>2048</MaxSizeInMegabytes>"
+                + "<EnableBatchedOperations>false</EnableBatchedOperations>"
+                + "<AutoDeleteOnIdle>PT2H</AutoDeleteOnIdle>"
+                + "<UserMetadata>owned-by &amp; billing</UserMetadata>"
+                + "</QueueDescription>");
+
+        given().body(body).when().put(BASE + "/metadata-queue")
+                .then().statusCode(201)
+                .body(containsString("<MaxSizeInMegabytes>2048</MaxSizeInMegabytes>"))
+                .body(containsString("<EnableBatchedOperations>false</EnableBatchedOperations>"))
+                .body(containsString("<AutoDeleteOnIdle>PT2H</AutoDeleteOnIdle>"))
+                .body(containsString("<UserMetadata>owned-by &amp; billing</UserMetadata>"));
+
+        given().when().get(BASE + "/metadata-queue")
+                .then().statusCode(200)
+                .body(containsString("<MaxSizeInMegabytes>2048</MaxSizeInMegabytes>"))
+                .body(containsString("<EnableBatchedOperations>false</EnableBatchedOperations>"))
+                .body(containsString("<AutoDeleteOnIdle>PT2H</AutoDeleteOnIdle>"))
+                .body(containsString("<UserMetadata>owned-by &amp; billing</UserMetadata>"));
+    }
+
+    @Test
+    void topicAndSubscriptionPersistDescriptiveSettings() {
+        given().body(entry("<TopicDescription xmlns=\"" + SB_NS + "\">"
+                        + "<MaxSizeInMegabytes>2048</MaxSizeInMegabytes>"
+                        + "<SupportOrdering>true</SupportOrdering>"
+                        + "<UserMetadata>topic-meta</UserMetadata>"
+                        + "</TopicDescription>"))
+                .when().put(BASE + "/metadata-topic")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/metadata-topic")
+                .then().statusCode(200)
+                .body(containsString("<MaxSizeInMegabytes>2048</MaxSizeInMegabytes>"))
+                .body(containsString("<SupportOrdering>true</SupportOrdering>"))
+                .body(containsString("<UserMetadata>topic-meta</UserMetadata>"));
+
+        given().body(entry("<SubscriptionDescription xmlns=\"" + SB_NS + "\">"
+                        + "<AutoDeleteOnIdle>PT1H</AutoDeleteOnIdle>"
+                        + "<UserMetadata>sub-meta</UserMetadata>"
+                        + "</SubscriptionDescription>"))
+                .when().put(BASE + "/metadata-topic/subscriptions/metadata-subscription")
+                .then().statusCode(201);
+
+        given().when().get(BASE + "/metadata-topic/subscriptions/metadata-subscription")
+                .then().statusCode(200)
+                .body(containsString("<AutoDeleteOnIdle>PT1H</AutoDeleteOnIdle>"))
+                .body(containsString("<UserMetadata>sub-meta</UserMetadata>"));
+    }
+
+    @Test
+    void descriptiveSettingsDefaultToAzureValues() {
+        given().body(entry("<QueueDescription xmlns=\"" + SB_NS + "\"/>"))
+                .when().put(BASE + "/metadata-default-queue")
+                .then().statusCode(201)
+                .body(containsString("<MaxSizeInMegabytes>1024</MaxSizeInMegabytes>"))
+                .body(containsString("<EnableBatchedOperations>true</EnableBatchedOperations>"))
+                .body(containsString("<AutoDeleteOnIdle>P10675199DT2H48M5.4775807S</AutoDeleteOnIdle>"))
+                .body(not(containsString("<UserMetadata>")));
+    }
+
+    @Test
+    void rejectsAutoDeleteOnIdleBelowFiveMinutes() {
+        given().body(entry("<QueueDescription xmlns=\"" + SB_NS + "\">"
+                        + "<AutoDeleteOnIdle>PT1M</AutoDeleteOnIdle>"
+                        + "</QueueDescription>"))
+                .when().put(BASE + "/metadata-invalid-idle")
+                .then().statusCode(400)
+                .body(containsString("AutoDeleteOnIdle must be at least PT5M"));
+    }
+
     private static String entry(String description) {
         return "<entry xmlns=\"http://www.w3.org/2005/Atom\"><content type=\"application/xml\">"
                 + description + "</content></entry>";
