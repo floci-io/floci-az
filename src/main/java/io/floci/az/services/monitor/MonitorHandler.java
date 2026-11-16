@@ -121,17 +121,16 @@ public class MonitorHandler implements AzureServiceHandler, Resettable, ArmProvi
     private Map<String, ArmResourceId> rulesByImmutableId;
     private Map<String, ArmResourceId> workspacesByCustomerId;
 
-    @Inject
-    ActivityLogEndpoint activityLog;
-
+    private final ActivityLogEndpoint activityLog;
     private final CloudDefaults defaults;
 
     @Inject
     public MonitorHandler(StorageFactory factory, EmulatorConfig config,
                           @ConfigProperty(name = "quarkus.http.limits.max-body-size", defaultValue = "2G")
                           MemorySize maxBodySize,
-                          CloudDefaults defaults) {
+                          CloudDefaults defaults, ActivityLogEndpoint activityLog) {
         this.defaults = defaults;
+        this.activityLog = activityLog;
         this.store = factory.create("monitor");
         this.workspaces = ArmResourceStore.create(factory, "monitor", WORKSPACE_TYPE, MonitorResource.class,
             MonitorResource::id, key -> key.startsWith("workspace/"));
