@@ -403,6 +403,13 @@
                                     token="sessionSPI.reject(brokerConsumer, message);"
                                     value="ServiceBusDeadLetterSupport.apply(message, (Rejected) remoteState); sessionSPI.reject(brokerConsumer, message);"
                                     failOnNoReplacements="true" />
+                                <!-- Abandon sends its properties to modify as the modified outcome's
+                                     message annotations; apply them before the message is redelivered. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="final Modified modification = (Modified) remoteState;"
+                                    value="final Modified modification = (Modified) remoteState; ServiceBusDeadLetterSupport.apply(message, modification);"
+                                    failOnNoReplacements="true" />
                                 <!-- Broker ingress timestamps and dead-letter properties can be newer than
                                      the large-message file. Copy the current metadata before streaming its body. -->
                                 <replace
