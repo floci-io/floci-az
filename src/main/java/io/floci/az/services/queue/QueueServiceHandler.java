@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -36,6 +37,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -69,6 +71,10 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     // bring back a queue deleted between its read and its write.
     private final Object queueRecordLock = new Object();
 
+    // One lock per queue for every step that reads its messages and then writes or removes them. The store
+    // has no compare-and-set, so without it two receives both see one message as visible and both return it,
+    // and a receive can write back a message that Delete or Clear Messages removed after the receive read it.
+    private final ConcurrentHashMap<String, Object> messageLocks = new ConcurrentHashMap<>();
 
     @Inject
     public QueueServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
@@ -244,11 +250,17 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         synchronized (queueRecordLock) {
             store.delete(nsKey(accountName, queueName));
         }
-        String msgPrefix = accountName + "/" + queueName + "/";
-        store.keys().stream()
-                .filter(k -> k.startsWith(msgPrefix))
-                .toList()
-                .forEach(store::delete);
+        removeMessages(accountName, queueName);
+    }
+
+    private void removeMessages(String accountName, String queueName) {
+        String keyPrefix = objKey(accountName, queueName, "");
+        synchronized (messageLock(accountName, queueName)) {
+            store.keys().stream()
+                    .filter(k -> k.startsWith(keyPrefix))
+                    .toList()
+                    .forEach(store::delete);
+        }
     }
 
     private Response listQueues(AzureRequest request) {
@@ -461,52 +473,65 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
             visibilityTimeoutSecs = 30;
         }
 
-        String keyPrefix = objKey(request.accountName(), queueName, "");
-        Instant now = Instant.now();
+        List<QueueModels.QueueMessageItem> messages = peekOnly
+                ? peekMessages(request.accountName(), queueName, numOfMessages)
+                : receiveMessages(request.accountName(), queueName, numOfMessages, visibilityTimeoutSecs);
 
-        List<StoredObject> visible = store.scan(k -> k.startsWith(keyPrefix)).stream()
-                .filter(so -> isVisible(so, now))
-                .sorted(Comparator.comparing(StoredObject::key))
-                .limit(numOfMessages)
+        return Response.ok(XmlUtils.toXml(new QueueModels.QueueMessageResponse(messages))).type(MediaType.APPLICATION_XML).build();
+    }
+
+    /** Peek Messages changes nothing, so it needs no lock, and its items carry no pop receipt or next-visible time. */
+    private List<QueueModels.QueueMessageItem> peekMessages(String accountName, String queueName, int numOfMessages) {
+        return visibleMessages(accountName, queueName, Instant.now(), numOfMessages).stream()
+                .map(so -> messageItem(so, null, null))
                 .collect(Collectors.toList());
+    }
 
-        if (!peekOnly) {
+    /**
+     * Picks the visible messages and hides them in one step under the queue's message lock. Azure hides a
+     * retrieved message from "other clients" for the visibility timeout, so two concurrent receives return
+     * disjoint messages.
+     */
+    private List<QueueModels.QueueMessageItem> receiveMessages(
+            String accountName, String queueName, int numOfMessages, long visibilityTimeoutSecs) {
+        List<QueueModels.QueueMessageItem> received = new ArrayList<>();
+        synchronized (messageLock(accountName, queueName)) {
+            Instant now = Instant.now();
             Instant hiddenUntil = now.plusSeconds(visibilityTimeoutSecs);
-            for (StoredObject so : visible) {
+            for (StoredObject so : visibleMessages(accountName, queueName, now, numOfMessages)) {
                 Map<String, String> meta = new HashMap<>(so.metadata());
                 meta.put("_visibleAt", String.valueOf(hiddenUntil.toEpochMilli()));
                 int dequeueCount = Integer.parseInt(meta.getOrDefault("DequeueCount", "0")) + 1;
                 meta.put("DequeueCount", String.valueOf(dequeueCount));
                 meta.put("PopReceipt", UUID.randomUUID().toString());
-                store.put(objKey(request.accountName(), queueName, so.key()),
-                        new StoredObject(so.key(), so.data(), meta, so.lastModified(), so.etag()));
+                StoredObject hidden = new StoredObject(so.key(), so.data(), meta, so.lastModified(), so.etag());
+                store.put(objKey(accountName, queueName, so.key()), hidden);
+                received.add(messageItem(hidden, meta.get("PopReceipt"), RFC1123_DATE_TIME.format(hiddenUntil)));
             }
         }
+        return received;
+    }
 
-        final Instant capturedNow = now;
-        final long capturedVt = visibilityTimeoutSecs;
-        List<QueueModels.QueueMessageItem> messages = visible.stream()
-                .map(so -> {
-                    StoredObject current = peekOnly
-                            ? so
-                            : store.get(objKey(request.accountName(), queueName, so.key())).orElse(so);
-                    Map<String, String> meta = current.metadata();
-                    int dequeueCount = peekOnly
-                            ? Integer.parseInt(meta.getOrDefault("DequeueCount", "0"))
-                            : Integer.parseInt(meta.getOrDefault("DequeueCount", "0"));
-                    return new QueueModels.QueueMessageItem(
-                            so.etag(),
-                            meta.get("InsertionTime"),
-                            expirationTime(meta),
-                            peekOnly ? null : meta.get("PopReceipt"),
-                            peekOnly ? null : RFC1123_DATE_TIME.format(capturedNow.plusSeconds(capturedVt)),
-                            dequeueCount,
-                            new String(so.data())
-                    );
-                })
+    private List<StoredObject> visibleMessages(String accountName, String queueName, Instant now, int numOfMessages) {
+        String keyPrefix = objKey(accountName, queueName, "");
+        return store.scan(k -> k.startsWith(keyPrefix)).stream()
+                .filter(so -> isVisible(so, now))
+                .sorted(Comparator.comparing(StoredObject::key))
+                .limit(numOfMessages)
                 .collect(Collectors.toList());
+    }
 
-        return Response.ok(XmlUtils.toXml(new QueueModels.QueueMessageResponse(messages))).type(MediaType.APPLICATION_XML).build();
+    private static QueueModels.QueueMessageItem messageItem(StoredObject so, String popReceipt, String timeNextVisible) {
+        Map<String, String> meta = so.metadata();
+        return new QueueModels.QueueMessageItem(
+                so.etag(),
+                meta.get("InsertionTime"),
+                expirationTime(meta),
+                popReceipt,
+                timeNextVisible,
+                Integer.parseInt(meta.getOrDefault("DequeueCount", "0")),
+                new String(so.data())
+        );
     }
 
     private boolean isVisible(StoredObject so, Instant now) {
@@ -537,18 +562,20 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
         String keyPrefix = objKey(request.accountName(), queueName, "");
-        Optional<StoredObject> message = store.scan(k -> k.startsWith(keyPrefix)).stream()
-                .filter(so -> messageId.equals(so.etag()))
-                .findFirst();
-        if (message.isEmpty() || isExpired(message.get(), Instant.now())) {
-            return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
-                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+        synchronized (messageLock(request.accountName(), queueName)) {
+            Optional<StoredObject> message = store.scan(k -> k.startsWith(keyPrefix)).stream()
+                    .filter(so -> messageId.equals(so.etag()))
+                    .findFirst();
+            if (message.isEmpty() || isExpired(message.get(), Instant.now())) {
+                return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
+            }
+            if (!popReceipt.equals(message.get().metadata().get("PopReceipt"))) {
+                return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+            }
+            store.delete(objKey(request.accountName(), queueName, message.get().key()));
         }
-        if (!popReceipt.equals(message.get().metadata().get("PopReceipt"))) {
-            return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
-                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
-        }
-        store.delete(objKey(request.accountName(), queueName, message.get().key()));
         return Response.status(Response.Status.NO_CONTENT).build();
     }
 
@@ -577,38 +604,29 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                     .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
         }
 
-        String keyPrefix = objKey(request.accountName(), queueName, "");
-        Optional<StoredObject> existing = store.scan(k -> k.startsWith(keyPrefix)).stream()
-                .filter(so -> messageId.equals(so.etag()))
-                .findFirst();
-        if (existing.isEmpty() || isExpired(existing.get(), Instant.now())) {
-            return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
-                    .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
-        }
-        if (!popReceipt.equals(existing.get().metadata().get("PopReceipt"))) {
-            return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
-                    .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
+        // Read before the message lock is taken, so a slow upload does not hold up the queue's other receives.
+        Optional<String> newText;
+        try {
+            newText = readMessageText(request);
+        } catch (IOException e) {
+            return Response.serverError().build();
         }
 
-        try {
-            // The message body is optional (Azure, x-ms-version 2011-08-18 and later): an update
-            // without one keeps the message text and only moves the visibility timeout, which is
-            // how SDK clients extend a lease (updateMessage(id, popReceipt, undefined, timeout)).
-            // Peek for a non-whitespace byte instead of buffering the body: the parser still
-            // streams a present body.
-            PushbackInputStream body = new PushbackInputStream(
-                    request.bodyStream() == null ? InputStream.nullInputStream() : request.bodyStream(), 1);
-            int first = body.read();
-            while (first != -1 && Character.isWhitespace(first)) {
-                first = body.read();
+        String keyPrefix = objKey(request.accountName(), queueName, "");
+        synchronized (messageLock(request.accountName(), queueName)) {
+            Optional<StoredObject> existing = store.scan(k -> k.startsWith(keyPrefix)).stream()
+                    .filter(so -> messageId.equals(so.etag()))
+                    .findFirst();
+            if (existing.isEmpty() || isExpired(existing.get(), Instant.now())) {
+                return new AzureErrorResponse("MessageNotFound", "The specified message does not exist.")
+                        .toXmlResponse(Response.Status.NOT_FOUND.getStatusCode());
             }
-            String messageText;
-            if (first == -1) {
-                messageText = existing.get().metadata().get("MessageText");
-            } else {
-                body.unread(first);
-                messageText = xmlMapper.readValue(body, QueueModels.QueueMessageRequest.class).MessageText();
+            if (!popReceipt.equals(existing.get().metadata().get("PopReceipt"))) {
+                return new AzureErrorResponse("PopReceiptMismatch", "The specified pop receipt did not match.")
+                        .toXmlResponse(Response.Status.BAD_REQUEST.getStatusCode());
             }
+
+            String messageText = newText.orElse(existing.get().metadata().get("MessageText"));
             Instant visibleAt = Instant.now().plusSeconds(visibilityTimeoutSecs);
             String newPopReceipt = UUID.randomUUID().toString();
             Map<String, String> meta = new HashMap<>(existing.get().metadata());
@@ -624,17 +642,32 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
                     .header("x-ms-popreceipt", newPopReceipt)
                     .header("x-ms-time-next-visible", RFC1123_DATE_TIME.format(visibleAt))
                     .build();
-        } catch (IOException e) {
-            return Response.serverError().build();
         }
     }
 
+    /**
+     * The message text of an Update Message body, or empty when there is no body. The body is optional
+     * (Azure, x-ms-version 2011-08-18 and later): an update without one keeps the message text and only
+     * moves the visibility timeout, which is how SDK clients extend a lease
+     * (updateMessage(id, popReceipt, undefined, timeout)).
+     */
+    private Optional<String> readMessageText(AzureRequest request) throws IOException {
+        // Peek for a non-whitespace byte instead of buffering the body: the parser still streams a present body.
+        PushbackInputStream body = new PushbackInputStream(
+                request.bodyStream() == null ? InputStream.nullInputStream() : request.bodyStream(), 1);
+        int first = body.read();
+        while (first != -1 && Character.isWhitespace(first)) {
+            first = body.read();
+        }
+        if (first == -1) {
+            return Optional.empty();
+        }
+        body.unread(first);
+        return Optional.of(xmlMapper.readValue(body, QueueModels.QueueMessageRequest.class).MessageText());
+    }
+
     private Response clearMessages(AzureRequest request, String queueName) {
-        String keyPrefix = objKey(request.accountName(), queueName, "");
-        store.keys().stream()
-                .filter(k -> k.startsWith(keyPrefix))
-                .toList()
-                .forEach(store::delete);
+        removeMessages(request.accountName(), queueName);
         return Response.status(Response.Status.NO_CONTENT).build();
     }
 
@@ -738,5 +771,9 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
 
     private static String objKey(String accountName, String queueName, String key) {
         return accountName + "/" + queueName + "/" + key;
+    }
+
+    private Object messageLock(String accountName, String queueName) {
+        return messageLocks.computeIfAbsent(objKey(accountName, queueName, ""), k -> new Object());
     }
 }
