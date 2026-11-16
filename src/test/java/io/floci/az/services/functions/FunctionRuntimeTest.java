@@ -26,6 +26,26 @@ class FunctionRuntimeTest {
     }
 
     @Test
+    void dotnetIsolatedLinuxFxVersionSelectsVersionedImage() {
+        assertEquals("mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated10.0",
+                FunctionRuntime.resolveImage("dotnet", "DOTNET-ISOLATED|10.0"));
+        assertEquals("mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated8.0",
+                FunctionRuntime.resolveImage("dotnet-isolated", "DOTNET-ISOLATED|8.0"));
+    }
+
+    @Test
+    void dotnetWithoutVersionKeepsDefaultImage() {
+        assertEquals("mcr.microsoft.com/azure-functions/dotnet-isolated:4",
+                FunctionRuntime.resolveImage("dotnet", null));
+    }
+
+    @Test
+    void inProcessDotnetStackKeepsDefaultImage() {
+        assertEquals("mcr.microsoft.com/azure-functions/dotnet-isolated:4",
+                FunctionRuntime.resolveImage("dotnet", "DOTNET|8.0"));
+    }
+
+    @Test
     void runtimeCanBeDerivedFromLinuxFxVersion() {
         assertEquals("python", FunctionRuntime.runtimeFromLinuxFxVersion("Python|3.12"));
     }
