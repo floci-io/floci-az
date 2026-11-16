@@ -31,7 +31,8 @@ public enum CloudSuffix {
     AKS(false),
     ACI(false),
     APIM(false),
-    WEB(false);
+    WEB(false),
+    SEARCH(true);
 
     private final boolean hostRouted;
 

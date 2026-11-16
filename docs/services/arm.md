@@ -487,6 +487,7 @@ passes, as floci-az has always accepted them. The types that declare their rule 
 | `Microsoft.Network/virtualNetworks/subnets` | 1 to 80 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
 | `Microsoft.Network/virtualNetworks` | 2 to 64 letters, digits, underscores, periods and hyphens, starting with a letter or digit and ending with a letter, digit or underscore |
 | `Microsoft.OperationalInsights/workspaces` | 4 to 63 letters, digits and hyphens, starting and ending with a letter or digit |
+| `Microsoft.Search/searchServices` | 2 to 60 lowercase letters, digits and hyphens, starting with two letters or digits, not ending with a hyphen, no consecutive hyphens |
 | `Microsoft.Sql/servers/databases` | 1 to 128 characters without `<>*%&:\/?` or control characters, not ending with a period or a space |
 | `Microsoft.Sql/servers/firewallRules` | 1 to 128 characters without `<>*%&:;\/?` or control characters, not ending with a period |
 | `Microsoft.Sql/servers` | 1 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen |
@@ -521,6 +522,7 @@ Concurrent creates of one name from several subscriptions leave exactly one owne
 | `Microsoft.DBforPostgreSQL/flexibleServers`, `Microsoft.DBforMySQL/flexibleServers`, `Microsoft.DBforMariaDB/servers` | `409 ServerNameAlreadyExists` |
 | `Microsoft.ApiManagement/service` | `409 ServiceAlreadyExists` |
 | `Microsoft.Communication/communicationServices` | `409 Conflict` (see below) |
+| `Microsoft.Search/searchServices` | `409 Conflict` (see below) |
 
 `POST /subscriptions/{sub}/providers/Microsoft.Storage/checkNameAvailability`, the
 `Microsoft.KeyVault` equivalent and its `checkMhsmNameAvailability`, and the `Microsoft.Web` one for a site name
@@ -530,8 +532,8 @@ For `Microsoft.Storage`, malformed names report `nameAvailable: false`, reason
 that creates a storage account with such a name is refused with `400 AccountNameInvalid`.
 
 The codes come from Microsoft's troubleshooting pages and real error payloads, because the REST specs
-do not model create conflicts. No public source gives the code for Managed HSM or Communication Services,
-so those two answer with ARM's generic `Conflict`. The status for the PostgreSQL, MySQL and MariaDB
+do not model create conflicts. No public source gives the code for Managed HSM, Communication Services or
+Azure AI Search, so those three answer with ARM's generic `Conflict`. The status for the PostgreSQL, MySQL and MariaDB
 servers is not publicly documented either; `409` is the likeliest.
 
 ## Intentional deviations

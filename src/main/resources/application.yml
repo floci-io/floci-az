@@ -86,6 +86,8 @@ floci-az:
         flush-interval-ms: 5000
       email:
         flush-interval-ms: 5000
+      search:
+        flush-interval-ms: 5000
       directory:                    # tenants, subscriptions (seeded, configured, first use) and, under the resource-group overrides, groups
         flush-interval-ms: 5000
 
@@ -349,6 +351,8 @@ floci-az:
     # docker-network:  # optional: shared Docker network for sidecar containers
     email:
       enabled: true
+    search:
+      enabled: true       # Microsoft.Search: Azure AI Search services, admin and query keys (management plane)
     arm:
       enabled: true       # central management plane (/providers, /subscriptions, resource groups). Disabling turns OFF all ARM-based services.
       default-subscription-id: "00000000-0000-0000-0000-000000000001"   # always exists; listed first by GET /subscriptions (what az login selects)

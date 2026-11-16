@@ -50,4 +50,12 @@ class StorageLadderWiringTest {
         assertEquals("memory", config.storage().mode());
         assertEquals(InMemoryStorage.class, storageFactory.create("email").getClass());
     }
+
+    @Test
+    @DisplayName("search resolves its own ServiceStorageConfig and follows the global mode by default")
+    void searchIsWiredIntoTheLadder() {
+        assertNotNull(config.storage().services().search(),
+                "storage.services.search must exist for the per-service override to be reachable");
+        assertEquals(InMemoryStorage.class, storageFactory.create("search").getClass());
+    }
 }

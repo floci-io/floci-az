@@ -451,6 +451,7 @@ def test_apim_suffix_is_cross_checked_against_the_government_comparison():
     cli = g.parse_cli_cloud(CLI_CLOUD)
     gov_compare = {"Azure Cache for Redis": ("redis.cache.windows.net", "redis.cache.usgovcloudapi.net"),
                    "API Management Gateway": ("azure-api.net", "azure-api.us"),
+                   "Azure AI Search": ("search.windows.net", "search.azure.us"),
                    "App Service": ("azurewebsites.net", "azurewebsites.us")}
     with_sdk = g.parse_go_environment(GO_GOV.replace(
         "    return &env", '    env.ApiManagement = ApiManagementAPI("azure-api.us")\n\n    return &env', 1))
@@ -471,12 +472,15 @@ def test_doc_only_suffixes_read_the_government_comparison_rows():
     go_env = g.parse_go_environment(GO_GOV)
     gov_compare = {"Azure Cache for Redis": ("redis.cache.windows.net", "redis.cache.usgovcloudapi.net"),
                    "API Management Gateway": ("azure-api.net", "azure-api.us"),
+                   "Azure AI Search": ("search.windows.net", "search.azure.us"),
                    "App Service": ("azurewebsites.net", "azurewebsites.us")}
     suffixes = g.build_suffixes("AzureUSGovernment", cli, go_env, gov_compare)
     assert suffixes["WEB"] == {"source": f"{g.GOV_COMPARE} (App Service, Azure Government)",
                                "value": "azurewebsites.us"}
     assert suffixes["REDIS"] == {"source": f"{g.GOV_COMPARE} (Azure Cache for Redis, Azure Government)",
                                  "value": "redis.cache.usgovcloudapi.net"}
+    assert suffixes["SEARCH"] == {"source": f"{g.GOV_COMPARE} (Azure AI Search, Azure Government)",
+                                  "value": "search.azure.us"}
     without_web = {row: pair for row, pair in gov_compare.items() if row != "App Service"}
     with pytest.raises(g.SourceError, match="no App Service row"):
         g.build_suffixes("AzureUSGovernment", cli, go_env, without_web)

@@ -1842,6 +1842,17 @@
           "resourceType" : "deployments"
         } ]
       }, {
+        "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Search",
+        "namespace" : "Microsoft.Search",
+        "registrationPolicy" : "RegistrationRequired",
+        "registrationState" : "Registered",
+        "resourceTypes" : [ {
+          "apiVersions" : [ "2026-09-01-preview", "2026-03-01-preview", "2025-05-01", "2025-02-01-preview", "2024-06-01-preview", "2024-03-01-preview", "2023-11-01", "2022-09-01", "2021-04-01-preview", "2020-08-01", "2020-08-01-preview", "2020-03-13", "2019-10-01-preview", "2015-08-19", "2015-02-28" ],
+          "capabilities" : "SupportsTags, SupportsLocation",
+          "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
+          "resourceType" : "searchServices"
+        } ]
+      }, {
         "id" : "/subscriptions/c0a7c0a7-0000-4000-8000-000000000001/providers/Microsoft.Sql",
         "namespace" : "Microsoft.Sql",
         "registrationPolicy" : "RegistrationRequired",

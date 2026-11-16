@@ -208,6 +208,25 @@ setup() {
     assert_output --partial "hostName"
 }
 
+@test "OpenTofu: search service created in the succeeded state with its endpoint" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Search/searchServices/${SEARCH_NAME}?api-version=2025-05-01"
+    assert_success
+    assert_equal "$(echo "$output" | jq -r '.type')" "Microsoft.Search/searchServices"
+    assert_equal "$(echo "$output" | jq -r '.sku.name')" "basic"
+    assert_equal "$(echo "$output" | jq -r '.properties.provisioningState')" "succeeded"
+    assert_equal "$(echo "$output" | jq -r '.properties.endpoint')" "https://${SEARCH_NAME}.search.windows.net"
+}
+
+@test "OpenTofu: search service primary key is the admin key the service lists" {
+    run curl -sf -X POST -H "Authorization: Bearer fake" \
+        "${FLOCI_AZ_ENDPOINT}/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Search/searchServices/${SEARCH_NAME}/listAdminKeys?api-version=2025-05-01"
+    assert_success
+    listed="$(echo "$output" | jq -r '.primaryKey')"
+    run tofu -chdir="$TOFU_DIR" output -raw search_primary_key
+    assert_success
+    assert_equal "$output" "$listed"
+}
+
 @test "OpenTofu: container registry created with Succeeded state" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ContainerRegistry/registries/${ACR_NAME}"
     assert_success

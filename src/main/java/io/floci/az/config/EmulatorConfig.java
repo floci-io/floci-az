@@ -311,6 +311,7 @@ public interface EmulatorConfig {
         ServiceStorageConfig monitor();
         ServiceStorageConfig containerApps();
         ServiceStorageConfig email();
+        ServiceStorageConfig search();
         ServiceStorageConfig directory();
     }
 
@@ -333,6 +334,12 @@ public interface EmulatorConfig {
     }
 
     interface EmailServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Azure AI Search: Microsoft.Search/searchServices on ARM. */
+    interface SearchServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -377,6 +384,8 @@ public interface EmulatorConfig {
 
         // Added Email service configuration
         EmailServiceConfig email();
+
+        SearchServiceConfig search();
     }
 
     /**

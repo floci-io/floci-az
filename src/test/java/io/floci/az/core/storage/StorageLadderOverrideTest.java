@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class StorageLadderOverrideTest {
 
     /**
-     * Email is pinned to {@code persistent} while the global mode stays {@code memory}.
+     * Email and search are pinned to {@code persistent} while the global mode stays {@code memory}.
      * {@code persistent-path} is redirected to the build directory because the shipped default
      * is {@code ./data}, which would write into the working tree during a test run.
      */
@@ -40,6 +40,7 @@ class StorageLadderOverrideTest {
             return Map.of(
                 "floci-az.storage.mode", "memory",
                 "floci-az.storage.services.email.mode", "persistent",
+                "floci-az.storage.services.search.mode", "persistent",
                 "floci-az.storage.persistent-path", Path.of("target", "storage-ladder-test").toString());
         }
     }
@@ -55,6 +56,12 @@ class StorageLadderOverrideTest {
     void emailOverrideTakesEffect() {
         assertEquals("memory", config.storage().mode(), "the global mode must differ for this test to prove anything");
         assertEquals(PersistentStorage.class, storageFactory.create("email").getClass());
+    }
+
+    @Test
+    @DisplayName("search follows its own mode, not the global one")
+    void searchOverrideTakesEffect() {
+        assertEquals(PersistentStorage.class, storageFactory.create("search").getClass());
     }
 
     @Test

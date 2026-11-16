@@ -113,6 +113,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.ResourceGraph/queries                                                RESOURCE_GROUP  GLOBAL    FILTER
         Microsoft.Resources/deployments                                                RESOURCE_GROUP  OPTIONAL  ARM_HANDLER
         Microsoft.Resources/resourceGroups                                             SUBSCRIPTION    REQUIRED  ARM_HANDLER
+        Microsoft.Search/searchServices                                                RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers                                                          RESOURCE_GROUP  REQUIRED  FILTER
         Microsoft.Sql/servers/connectionPolicies                                       RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.Sql/servers/databases                                                RESOURCE_GROUP  OPTIONAL  FILTER
@@ -166,6 +167,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.Network/virtualNetworks          2-64    null    0    null
         Microsoft.Network/virtualNetworks/subnets  1-80    null    0    null
         Microsoft.OperationalInsights/workspaces    4-63    null    0    null
+        Microsoft.Search/searchServices    2-60    SEARCH    409    Conflict
         Microsoft.Sql/servers                  1-63     SQL     400    NameAlreadyExists
         Microsoft.Sql/servers/databases        1-128    null    0      null
         Microsoft.Sql/servers/firewallRules    1-128    null    0      null

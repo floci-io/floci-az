@@ -43,6 +43,7 @@ class RoutingTableAssemblyTest {
         Map.entry(".vault.azure.net", "keyvault"),
         Map.entry(".managedhsm.azure.net", "keyvault"),
         Map.entry(".communication.azure.com", "email"),
+        Map.entry(".search.windows.net", "search"),
         Map.entry(".blob.core.windows.net", "blob"),
         Map.entry(".dfs.core.windows.net", "blob"),
         Map.entry(".queue.core.windows.net", "queue"),
@@ -77,7 +78,8 @@ class RoutingTableAssemblyTest {
         Map.entry("-servicebus", "servicebus"),
         Map.entry("-signalr", "signalr"),
         Map.entry("-apim", "apim"),
-        Map.entry("-email", "email")
+        Map.entry("-email", "email"),
+        Map.entry("-search", "search")
     );
 
     /**
@@ -104,6 +106,7 @@ class RoutingTableAssemblyTest {
         Map.entry("/providers/Microsoft.Compute/", "vm"),
         Map.entry("/providers/Microsoft.Cache/", "redis"),
         Map.entry("/providers/Microsoft.Communication/", "email"),
+        Map.entry("/providers/Microsoft.Search/", "search"),
         Map.entry("/providers/Microsoft.App/", "containerapps"),
         Map.entry("/providers/Microsoft.Resources/", "deployments")
     );

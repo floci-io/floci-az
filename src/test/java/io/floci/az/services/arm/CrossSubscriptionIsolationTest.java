@@ -141,6 +141,9 @@ class CrossSubscriptionIsolationTest {
                         409, "ServiceAlreadyExists"),
                 new GlobalKind(new Kind("communication service", "Microsoft.Communication/communicationServices", "xsub-comm", "2023-04-01",
                         "{\"location\":\"global\",\"properties\":{\"dataLocation\":\"United States\"}}"),
+                        409, "Conflict"),
+                new GlobalKind(new Kind("search service", "Microsoft.Search/searchServices", "xsub-search", "2025-05-01",
+                        "{\"location\":\"eastus\",\"sku\":{\"name\":\"basic\"}}"),
                         409, "Conflict"));
     }
 

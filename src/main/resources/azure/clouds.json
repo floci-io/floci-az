@@ -845,6 +845,10 @@
           "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure Cache for Redis, Azure Public)",
           "value": "redis.cache.windows.net"
         },
+        "SEARCH": {
+          "source": "go-azure-sdk/sdk/environments/azure_public.go; azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure AI Search, Azure Public)",
+          "value": "search.windows.net"
+        },
         "SERVICEBUS": {
           "source": "go-azure-sdk/sdk/environments/azure_public.go",
           "value": "servicebus.windows.net"
@@ -1209,6 +1213,10 @@
           "source": "azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure Cache for Redis, Azure Government)",
           "value": "redis.cache.usgovcloudapi.net"
         },
+        "SEARCH": {
+          "source": "go-azure-sdk/sdk/environments/azure_gov.go; azure-docs/articles/azure-government/compare-azure-government-global-azure.md (Azure AI Search, Azure Government)",
+          "value": "search.azure.us"
+        },
         "SERVICEBUS": {
           "source": "go-azure-sdk/sdk/environments/azure_gov.go",
           "value": "servicebus.usgovcloudapi.net"
@@ -1571,6 +1579,10 @@
         "REDIS": {
           "source": "UNSETTLED: Azure Cache for Redis host suffix in AzureChinaCloud; no local source",
           "value": null
+        },
+        "SEARCH": {
+          "source": "go-azure-sdk/sdk/environments/azure_china.go",
+          "value": "search.azure.cn"
         },
         "SERVICEBUS": {
           "source": "go-azure-sdk/sdk/environments/azure_china.go",
