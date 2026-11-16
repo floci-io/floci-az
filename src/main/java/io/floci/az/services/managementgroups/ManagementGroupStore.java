@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -266,7 +267,9 @@ public class ManagementGroupStore implements Resettable {
     /** A consistent copy of the tenant's hierarchy, for readers that derive several rows from one tree. */
     public synchronized Snapshot snapshot(String tenantId) {
         Hierarchy hierarchy = hierarchy(tenantId);
-        return new Snapshot(tenantId, Map.copyOf(hierarchy.groups), Map.copyOf(hierarchy.subscriptionParents));
+        // A LinkedHashMap copy: list() answers in creation order, which Map.copyOf does not keep.
+        return new Snapshot(tenantId, Collections.unmodifiableMap(new LinkedHashMap<>(hierarchy.groups)),
+            Map.copyOf(hierarchy.subscriptionParents));
     }
 
     /** The ancestors of a group from its parent up to the root. */

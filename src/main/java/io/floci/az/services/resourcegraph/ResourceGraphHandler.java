@@ -102,7 +102,7 @@ public class ResourceGraphHandler implements AzureServiceHandler {
         Kql.Query parsed;
         try {
             parsed = Kql.parse(text);
-            rows = KqlEngine.run(parsed, scoped(subscriptions));
+            rows = KqlEngine.run(parsed, scoped(tables.queryView(), subscriptions));
         } catch (KqlException e) {
             LOG.debugf("Resource Graph query rejected: %s", e.getMessage());
             return queryError(e);
@@ -145,7 +145,7 @@ public class ResourceGraphHandler implements AzureServiceHandler {
     }
 
     /** The tables narrowed to the subscriptions the request names, or every subscription when it names none. */
-    private KqlEngine.Tables scoped(List<String> subscriptions) {
+    private static KqlEngine.Tables scoped(KqlEngine.Tables tables, List<String> subscriptions) {
         if (subscriptions.isEmpty()) {
             return tables;
         }

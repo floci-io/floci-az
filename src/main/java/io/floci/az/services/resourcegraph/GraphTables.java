@@ -65,6 +65,34 @@ public class GraphTables implements KqlEngine.Tables {
         "subscriptionId", "managedBy", "sku", "plan", "properties", "tags", "identity", "zones", "extendedLocation",
         "systemData");
 
+    /**
+     * The tables as one query sees them: each is assembled on its first read and answered from that copy
+     * afterwards, so every {@code union} branch and {@code join} side of the query reads the same rows (and
+     * the same management-group hierarchy) whatever changes while it runs.
+     */
+    public KqlEngine.Tables queryView() {
+        Map<String, List<Map<String, Object>>> assembled = new LinkedHashMap<>();
+        return new KqlEngine.Tables() {
+            @Override
+            public List<Map<String, Object>> rows(String table) {
+                String name = table.toLowerCase(Locale.ROOT);
+                List<Map<String, Object>> rows = assembled.get(name);
+                if (rows == null) {
+                    rows = GraphTables.this.rows(table);
+                    if (rows != null) {
+                        assembled.put(name, rows);
+                    }
+                }
+                return rows;
+            }
+
+            @Override
+            public List<String> columns(String table) {
+                return GraphTables.this.columns(table);
+            }
+        };
+    }
+
     @Override
     public List<String> columns(String table) {
         return switch (table.toLowerCase(Locale.ROOT)) {
@@ -122,11 +150,12 @@ public class GraphTables implements KqlEngine.Tables {
 
     private List<Map<String, Object>> resourceContainers() {
         List<Map<String, Object>> rows = new ArrayList<>();
-        // One snapshot of each tenant's hierarchy per query: every row of the answer describes the same tree.
+        // One snapshot of each tenant's hierarchy per read, keyed as the store keys tenants (case-insensitively),
+        // so the group rows and the subscription chains of one tenant always come from the same tree.
         Map<String, ManagementGroupStore.Snapshot> hierarchies = new LinkedHashMap<>();
         if (managementGroupsEnabled()) {
             for (Tenant tenant : directory.tenants()) {
-                ManagementGroupStore.Snapshot hierarchy = hierarchies.computeIfAbsent(tenant.id(), managementGroups::snapshot);
+                ManagementGroupStore.Snapshot hierarchy = hierarchyOf(hierarchies, tenant.id());
                 for (Group group : hierarchy.list()) {
                     rows.add(managementGroupRow(hierarchy, group));
                 }
@@ -152,7 +181,7 @@ public class GraphTables implements KqlEngine.Tables {
             properties.put("displayName", row.get("name"));
             properties.put("state", subscription == null ? "Enabled" : subscription.state().toString());
             properties.put("managementGroupAncestorsChain", managementGroupsEnabled()
-                ? ancestorsChain(hierarchies.computeIfAbsent(tenantId, managementGroups::snapshot), subscriptionId) : List.of());
+                ? ancestorsChain(hierarchyOf(hierarchies, tenantId), subscriptionId) : List.of());
             row.put("properties", properties);
             row.put("tags", null);
             row.put("identity", null);
@@ -183,6 +212,10 @@ public class GraphTables implements KqlEngine.Tables {
             }
         }
         return rows;
+    }
+
+    private ManagementGroupStore.Snapshot hierarchyOf(Map<String, ManagementGroupStore.Snapshot> hierarchies, String tenantId) {
+        return hierarchies.computeIfAbsent(tenantId.toLowerCase(Locale.ROOT), key -> managementGroups.snapshot(tenantId));
     }
 
     private boolean managementGroupsEnabled() {
