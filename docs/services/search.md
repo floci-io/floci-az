@@ -24,8 +24,11 @@ keys. The other `az search` command groups are not served yet: see
   has one unnamed query key, as in Azure
 - **Name availability**: `checkNameAvailability` reports a taken name as `AlreadyExists` and a
   malformed one as `Invalid`
-- **Managed identity**: a `SystemAssigned` identity is answered with a `principalId` and `tenantId`
-  that stay stable across updates
+- **Managed identity**: `SystemAssigned`, `UserAssigned` and `SystemAssigned, UserAssigned`. A
+  system-assigned identity gets a `principalId` and `tenantId` that stay stable across updates. Each
+  user-assigned identity reads back the `principalId` and `clientId` of the
+  [managed identity](managed-identity.md) it names, and one that does not exist is refused with
+  `400 FailedIdentityOperation`. Ids a caller sends are read-only and are not echoed
 
 ---
 
@@ -150,6 +153,10 @@ floci-az:
   does not reach (see [SKU limits](#sku-limits)). A `PATCH` is judged on the service as it would leave it, so
   changing only the SKU of a service that is too large for the new one is refused too. Azure's own
   error code for these is not publicly documented.
+- **Field types.** A field sent with the wrong JSON type, such as `disableLocalAuth: "true"`,
+  `dataExfiltrationProtections: "BlockAll"` or `networkRuleSet.ipRules: "invalid"`, is refused with
+  `400 InvalidRequestContent` rather than replaced by its default, and so is an identity `type`
+  outside the spec's four. A `null` is no value and keeps what is stored.
 - **Enums and firewall rules.** `hostingMode`, `computeType`, `publicNetworkAccess`, `semanticSearch`,
   `knowledgeRetrieval`, `networkRuleSet.bypass`, `encryptionWithCmk.enforcement` and
   `dataExfiltrationProtections` must hold a value the spec lists, in any casing, and each firewall

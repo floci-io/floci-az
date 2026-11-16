@@ -16,6 +16,9 @@ import io.floci.az.core.cloud.CloudProfile;
 import io.floci.az.core.cloud.CloudProfile.Location;
 import io.floci.az.core.cloud.CloudSuffix;
 import io.floci.az.core.storage.StorageFactory;
+import io.floci.az.services.entra.TokenIssuer;
+import io.floci.az.services.managedidentity.ManagedIdentityModels.UserAssignedIdentity;
+import io.floci.az.services.managedidentity.ManagedIdentityStore;
 import io.floci.az.services.search.SearchModels.QueryKey;
 import io.floci.az.services.search.SearchModels.SearchServiceResource;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -80,6 +83,16 @@ public class SearchArmService {
             "networkRuleSet.bypass", List.of("None", "AzureServices", "AzurePortal"),
             "encryptionWithCmk.enforcement", List.of("Disabled", "Enabled", "Unspecified"));
     private static final List<String> DATA_EXFILTRATION_PROTECTIONS = List.of("BlockAll");
+    /** {@code IdentityType} (2025-05-01). */
+    private static final String IDENTITY_NONE = "None";
+    private static final String IDENTITY_SYSTEM = "SystemAssigned";
+    private static final String IDENTITY_USER = "UserAssigned";
+    private static final List<String> IDENTITY_TYPES = List.of(IDENTITY_NONE, IDENTITY_SYSTEM, IDENTITY_USER,
+            IDENTITY_SYSTEM + ", " + IDENTITY_USER);
+
+    /** A request field whose JSON type the spec fixes, as {@link #wrongType} checks it. */
+    private record Shape(String name, Object value, Class<?> type, String description) {
+    }
     /** The bounds of {@code replicaCount} and {@code partitionCount} (2025-05-01). */
     private static final int MIN_UNITS = 1;
     private static final int MAX_UNITS = 12;
@@ -112,18 +125,22 @@ public class SearchArmService {
 
     private static final String KEY_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private static final int KEY_LENGTH = 52;
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ArmResourceStore<SearchServiceResource> services;
+    /** Per instance, not static: a static one would be built into the native image with a fixed seed. */
+    private final SecureRandom random = new SecureRandom();
     private final GlobalNameRegistry names;
     private final CloudDefaults defaults;
+    private final ManagedIdentityStore identities;
 
     @Inject
-    public SearchArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults) {
+    public SearchArmService(StorageFactory storageFactory, GlobalNameRegistry names, CloudDefaults defaults,
+                            ManagedIdentityStore identities) {
         this.services = ArmResourceStore.create(storageFactory, STORE, SearchModels.SEARCH_SERVICES,
                 SearchServiceResource.class, SearchServiceResource::id, key -> false);
         this.names = names;
         this.defaults = defaults;
+        this.identities = identities;
     }
 
     /** Serves one request under {@code /providers/Microsoft.Search/}. */
@@ -232,8 +249,8 @@ public class SearchArmService {
                         identity(body.get("identity"), existing.map(SearchServiceResource::identity).orElse(null), req),
                         properties(properties, base, endpoint(cloud, stored.name())),
                         existing.map(SearchServiceResource::createdAt).orElseGet(SearchArmService::now),
-                        existing.map(SearchServiceResource::primaryKey).orElseGet(SearchArmService::newKey),
-                        existing.map(SearchServiceResource::secondaryKey).orElseGet(SearchArmService::newKey),
+                        existing.map(SearchServiceResource::primaryKey).orElseGet(this::newKey),
+                        existing.map(SearchServiceResource::secondaryKey).orElseGet(this::newKey),
                         existing.map(SearchServiceResource::queryKeys)
                                 .orElseGet(() -> List.of(new QueryKey(null, newKey()))));
             });
@@ -478,6 +495,10 @@ public class SearchArmService {
      * with, so the answer is ARM's generic {@code 400 InvalidRequestContent}.
      */
     private static Optional<Response> validate(Map<String, Object> body, Map<String, Object> properties) {
+        Optional<Response> wrongType = wrongType(body, properties);
+        if (wrongType.isPresent()) {
+            return wrongType;
+        }
         if (body.get("sku") != null && skuName(body).isEmpty()) {
             return Optional.of(invalid("The SKU name is invalid: it must be one of " + SKU_NAMES + "."));
         }
@@ -494,6 +515,43 @@ public class SearchArmService {
             }
         }
         return outsideEnum(properties).or(() -> invalidNetworkRules(properties));
+    }
+
+    /**
+     * The first field sent with a JSON type other than the spec's, checked before any default is applied, so a
+     * malformed value is refused rather than replaced by its default ({@code disableLocalAuth: "true"} read as
+     * {@code false}) or stored in the wrong shape. A {@code null} is no value and passes. An identity type outside
+     * {@code IdentityType} is refused here too, since a type nothing recognises would otherwise mean no identity.
+     */
+    private static Optional<Response> wrongType(Map<String, Object> body, Map<String, Object> properties) {
+        Object identity = body.get("identity");
+        Object networkRuleSet = properties.get("networkRuleSet");
+        List<Shape> shapes = List.of(
+                new Shape("properties", body.get("properties"), Map.class, "an object"),
+                new Shape("sku", body.get("sku"), Map.class, "an object"),
+                new Shape("tags", body.get("tags"), Map.class, "an object"),
+                new Shape("identity", identity, Map.class, "an object"),
+                new Shape("identity.userAssignedIdentities", ArmJson.cast(identity).get("userAssignedIdentities"),
+                        Map.class, "an object"),
+                new Shape("disableLocalAuth", properties.get("disableLocalAuth"), Boolean.class, "a boolean"),
+                new Shape("authOptions", properties.get("authOptions"), Map.class, "an object"),
+                new Shape("networkRuleSet", networkRuleSet, Map.class, "an object"),
+                new Shape("networkRuleSet.ipRules", ArmJson.cast(networkRuleSet).get("ipRules"), List.class,
+                        "an array"),
+                new Shape("encryptionWithCmk", properties.get("encryptionWithCmk"), Map.class, "an object"),
+                new Shape("dataExfiltrationProtections", properties.get("dataExfiltrationProtections"), List.class,
+                        "an array"));
+        for (Shape shape : shapes) {
+            if (shape.value() != null && !shape.type().isInstance(shape.value())) {
+                return Optional.of(invalid("The '" + shape.name() + "' must be " + shape.description() + "."));
+            }
+        }
+        Object identityType = ArmJson.cast(identity).get("type");
+        if (identityType != null && identityType(identityType).isEmpty()) {
+            return Optional.of(invalid("The identity type '" + identityType + "' is invalid: it must be one of "
+                    + IDENTITY_TYPES + "."));
+        }
+        return Optional.empty();
     }
 
     /**
@@ -696,24 +754,59 @@ public class SearchArmService {
     }
 
     /**
-     * The identity as Azure answers it: the body's, with a principal and tenant when it is system assigned. The
-     * principal of a service that already has one stays; an identity of type {@code None} is no identity.
+     * The identity as Azure answers it, built from the request's {@code type} and identity ids alone: every id in
+     * it is read-only, so none is taken from the caller. A system-assigned identity gets a principal, kept across
+     * updates, and the tenant. Each user-assigned identity gets its principal and client ids from the Managed
+     * Identity store. {@code UserAssignedIdentityRule} refuses an identity the store does not hold before the request
+     * gets here, so the deterministic ids, as {@code PolicyHandler.buildIdentity()} gives them, serve only when the
+     * Managed Identity service is disabled. An identity of type {@code None} is no identity.
      */
-    private static Map<String, Object> identity(Object sent, Map<String, Object> existing, AzureRequest req) {
+    private Map<String, Object> identity(Object sent, Map<String, Object> existing, AzureRequest req) {
         Map<String, Object> body = ArmJson.cast(sent);
-        String type = ArmJson.string(body, "type", "None");
-        if (body.isEmpty() || "None".equalsIgnoreCase(type)) {
+        String type = identityType(body.get("type")).orElse(IDENTITY_NONE);
+        if (IDENTITY_NONE.equals(type)) {
             return null;
         }
-        Map<String, Object> identity = new LinkedHashMap<>(body);
-        if (type.toLowerCase(Locale.ROOT).contains("systemassigned")) {
+        Map<String, Object> identity = new LinkedHashMap<>();
+        identity.put("type", type);
+        if (type.startsWith(IDENTITY_SYSTEM)) {
             identity.put("principalId", existing != null && existing.get("principalId") instanceof String principal
                     ? principal : UUID.randomUUID().toString());
             if (req.scope() != null && req.scope().tenantId() != null) {
                 identity.put("tenantId", req.scope().tenantId());
             }
         }
+        if (type.endsWith(IDENTITY_USER)) {
+            Map<String, Object> userAssigned = new LinkedHashMap<>();
+            // A null entry removes that identity, as UserAssignedIdentityRule reads it.
+            ArmJson.cast(body.get("userAssignedIdentities")).forEach((resourceId, value) -> {
+                if (value != null) {
+                    userAssigned.put(resourceId, userAssignedIds(resourceId));
+                }
+            });
+            identity.put("userAssignedIdentities", userAssigned);
+        }
         return identity;
+    }
+
+    private Map<String, Object> userAssignedIds(String resourceId) {
+        Map<String, Object> ids = new LinkedHashMap<>();
+        Optional<UserAssignedIdentity> stored = identities.findByResourceId(resourceId);
+        String seed = resourceId.toLowerCase(Locale.ROOT);
+        ids.put("principalId", stored.map(UserAssignedIdentity::principalId)
+                .orElseGet(() -> TokenIssuer.deterministicGuid("search-uai-principal:" + seed)));
+        ids.put("clientId", stored.map(UserAssignedIdentity::clientId)
+                .orElseGet(() -> TokenIssuer.deterministicGuid("search-uai-client:" + seed)));
+        return ids;
+    }
+
+    /** The spec's spelling of an {@code IdentityType}, matched ignoring case and the space after the comma. */
+    private static Optional<String> identityType(Object sent) {
+        if (!(sent instanceof String text)) {
+            return Optional.empty();
+        }
+        String compact = text.replace(" ", "");
+        return IDENTITY_TYPES.stream().filter(known -> known.replace(" ", "").equalsIgnoreCase(compact)).findFirst();
     }
 
     private static Map<String, Object> tags(Object sent) {
@@ -764,10 +857,10 @@ public class SearchArmService {
     }
 
     /** An API key in the shape of Azure's: 52 letters and digits. */
-    private static String newKey() {
+    private String newKey() {
         StringBuilder key = new StringBuilder(KEY_LENGTH);
         for (int i = 0; i < KEY_LENGTH; i++) {
-            key.append(KEY_ALPHABET.charAt(RANDOM.nextInt(KEY_ALPHABET.length())));
+            key.append(KEY_ALPHABET.charAt(random.nextInt(KEY_ALPHABET.length())));
         }
         return key.toString();
     }

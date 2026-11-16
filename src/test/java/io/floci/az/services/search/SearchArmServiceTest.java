@@ -210,6 +210,77 @@ class SearchArmServiceTest {
     }
 
     @Test
+    void aUserAssignedIdentityReadsBackTheIdsOfTheManagedIdentity() {
+        String uai = "/subscriptions/" + SUB + "/resourceGroups/rg/providers/Microsoft.ManagedIdentity"
+            + "/userAssignedIdentities/search-uai";
+        Response created = given().contentType("application/json").body("{\"location\": \"westus\"}")
+            .when().put(uai + "?api-version=2023-01-31");
+        created.then().statusCode(201);
+        String principalId = created.path("properties.principalId");
+        String clientId = created.path("properties.clientId");
+
+        // The ids a caller sends are read-only, so they are not echoed.
+        put("rg", "withuai", """
+                {"location": "westus", "sku": {"name": "basic"},
+                 "identity": {"type": "SystemAssigned, UserAssigned", "principalId": "caller-chosen",
+                              "userAssignedIdentities": {"%s": {"principalId": "caller-chosen"}}}}""".formatted(uai))
+            .then().statusCode(201)
+            .body("identity.type", equalTo("SystemAssigned, UserAssigned"))
+            .body("identity.principalId", not(equalTo("caller-chosen")))
+            .body("identity.userAssignedIdentities.'" + uai + "'.principalId", equalTo(principalId))
+            .body("identity.userAssignedIdentities.'" + uai + "'.clientId", equalTo(clientId));
+        given().when().get(service("rg", "withuai") + API).then().statusCode(200)
+            .body("identity.userAssignedIdentities.'" + uai + "'.clientId", equalTo(clientId));
+
+        // A null entry detaches that identity; the type is answered in the spec's spelling.
+        given().contentType("application/json").body("""
+                {"identity": {"type": "systemassigned,userassigned", "userAssignedIdentities": {"%s": null}}}"""
+                .formatted(uai))
+            .when().patch(service("rg", "withuai") + API)
+            .then().statusCode(200)
+            .body("identity.type", equalTo("SystemAssigned, UserAssigned"))
+            .body("identity.userAssignedIdentities", anEmptyMap());
+
+        // An identity the Managed Identity store does not hold is refused by the ARM gate.
+        put("rg", "unknownuai", """
+                {"location": "westus", "sku": {"name": "basic"},
+                 "identity": {"type": "UserAssigned", "userAssignedIdentities": {"%s": {}}}}"""
+                .formatted(uai.replace("search-uai", "not-created")))
+            .then().statusCode(400).body("error.code", equalTo("FailedIdentityOperation"));
+    }
+
+    @Test
+    void fieldsSentWithTheWrongJsonTypeAreRefusedRatherThanDefaulted() {
+        put("rg", "shapes", CLI_BODY).then().statusCode(201);
+        String service = service("rg", "shapes");
+
+        for (String patch : List.of(
+                "{\"properties\": \"standard\"}",
+                "{\"sku\": \"basic\"}",
+                "{\"tags\": [\"env\"]}",
+                "{\"identity\": \"SystemAssigned\"}",
+                "{\"identity\": {\"type\": \"Bogus\"}}",
+                "{\"identity\": {\"type\": \"UserAssigned\", \"userAssignedIdentities\": [\"id\"]}}",
+                "{\"properties\": {\"disableLocalAuth\": \"true\"}}",
+                "{\"properties\": {\"authOptions\": \"apiKeyOnly\"}}",
+                "{\"properties\": {\"networkRuleSet\": \"open\"}}",
+                "{\"properties\": {\"networkRuleSet\": {\"ipRules\": \"invalid\"}}}",
+                "{\"properties\": {\"encryptionWithCmk\": \"Enabled\"}}",
+                "{\"properties\": {\"dataExfiltrationProtections\": \"BlockAll\"}}")) {
+            given().contentType("application/json").body(patch).when().patch(service + API)
+                .then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
+        }
+
+        given().when().get(service + API).then().statusCode(200)
+            .body("properties.disableLocalAuth", equalTo(false))
+            .body("properties.dataExfiltrationProtections", empty())
+            .body("$", not(hasKey("identity")));
+        // A null is no value, so it still means "keep what is stored".
+        given().contentType("application/json").body("{\"properties\": {\"disableLocalAuth\": null}}")
+            .when().patch(service + API).then().statusCode(200);
+    }
+
+    @Test
     void servicesAreListedByResourceGroupAndBySubscription() {
         put("rg-a", "lista", CLI_BODY).then().statusCode(201);
         put("rg-b", "listb", CLI_BODY).then().statusCode(201);
