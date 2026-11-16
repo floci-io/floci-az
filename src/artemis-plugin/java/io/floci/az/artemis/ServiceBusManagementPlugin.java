@@ -31,8 +31,9 @@ import java.util.Map;
 /**
  * Answers the requests on Service Bus entity management nodes ({@code {entity}/$management}).
  *
- * <p>It implements non-destructive peek. Lock renewal is answered before routing, in the AMQP
- * layer, so it never reaches this plugin. Every other operation gets 501 (Not Implemented),
+ * <p>It implements non-destructive peek. Lock renewal, receive-by-sequence-number and
+ * update-disposition are answered before routing, in the AMQP layer, so they never reach this
+ * plugin. Every other operation gets 501 (Not Implemented),
  * which names the operation: a request that reached routing unanswered would otherwise reach no
  * one, and the client would wait for a reply until it timed out.
  */

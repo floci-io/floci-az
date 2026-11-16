@@ -376,7 +376,7 @@
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java"
                                     token="sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(message), routingContext, message);"
-                                    value="AmqpReplyRouting.onReceive(connection, address, message);&#10;         if (message instanceof AMQPMessage renewal &amp;&amp; ServiceBusLockRenewalSupport.handle(this, address, renewal, delivery)) { return; }&#10;         if (message instanceof AMQPMessage amqpMessage &amp;&amp; ServiceBusBatchSupport.isBatch(amqpMessage)) {&#10;            for (Message batchMessage : ServiceBusBatchSupport.decode(amqpMessage, sessionSPI.getCoreMessageObjectPools())) {&#10;               sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(batchMessage), routingContext, batchMessage);&#10;            }&#10;         } else {&#10;            sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(message), routingContext, message);&#10;         }"
+                                    value="AmqpReplyRouting.onReceive(connection, address, message);&#10;         if (message instanceof AMQPMessage renewal &amp;&amp; (ServiceBusLockRenewalSupport.handle(this, address, renewal, delivery) || ServiceBusDeferralSupport.handle(this, address, renewal, delivery))) { return; }&#10;         if (message instanceof AMQPMessage amqpMessage &amp;&amp; ServiceBusBatchSupport.isBatch(amqpMessage)) {&#10;            for (Message batchMessage : ServiceBusBatchSupport.decode(amqpMessage, sessionSPI.getCoreMessageObjectPools())) {&#10;               sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(batchMessage), routingContext, batchMessage);&#10;            }&#10;         } else {&#10;            sessionSPI.serverSend(this, tx, receiver, delivery, address, deduceRoutingType(message), routingContext, message);&#10;         }"
                                     failOnNoReplacements="true" />
                                 <replace
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
@@ -409,6 +409,14 @@
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="final Modified modification = (Modified) remoteState;"
                                     value="final Modified modification = (Modified) remoteState; ServiceBusDeadLetterSupport.apply(message, modification);"
+                                    failOnNoReplacements="true" />
+                                <!-- Defer is a modified outcome with undeliverable-here. Mark the message deferred
+                                     in its entity before Artemis puts it back, so no receiver link is offered it
+                                     again; it is then received by sequence number (ServiceBusDeferralSupport). -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
+                                    token="message.rejectConsumer(brokerConsumer.sequentialID());"
+                                    value="ServiceBusDeferralSupport.defer(brokerConsumer, message.getMessageID()); message.rejectConsumer(brokerConsumer.sequentialID());"
                                     failOnNoReplacements="true" />
                                 <!-- Broker ingress timestamps and dead-letter properties can be newer than
                                      the large-message file. Copy the current metadata before streaming its body. -->

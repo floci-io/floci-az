@@ -188,6 +188,58 @@ class ServiceBusCompatibilityTest {
         }
     }
 
+    @Test
+    @DisplayName("a deferred message is received by sequence number and completed")
+    void deferredMessageIsReceivedBySequenceNumberAndCompleted() throws Exception {
+        String queue = uniqueQueue();
+        String payload = "deferred-" + UUID.randomUUID();
+        send(queue, payload);
+
+        long sequenceNumber;
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            sequenceNumber = msg.getSequenceNumber();
+            receiver.defer(msg);
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            assertEquals(0, receiver.receiveMessages(1, Duration.ofSeconds(3)).stream().count(),
+                    "A deferred message must not be delivered to receivers again");
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(sequenceNumber);
+            assertNotNull(deferred, "Expected the deferred message");
+            assertEquals(payload, deferred.getBody().toString());
+            assertEquals(sequenceNumber, deferred.getSequenceNumber());
+            assertNotNull(deferred.getLockToken());
+            assertTrue(deferred.getLockedUntil().isAfter(OffsetDateTime.now()));
+            receiver.complete(deferred);
+
+            assertThrows(RuntimeException.class, () -> receiver.receiveDeferredMessage(sequenceNumber),
+                    "A completed deferred message is gone");
+        }
+    }
+
+    @Test
+    @DisplayName("receiving a message that was not deferred by sequence number fails")
+    void receivingAMessageThatWasNotDeferredFails() throws Exception {
+        String queue = uniqueQueue();
+        send(queue, "not-deferred-" + UUID.randomUUID());
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage peeked = receiver.peekMessage();
+            assertNotNull(peeked, "Expected a message to peek");
+
+            assertThrows(RuntimeException.class, () -> receiver.receiveDeferredMessage(peeked.getSequenceNumber()));
+
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "The message is still delivered normally");
+            receiver.complete(msg);
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"false,false,false", "false,false,true", "false,true,false", "false,true,true",
             "true,false,false", "true,false,true", "true,true,false", "true,true,true"})

@@ -65,6 +65,9 @@ public class ServiceBusConfigGenerator {
                   .startAttr("broker-plugin", "class-name",
                           "io.floci.az.artemis.ServiceBusManagementPlugin")
                   .end("broker-plugin")
+                  .startAttr("broker-plugin", "class-name",
+                          "org.apache.activemq.artemis.protocol.amqp.proton.ServiceBusDeferralSupport")
+                  .end("broker-plugin")
                 .end("broker-plugins")
                 .start("address-settings")
                   .startAttr("address-setting", "match", "#")

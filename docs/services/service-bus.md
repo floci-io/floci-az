@@ -150,8 +150,9 @@ when needed to keep the AMQP response bounded. Empty entities return an empty re
 
 ## Management requests
 
-Each entity's `$management` node answers peek (`com.microsoft:peek-message`) and lock renewal
-(`com.microsoft:renew-lock`, `com.microsoft:renew-session-lock`), and the `$cbs` node answers
+Each entity's `$management` node answers peek (`com.microsoft:peek-message`), lock renewal
+(`com.microsoft:renew-lock`, `com.microsoft:renew-session-lock`) and message deferral
+(`com.microsoft:receive-by-sequence-number`, `com.microsoft:update-disposition`), and the `$cbs` node answers
 `put-token`. Every other request gets status `501` (Not Implemented), with a status description
 that names the operation, and the SDK call fails with that status. Azure implements these
 [operations](https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-amqp-request-response),
@@ -161,8 +162,6 @@ so a call that works against Azure fails against floci-az:
 |---|---|
 | `com.microsoft:schedule-message` | Schedule messages |
 | `com.microsoft:cancel-scheduled-message` | Cancel scheduled messages |
-| `com.microsoft:receive-by-sequence-number` | Receive deferred messages |
-| `com.microsoft:update-disposition` | Settle deferred messages |
 | `com.microsoft:set-session-state` | Set a session's state |
 | `com.microsoft:get-session-state` | Get a session's state |
 | `com.microsoft:get-message-sessions` | List sessions |
@@ -315,10 +314,24 @@ Sequence numbers use Artemis broker message IDs, as peek already does. They may 
 and moving a message to a dead-letter queue may assign a new ID. Azure's gap-free per-entity
 sequence allocation is not emulated.
 
+## Message deferral
+
+A deferred message stays in its queue or subscription but is not delivered to receivers again.
+`ReceiveDeferredMessage(s)` fetches it by sequence number, in `PeekLock` or `ReceiveAndDelete`
+mode, and a peek-locked deferred message is settled through `update-disposition`: complete removes
+it, dead-letter moves it to the dead-letter queue with its reason and description, and abandon or
+defer release the lock and leave it deferred. Asking for a sequence number that is not deferred in
+that entity fails with `MessageNotFound`, and settling with an expired lock fails with
+`MessageLockLost`, as in Azure.
+
+Deferral is tracked per entity, so a topic message deferred on one subscription is still delivered
+on the others. The deferred state is held in broker memory: after a broker restart, deferred
+messages are delivered to receivers again.
+
 ## Out of scope (future work)
 
 - Session state
-- Deferred messages and auto-forwarding
+- Auto-forwarding
 - Message transactions
 - Geo-disaster recovery and partitioned entities
 
@@ -331,4 +344,4 @@ scoped to the receiving connection and associated link when supplied. Session re
 owning connection and associated link when supplied. Renewal never resurrects an expired lock.
 
 Old expiry timers cannot expire renewed locks. Buffers for delivery tags are pooled, but token values
-are never reused within the broker process. Deferred messages remain unsupported.
+are never reused within the broker process.
