@@ -27,7 +27,9 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.io.InputStream;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +88,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
 
     private static final Logger LOG = Logger.getLogger(PostgresHandler.class);
     private static final String TYPE = "Microsoft.DBforPostgreSQL/flexibleServers";
+    /** The sidecar superuser of a server created with password sign-in off; reachable only through /connect. */
+    private static final String ENTRA_ONLY_SUPERUSER = "flociadmin";
 
     private static final String NAMESPACE = "Microsoft.DBforPostgreSQL";
 
@@ -95,6 +99,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
     private final GlobalNameRegistry names;
 
     private final ObjectMapper mapper = new ObjectMapper();
+    /** An instance field, not a static one: a SecureRandom seeded at native image build time is refused. */
+    private final SecureRandom random = new SecureRandom();
 
     /** Guards concurrent server-start operations (per server name). */
     private final ConcurrentHashMap<String, Object> startLocks = new ConcurrentHashMap<>();
@@ -167,6 +173,14 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleFirewallRuleList(method, request, segment(tail, 1));
         }
 
+        // ── Microsoft Entra administrators ─────────────────────────────────
+        if (tail.matches("flexibleServers/[^/]+/administrators/[^/]+")) {
+            return handleAdministrator(method, request, segment(tail, 1), segment(tail, 3));
+        }
+        if (tail.matches("flexibleServers/[^/]+/administrators")) {
+            return handleAdministratorList(request, segment(tail, 1));
+        }
+
         // ── Databases ──────────────────────────────────────────────────────
         if (tail.matches("flexibleServers/[^/]+/databases/[^/]+")) {
             return handleDatabase(method, request, segment(tail, 1), segment(tail, 3));
@@ -183,9 +197,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             return handleServerList(request);
         }
 
-        return Response.status(Response.Status.NOT_FOUND)
-            .entity(Map.of("error", "Unknown PostgreSQL path: " + tail))
-            .build();
+        return notFound("Unknown PostgreSQL path: " + tail);
     }
 
     // ── ARM long-running-operation responses ──────────────────────────────────
@@ -277,10 +289,21 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             }
 
             if (isNew) {
+                PostgresState.AuthConfig authConfig = authConfig(props.path("authConfig"));
                 String login    = props.path("administratorLogin").asText();
                 String password = props.path("administratorLoginPassword").asText();
-                if (login.isBlank())    return badRequest("administratorLogin is required");
-                if (password.isBlank()) return badRequest("administratorLoginPassword is required");
+                boolean passwordAuthDisabled = authConfig != null
+                    && "Disabled".equalsIgnoreCase(authConfig.passwordAuth());
+                if (passwordAuthDisabled) {
+                    // Azure needs administratorLogin only "the first time that you enable password based
+                    // authentication" (2025-08-01). The sidecar still needs a superuser, so an Entra-only server
+                    // gets generated credentials, which only the /connect endpoint returns.
+                    login = ENTRA_ONLY_SUPERUSER;
+                    password = generatedPassword();
+                } else {
+                    if (login.isBlank())    return badRequest("administratorLogin is required");
+                    if (password.isBlank()) return badRequest("administratorLoginPassword is required");
+                }
 
                 String location = body.path("location").asText(defaults.defaultLocation(request.scope()));
                 String version  = props.path("version").asText("16");
@@ -293,7 +316,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
-                    Instant.now());
+                    Instant.now(), authConfig, new ConcurrentHashMap<>());
                 // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
                 // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
                 GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.POSTGRES,
@@ -342,6 +365,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 String skuName  = sku.path("name").asText(live.skuName());
                 String skuTier  = sku.path("tier").asText(live.skuTier());
                 Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
+                PostgresState.AuthConfig authConfig = props.has("authConfig")
+                    ? authConfig(props.path("authConfig")) : live.authConfig();
 
                 boolean passwordChanged = !password.isBlank()
                     && !password.equals(live.administratorLoginPassword());
@@ -355,7 +380,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     live.containerId(), live.hostPort(), live.host(), mergedTags,
                     live.databases(), live.firewallRules(), live.configurations(),
-                    live.createdAt());
+                    live.createdAt(), authConfig, live.administrators());
                 // Delete does not take the start lock, so the server can go away while the
                 // rotation runs. Writing it back would resurrect a name another scope may claim.
                 if (!state.replaceServer(live, updated)) {
@@ -453,6 +478,53 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
             ? state.listServersBySubscription(sub)
             : state.listServersByResourceGroup(sub, rg.get());
         List<Map<String, Object>> value = servers.stream().map(this::serverResponse).toList();
+        return Response.ok(Map.of("value", value)).build();
+    }
+
+    // ── Microsoft Entra administrators ───────────────────────────────────────
+
+    /**
+     * {@code AdministratorsMicrosoftEntra_*} (2025-08-01): a PUT answers 202 (the only status declared) with the
+     * administrator, which is complete at once; a GET 200; a DELETE 204, whether or not there was one. The object id
+     * is the path's; the body carries the principal's name, type and tenant.
+     */
+    private Response handleAdministrator(String method, AzureRequest request, String serverName, String objectId) {
+        Optional<PostgresState.ServerEntry> server = server(request, serverName);
+        if (server.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        return switch (method) {
+            case "PUT" -> {
+                try {
+                    JsonNode props = readBody(request.bodyStream()).path("properties");
+                    PostgresState.AdministratorEntry admin = new PostgresState.AdministratorEntry(objectId,
+                        props.path("principalName").asText(null), props.path("principalType").asText(null),
+                        props.path("tenantId").asText(null));
+                    state.putAdministrator(serverName, admin);
+                    yield accepted(request, administratorId(server.get(), objectId),
+                        administratorResponse(server.get(), admin));
+                } catch (Exception e) {
+                    yield badRequest("Invalid request body: " + e.getMessage());
+                }
+            }
+            case "GET" -> state.getAdministrator(serverName, objectId)
+                .map(admin -> Response.ok(administratorResponse(server.get(), admin)).build())
+                .orElse(notFound("Administrator '" + objectId + "' not found"));
+            case "DELETE" -> {
+                state.removeAdministrator(serverName, objectId);
+                yield Response.status(204).build();
+            }
+            default -> methodNotAllowed();
+        };
+    }
+
+    private Response handleAdministratorList(AzureRequest request, String serverName) {
+        Optional<PostgresState.ServerEntry> server = server(request, serverName);
+        if (server.isEmpty()) {
+            return notFound("Server '" + serverName + "' not found");
+        }
+        List<Map<String, Object>> value = state.listAdministrators(serverName).stream()
+            .map(admin -> administratorResponse(server.get(), admin)).toList();
         return Response.ok(Map.of("value", value)).build();
     }
 
@@ -630,7 +702,17 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         boolean ready = config.services().postgres().mocked() || s.containerId() != null;
 
         Map<String, Object> props = new LinkedHashMap<>();
-        props.put("administratorLogin", s.administratorLogin());
+        // Azure returns no administratorLogin for a server with password sign-in off.
+        if (!s.passwordAuthDisabled()) {
+            props.put("administratorLogin", s.administratorLogin());
+        }
+        if (s.authConfig() != null) {
+            Map<String, Object> auth = new LinkedHashMap<>();
+            putIfPresent(auth, "activeDirectoryAuth", s.authConfig().activeDirectoryAuth());
+            putIfPresent(auth, "passwordAuth", s.authConfig().passwordAuth());
+            putIfPresent(auth, "tenantId", s.authConfig().tenantId());
+            props.put("authConfig", auth);
+        }
         props.put("version", s.version());
         props.put("fullyQualifiedDomainName", s.fullyQualifiedDomainName());
         props.put("state", ready ? "Ready" : "Creating");
@@ -651,6 +733,47 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         if (!s.tags().isEmpty()) resp.put("tags", s.tags());
         resp.put("properties", props);
         return resp;
+    }
+
+    private static String administratorId(PostgresState.ServerEntry server, String objectId) {
+        return server.armId() + "/administrators/" + objectId;
+    }
+
+    /** As the spec's example: named by the principal, with the object id and the request's values. */
+    private static Map<String, Object> administratorResponse(PostgresState.ServerEntry server,
+                                                             PostgresState.AdministratorEntry admin) {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("objectId", admin.objectId());
+        putIfPresent(props, "principalName", admin.principalName());
+        putIfPresent(props, "principalType", admin.principalType());
+        putIfPresent(props, "tenantId", admin.tenantId());
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("id", administratorId(server, admin.objectId()));
+        resp.put("name", admin.principalName() != null ? admin.principalName() : admin.objectId());
+        resp.put("type", "Microsoft.DBforPostgreSQL/flexibleServers/administrators");
+        resp.put("properties", props);
+        return resp;
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            target.put(key, value);
+        }
+    }
+
+    /** {@code properties.authConfig} as sent, or null when the body names none. */
+    private static PostgresState.AuthConfig authConfig(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        return new PostgresState.AuthConfig(node.path("activeDirectoryAuth").asText(null),
+            node.path("passwordAuth").asText(null), node.path("tenantId").asText(null));
+    }
+
+    private String generatedPassword() {
+        byte[] bytes = new byte[24];
+        random.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     private Map<String, Object> databaseResponse(PostgresState.DatabaseEntry db,

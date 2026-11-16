@@ -59,6 +59,7 @@ class ArmSurfaceGoldenTest {
         Microsoft.DBforMySQL/flexibleServers/databases                                 RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforMySQL/flexibleServers/firewallRules                             RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforPostgreSQL/flexibleServers                                      RESOURCE_GROUP  REQUIRED  FILTER
+        Microsoft.DBforPostgreSQL/flexibleServers/administrators                       RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforPostgreSQL/flexibleServers/configurations                       RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforPostgreSQL/flexibleServers/databases                            RESOURCE_GROUP  OPTIONAL  FILTER
         Microsoft.DBforPostgreSQL/flexibleServers/firewallRules                        RESOURCE_GROUP  OPTIONAL  FILTER
