@@ -110,7 +110,7 @@ class EventGridHandlerTest {
             .contentType("application/json")
             .body("{\"location\":\"eastus\",\"properties\":{}}")
             .when().put(TOPIC_BASE + API)
-            .then().statusCode(200)
+            .then().statusCode(201)
             .body("name", equalTo(TOPIC))
             .body("type", equalTo("Microsoft.EventGrid/topics"))
             .body("properties.provisioningState", equalTo("Succeeded"))
@@ -128,10 +128,30 @@ class EventGridHandlerTest {
             .contentType("application/json")
             .body(body)
             .when().put(TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/" + subscriptionName + API)
-            .then().statusCode(200)
+            .then().statusCode(201)
             .body("name", equalTo(subscriptionName))
             .body("type", equalTo("Microsoft.EventGrid/eventSubscriptions"))
             .body("properties.destination.properties.endpointUrl", equalTo(webhookUrl()));
+    }
+
+    @Test
+    void deletingATopicAnswers204AndItReadsBackAs404() {
+        createTopic();
+
+        given().when().delete(TOPIC_BASE + API).then().statusCode(204);
+        given().when().get(TOPIC_BASE + API).then().statusCode(404);
+    }
+
+    @Test
+    void anUnsetSubjectFilterReadsBackAsTwoEmptyStrings() {
+        createTopic();
+        createSubscription("sub-no-filter", null);
+
+        given().when().get(TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/sub-no-filter" + API)
+            .then().statusCode(200)
+            .body("properties.filter.subjectBeginsWith", equalTo(""))
+            .body("properties.filter.subjectEndsWith", equalTo(""))
+            .body("properties.filter.isSubjectCaseSensitive", equalTo(false));
     }
 
     @Test
@@ -140,7 +160,7 @@ class EventGridHandlerTest {
         given().contentType("application/json").body("{\"properties\":{}}")
             .when().put("/subscriptions/" + SUB + "/resourceGroups/" + RG
                 + "/providers/Microsoft.EventGrid/topics/unlocated-topic" + API)
-            .then().statusCode(200)
+            .then().statusCode(201)
             .body("location", equalTo("eastus"));
     }
 
@@ -268,7 +288,7 @@ class EventGridHandlerTest {
         String url = TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/sub-dl-echo" + API;
         given().contentType("application/json").body(body)
             .when().put(url)
-            .then().statusCode(200);
+            .then().statusCode(201);
 
         given().when().get(url)
             .then().statusCode(200)
@@ -493,7 +513,7 @@ class EventGridHandlerTest {
                 + ",\"eventTimeToLiveInMinutes\":1440}}}";
         given().contentType("application/json").body(body)
             .when().put(TOPIC_SCOPE + "/providers/Microsoft.EventGrid/eventSubscriptions/" + name + API)
-            .then().statusCode(200);
+            .then().statusCode(201);
     }
 
     private void publishOrderEvent(String id) {

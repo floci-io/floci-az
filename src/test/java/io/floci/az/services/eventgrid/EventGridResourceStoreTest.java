@@ -73,13 +73,13 @@ class EventGridResourceStoreTest {
     void aPutThroughOtherCasingUpdatesTheOneTopic() {
         String id = given().contentType("application/json").body(TOPIC_BODY)
             .when().put(topic("sub-case", "RG-Case", "Topic-One") + API)
-            .then().statusCode(200).extract().path("id");
+            .then().statusCode(201).extract().path("id");
         String firstKey = given().when().post(topic("sub-case", "RG-Case", "Topic-One") + "/listKeys" + API)
             .then().statusCode(200).extract().path("key1");
 
         given().contentType("application/json").body(TOPIC_BODY)
             .when().put(topic("sub-case", "rg-case", "topic-one") + API)
-            .then().statusCode(200)
+            .then().statusCode(201)
             .body("id", equalTo(id))
             .body("name", equalTo("Topic-One"));
 
@@ -123,11 +123,11 @@ class EventGridResourceStoreTest {
         given().contentType("application/json")
             .body("{\"properties\":{\"destination\":{\"endpointType\":\"WebHook\",\"properties\":{\"endpointUrl\":"
                 + "\"http://127.0.0.1:1/hook\"}}}}")
-            .when().put(subscriptionPath + API).then().statusCode(200).body("id", equalTo(subscriptionPath));
+            .when().put(subscriptionPath + API).then().statusCode(201).body("id", equalTo(subscriptionPath));
         assertFalse(backend.get(oldSubscriptionKey).isPresent(), "the write moved the subscription off its old key");
         assertTrue(backend.get(subscriptionPath.toLowerCase()).isPresent());
 
-        given().when().delete(topic("sub-legacy", "rg-legacy", "legacy-topic") + API).then().statusCode(200);
+        given().when().delete(topic("sub-legacy", "rg-legacy", "legacy-topic") + API).then().statusCode(204);
         assertFalse(backend.get(subscriptionPath.toLowerCase()).isPresent(), "deleting the topic took its subscription");
         given().when().get(subscriptionPath + API).then().statusCode(404);
     }

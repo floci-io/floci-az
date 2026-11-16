@@ -30,7 +30,7 @@ class CloudDefaultLocationEventGridAliasTest {
     void aTopicWithoutALocationGetsTheEventGridRegion() {
         given().contentType("application/json").body("{\"properties\":{}}")
             .when().put(RG + "/providers/Microsoft.EventGrid/topics/aliased-topic?api-version=2025-02-15")
-            .then().statusCode(200).body("location", equalTo("northeurope"));
+            .then().statusCode(201).body("location", equalTo("northeurope"));
     }
 
     @Test

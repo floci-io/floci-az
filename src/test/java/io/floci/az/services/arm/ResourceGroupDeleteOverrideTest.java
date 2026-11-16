@@ -79,7 +79,7 @@ class ResourceGroupDeleteOverrideTest {
         String topic = group("rg-idx") + "/providers/Microsoft.EventGrid/topics/idx-topic";
         String workspace = group("rg-idx") + "/providers/Microsoft.OperationalInsights/workspaces/idx-ws";
         String email = group("rg-idx") + "/providers/Microsoft.Communication/emailServices/idx-email";
-        json("{\"location\":\"eastus\",\"properties\":{}}").when().put(topic + EVENT_GRID_API).then().statusCode(200);
+        json("{\"location\":\"eastus\",\"properties\":{}}").when().put(topic + EVENT_GRID_API).then().statusCode(201);
         json("{\"location\":\"eastus\",\"properties\":{}}").when().put(workspace + MONITOR_API).then().statusCode(201);
         json("{\"location\":\"global\",\"properties\":{\"dataLocation\":\"United States\"}}")
             .when().put(email + EMAIL_API).then().statusCode(201);

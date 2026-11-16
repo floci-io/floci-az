@@ -144,7 +144,7 @@ class ResourceGroupAzureParityTest {
             + "\"accessPolicies\":[]}}").when().put(vault + KV_API).then().statusCode(200);
         json("{\"location\":\"eastus\",\"properties\":{\"sku\":{\"name\":\"Basic\",\"family\":\"C\",\"capacity\":0}}}")
             .when().put(cache + REDIS_API).then().statusCode(201);
-        json("{\"location\":\"eastus\",\"properties\":{}}").when().put(topic + EVENT_GRID_API).then().statusCode(200);
+        json("{\"location\":\"eastus\",\"properties\":{}}").when().put(topic + EVENT_GRID_API).then().statusCode(201);
         json("{\"location\":\"eastus\",\"kind\":\"StorageV2\",\"sku\":{\"name\":\"Standard_LRS\"}}")
             .when().put(kept + STORAGE_API).then().statusCode(200);
 

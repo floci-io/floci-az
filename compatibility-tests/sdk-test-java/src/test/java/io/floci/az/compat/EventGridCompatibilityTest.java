@@ -173,7 +173,7 @@ class EventGridCompatibilityTest {
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
-        assertEquals(200, resp.statusCode(), "create topic: " + resp.body());
+        assertEquals(201, resp.statusCode(), "create topic: " + resp.body());
         String endpoint = MAPPER.readTree(resp.body()).path("properties").path("endpoint").asText(null);
         assertNotNull(endpoint, "topic must expose a data-plane endpoint");
         return endpoint;
@@ -207,7 +207,7 @@ class EventGridCompatibilityTest {
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
-        assertEquals(200, resp.statusCode(), "create subscription: " + resp.body());
+        assertEquals(201, resp.statusCode(), "create subscription: " + resp.body());
     }
 
     private static String shortId() {
