@@ -283,7 +283,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         }
 
         Response.ResponseBuilder rb = Response.ok()
-                .header("x-ms-approximate-messages-count", approximateVisibleMessageCount(request, queueName));
+                .header("x-ms-approximate-messages-count", approximateMessageCount(request, queueName));
         queue.get().metadata().forEach((name, value) -> rb.header("x-ms-meta-" + name, value));
         return rb.build();
     }
@@ -638,11 +638,16 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
         return Response.status(Response.Status.NO_CONTENT).build();
     }
 
-    private long approximateVisibleMessageCount(AzureRequest request, String queueName) {
+    /**
+     * Counts hidden messages too, as Azure does: its count is "not lower than the actual number of
+     * messages in the queue", whereas Peek Messages returns visible messages only. A client that
+     * must tell an empty queue from one whose message is hidden relies on the difference.
+     */
+    private long approximateMessageCount(AzureRequest request, String queueName) {
         String keyPrefix = objKey(request.accountName(), queueName, "");
         Instant now = Instant.now();
         return store.scan(k -> k.startsWith(keyPrefix)).stream()
-                .filter(so -> isVisible(so, now))
+                .filter(so -> !isExpired(so, now))
                 .count();
     }
 

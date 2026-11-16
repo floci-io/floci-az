@@ -431,6 +431,92 @@ public class QueueServiceTest {
             .body(containsString("delayed"));
     }
 
+    @Test
+    void approximateMessageCountIncludesHiddenAndVisibleMessages() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>parked</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages?visibilitytimeout=600", ACCOUNT, QUEUE)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{queue}/messages?peekonly=true", ACCOUNT, QUEUE)
+            .then().statusCode(200).body(not(containsString("parked")));
+
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("1"));
+
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>ready</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages", ACCOUNT, QUEUE)
+            .then().statusCode(201);
+
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("2"));
+    }
+
+    @Test
+    void approximateMessageCountIncludesMessageHiddenByReceive() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>in-flight</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages", ACCOUNT, QUEUE);
+
+        given()
+            .when().get("/{account}/{queue}/messages?visibilitytimeout=600", ACCOUNT, QUEUE)
+            .then().statusCode(200).body(containsString("in-flight"));
+
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("1"));
+    }
+
+    @Test
+    void approximateMessageCountLeavesOutDeletedMessage() {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>first</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>second</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages", ACCOUNT, QUEUE);
+
+        Response dequeue = given()
+            .get("/{account}/{queue}/messages?numofmessages=2&visibilitytimeout=600", ACCOUNT, QUEUE);
+        String messageId = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage[0].MessageId");
+        String popReceipt = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage[0].PopReceipt");
+
+        given()
+            .when().delete("/{account}/{queue}/messages/{id}?popreceipt={receipt}", ACCOUNT, QUEUE, messageId, popReceipt)
+            .then().statusCode(204);
+
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("1"));
+    }
+
+    @Test
+    void approximateMessageCountLeavesOutExpiredMessage() throws Exception {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>short-lived</MessageText></QueueMessage>")
+            .post("/{account}/{queue}/messages?messagettl=1", ACCOUNT, QUEUE);
+
+        Thread.sleep(1200);
+
+        given()
+            .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+            .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("0"));
+    }
+
     // Enqueued late in a wall-clock second, a visibility deadline truncated to whole seconds would
     // expire at the next second boundary, well before the requested timeout.
     @Test
