@@ -37,19 +37,19 @@ class EventGridStrictNamesTest {
                 .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
         }
         given().contentType("application/json").body(TOPIC_BODY).when().put(BASE + "Good-Topic-1" + API)
-            .then().statusCode(200);
+            .then().statusCode(201);
     }
 
     @Test
     void anEventSubscriptionNameOutsideTheRuleIsRefusedAndAValidOneIsCreated() {
         given().contentType("application/json").body(TOPIC_BODY).when().put(BASE + "names-topic" + API)
-            .then().statusCode(200);
+            .then().statusCode(201);
         String subscriptions = BASE + "names-topic/providers/Microsoft.EventGrid/eventSubscriptions/";
         for (String bad : new String[] {"ab", "dot.ted", "s".repeat(65)}) {
             given().contentType("application/json").body(SUBSCRIPTION_BODY).when().put(subscriptions + bad + API)
                 .then().statusCode(400).body("error.code", equalTo("InvalidResourceName"));
         }
         given().contentType("application/json").body(SUBSCRIPTION_BODY)
-            .when().put(subscriptions + "good-subscription" + API).then().statusCode(200);
+            .when().put(subscriptions + "good-subscription" + API).then().statusCode(201);
     }
 }

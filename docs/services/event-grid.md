@@ -96,6 +96,9 @@ curl -s -X PUT \
   }'
 ```
 
+The PUT answers `201 Created` for a create and an update alike, the only status Azure declares for it, with the
+subscription already at `provisioningState: Succeeded`, so a client's poller finishes on the first response.
+
 The emulator immediately runs the validation handshake against the webhook (a
 `SubscriptionValidationEvent`; the subscriber must echo `{"validationResponse": "<code>"}`).
 

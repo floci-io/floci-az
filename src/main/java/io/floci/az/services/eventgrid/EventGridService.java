@@ -141,7 +141,8 @@ public class EventGridService {
                 .orElseGet(() -> new Topic(sub, rg, name, location, inputSchema, generateKey(), generateKey())))
                 .stored().value();
         LOG.infov("ARM: created Event Grid topic {0} (schema={1})", name, inputSchema);
-        return Response.ok(topicJson(topic)).build();
+        // Topics_CreateOrUpdate declares only 201 (2025-02-15).
+        return Response.status(201).entity(topicJson(topic)).build();
     }
 
     private Response getTopic(String sub, String rg, String name) {
@@ -153,7 +154,8 @@ public class EventGridService {
     private Response deleteTopic(String sub, String rg, String name) {
         topics.delete(topicId(sub, rg, name)).ifPresent(t -> subscriptionsForTopic(t.value().resourceId())
                 .forEach(s -> subscriptions.delete(eventSubscriptionId(s.topicResourceId(), s.name()))));
-        return Response.ok().build();
+        // Topics_Delete declares 202 and 204 (2025-02-15); the delete is synchronous, so 204.
+        return Response.noContent().build();
     }
 
     private Response listKeys(String sub, String rg, String name) {
@@ -241,7 +243,8 @@ public class EventGridService {
         boolean validated = delivery.validate(es, es.topicResourceId());
         LOG.infov("ARM: created Event Grid subscription {0} → {1} (validated={2})",
                 name, endpointUrl, validated);
-        return Response.ok(subscriptionJson(es)).build();
+        // EventSubscriptions_CreateOrUpdate declares only 201, for create and update alike (2025-02-15).
+        return Response.status(201).entity(subscriptionJson(es)).build();
     }
 
     private Filter parseFilter(Map<String, Object> raw) {
@@ -355,8 +358,10 @@ public class EventGridService {
         destination.put("properties", destProps);
 
         Map<String, Object> filter = new LinkedHashMap<>();
-        filter.put("subjectBeginsWith", s.filter().subjectBeginsWith());
-        filter.put("subjectEndsWith", s.filter().subjectEndsWith());
+        // An unset subject filter reads back as "", as Azure answers it: azurerm treats only two empty strings
+        // as "no subject_filter", so nulls would leave a block in state that the config never declared.
+        filter.put("subjectBeginsWith", emptyIfNull(s.filter().subjectBeginsWith()));
+        filter.put("subjectEndsWith", emptyIfNull(s.filter().subjectEndsWith()));
         filter.put("includedEventTypes",
                 s.filter().includedEventTypes().isEmpty() ? null : s.filter().includedEventTypes());
         filter.put("isSubjectCaseSensitive", s.filter().isSubjectCaseSensitive());
@@ -387,6 +392,10 @@ public class EventGridService {
         resource.put("type", "Microsoft.EventGrid/eventSubscriptions");
         resource.put("properties", properties);
         return resource;
+    }
+
+    private static String emptyIfNull(String value) {
+        return value == null ? "" : value;
     }
 
     private static Map<String, Object> deadLetterJson(DeadLetterDestination d) {

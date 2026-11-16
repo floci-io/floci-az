@@ -126,6 +126,21 @@ setup() {
     assert_output --partial "$QUEUE_NAME"
 }
 
+@test "Terraform: event grid topic and its event subscription created" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.EventGrid/topics/floci-test-egtopic/providers/Microsoft.EventGrid/eventSubscriptions/floci-test-egsub"
+    assert_success
+    assert_output --partial '"provisioningState":"Succeeded"'
+    assert_output --partial "https://127.0.0.1:1/eventgrid"
+}
+
+@test "Terraform: a plan after apply leaves the event grid topic and subscription unchanged" {
+    cd "$TF_DIR"
+    run terraform plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_eventgrid_topic.egt -target=azurerm_eventgrid_event_subscription.egs
+    assert_success
+    assert_output --partial "No changes"
+}
+
 @test "Terraform: key vault created with vault URI" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.KeyVault/vaults/${KV_NAME}"
     assert_success

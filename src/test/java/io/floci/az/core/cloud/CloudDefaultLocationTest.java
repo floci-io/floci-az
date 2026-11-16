@@ -35,7 +35,7 @@ class CloudDefaultLocationTest {
     void anEventGridTopicWithoutALocationGetsTheConfiguredOne() {
         given().contentType("application/json").body("{\"properties\":{}}")
             .when().put(RG + "/providers/Microsoft.EventGrid/topics/located-topic?api-version=2025-02-15")
-            .then().statusCode(200).body("location", equalTo("westeurope"));
+            .then().statusCode(201).body("location", equalTo("westeurope"));
     }
 
     @Test
