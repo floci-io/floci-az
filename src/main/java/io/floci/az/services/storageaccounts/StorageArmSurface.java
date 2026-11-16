@@ -42,6 +42,7 @@ public class StorageArmSurface implements ArmSurfaceProvider {
             ArmResourceType.resourceGroup(NAMESPACE, "storageAccounts", LocationPolicy.REQUIRED)
                 .withName(ACCOUNT_NAME)
                 .withGlobalName(ACCOUNT_DNS_NAME),
+            ArmResourceType.child(NAMESPACE, "storageAccounts/managementPolicies"),
             ArmResourceType.child(NAMESPACE, "storageAccounts/blobServices"),
             ArmResourceType.child(NAMESPACE, "storageAccounts/blobServices/containers"),
             ArmResourceType.child(NAMESPACE, "storageAccounts/queueServices"),

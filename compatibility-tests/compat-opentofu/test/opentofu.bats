@@ -114,6 +114,29 @@ setup() {
     refute_output --partial '"stage"'
 }
 
+@test "OpenTofu: storage account blob properties read back, so a second plan leaves them unchanged" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}/blobServices/default"
+    assert_success
+    assert_output --partial '"isVersioningEnabled":true'
+
+    # The account still plans other drift (the queue and table encryption key type), so only blob_properties is checked.
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -target=azurerm_storage_account.sa
+    assert_success
+    refute_output --partial "blob_properties"
+}
+
+@test "OpenTofu: storage management policy stored, so a second plan leaves it unchanged" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Storage/storageAccounts/${SA_NAME}/managementPolicies/default"
+    assert_success
+    assert_output --partial '"expire-logs"'
+
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -target=azurerm_storage_management_policy.mp
+    assert_success
+    refute_output --partial "# azurerm_storage_management_policy.mp"
+}
+
 @test "OpenTofu: storage container listed in blob API" {
     run curl -sf "${FLOCI_AZ_ENDPOINT}/${SA_NAME}?comp=list&restype=container"
     assert_success

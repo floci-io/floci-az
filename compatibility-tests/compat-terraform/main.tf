@@ -34,7 +34,47 @@ resource "azurerm_storage_account" "sa" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
 
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 7
+    }
+
+    container_delete_retention_policy {
+      days = 7
+    }
+
+    cors_rule {
+      allowed_headers    = ["*"]
+      allowed_methods    = ["GET", "PUT"]
+      allowed_origins    = ["https://example.com"]
+      exposed_headers    = ["*"]
+      max_age_in_seconds = 3600
+    }
+  }
+
   tags = var.storage_tags
+}
+
+resource "azurerm_storage_management_policy" "mp" {
+  storage_account_id = azurerm_storage_account.sa.id
+
+  rule {
+    name    = "expire-logs"
+    enabled = true
+
+    filters {
+      blob_types   = ["blockBlob"]
+      prefix_match = ["logs/"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = 30
+      }
+    }
+  }
 }
 
 resource "azurerm_storage_container" "sc" {

@@ -95,6 +95,12 @@ Blob XML responses, and the Data Lake Storage Gen2 DFS host alias.
   messages. A missing one is `404` (`ContainerNotFound` / `QueueNotFound`, the Storage service's codes; Azure's
   ARM spec records no code for it). Statuses follow the spec: a container delete is `200`, or `204` when there
   was none; a queue create is `200` and a queue delete `204`
+- **ARM management policy and blob service properties**: `.../managementPolicies/default` keeps the
+  lifecycle `policy` as sent, with a generated `lastModifiedTime`; its `PUT` and `GET` answer `200`, a `GET`
+  before one is set answers `404`, and a `DELETE` answers `200`, or `204` when there was none.
+  `.../blobServices/default` keeps the `properties` of its last `PUT` (versioning, delete retention, CORS and
+  the rest), which replace the ones set before; until one is set its `GET` answers empty `properties`. Both go
+  with the account when it is deleted. The rules are stored, not run: no blob is tiered or deleted by a policy
 - **Not-found semantics**: missing blob/container returns the Azure `404 BlobNotFound` /
   `ContainerNotFound` XML error shape
 
