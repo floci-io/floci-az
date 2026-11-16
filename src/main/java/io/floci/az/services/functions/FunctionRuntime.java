@@ -37,6 +37,9 @@ public final class FunctionRuntime {
             case "python" -> "mcr.microsoft.com/azure-functions/python:4-python" + version;
             case "node"   -> "mcr.microsoft.com/azure-functions/node:4-node" + version;
             case "java"   -> "mcr.microsoft.com/azure-functions/java:4-java" + version;
+            case "dotnet" -> isIsolated(parts[0])
+                    ? "mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated" + version
+                    : defaultImage(normalizedRuntime);
             default       -> defaultImage(normalizedRuntime);
         };
     }
@@ -51,6 +54,10 @@ public final class FunctionRuntime {
                     + ". Expected a value such as Python|3.12.");
         }
         return normalizeRuntime(parts[0]);
+    }
+
+    private static boolean isIsolated(String stack) {
+        return "dotnet-isolated".equals(stack.trim().toLowerCase(Locale.ROOT));
     }
 
     private static String normalizeRuntime(String runtime) {

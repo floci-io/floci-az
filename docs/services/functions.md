@@ -50,7 +50,9 @@ Default account: `devstoreaccount1`
 ```
 
 `linuxFxVersion` is optional. When set, floci-az selects the matching Azure Functions
-Linux image, such as `mcr.microsoft.com/azure-functions/python:4-python3.12`.
+Linux image, such as `mcr.microsoft.com/azure-functions/python:4-python3.12`, or
+`mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated10.0` for `DOTNET-ISOLATED|10.0`.
+An in-process `DOTNET|<version>` stack keeps the default `dotnet-isolated:4` image.
 The ARM-compatible `Microsoft.Web/sites` and `Microsoft.Web/sites/{name}/config/web`
 paths accept the same setting under `properties.siteConfig.linuxFxVersion` and
 `properties.linuxFxVersion`, respectively.
