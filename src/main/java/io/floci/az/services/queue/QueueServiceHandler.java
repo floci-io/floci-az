@@ -37,7 +37,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -61,6 +60,7 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     private static final String NEVER_EXPIRES = "Fri, 31 Dec 9999 23:59:59 GMT";
     // Permission letters a queue's stored access policy may grant: read, add, update, process.
     private static final String QUEUE_SAS_PERMISSIONS = "raup";
+    private static final int MESSAGE_LOCK_COUNT = 64;
 
     private final StorageBackend<String, StoredObject> store;
     private final XmlMapper xmlMapper = new XmlMapper();
@@ -71,15 +71,18 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     // bring back a queue deleted between its read and its write.
     private final Object queueRecordLock = new Object();
 
-    // One lock per queue for every step that reads its messages and then writes or removes them. The store
-    // has no compare-and-set, so without it two receives both see one message as visible and both return it,
-    // and a receive can write back a message that Delete or Clear Messages removed after the receive read it.
-    private final ConcurrentHashMap<String, Object> messageLocks = new ConcurrentHashMap<>();
+    // Every step that reads a queue's messages and then writes or removes them holds the queue's message
+    // lock. The store has no compare-and-set, so without it two receives both see one message as visible
+    // and both return it, and a receive can write back a message that Delete or Clear Messages removed
+    // after the receive read it. A queue always maps to the same one of a fixed set of locks, so the set
+    // does not grow with the queues that come and go; two queues that share a lock only wait for each other.
+    private final Object[] messageLocks = new Object[MESSAGE_LOCK_COUNT];
 
     @Inject
     public QueueServiceHandler(StorageFactory storageFactory, EmulatorConfig config) {
         this.config = config;
         this.store = storageFactory.create("queue");
+        Arrays.setAll(messageLocks, i -> new Object());
     }
 
     @Override
@@ -774,6 +777,6 @@ public class QueueServiceHandler implements AzureServiceHandler, Resettable {
     }
 
     private Object messageLock(String accountName, String queueName) {
-        return messageLocks.computeIfAbsent(objKey(accountName, queueName, ""), k -> new Object());
+        return messageLocks[Math.floorMod(objKey(accountName, queueName, "").hashCode(), messageLocks.length)];
     }
 }
