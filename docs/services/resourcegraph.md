@@ -101,6 +101,10 @@ floci-az:
 
 ## Intentional deviations
 
+- **Management-group rows are answered to subscription-scoped queries too.** They are tenant-level
+  rows (no `subscriptionId`), so the `subscriptions` scope does not drop them. Azure's documented
+  management-group samples run at tenant or management-group scope; what Azure answers for such rows
+  under a subscription-scoped query is not verified.
 - **`authorizationresources` is empty** and `policyresources` holds no `microsoft.policyinsights/policystates`
   rows: role assignments, role definitions and compliance states are not modelled.
 - **`properties` of `resources` rows** are what the owning service's resource index publishes: the
