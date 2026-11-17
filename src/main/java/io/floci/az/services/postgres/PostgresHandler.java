@@ -292,9 +292,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 PostgresState.AuthConfig authConfig = authConfig(props.path("authConfig"));
                 String login    = props.path("administratorLogin").asText();
                 String password = props.path("administratorLoginPassword").asText();
-                boolean passwordAuthDisabled = authConfig != null
-                    && "Disabled".equalsIgnoreCase(authConfig.passwordAuth());
-                if (passwordAuthDisabled) {
+                if (passwordAuthDisabled(authConfig)) {
                     // Azure needs administratorLogin only "the first time that you enable password based
                     // authentication" (2025-08-01). The sidecar still needs a superuser, so an Entra-only server
                     // gets generated credentials, which only the /connect endpoint returns.
@@ -365,17 +363,35 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 String skuName  = sku.path("name").asText(live.skuName());
                 String skuTier  = sku.path("tier").asText(live.skuTier());
                 Map<String, String> mergedTags = body.has("tags") ? tags : live.tags();
-                PostgresState.AuthConfig authConfig = props.has("authConfig")
-                    ? authConfig(props.path("authConfig")) : live.authConfig();
+                PostgresState.AuthConfig authConfig = updatedAuthConfig(props.path("authConfig"), live.authConfig(), isPatch);
+
+                // Azure takes administratorLogin "the first time that you enable password based authentication",
+                // and never changes it after (2025-08-01). A server created with password sign-in off carries
+                // only the generated superuser, so the first enable adds the client's login as a new role.
+                boolean firstPasswordEnable = live.passwordAuthDisabled() && !passwordAuthDisabled(authConfig)
+                    && ENTRA_ONLY_SUPERUSER.equals(live.administratorLogin());
+                String requestedLogin = props.path("administratorLogin").asText("");
+                if (firstPasswordEnable && requestedLogin.isBlank()) {
+                    return badRequest("administratorLogin is required the first time password authentication is enabled");
+                }
+                if (firstPasswordEnable && password.isBlank()) {
+                    return badRequest("administratorLoginPassword is required");
+                }
+                boolean addsLogin = firstPasswordEnable && !requestedLogin.equals(live.administratorLogin());
+                String login = addsLogin ? requestedLogin : live.administratorLogin();
 
                 boolean passwordChanged = !password.isBlank()
                     && !password.equals(live.administratorLoginPassword());
-                if (passwordChanged && !config.services().postgres().mocked() && live.containerId() != null) {
-                    serverManager.rotateAdminPassword(live, password);
+                if (!config.services().postgres().mocked() && live.containerId() != null) {
+                    if (addsLogin) {
+                        serverManager.createAdminRole(live, login, password);
+                    } else if (passwordChanged) {
+                        serverManager.rotateAdminPassword(live, password);
+                    }
                 }
                 updated = new PostgresState.ServerEntry(
                     live.serverName(), live.subscriptionId(), live.resourceGroupName(),
-                    live.location(), version, live.administratorLogin(),
+                    live.location(), version, login,
                     password.isBlank() ? live.administratorLoginPassword() : password,
                     skuName, skuTier, storageGB,
                     live.containerId(), live.hostPort(), live.host(), mergedTags,
@@ -768,6 +784,29 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
         }
         return new PostgresState.AuthConfig(node.path("activeDirectoryAuth").asText(null),
             node.path("passwordAuth").asText(null), node.path("tenantId").asText(null));
+    }
+
+    /**
+     * The authConfig an update leaves: a PUT replaces it, a PATCH merges what it sends field by field
+     * ({@code AuthConfigForPatch}, merge-patch), and an update that omits it keeps the stored one.
+     */
+    private static PostgresState.AuthConfig updatedAuthConfig(JsonNode node, PostgresState.AuthConfig stored,
+                                                              boolean isPatch) {
+        PostgresState.AuthConfig sent = authConfig(node);
+        if (sent == null) {
+            return stored;
+        }
+        if (!isPatch || stored == null) {
+            return sent;
+        }
+        return new PostgresState.AuthConfig(
+            sent.activeDirectoryAuth() != null ? sent.activeDirectoryAuth() : stored.activeDirectoryAuth(),
+            sent.passwordAuth() != null ? sent.passwordAuth() : stored.passwordAuth(),
+            sent.tenantId() != null ? sent.tenantId() : stored.tenantId());
+    }
+
+    private static boolean passwordAuthDisabled(PostgresState.AuthConfig authConfig) {
+        return authConfig != null && "Disabled".equalsIgnoreCase(authConfig.passwordAuth());
     }
 
     private String generatedPassword() {

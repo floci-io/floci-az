@@ -15,7 +15,10 @@ Compatible with the `pgjdbc` (JDBC), `psycopg`, `Npgsql`, and any libpq-speaking
 - **Entra-only servers**: a create with `authConfig.passwordAuth: Disabled` needs no `administratorLogin`, as on
   Azure, and the server reads back its `authConfig` with no `administratorLogin`. The container still needs a
   superuser, so floci-az generates one (`flociadmin` with a random password), which only the `/connect` endpoint
-  returns. Entra tokens are not accepted as database passwords
+  returns. Entra tokens are not accepted as database passwords. Turning password sign-in on later (azurerm's
+  `createMode: Update` PUT, or `az postgres flexible-server update --password-auth Enabled`) needs an
+  `administratorLogin` and a password the first time, as on Azure: floci-az creates that login as a superuser role in
+  the container, and the server reads it back from then on. A `PATCH` merges `authConfig` field by field
 - **Microsoft Entra administrators**: `.../administrators/{objectId}` keeps the principal's name, type and tenant;
   `PUT` answers `202`, `GET` `200`, and `DELETE` `204` whether or not there was one. They are stored, not applied:
   no database role is created for the principal

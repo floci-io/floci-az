@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -107,6 +108,36 @@ class PostgresServerManagerRotationTest {
 
         assertThat(failure.getMessage(), containsString("outcome is unknown"));
         assertThat(failure.getMessage(), not(containsString(NEW_PASSWORD)));
+    }
+
+    @Test
+    void addingAnAdministratorLoginCreatesASuperuserRoleAsTheCurrentAdmin() {
+        answerExec(new ContainerLifecycleManager.ExecResult(0, "CREATE ROLE\n"), null);
+
+        manager.createAdminRole(entry(), "new\"admin", NEW_PASSWORD);
+
+        ArgumentCaptor<String[]> command = ArgumentCaptor.forClass(String[].class);
+        verify(containers).execInContainer(eq("cid-1"), anyList(), command.capture());
+        String sent = String.join(" ", command.getValue());
+        assertThat(sent, containsString("-U pgadmin"));
+        assertThat(sent, containsString("CREATE ROLE \"new\"\"admin\" WITH LOGIN SUPERUSER PASSWORD '" + NEW_PASSWORD + "'"));
+    }
+
+    @Test
+    void anUnfinishedRoleCreationIsSettledByLoggingInAsTheNewRole() {
+        answerExec(new ContainerLifecycleManager.ExecResult(UNFINISHED, ""),
+                new ContainerLifecycleManager.ExecResult(2,
+                        "psql: error: FATAL:  password authentication failed for user \"newadmin\"\n"));
+
+        RuntimeException failure = assertThrows(RuntimeException.class,
+                () -> manager.createAdminRole(entry(), "newadmin", NEW_PASSWORD));
+
+        assertThat(failure.getMessage(), containsString("Adding administrator login timed out"));
+        assertThat(failure.getMessage(), containsString("was not applied"));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> env = ArgumentCaptor.forClass(List.class);
+        verify(containers, times(2)).execInContainer(eq("cid-1"), env.capture(), any(String[].class));
+        assertThat(env.getAllValues().get(1), hasItem("PGUSER=newadmin"));
     }
 
     /** The login that settles an unfinished rotation is the only exec that authenticates with the new password. */

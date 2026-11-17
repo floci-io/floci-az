@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
@@ -67,6 +68,65 @@ class PostgresEntraAuthTest {
         String body = ENTRA_ONLY_BODY.replace("\"passwordAuth\":\"Disabled\"", "\"passwordAuth\":\"Enabled\"");
         given().contentType("application/json").body(body).when().put(BASE + "needslogin" + API)
             .then().statusCode(400).body("error.message", equalTo("administratorLogin is required"));
+    }
+
+    /** What azurerm sends to turn password sign-in on later: a PUT with createMode Update, the login and a password. */
+    private static final String ENABLE_PASSWORD_PUT = "{\"location\":\"eastus\","
+        + "\"properties\":{\"createMode\":\"Update\",\"administratorLogin\":\"pgadmin\","
+        + "\"administratorLoginPassword\":\"Enabled_Strong123!\","
+        + "\"authConfig\":{\"activeDirectoryAuth\":\"Enabled\",\"passwordAuth\":\"Enabled\",\"tenantId\":\""
+        + TENANT + "\"}}}";
+
+    @Test
+    void enablingPasswordSignInLaterSetsTheLoginTheClientSent() {
+        given().contentType("application/json").body(ENTRA_ONLY_BODY).when().put(BASE + "laterlogin" + API)
+            .then().statusCode(202);
+
+        given().contentType("application/json").body(ENABLE_PASSWORD_PUT).when().put(BASE + "laterlogin" + API)
+            .then().statusCode(202)
+            .body("properties.administratorLogin", equalTo("pgadmin"));
+
+        given().when().get(BASE + "laterlogin" + API)
+            .then().statusCode(200)
+            .body("properties.administratorLogin", equalTo("pgadmin"))
+            .body("properties.authConfig.passwordAuth", equalTo("Enabled"));
+        given().when().get("/devstoreaccount1-postgres/flexibleServers/laterlogin/connect")
+            .then().statusCode(200)
+            .body("uri", containsString("pgadmin:Enabled_Strong123!@"));
+    }
+
+    @Test
+    void enablingPasswordSignInWithoutALoginIsRefused() {
+        given().contentType("application/json").body(ENTRA_ONLY_BODY).when().put(BASE + "nologin" + API)
+            .then().statusCode(202);
+
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"passwordAuth\":\"Enabled\"},"
+                + "\"administratorLoginPassword\":\"Enabled_Strong123!\"}}")
+            .when().patch(BASE + "nologin" + API)
+            .then().statusCode(400).body("error.code", equalTo("InvalidRequest"));
+
+        given().when().get(BASE + "nologin" + API)
+            .then().statusCode(200)
+            .body("properties.authConfig.passwordAuth", equalTo("Disabled"))
+            .body("properties", not(hasKey("administratorLogin")));
+    }
+
+    @Test
+    void aPartialAuthConfigPatchKeepsTheFieldsItLeavesOut() {
+        given().contentType("application/json").body(ENTRA_ONLY_BODY).when().put(BASE + "partialauth" + API)
+            .then().statusCode(202);
+
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"activeDirectoryAuth\":\"Enabled\"}}}")
+            .when().patch(BASE + "partialauth" + API)
+            .then().statusCode(202);
+
+        given().when().get(BASE + "partialauth" + API)
+            .then().statusCode(200)
+            .body("properties.authConfig.passwordAuth", equalTo("Disabled"))
+            .body("properties.authConfig.tenantId", equalTo(TENANT))
+            .body("properties", not(hasKey("administratorLogin")));
     }
 
     @Test
