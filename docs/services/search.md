@@ -21,7 +21,8 @@ keys. The other `az search` command groups are not served yet: see
 - **Admin keys**: `listAdminKeys` and `regenerateAdminKey/{primary|secondary}`. Regenerating one key
   leaves the other untouched
 - **Query keys**: `listQueryKeys`, `createQueryKey/{name}` and `deleteQueryKey/{key}`. A new service
-  has one unnamed query key, as in Azure
+  has one unnamed query key, as in Azure. Deleting a key answers `200`, a key the service does not have
+  answers `204`, so a repeated delete succeeds, and a missing service answers `404`
 - **Name availability**: `checkNameAvailability` reports a taken name as `AlreadyExists` and a
   malformed one as `Invalid`
 - **Managed identity**: `SystemAssigned`, `UserAssigned` and `SystemAssigned, UserAssigned`. A

@@ -367,9 +367,11 @@ class SearchArmServiceTest {
             .extract().path("value.key");
         assertEquals(created, listed.get(1));
 
+        given().when().delete(keys + "/deleteQueryKey/" + created + API).then().statusCode(200);
+        post(keys + "/listQueryKeys").then().body("value", hasSize(1));
+        // The service exists but the key is gone: Azure answers 204, so a repeated delete succeeds.
         given().when().delete(keys + "/deleteQueryKey/" + created + API).then().statusCode(204);
         post(keys + "/listQueryKeys").then().body("value", hasSize(1));
-        given().when().delete(keys + "/deleteQueryKey/" + created + API).then().statusCode(404);
     }
 
     @Test

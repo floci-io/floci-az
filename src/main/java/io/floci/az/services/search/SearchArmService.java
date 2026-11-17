@@ -387,18 +387,21 @@ public class SearchArmService {
         }).map(stored -> ok(created.toArm())).orElseGet(() -> serviceNotFound(id));
     }
 
-    /** {@code QueryKeys_Delete}: {@code 204} once the key is gone, {@code 404} for a key the service does not have. */
+    /**
+     * {@code QueryKeys_Delete}: {@code 200} once the key is gone, {@code 204} with nothing written for a key the
+     * service does not have, so a repeated delete succeeds, and {@code 404} only when the service is missing, as
+     * the operation's description in the spec says.
+     */
     private Response deleteQueryKey(ArmResourceId id, String key) {
         try {
             return services.update(id, service -> {
                         if (service.queryKeys().stream().noneMatch(queryKey -> queryKey.key().equals(key))) {
-                            throw new Refused(ArmErrors.notFound(
-                                    "The query key was not found on search service '" + id.name() + "'."));
+                            throw new Refused(Response.noContent().build());
                         }
                         return service.withQueryKeys(service.queryKeys().stream()
                                 .filter(queryKey -> !queryKey.key().equals(key)).toList());
                     })
-                    .map(stored -> Response.noContent().build())
+                    .map(stored -> Response.ok().build())
                     .orElseGet(() -> serviceNotFound(id));
         } catch (Refused refused) {
             return refused.response();

@@ -67,6 +67,10 @@ setup() {
     run az search query-key delete --service-name "$SEARCH_NAME" -g "$RG_NAME" --key-value "$key"
     assert_success
 
+    # The key is gone but the service exists: Azure answers 204, so deleting it again succeeds.
+    run az search query-key delete --service-name "$SEARCH_NAME" -g "$RG_NAME" --key-value "$key"
+    assert_success
+
     run az_json search query-key list --service-name "$SEARCH_NAME" -g "$RG_NAME"
     assert_success
     assert_equal "$(echo "$output" | jq -r --arg k "$key" '[.[] | select(.key == $k)] | length')" "0"
