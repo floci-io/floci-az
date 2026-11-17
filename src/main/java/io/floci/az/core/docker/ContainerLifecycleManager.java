@@ -643,6 +643,62 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /**
+     * Removes exited containers whose owner container no longer exists, whatever resource namespace
+     * they were created under. An owner killed while stopping its sidecars cannot remove them, and
+     * an emulator started under another namespace never matches them in
+     * {@link #removeOrphanedContainers}. Only exited containers with an explicit owner label that
+     * Docker reports as missing are removed, and without force, so a running sidecar or one whose
+     * owner still exists (or cannot be inspected) is never touched.
+     *
+     * @return the number of containers successfully removed
+     */
+    public int removeExitedContainersWithMissingOwner(
+            Map<String, String> requiredLabels, String ownerLabel) {
+        List<Container> containers = dockerClient.listContainersCmd().withShowAll(true).exec();
+        int removed = 0;
+        for (Container container : containers) {
+            if ("exited".equals(container.getState())
+                    && hasRequiredLabels(container, requiredLabels)
+                    && ownerIsMissing(container, ownerLabel)
+                    && tryRemoveExited(container.getId())) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private boolean ownerIsMissing(Container container, String ownerLabel) {
+        Map<String, String> labels = container.getLabels();
+        String ownerId = labels == null ? null : labels.get(ownerLabel);
+        if (ownerId == null || ownerId.isBlank()) {
+            return false;
+        }
+        try {
+            dockerClient.inspectContainerCmd(ownerId).exec();
+            return false;
+        } catch (NotFoundException e) {
+            return true;
+        } catch (Exception e) {
+            LOG.warnv("Could not inspect owner container {0}; leaving exited container {1}: {2}",
+                    ownerId, container.getId(), e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean tryRemoveExited(String containerId) {
+        try {
+            dockerClient.removeContainerCmd(containerId).withRemoveVolumes(true).exec();
+            LOG.infov("Removed exited container {0} whose owner no longer exists", containerId);
+            return true;
+        } catch (NotFoundException ignored) {
+            return false;
+        } catch (Exception e) {
+            LOG.warnv("Could not remove exited container {0}: {1}", containerId, e.getMessage());
+            return false;
+        }
+    }
+
     /** Starts a previously-created (stopped) container in place, without removing it. */
     public void start(String containerId) {
         try {

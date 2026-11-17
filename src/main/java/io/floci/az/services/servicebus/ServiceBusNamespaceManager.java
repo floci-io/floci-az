@@ -362,9 +362,19 @@ public class ServiceBusNamespaceManager implements ServiceHealth {
     }
 
     int reapOrphanedContainers() {
-        return lifecycleManager.removeOrphanedContainers(
+        int removed = lifecycleManager.removeOrphanedContainers(
                 containerName(""), ContainerStorageHelper.defaultLabels(config),
                 OWNER_CONTAINER_LABEL);
+        return removed + lifecycleManager.removeExitedContainersWithMissingOwner(
+                anyNamespaceServiceLabels(), OWNER_CONTAINER_LABEL);
+    }
+
+    /** Service Bus sidecar labels without {@code floci_namespace}, matching every resource namespace. */
+    private Map<String, String> anyNamespaceServiceLabels() {
+        Map<String, String> labels = new LinkedHashMap<>(ContainerStorageHelper.defaultLabels(config));
+        labels.remove("floci_namespace");
+        labels.put(ContainerStorageHelper.SERVICE_LABEL, SERVICE_TOKEN);
+        return labels;
     }
 
     Map<String, String> serviceContainerLabels(String namespaceName) {

@@ -174,6 +174,90 @@ class ContainerLifecycleManagerCleanupTest {
         verify(dockerClient, never()).removeContainerCmd("disagreeing");
     }
 
+    @Test
+    void removesExitedContainersWithMissingOwnerFromAnyNamespace() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        ListContainersCmd listCmd = mock(ListContainersCmd.class, RETURNS_SELF);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+
+        Container orphan = stateful("orphan", "exited", serviceLabels("probe-one", "gone-owner"));
+        Container running = stateful("running", "running", serviceLabels("probe-one", "gone-owner"));
+        Container ownerAlive = stateful("owner-alive", "exited", serviceLabels("probe-one", "live-owner"));
+        Container ownerless = stateful("ownerless", "exited", serviceLabels("probe-one", null));
+        Container ownerUnknown = stateful("owner-unknown", "exited", serviceLabels("probe-one", "flaky-owner"));
+        Map<String, String> otherService = serviceLabels("probe-one", "gone-owner");
+        otherService.put("io.floci.service", "postgres");
+        Container unrelatedService = stateful("unrelated-service", "exited", otherService);
+        when(listCmd.exec()).thenReturn(
+                List.of(orphan, running, ownerAlive, ownerless, ownerUnknown, unrelatedService));
+
+        InspectContainerCmd goneOwnerCmd = mock(InspectContainerCmd.class);
+        when(dockerClient.inspectContainerCmd("gone-owner")).thenReturn(goneOwnerCmd);
+        when(goneOwnerCmd.exec()).thenThrow(new NotFoundException("gone"));
+        InspectContainerCmd liveOwnerCmd = mock(InspectContainerCmd.class);
+        when(dockerClient.inspectContainerCmd("live-owner")).thenReturn(liveOwnerCmd);
+        when(liveOwnerCmd.exec()).thenReturn(mock(InspectContainerResponse.class));
+        InspectContainerCmd flakyOwnerCmd = mock(InspectContainerCmd.class);
+        when(dockerClient.inspectContainerCmd("flaky-owner")).thenReturn(flakyOwnerCmd);
+        when(flakyOwnerCmd.exec()).thenThrow(new IllegalStateException("docker unavailable"));
+
+        RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class, RETURNS_SELF);
+        when(dockerClient.removeContainerCmd("orphan")).thenReturn(removeCmd);
+        Map<String, String> required = new LinkedHashMap<>(emulatorLabels(null));
+        required.put("io.floci.service", "servicebus");
+
+        int removed = manager(dockerClient).removeExitedContainersWithMissingOwner(
+                required, "floci_owner_container");
+
+        assertEquals(1, removed);
+        verify(removeCmd).withRemoveVolumes(true);
+        verify(removeCmd, never()).withForce(true);
+        verify(removeCmd).exec();
+        verify(dockerClient, never()).removeContainerCmd("running");
+        verify(dockerClient, never()).removeContainerCmd("owner-alive");
+        verify(dockerClient, never()).removeContainerCmd("ownerless");
+        verify(dockerClient, never()).removeContainerCmd("owner-unknown");
+        verify(dockerClient, never()).removeContainerCmd("unrelated-service");
+    }
+
+    @Test
+    void failedRemovalOfExitedOrphanIsNotCounted() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        ListContainersCmd listCmd = mock(ListContainersCmd.class, RETURNS_SELF);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        Container orphan = stateful("orphan", "exited", serviceLabels("probe-one", "gone-owner"));
+        when(listCmd.exec()).thenReturn(List.of(orphan));
+        InspectContainerCmd ownerCmd = mock(InspectContainerCmd.class);
+        when(dockerClient.inspectContainerCmd("gone-owner")).thenReturn(ownerCmd);
+        when(ownerCmd.exec()).thenThrow(new NotFoundException("gone"));
+        RemoveContainerCmd removeCmd = mock(RemoveContainerCmd.class, RETURNS_SELF);
+        when(dockerClient.removeContainerCmd("orphan")).thenReturn(removeCmd);
+        when(removeCmd.exec()).thenThrow(new IllegalStateException("remove failed"));
+        Map<String, String> required = new LinkedHashMap<>(emulatorLabels(null));
+        required.put("io.floci.service", "servicebus");
+
+        int removed = manager(dockerClient).removeExitedContainersWithMissingOwner(
+                required, "floci_owner_container");
+
+        assertEquals(0, removed);
+    }
+
+    private static Container stateful(String id, String state, Map<String, String> labels) {
+        Container container = container(id, new String[]{"/floci-az-probe-one-servicebus-" + id}, labels);
+        when(container.getState()).thenReturn(state);
+        return container;
+    }
+
+    private static Map<String, String> serviceLabels(String namespace, String owner) {
+        Map<String, String> labels = new LinkedHashMap<>(emulatorLabels(namespace));
+        labels.put("io.floci", "az");
+        labels.put("io.floci.service", "servicebus");
+        if (owner != null) {
+            labels.put("floci_owner_container", owner);
+        }
+        return labels;
+    }
+
     private static Container container(String id, String[] names, Map<String, String> labels) {
         Container container = mock(Container.class);
         when(container.getId()).thenReturn(id);
