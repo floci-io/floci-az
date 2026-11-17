@@ -113,6 +113,46 @@ class PostgresEntraAuthTest {
     }
 
     @Test
+    void aLoginNamedLikeTheGeneratedOneStillCountsAsSetWhenPasswordSignInComesBack() {
+        String passwordServer = "{\"location\":\"eastus\",\"properties\":{\"version\":\"16\","
+            + "\"administratorLogin\":\"flociadmin\",\"administratorLoginPassword\":\"Chosen_Strong123!\"}}";
+        given().contentType("application/json").body(passwordServer).when().put(BASE + "samename" + API)
+            .then().statusCode(202);
+
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"activeDirectoryAuth\":\"Enabled\",\"passwordAuth\":\"Disabled\"}}}")
+            .when().patch(BASE + "samename" + API)
+            .then().statusCode(202);
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"passwordAuth\":\"Enabled\"}}}")
+            .when().patch(BASE + "samename" + API)
+            .then().statusCode(202)
+            .body("properties.administratorLogin", equalTo("flociadmin"));
+
+        given().when().get("/devstoreaccount1-postgres/flexibleServers/samename/connect")
+            .then().statusCode(200)
+            .body("uri", containsString("flociadmin:Chosen_Strong123!@"));
+    }
+
+    @Test
+    void aLoginSetOnTheFirstEnableIsKeptWhenPasswordSignInIsTurnedOffAndOnAgain() {
+        given().contentType("application/json").body(ENTRA_ONLY_BODY).when().put(BASE + "reenable" + API)
+            .then().statusCode(202);
+        given().contentType("application/json").body(ENABLE_PASSWORD_PUT).when().put(BASE + "reenable" + API)
+            .then().statusCode(202);
+
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"passwordAuth\":\"Disabled\"}}}")
+            .when().patch(BASE + "reenable" + API)
+            .then().statusCode(202);
+        given().contentType("application/json")
+            .body("{\"properties\":{\"authConfig\":{\"passwordAuth\":\"Enabled\"}}}")
+            .when().patch(BASE + "reenable" + API)
+            .then().statusCode(202)
+            .body("properties.administratorLogin", equalTo("pgadmin"));
+    }
+
+    @Test
     void aPartialAuthConfigPatchKeepsTheFieldsItLeavesOut() {
         given().contentType("application/json").body(ENTRA_ONLY_BODY).when().put(BASE + "partialauth" + API)
             .then().statusCode(202);

@@ -232,9 +232,26 @@ public class PostgresServerManager {
      *                          keeps the generated login in both cases
      */
     public void createAdminRole(PostgresState.ServerEntry entry, String login, String password) {
-        String sql = "CREATE ROLE " + quoteIdentifier(login) + " WITH LOGIN SUPERUSER PASSWORD " + quoteLiteral(password);
+        // A retry after an attempt whose outcome was lost finds the role already there, so it sets the role up
+        // again instead of failing on CREATE ROLE forever.
+        String verb = roleExists(entry, login) ? "ALTER ROLE " : "CREATE ROLE ";
+        String sql = verb + quoteIdentifier(login) + " WITH LOGIN SUPERUSER PASSWORD " + quoteLiteral(password);
         runAsAdmin(entry, sql, login, password, "Adding administrator login");
         LOG.infof("Added administrator login for PostgreSQL server %s", entry.serverName());
+    }
+
+    private boolean roleExists(PostgresState.ServerEntry entry, String login) {
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + entry.administratorLoginPassword()),
+            "psql", "-v", "ON_ERROR_STOP=1", "-U", entry.administratorLogin(), "-d", "postgres", "-tA", "-c",
+            "SELECT 1 FROM pg_roles WHERE rolname = " + quoteLiteral(login));
+        if (!result.finished() || result.exitCode() != 0) {
+            throw new RuntimeException("Adding administrator login failed for PostgreSQL server '"
+                + entry.serverName() + "': could not look up the role: "
+                + redact(result.output(), entry.administratorLoginPassword()));
+        }
+        return result.output() != null && result.output().strip().equals("1");
     }
 
     /**

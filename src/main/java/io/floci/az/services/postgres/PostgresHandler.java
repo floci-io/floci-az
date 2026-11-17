@@ -292,7 +292,8 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 PostgresState.AuthConfig authConfig = authConfig(props.path("authConfig"));
                 String login    = props.path("administratorLogin").asText();
                 String password = props.path("administratorLoginPassword").asText();
-                if (passwordAuthDisabled(authConfig)) {
+                boolean generatedLogin = passwordAuthDisabled(authConfig);
+                if (generatedLogin) {
                     // Azure needs administratorLogin only "the first time that you enable password based
                     // authentication" (2025-08-01). The sidecar still needs a superuser, so an Entra-only server
                     // gets generated credentials, which only the /connect endpoint returns.
@@ -314,7 +315,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     null, 0, "localhost", tags,
                     new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>(),
-                    Instant.now(), authConfig, new ConcurrentHashMap<>());
+                    Instant.now(), authConfig, new ConcurrentHashMap<>(), generatedLogin);
                 // The gate reserved the name already for an ARM create (this finds it OWNED); a create outside the
                 // gate reserves it here, so an ARM create in flight and this one cannot both claim it.
                 GlobalNameRegistry.Reservation reservation = names.reserve(cloud(request), CloudSuffix.POSTGRES,
@@ -368,8 +369,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                 // Azure takes administratorLogin "the first time that you enable password based authentication",
                 // and never changes it after (2025-08-01). A server created with password sign-in off carries
                 // only the generated superuser, so the first enable adds the client's login as a new role.
-                boolean firstPasswordEnable = live.passwordAuthDisabled() && !passwordAuthDisabled(authConfig)
-                    && ENTRA_ONLY_SUPERUSER.equals(live.administratorLogin());
+                boolean firstPasswordEnable = live.generatedLogin() && !passwordAuthDisabled(authConfig);
                 String requestedLogin = props.path("administratorLogin").asText("");
                 if (firstPasswordEnable && requestedLogin.isBlank()) {
                     return badRequest("administratorLogin is required the first time password authentication is enabled");
@@ -396,7 +396,7 @@ public class PostgresHandler implements AzureServiceHandler, Resettable, Resourc
                     skuName, skuTier, storageGB,
                     live.containerId(), live.hostPort(), live.host(), mergedTags,
                     live.databases(), live.firewallRules(), live.configurations(),
-                    live.createdAt(), authConfig, live.administrators());
+                    live.createdAt(), authConfig, live.administrators(), live.generatedLogin() && !firstPasswordEnable);
                 // Delete does not take the start lock, so the server can go away while the
                 // rotation runs. Writing it back would resurrect a name another scope may claim.
                 if (!state.replaceServer(live, updated)) {

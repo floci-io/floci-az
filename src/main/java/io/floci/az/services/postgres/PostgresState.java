@@ -361,7 +361,8 @@ public class PostgresState {
             new ConcurrentHashMap<>(stored.configurations() != null ? stored.configurations() : Map.of()),
             stored.createdAt(),
             stored.authConfig(),
-            new ConcurrentHashMap<>(stored.administrators()));
+            new ConcurrentHashMap<>(stored.administrators()),
+            stored.generatedLogin());
     }
 
     // ── Key helper ───────────────────────────────────────────────────────────
@@ -398,7 +399,11 @@ public class PostgresState {
             Map<String, String> configurations,
             Instant createdAt,
             AuthConfig authConfig,                // null when the create named none: Azure's defaults apply
-            Map<String, AdministratorEntry> administrators
+            Map<String, AdministratorEntry> administrators,
+            // administratorLogin is the superuser floci-az generated for an Entra-only create: no password login
+            // has been set yet, so the first update that enables password sign-in sets one. A record stored
+            // before this field existed reads false, a login the client chose.
+            boolean generatedLogin
     ) {
         /** A record stored before administrators existed reads none. */
         public ServerEntry {
@@ -414,7 +419,7 @@ public class PostgresState {
                            Instant createdAt) {
             this(serverName, subscriptionId, resourceGroupName, location, version, administratorLogin,
                 administratorLoginPassword, skuName, skuTier, storageSizeGB, containerId, hostPort, host, tags,
-                databases, firewallRules, configurations, createdAt, null, new ConcurrentHashMap<>());
+                databases, firewallRules, configurations, createdAt, null, new ConcurrentHashMap<>(), false);
         }
 
         /** Whether password sign-in is off, so Azure returns no {@code administratorLogin}. */
@@ -433,7 +438,7 @@ public class PostgresState {
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
                 id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt,
-                authConfig, administrators);
+                authConfig, administrators, generatedLogin);
         }
 
         /** This server's own fields over the container and child resources of {@code stored}. */
@@ -443,7 +448,7 @@ public class PostgresState {
                 skuName, skuTier, storageSizeGB,
                 stored.containerId(), stored.hostPort(), stored.host(), tags,
                 stored.databases(), stored.firewallRules(), stored.configurations(), createdAt,
-                authConfig, stored.administrators());
+                authConfig, stored.administrators(), generatedLogin);
         }
 
         /**
