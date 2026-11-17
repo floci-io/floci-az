@@ -65,6 +65,37 @@ class BlobServiceSasTest {
     }
 
     @Test
+    void serviceSasOverridesReplaceStoredResponseHeaders() throws Exception {
+        given().header("x-ms-blob-type", "BlockBlob")
+                .header("x-ms-blob-cache-control", "max-age=60")
+                .header("x-ms-blob-content-disposition", "inline")
+                .header("x-ms-blob-content-encoding", "br")
+                .header("x-ms-blob-content-language", "en")
+                .body("original").put(BASE + "/file").then().statusCode(201);
+        var sas = sas("r", "b", "file", "2020-12-06", Map.of(
+                "rscc", "no-store",
+                "rscd", "attachment; filename=\"report.txt\"",
+                "rsce", "identity",
+                "rscl", "fr"));
+        for (var response : List.of(
+                given().queryParams(sas).get(BASE + "/file"),
+                given().queryParams(sas).head(BASE + "/file"))) {
+            response.then().statusCode(200)
+                    .header("Cache-Control", "no-store")
+                    .header("Content-Disposition", "attachment; filename=\"report.txt\"")
+                    .header("Content-Encoding", "identity")
+                    .header("Content-Language", "fr");
+        }
+
+        given().queryParams(sas("r", "b", "file", "2020-12-06")).head(BASE + "/file")
+                .then().statusCode(200)
+                .header("Cache-Control", "max-age=60")
+                .header("Content-Disposition", "inline")
+                .header("Content-Encoding", "br")
+                .header("Content-Language", "en");
+    }
+
+    @Test
     void containerSasReadsChildrenAndLists() throws Exception {
         var sas = sas("rl", "c", null, "2020-12-06");
         given().queryParams(sas).get(BASE + "/file").then().statusCode(200);
