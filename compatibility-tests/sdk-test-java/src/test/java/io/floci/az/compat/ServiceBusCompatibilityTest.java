@@ -216,8 +216,7 @@ class ServiceBusCompatibilityTest {
             assertTrue(deferred.getLockedUntil().isAfter(OffsetDateTime.now()));
             receiver.complete(deferred);
 
-            assertThrows(RuntimeException.class, () -> receiver.receiveDeferredMessage(sequenceNumber),
-                    "A completed deferred message is gone");
+            assertDeferredMessageNotFound(receiver, sequenceNumber, "A completed deferred message is gone");
         }
     }
 
@@ -235,7 +234,7 @@ class ServiceBusCompatibilityTest {
             receiver.defer(msg);
 
             ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(msg.getSequenceNumber());
-            assertThrows(RuntimeException.class, () -> other.receiveDeferredMessage(msg.getSequenceNumber()),
+            assertDeferredMessageNotFound(other, msg.getSequenceNumber(),
                     "A locked deferred message must not be handed out again");
 
             OffsetDateTime firstDeadline = deferred.getLockedUntil();
@@ -286,7 +285,8 @@ class ServiceBusCompatibilityTest {
             ServiceBusReceivedMessage peeked = receiver.peekMessage();
             assertNotNull(peeked, "Expected a message to peek");
 
-            assertThrows(RuntimeException.class, () -> receiver.receiveDeferredMessage(peeked.getSequenceNumber()));
+            assertDeferredMessageNotFound(receiver, peeked.getSequenceNumber(),
+                    "A message that was not deferred is not found");
 
             ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
                     .stream().findFirst().orElse(null);
@@ -807,6 +807,15 @@ class ServiceBusCompatibilityTest {
 
     private static String uniqueName(String prefix) {
         return prefix + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /**
+     * The SDK turns a 404 message-not-found reply into an empty result, so the batch call returns
+     * nothing. Any other failure, such as a 501, throws instead.
+     */
+    private static void assertDeferredMessageNotFound(
+            ServiceBusReceiverClient receiver, long sequenceNumber, String message) {
+        assertEquals(0, receiver.receiveDeferredMessageBatch(List.of(sequenceNumber)).stream().count(), message);
     }
 
     private static void assertReceiverRejected(Executable operation, String expectedMessage) {
