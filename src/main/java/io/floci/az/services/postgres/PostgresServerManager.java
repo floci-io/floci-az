@@ -218,41 +218,84 @@ public class PostgresServerManager {
     public void rotateAdminPassword(PostgresState.ServerEntry entry, String newPassword) {
         String login = entry.administratorLogin();
         String sql = "ALTER ROLE " + quoteIdentifier(login) + " WITH PASSWORD " + quoteLiteral(newPassword);
-        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
-            entry.containerId(),
-            List.of("PGPASSWORD=" + entry.administratorLoginPassword(),
-                "PGOPTIONS=-c statement_timeout=" + ROTATION_STATEMENT_TIMEOUT_MS),
-            "psql", "-v", "ON_ERROR_STOP=1", "-U", login, "-d", "postgres", "-c", sql);
-        if (!result.finished()) {
-            confirmUnfinishedRotation(entry, newPassword);
-        } else if (result.exitCode() != 0) {
-            throw new RuntimeException("Password rotation failed for PostgreSQL server '"
-                + entry.serverName() + "': " + redact(result.output(), newPassword, entry.administratorLoginPassword()));
-        }
+        runAsAdmin(entry, sql, login, newPassword, "Password rotation");
         LOG.infof("Rotated admin password for PostgreSQL server %s", entry.serverName());
     }
 
     /**
-     * Settles a rotation whose exec never reported an exit code. Returns when the server accepts
-     * the new password, and throws otherwise. The login goes over TCP on the container's own
-     * address, because the image trusts socket and loopback connections whatever the password.
-     * Only an explicit authentication failure counts as "not changed"; anything else leaves the
-     * outcome unknown, and says so, since the caller is about to keep the old password.
+     * Adds the first password-based administrator to a server created with password sign-in off, as Azure
+     * does the first time an update enables password authentication with an {@code administratorLogin}. The
+     * generated superuser the server was created with stays, as Azure keeps a role once created; the new role is
+     * a superuser too, so it can do everything the admin login of a password-created server can.
+     *
+     * @throws RuntimeException if the role was not created, or if it cannot be told whether it was; the caller
+     *                          keeps the generated login in both cases
      */
-    private void confirmUnfinishedRotation(PostgresState.ServerEntry entry, String newPassword) {
+    public void createAdminRole(PostgresState.ServerEntry entry, String login, String password) {
+        // A retry after an attempt whose outcome was lost finds the role already there, so it sets the role up
+        // again instead of failing on CREATE ROLE forever.
+        String verb = roleExists(entry, login) ? "ALTER ROLE " : "CREATE ROLE ";
+        String sql = verb + quoteIdentifier(login) + " WITH LOGIN SUPERUSER PASSWORD " + quoteLiteral(password);
+        runAsAdmin(entry, sql, login, password, "Adding administrator login");
+        LOG.infof("Added administrator login for PostgreSQL server %s", entry.serverName());
+    }
+
+    private boolean roleExists(PostgresState.ServerEntry entry, String login) {
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + entry.administratorLoginPassword()),
+            "psql", "-v", "ON_ERROR_STOP=1", "-U", entry.administratorLogin(), "-d", "postgres", "-tA", "-c",
+            "SELECT 1 FROM pg_roles WHERE rolname = " + quoteLiteral(login));
+        if (!result.finished() || result.exitCode() != 0) {
+            throw new RuntimeException("Adding administrator login failed for PostgreSQL server '"
+                + entry.serverName() + "': could not look up the role: "
+                + redact(result.output(), entry.administratorLoginPassword()));
+        }
+        return result.output() != null && result.output().strip().equals("1");
+    }
+
+    /**
+     * Runs one statement as the server's current admin role, bounded by a server-side timeout. {@code login} and
+     * {@code password} are the credentials the statement sets, which settle an exec that never reports an exit
+     * code, and are redacted from any error along with the current password.
+     */
+    private void runAsAdmin(PostgresState.ServerEntry entry, String sql, String login, String password,
+                            String action) {
+        ContainerLifecycleManager.ExecResult result = containerManager.execInContainer(
+            entry.containerId(),
+            List.of("PGPASSWORD=" + entry.administratorLoginPassword(),
+                "PGOPTIONS=-c statement_timeout=" + ROTATION_STATEMENT_TIMEOUT_MS),
+            "psql", "-v", "ON_ERROR_STOP=1", "-U", entry.administratorLogin(), "-d", "postgres", "-c", sql);
+        if (!result.finished()) {
+            confirmUnfinished(entry, login, password, action);
+        } else if (result.exitCode() != 0) {
+            throw new RuntimeException(action + " failed for PostgreSQL server '"
+                + entry.serverName() + "': " + redact(result.output(), password, entry.administratorLoginPassword()));
+        }
+    }
+
+    /**
+     * Settles a statement whose exec never reported an exit code. Returns when the server accepts
+     * {@code login} with {@code password}, and throws otherwise. The login goes over TCP on the container's own
+     * address, because the image trusts socket and loopback connections whatever the password.
+     * Only an explicit authentication failure counts as "not applied" (Postgres reports a missing role the same
+     * way); anything else leaves the outcome unknown, and says so, since the caller is about to keep the old
+     * credentials.
+     */
+    private void confirmUnfinished(PostgresState.ServerEntry entry, String login, String password, String action) {
         ContainerLifecycleManager.ExecResult probe = containerManager.execInContainer(
             entry.containerId(),
-            List.of("PGPASSWORD=" + newPassword, "PGUSER=" + entry.administratorLogin(), "PGCONNECT_TIMEOUT=10"),
+            List.of("PGPASSWORD=" + password, "PGUSER=" + login, "PGCONNECT_TIMEOUT=10"),
             "sh", "-c", "psql -h \"$(hostname -i | cut -d' ' -f1)\" -d postgres -tAc 'select 1'");
         if (probe.finished() && probe.exitCode() == 0) {
             return;
         }
-        String output = redact(probe.output(), newPassword, entry.administratorLoginPassword());
+        String output = redact(probe.output(), password, entry.administratorLoginPassword());
         if (probe.finished() && output.contains("password authentication failed")) {
-            throw new RuntimeException("Password rotation timed out for PostgreSQL server '"
+            throw new RuntimeException(action + " timed out for PostgreSQL server '"
                 + entry.serverName() + "' and was not applied");
         }
-        throw new RuntimeException("Password rotation timed out for PostgreSQL server '" + entry.serverName()
+        throw new RuntimeException(action + " timed out for PostgreSQL server '" + entry.serverName()
             + "' and its outcome is unknown; send the update again to settle it: " + output);
     }
 

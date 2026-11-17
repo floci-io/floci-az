@@ -1511,6 +1511,11 @@
           "locations" : [ "East US", "East US 2", "South Central US", "West US 2", "Central US", "North Central US", "West US", "West Central US", "West US 3", "Canada Central", "Canada East", "Brazil South", "Brazil Southeast", "Mexico Central", "North Europe", "UK South", "West Europe", "France Central", "Germany West Central", "Norway East", "Switzerland North", "Sweden Central", "France South", "Germany North", "Norway West", "Switzerland West", "UK West", "Italy North", "Spain Central", "Poland Central", "Australia East", "Southeast Asia", "Central India", "East Asia", "Japan East", "Korea Central", "Australia Central", "Australia Central 2", "Australia Southeast", "Japan West", "Korea South", "South India", "West India", "Indonesia Central", "New Zealand North", "UAE North", "UAE Central", "Israel Central", "Qatar Central", "South Africa North", "South Africa West" ],
           "resourceType" : "flexibleServers"
         }, {
+          "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview" ],
+          "capabilities" : "None",
+          "locations" : [ ],
+          "resourceType" : "flexibleServers/administrators"
+        }, {
           "apiVersions" : [ "2026-04-01-preview", "2026-01-01-preview", "2025-08-01", "2025-06-01-preview", "2025-01-01-preview", "2024-11-01-preview", "2024-08-01", "2024-03-01-preview", "2023-12-01-preview", "2023-06-01-preview", "2023-03-01-preview", "2022-12-01", "2022-03-08-preview", "2022-01-20-preview", "2021-06-01", "2021-06-01-preview", "2020-02-14-preview" ],
           "capabilities" : "None",
           "locations" : [ ],

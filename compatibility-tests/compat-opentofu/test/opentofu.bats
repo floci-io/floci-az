@@ -268,6 +268,24 @@ setup() {
     assert_output --partial "$PG_DB_NAME"
 }
 
+@test "OpenTofu: an Entra-only postgresql server and its Entra administrator read back, so a second plan leaves them unchanged" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/floci-test-pg-entra"
+    assert_success
+    assert_output --partial '"passwordAuth":"Disabled"'
+    refute_output --partial '"administratorLogin"'
+
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/floci-test-pg-entra/administrators/22222222-2222-2222-2222-222222222222"
+    assert_success
+    assert_output --partial '"principalType":"ServicePrincipal"'
+
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -detailed-exitcode \
+        -target=azurerm_postgresql_flexible_server.pg_entra \
+        -target=azurerm_postgresql_flexible_server_active_directory_administrator.pg_entra_admin
+    assert_success
+    assert_output --partial "No changes"
+}
+
 @test "OpenTofu: private DNS zone created" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.Network/privateDnsZones/${PDZ_NAME}"
     assert_success

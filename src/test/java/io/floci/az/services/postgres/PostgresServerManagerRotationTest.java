@@ -8,6 +8,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.InvocationOnMock;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -107,6 +109,71 @@ class PostgresServerManagerRotationTest {
 
         assertThat(failure.getMessage(), containsString("outcome is unknown"));
         assertThat(failure.getMessage(), not(containsString(NEW_PASSWORD)));
+    }
+
+    @Test
+    void addingAnAdministratorLoginCreatesASuperuserRoleAsTheCurrentAdmin() {
+        List<String> sent = answerRoleExec(false, new ContainerLifecycleManager.ExecResult(0, "CREATE ROLE\n"), null);
+
+        manager.createAdminRole(entry(), "new\"admin", NEW_PASSWORD);
+
+        assertThat(sent.get(0), containsString("pg_roles WHERE rolname = 'new\"admin'"));
+        assertThat(sent.get(1), containsString("-U pgadmin"));
+        assertThat(sent.get(1),
+                containsString("CREATE ROLE \"new\"\"admin\" WITH LOGIN SUPERUSER PASSWORD '" + NEW_PASSWORD + "'"));
+    }
+
+    @Test
+    void aRetryAfterALostResultSetsUpTheRoleThatIsAlreadyThere() {
+        List<String> sent = answerRoleExec(true, new ContainerLifecycleManager.ExecResult(0, "ALTER ROLE\n"), null);
+
+        assertDoesNotThrow(() -> manager.createAdminRole(entry(), "newadmin", NEW_PASSWORD));
+
+        assertThat(sent.get(1),
+                containsString("ALTER ROLE \"newadmin\" WITH LOGIN SUPERUSER PASSWORD '" + NEW_PASSWORD + "'"));
+    }
+
+    @Test
+    void anUnfinishedRoleCreationIsSettledByLoggingInAsTheNewRole() {
+        answerRoleExec(false, new ContainerLifecycleManager.ExecResult(UNFINISHED, ""),
+                new ContainerLifecycleManager.ExecResult(2,
+                        "psql: error: FATAL:  password authentication failed for user \"newadmin\"\n"));
+
+        RuntimeException failure = assertThrows(RuntimeException.class,
+                () -> manager.createAdminRole(entry(), "newadmin", NEW_PASSWORD));
+
+        assertThat(failure.getMessage(), containsString("Adding administrator login timed out"));
+        assertThat(failure.getMessage(), containsString("was not applied"));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> env = ArgumentCaptor.forClass(List.class);
+        verify(containers, times(3)).execInContainer(eq("cid-1"), env.capture(), any(String[].class));
+        assertThat(env.getAllValues().get(2), hasItem("PGUSER=newadmin"));
+    }
+
+    /**
+     * Answers the role lookup with whether the role exists, the statement with {@code statement}, and the login
+     * that settles an unfinished statement with {@code login}; returns each command as it is sent.
+     */
+    private List<String> answerRoleExec(boolean roleExists, ContainerLifecycleManager.ExecResult statement,
+                                        ContainerLifecycleManager.ExecResult login) {
+        List<String> sent = new ArrayList<>();
+        when(containers.execInContainer(eq("cid-1"), anyList(), any(String[].class)))
+                .thenAnswer((InvocationOnMock invocation) -> {
+                    List<String> env = invocation.getArgument(1);
+                    Object[] args = invocation.getArguments();
+                    StringBuilder command = new StringBuilder();
+                    for (int i = 2; i < args.length; i++) {
+                        command.append(args[i] instanceof String[] parts ? String.join(" ", parts) : args[i]).append(' ');
+                    }
+                    sent.add(command.toString());
+                    if (env.contains("PGPASSWORD=" + NEW_PASSWORD)) {
+                        return login;
+                    }
+                    return command.indexOf("pg_roles") >= 0
+                            ? new ContainerLifecycleManager.ExecResult(0, roleExists ? "1\n" : "")
+                            : statement;
+                });
+        return sent;
     }
 
     /** The login that settles an unfinished rotation is the only exec that authenticates with the new password. */

@@ -250,6 +250,36 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "pgfw" {
   end_ip_address   = "255.255.255.255"
 }
 
+# Entra-only: password sign-in off, so the provider sends no administrator login.
+resource "azurerm_postgresql_flexible_server" "pg_entra" {
+  name                          = "floci-test-pg-entra"
+  resource_group_name           = azurerm_resource_group.rg.name
+  location                      = azurerm_resource_group.rg.location
+  version                       = "16"
+  storage_mb                    = 32768
+  sku_name                      = "B_Standard_B1ms"
+  public_network_access_enabled = true
+
+  authentication {
+    active_directory_auth_enabled = true
+    password_auth_enabled         = false
+    tenant_id                     = var.tenant_id
+  }
+
+  lifecycle {
+    ignore_changes = [zone]
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "pg_entra_admin" {
+  server_name         = azurerm_postgresql_flexible_server.pg_entra.name
+  resource_group_name = azurerm_resource_group.rg.name
+  tenant_id           = var.tenant_id
+  object_id           = "22222222-2222-2222-2222-222222222222"
+  principal_name      = "floci-test-pg-admin"
+  principal_type      = "ServicePrincipal"
+}
+
 resource "azurerm_subnet" "pe_subnet" {
   name                 = "floci-test-pe-subnet"
   resource_group_name  = azurerm_resource_group.rg.name

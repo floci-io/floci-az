@@ -39,6 +39,7 @@ public class PostgresArmSurface implements ArmSurfaceProvider {
             ArmResourceType.resourceGroup(NAMESPACE, "flexibleServers", LocationPolicy.REQUIRED)
                 .withName(SERVER_NAME)
                 .withGlobalName(SERVER_DNS_NAME),
+            ArmResourceType.child(NAMESPACE, "flexibleServers/administrators"),
             ArmResourceType.child(NAMESPACE, "flexibleServers/configurations"),
             ArmResourceType.child(NAMESPACE, "flexibleServers/databases"),
             ArmResourceType.child(NAMESPACE, "flexibleServers/firewallRules"))));

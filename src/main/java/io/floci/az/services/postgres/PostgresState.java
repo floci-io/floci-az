@@ -245,6 +245,36 @@ public class PostgresState {
             .orElse(List.of());
     }
 
+    // ── Microsoft Entra administrators ────────────────────────────────────────
+
+    public synchronized void putAdministrator(String serverName, AdministratorEntry admin) {
+        getServer(serverName).ifPresent(s -> {
+            s.administrators().put(key(admin.objectId()), admin);
+            write(s);
+        });
+    }
+
+    public synchronized Optional<AdministratorEntry> getAdministrator(String serverName, String objectId) {
+        return getServer(serverName)
+            .map(s -> s.administrators().get(key(objectId)));
+    }
+
+    public synchronized boolean removeAdministrator(String serverName, String objectId) {
+        return getServer(serverName).map(s -> {
+            boolean removed = s.administrators().remove(key(objectId)) != null;
+            if (removed) {
+                write(s);
+            }
+            return removed;
+        }).orElse(false);
+    }
+
+    public synchronized List<AdministratorEntry> listAdministrators(String serverName) {
+        return getServer(serverName)
+            .map(s -> List.copyOf(s.administrators().values()))
+            .orElse(List.of());
+    }
+
     // ── Server configurations ──────────────────────────────────────────────────
 
     public synchronized void putConfiguration(String serverName, String name, String value) {
@@ -329,7 +359,10 @@ public class PostgresState {
             new ConcurrentHashMap<>(stored.databases() != null ? stored.databases() : Map.of()),
             new ConcurrentHashMap<>(stored.firewallRules() != null ? stored.firewallRules() : Map.of()),
             new ConcurrentHashMap<>(stored.configurations() != null ? stored.configurations() : Map.of()),
-            stored.createdAt());
+            stored.createdAt(),
+            stored.authConfig(),
+            new ConcurrentHashMap<>(stored.administrators()),
+            stored.generatedLogin());
     }
 
     // ── Key helper ───────────────────────────────────────────────────────────
@@ -364,8 +397,36 @@ public class PostgresState {
             Map<String, DatabaseEntry> databases,
             Map<String, FirewallRule> firewallRules,
             Map<String, String> configurations,
-            Instant createdAt
+            Instant createdAt,
+            AuthConfig authConfig,                // null when the create named none: Azure's defaults apply
+            Map<String, AdministratorEntry> administrators,
+            // administratorLogin is the superuser floci-az generated for an Entra-only create: no password login
+            // has been set yet, so the first update that enables password sign-in sets one. A record stored
+            // before this field existed reads false, a login the client chose.
+            boolean generatedLogin
     ) {
+        /** A record stored before administrators existed reads none. */
+        public ServerEntry {
+            administrators = administrators != null ? administrators : new ConcurrentHashMap<>();
+        }
+
+        /** A server with no authentication settings and no Microsoft Entra administrators. */
+        public ServerEntry(String serverName, String subscriptionId, String resourceGroupName, String location,
+                           String version, String administratorLogin, String administratorLoginPassword,
+                           String skuName, String skuTier, int storageSizeGB, String containerId, int hostPort,
+                           String host, Map<String, String> tags, Map<String, DatabaseEntry> databases,
+                           Map<String, FirewallRule> firewallRules, Map<String, String> configurations,
+                           Instant createdAt) {
+            this(serverName, subscriptionId, resourceGroupName, location, version, administratorLogin,
+                administratorLoginPassword, skuName, skuTier, storageSizeGB, containerId, hostPort, host, tags,
+                databases, firewallRules, configurations, createdAt, null, new ConcurrentHashMap<>(), false);
+        }
+
+        /** Whether password sign-in is off, so Azure returns no {@code administratorLogin}. */
+        public boolean passwordAuthDisabled() {
+            return authConfig != null && "Disabled".equalsIgnoreCase(authConfig.passwordAuth());
+        }
+
         public String armId() {
             return String.format(
                 "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.DBforPostgreSQL/flexibleServers/%s",
@@ -376,7 +437,8 @@ public class PostgresState {
             return new ServerEntry(serverName, subscriptionId, resourceGroupName,
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
-                id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt);
+                id, port, reachableHost, tags, databases, firewallRules, configurations, createdAt,
+                authConfig, administrators, generatedLogin);
         }
 
         /** This server's own fields over the container and child resources of {@code stored}. */
@@ -385,7 +447,8 @@ public class PostgresState {
                 location, version, administratorLogin, administratorLoginPassword,
                 skuName, skuTier, storageSizeGB,
                 stored.containerId(), stored.hostPort(), stored.host(), tags,
-                stored.databases(), stored.firewallRules(), stored.configurations(), createdAt);
+                stored.databases(), stored.firewallRules(), stored.configurations(), createdAt,
+                authConfig, stored.administrators(), generatedLogin);
         }
 
         /**
@@ -418,6 +481,17 @@ public class PostgresState {
                 Instant.now());
         }
     }
+
+    /**
+     * A server's {@code properties.authConfig}: {@code activeDirectoryAuth} and {@code passwordAuth} as the
+     * {@code Enabled}/{@code Disabled} values the request named, and the Entra tenant.
+     */
+    @RegisterForReflection
+    public record AuthConfig(String activeDirectoryAuth, String passwordAuth, String tenantId) {}
+
+    /** A Microsoft Entra administrator, {@code administrators/{objectId}}. */
+    @RegisterForReflection
+    public record AdministratorEntry(String objectId, String principalName, String principalType, String tenantId) {}
 
     /**
      * Represents a server-level firewall rule.

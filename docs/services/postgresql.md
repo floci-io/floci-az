@@ -12,6 +12,16 @@ Compatible with the `pgjdbc` (JDBC), `psycopg`, `Npgsql`, and any libpq-speaking
 ## Features
 
 - **Flexible servers**: create, get, list, update (PATCH), delete; one Docker container per logical server. Changing `administratorLoginPassword` through PUT or PATCH runs `ALTER ROLE` in the running container, so the new password works immediately; in mocked mode it is only stored
+- **Entra-only servers**: a create with `authConfig.passwordAuth: Disabled` needs no `administratorLogin`, as on
+  Azure, and the server reads back its `authConfig` with no `administratorLogin`. The container still needs a
+  superuser, so floci-az generates one (`flociadmin` with a random password), which only the `/connect` endpoint
+  returns. Entra tokens are not accepted as database passwords. Turning password sign-in on later (azurerm's
+  `createMode: Update` PUT, or `az postgres flexible-server update --password-auth Enabled`) needs an
+  `administratorLogin` and a password the first time, as on Azure: floci-az creates that login as a superuser role in
+  the container, and the server reads it back from then on. A `PATCH` merges `authConfig` field by field
+- **Microsoft Entra administrators**: `.../administrators/{objectId}` keeps the principal's name, type and tenant;
+  `PUT` answers `202`, `GET` `200`, and `DELETE` `204` whether or not there was one. They are stored, not applied:
+  no database role is created for the principal
 - **Databases**: create, get, list, delete (metadata only, see note below)
 - **Firewall rules**: full CRUD; metadata-only (no actual IP filtering in dev mode)
 - **Configurations**: get, list, put (server parameters stored as metadata)
@@ -208,6 +218,15 @@ resource "azurerm_postgresql_flexible_server_database" "db" {
 | `GET` | `.../flexibleServers/{name}/firewallRules/{rule}` | Get a firewall rule |
 | `DELETE` | `.../flexibleServers/{name}/firewallRules/{rule}` | Delete a firewall rule |
 | `GET` | `.../flexibleServers/{name}/firewallRules` | List all firewall rules |
+
+### Microsoft Entra administrators
+
+| Method | Path | Description |
+|---|---|---|
+| `PUT` | `.../flexibleServers/{name}/administrators/{objectId}` | Create or update an Entra administrator |
+| `GET` | `.../flexibleServers/{name}/administrators/{objectId}` | Get an Entra administrator |
+| `DELETE` | `.../flexibleServers/{name}/administrators/{objectId}` | Delete an Entra administrator |
+| `GET` | `.../flexibleServers/{name}/administrators` | List the Entra administrators |
 
 ### Configurations
 

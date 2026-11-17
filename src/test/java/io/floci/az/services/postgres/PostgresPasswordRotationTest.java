@@ -123,6 +123,53 @@ class PostgresPasswordRotationTest {
     }
 
     @Test
+    void enablingPasswordSignInOnAnEntraOnlyServerAddsTheLoginAsARoleInsteadOfRotatingTheGeneratedOne() {
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Standard_B1ms\",\"tier\":\"Burstable\"},"
+                        + "\"properties\":{\"version\":\"16\",\"authConfig\":{\"activeDirectoryAuth\":\"Enabled\","
+                        + "\"passwordAuth\":\"Disabled\"}}}")
+                .when().put(BASE + "entra-pg" + API)
+                .then().statusCode(202);
+
+        given().contentType("application/json")
+                .body("{\"properties\":{\"administratorLogin\":\"pgadmin\","
+                        + "\"administratorLoginPassword\":\"" + NEW_PASSWORD + "\","
+                        + "\"authConfig\":{\"activeDirectoryAuth\":\"Enabled\",\"passwordAuth\":\"Enabled\"}}}")
+                .when().patch(BASE + "entra-pg" + API)
+                .then().statusCode(202)
+                .body("properties.administratorLogin", equalTo("pgadmin"));
+
+        verify(serverManager).createAdminRole(
+                argThat(entry -> "cid-entra-pg".equals(entry.containerId())
+                        && "flociadmin".equals(entry.administratorLogin())),
+                eq("pgadmin"), eq(NEW_PASSWORD));
+        verify(serverManager, never()).rotateAdminPassword(any(), any());
+        assertConnectPassword("entra-pg", NEW_PASSWORD);
+    }
+
+    @Test
+    void aFailedLoginCreationKeepsTheServerEntraOnly() {
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"properties\":{\"version\":\"16\","
+                        + "\"authConfig\":{\"passwordAuth\":\"Disabled\"}}}")
+                .when().put(BASE + "entra-fail-pg" + API)
+                .then().statusCode(202);
+        doThrow(new RuntimeException("Adding administrator login failed for PostgreSQL server 'entra-fail-pg'"))
+                .when(serverManager).createAdminRole(any(), any(), any());
+
+        given().contentType("application/json")
+                .body("{\"properties\":{\"administratorLogin\":\"pgadmin\","
+                        + "\"administratorLoginPassword\":\"" + NEW_PASSWORD + "\","
+                        + "\"authConfig\":{\"passwordAuth\":\"Enabled\"}}}")
+                .when().patch(BASE + "entra-fail-pg" + API)
+                .then().statusCode(500)
+                .body(not(containsString(NEW_PASSWORD)));
+
+        given().get(BASE + "entra-fail-pg" + API).then().statusCode(200)
+                .body("properties.authConfig.passwordAuth", equalTo("Disabled"));
+    }
+
+    @Test
     void aFailedRotationKeepsThePasswordTheContainerStillAccepts() {
         createServer("failing-pg");
         doThrow(new RuntimeException("Password rotation failed for PostgreSQL server 'failing-pg'"))
