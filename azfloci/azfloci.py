@@ -41,8 +41,6 @@ def main():
         env["AZURE_STORAGE_CONNECTION_STRING"] = conn_str
         
     env["AZURE_STORAGE_ALLOW_HTTP"] = "true"
-    # SSL bypass for SDKs using requests
-    env["REQUESTS_CA_BUNDLE"] = ""
     # For some other SDKs
     env["PYTHONHTTPSVERIFY"] = "0"
 
