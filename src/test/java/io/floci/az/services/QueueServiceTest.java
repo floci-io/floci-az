@@ -8,9 +8,19 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -517,6 +527,140 @@ public class QueueServiceTest {
             .then().statusCode(200).header("x-ms-approximate-messages-count", equalTo("0"));
     }
 
+    // Azure hides a received message from other clients for its visibility timeout, so receives that
+    // arrive at the same time get disjoint messages: none twice, none lost.
+    @Test
+    void concurrentReceivesReturnEachMessageToOneConsumerOnly() throws Exception {
+        int consumers = 8;
+        int messages = 64;
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        ExecutorService pool = Executors.newFixedThreadPool(consumers);
+        try {
+            for (int round = 0; round < 10; round++) {
+                for (int i = 0; i < messages; i++) {
+                    sendMessage("round" + round + "-" + i);
+                }
+                List<Callable<List<String>>> receives = new ArrayList<>();
+                for (int consumer = 0; consumer < consumers; consumer++) {
+                    receives.add(() -> given()
+                        .when().get("/{account}/{queue}/messages?numofmessages=16&visibilitytimeout=600", ACCOUNT, QUEUE)
+                        .then().statusCode(200)
+                        .extract().xmlPath().getList("QueueMessagesList.QueueMessage.MessageId", String.class));
+                }
+
+                List<String> received = new ArrayList<>();
+                runAtOnce(pool, receives).forEach(received::addAll);
+                int distinct = new HashSet<>(received).size();
+                assertEquals(distinct, received.size(),
+                    "round " + round + ": " + (received.size() - distinct) + " messages returned more than once");
+                assertEquals(messages, distinct, "round " + round + ": distinct messages received");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    // A pop receipt stops matching once the message is updated, so of several updates sent at the same
+    // time with one receipt, exactly one succeeds.
+    @Test
+    void concurrentUpdatesWithOnePopReceiptLetExactlyOneSucceed() throws Exception {
+        int updaters = 8;
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        ExecutorService pool = Executors.newFixedThreadPool(updaters);
+        try {
+            for (int round = 0; round < 10; round++) {
+                sendMessage("lease-" + round);
+                Response dequeue = given()
+                    .get("/{account}/{queue}/messages?visibilitytimeout=600", ACCOUNT, QUEUE);
+                String messageId = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.MessageId");
+                String popReceipt = dequeue.xmlPath().getString("QueueMessagesList.QueueMessage.PopReceipt");
+
+                List<Callable<Integer>> updates = new ArrayList<>();
+                for (int updater = 0; updater < updaters; updater++) {
+                    updates.add(() -> given()
+                        .when().put("/{account}/{queue}/messages/{id}?popreceipt={receipt}&visibilitytimeout=600",
+                            ACCOUNT, QUEUE, messageId, popReceipt)
+                        .statusCode());
+                }
+
+                List<Integer> statuses = runAtOnce(pool, updates);
+                assertEquals(1, Collections.frequency(statuses, 204), "round " + round + " statuses " + statuses);
+                assertEquals(updaters - 1, Collections.frequency(statuses, 400), "round " + round + " statuses " + statuses);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    // A delete and a receive that arrive at the same time must not both get the message: either the
+    // delete wins and the receive finds nothing, or the receive wins and its new pop receipt makes the
+    // delete fail. Otherwise two consumers process one message. There is one receiver, so only the race
+    // between delete and receive can fail this test.
+    @Test
+    void deleteRacingAReceiveLetsOnlyOneConsumerHaveTheMessage() throws Exception {
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 100; round++) {
+                // Put Message returns a pop receipt that deletes the message until a receive replaces it.
+                Response sent = sendMessage("contested-" + round);
+                String messageId = sent.xmlPath().getString("QueueMessagesList.QueueMessage.MessageId");
+                String popReceipt = sent.xmlPath().getString("QueueMessagesList.QueueMessage.PopReceipt");
+
+                List<Callable<Integer>> consumers = List.of(
+                    () -> given()
+                        .when().delete("/{account}/{queue}/messages/{id}?popreceipt={receipt}",
+                            ACCOUNT, QUEUE, messageId, popReceipt)
+                        .then().statusCode(anyOf(equalTo(204), equalTo(400)))
+                        .extract().statusCode() == 204 ? 1 : 0,
+                    () -> given()
+                        .when().get("/{account}/{queue}/messages?visibilitytimeout=600", ACCOUNT, QUEUE)
+                        .then().statusCode(200)
+                        .extract().xmlPath().getList("QueueMessagesList.QueueMessage.MessageId").size());
+
+                List<Integer> taken = runAtOnce(pool, consumers);
+                assertEquals(1, taken.get(0) + taken.get(1),
+                    "round " + round + ": deleted " + taken.get(0) + ", received " + taken.get(1));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    // A receive that read the messages just before Clear Messages removed them must not write them back
+    // hidden, or they reappear once their visibility timeout ends.
+    @Test
+    void clearRacingAReceiveLeavesNoMessageBehind() throws Exception {
+        int receivers = 7;
+        given().put("/{account}/{queue}", ACCOUNT, QUEUE);
+        ExecutorService pool = Executors.newFixedThreadPool(1 + receivers);
+        try {
+            for (int round = 0; round < 30; round++) {
+                for (int i = 0; i < 32; i++) {
+                    sendMessage("round" + round + "-" + i);
+                }
+                List<Callable<Integer>> calls = new ArrayList<>();
+                calls.add(() -> given().when().delete("/{account}/{queue}/messages", ACCOUNT, QUEUE).statusCode());
+                for (int receiver = 0; receiver < receivers; receiver++) {
+                    calls.add(() -> given()
+                        .when().get("/{account}/{queue}/messages?numofmessages=32&visibilitytimeout=600", ACCOUNT, QUEUE)
+                        .statusCode());
+                }
+
+                List<Integer> statuses = runAtOnce(pool, calls);
+                assertEquals(204, statuses.get(0), "round " + round + " statuses " + statuses);
+                assertEquals(receivers, Collections.frequency(statuses, 200), "round " + round + " statuses " + statuses);
+                String left = given()
+                    .when().get("/{account}/{queue}?comp=metadata", ACCOUNT, QUEUE)
+                    .then().statusCode(200)
+                    .extract().header("x-ms-approximate-messages-count");
+                assertEquals("0", left, "round " + round + ": messages left after Clear Messages");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     // Enqueued late in a wall-clock second, a visibility deadline truncated to whole seconds would
     // expire at the next second boundary, well before the requested timeout.
     @Test
@@ -721,6 +865,33 @@ public class QueueServiceTest {
         given()
             .when().get("/{account}?comp=list", ACCOUNT)
             .then().statusCode(200).body(not(containsString("no-such-queue")));
+    }
+
+    private static Response sendMessage(String text) {
+        return given()
+            .contentType("application/xml")
+            .body("<QueueMessage><MessageText>" + text + "</MessageText></QueueMessage>")
+            .when().post("/{account}/{queue}/messages", ACCOUNT, QUEUE)
+            .then().statusCode(201)
+            .extract().response();
+    }
+
+    /** Releases every call at the same moment and returns their results in the order of the calls. */
+    private static <T> List<T> runAtOnce(ExecutorService pool, List<Callable<T>> calls) throws Exception {
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<T>> pending = new ArrayList<>();
+        for (Callable<T> call : calls) {
+            pending.add(pool.submit(() -> {
+                start.await();
+                return call.call();
+            }));
+        }
+        start.countDown();
+        List<T> results = new ArrayList<>();
+        for (Future<T> result : pending) {
+            results.add(result.get());
+        }
+        return results;
     }
 
     private static String signedIdentifiers(int count, String permission) {
