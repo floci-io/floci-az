@@ -103,8 +103,12 @@ valid (an object, string dates in order, a string `displayName`); defaults stand
 only, and a `PATCH` `displayName` must be a non-empty string. A path segment after an action
 (`.../removePassword/extra`) answers `400` without touching credentials. On create, the principal the
 caller's token names (`oid`, when it is a user or service principal of the tenant) becomes the first owner,
-as Graph makes the signed-in principal one; a client that then sets its own owners, as the Terraform
-`azuread_application` resource does, removes it the same way.
+as Graph makes the signed-in principal one, and each `directoryObjects/{id}` reference the body binds with
+`owners@odata.bind` becomes an owner after it: a user or service principal of the tenant, each once, with
+`404` and nothing registered when a reference names neither. The binding is not a property, so it is not
+stored and not read back. A client that then sets its own owners, as the Terraform `azuread_application`
+resource does when it binds the caller and its configured owners and drops the caller it did not configure,
+removes it the same way.
 
 ## Out of scope
 

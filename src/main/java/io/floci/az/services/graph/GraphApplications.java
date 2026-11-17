@@ -38,7 +38,8 @@ import java.util.regex.Pattern;
  * {@code /v1.0/applications/{id}}, {@code POST /v1.0/applications}, and the {@code addPassword} /
  * {@code removePassword} actions, and {@code owners} ({@code GET}, {@code POST owners/$ref},
  * {@code DELETE owners/{id}/$ref}): the caller the token names becomes the first owner on create, as Graph
- * makes the signed-in principal one. A registration is the full Graph {@code application} object: a create
+ * makes the signed-in principal one, followed by the principals the body binds with {@code owners@odata.bind}.
+ * A registration is the full Graph {@code application} object: a create
  * stores every writable property it is sent and an update replaces the properties it names and keeps
  * the rest, so clients that write {@code api}, {@code web}, {@code identifierUris} and the like read
  * them back as sent. A created registration gets a service principal too, so the emulator's token
@@ -53,6 +54,8 @@ final class GraphApplications {
     /** Properties Graph computes; a request that writes one is refused. */
     private static final Set<String> READ_ONLY = Set.of("id", "appId", "createdDateTime", "deletedDateTime",
         "passwordCredentials", "publisherDomain", "applicationTemplateId", "disabledByMicrosoftStatus");
+    /** The create body's binding of the {@code owners} navigation property: one {@code directoryObjects/{id}} URL per owner. */
+    private static final String OWNERS_BIND = "owners@odata.bind";
     private static final String SECRET_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789~._-";
 
     private final GraphDirectoryStore store;
@@ -294,17 +297,37 @@ final class GraphApplications {
         if (readOnly.isPresent()) {
             return graphError(400, "Request_BadRequest", "Property '" + readOnly.get() + "' is read-only and cannot be set.");
         }
+        Object bound = body.get(OWNERS_BIND);
+        if (bound != null && !(bound instanceof List<?> references && references.stream().allMatch(String.class::isInstance))) {
+            return graphError(400, "Request_BadRequest", OWNERS_BIND + " must be an array of object references.");
+        }
+        // The principal the token names owns what it registers, as Graph makes the signed-in principal the first owner;
+        // the references the body binds follow it, each once and under the principal's own id.
+        List<String> owners = new ArrayList<>();
+        String caller = BearerClaims.of(request).oid();
+        if (caller != null) {
+            principal(caller).ifPresent(p -> owners.add(String.valueOf(p.get("id"))));
+        }
+        for (Object reference : bound instanceof List<?> references ? references : List.of()) {
+            String ownerId = lastSegment((String) reference);
+            Optional<Map<String, Object>> principal = ownerId == null ? Optional.empty() : principal(ownerId);
+            if (principal.isEmpty()) {
+                return notFound(ownerId == null ? (String) reference : ownerId);
+            }
+            String canonicalId = String.valueOf(principal.get().get("id"));
+            if (owners.stream().noneMatch(canonicalId::equalsIgnoreCase)) {
+                owners.add(canonicalId);
+            }
+        }
         String appId = UUID.randomUUID().toString();
         String objectId = UUID.randomUUID().toString();
         DirectoryObject app = GraphDirectoryStore.application(tenantId, objectId, appId, name, List.of());
         writeProperties(app.props(), body);
-        String caller = BearerClaims.of(request).oid();
         synchronized (store) {
             store.put(app);
             store.put(GraphDirectoryStore.servicePrincipal(tenantId, TokenIssuer.deterministicGuid("sp:" + appId), appId, name));
-            // The principal the token names owns what it registers, as Graph makes the signed-in principal the first owner.
-            if (caller != null && principal(caller).isPresent()) {
-                store.addLink(tenantId, objectId, GraphDirectoryStore.OWNERS, caller);
+            for (String owner : owners) {
+                store.addLink(tenantId, objectId, GraphDirectoryStore.OWNERS, owner);
             }
         }
         return Response.status(201).entity(write(application(app, true))).type(MediaType.APPLICATION_JSON).build();
@@ -426,11 +449,14 @@ final class GraphApplications {
         return body.keySet().stream().filter(READ_ONLY::contains).findFirst();
     }
 
-    /** Writes every property of {@code body} onto {@code props}, a null clearing it; OData annotations are not properties. */
+    /**
+     * Writes every property of {@code body} onto {@code props}, a null clearing it. OData annotations, on the
+     * object ({@code @odata.type}) or on a property ({@code owners@odata.bind}), are not properties.
+     */
     private void writeProperties(ObjectNode props, Map<String, Object> body) {
         for (Map.Entry<String, Object> entry : body.entrySet()) {
             String key = entry.getKey();
-            if (key.startsWith("@") || READ_ONLY.contains(key)) {
+            if (key.indexOf('@') >= 0 || READ_ONLY.contains(key)) {
                 continue;
             }
             if (entry.getValue() == null) {

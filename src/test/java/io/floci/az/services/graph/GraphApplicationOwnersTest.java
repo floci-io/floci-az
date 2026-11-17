@@ -8,7 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 @QuarkusTest
 @DisplayName("Microsoft Graph applications: owners, the caller as the first one, add and remove by reference")
@@ -70,20 +73,20 @@ class GraphApplicationOwnersTest {
                 .when().post("/v1.0/applications/" + objectId + "/owners/$ref/extra").then().statusCode(400);
         given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(200).body("value", hasSize(1));
 
-        // A reference written in another casing names the same principal: it is a duplicate, and the link keeps the canonical id.
-        given().contentType("application/json")
-                .body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + EntraStore.DEV_USER_OBJECT_ID.toUpperCase() + "\"}")
+        // A reference written in another casing names the same principal: it is a duplicate, it is removed by
+        // either casing, and an add through it keeps the canonical id. The dev user's GUID has letters to recase.
+        String recased = EntraStore.DEV_USER_OBJECT_ID.toUpperCase();
+        assertNotEquals(EntraStore.DEV_USER_OBJECT_ID, recased);
+        given().contentType("application/json").body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + recased + "\"}")
                 .when().post("/v1.0/applications/" + objectId + "/owners/$ref").then().statusCode(400);
-        given().contentType("application/json")
-                .body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + EntraStore.DEV_SP_OBJECT_ID.toUpperCase() + "\"}")
+        given().when().delete("/v1.0/applications/" + objectId + "/owners/" + recased + "/$ref").then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(200).body("value", hasSize(0));
+        given().contentType("application/json").body("{\"@odata.id\": \"" + DIRECTORY_OBJECTS + recased + "\"}")
                 .when().post("/v1.0/applications/" + objectId + "/owners/$ref").then().statusCode(204);
         given().when().get("/v1.0/applications/" + objectId + "/owners")
                 .then().statusCode(200)
-                .body("value", hasSize(2))
-                .body("value[1].id", equalTo(EntraStore.DEV_SP_OBJECT_ID));
-        given().when().delete("/v1.0/applications/" + objectId + "/owners/" + EntraStore.DEV_SP_OBJECT_ID.toUpperCase() + "/$ref")
-                .then().statusCode(204);
-        given().when().get("/v1.0/applications/" + objectId + "/owners").then().statusCode(200).body("value", hasSize(1));
+                .body("value", hasSize(1))
+                .body("value[0].id", equalTo(EntraStore.DEV_USER_OBJECT_ID));
 
         // Deleting the registration drops its owner links: a new one under the same lookups starts clean.
         given().when().delete("/v1.0/applications/" + objectId).then().statusCode(204);
@@ -93,5 +96,64 @@ class GraphApplicationOwnersTest {
         String anonymous = given().contentType("application/json").body("{\"displayName\": \"unowned\"}")
                 .when().post("/v1.0/applications").then().statusCode(201).extract().path("id");
         given().when().get("/v1.0/applications/" + anonymous + "/owners").then().statusCode(200).body("value", hasSize(0));
+    }
+
+    @Test
+    void ownersBoundInTheCreateBodyBecomeOwnersAndAreNotStoredAsAProperty() {
+        String token = given().contentType("application/x-www-form-urlencoded")
+                .formParam("grant_type", "client_credentials").formParam("client_id", EntraStore.DEV_CLIENT_ID)
+                .formParam("client_secret", EntraStore.DEV_CLIENT_SECRET).formParam("scope", "https://graph.microsoft.com/.default")
+                .when().post("/" + TENANT + "/oauth2/v2.0/token").then().statusCode(200).extract().path("access_token");
+
+        // The provider's create: the caller and a configured owner bound in the body, the second in another casing.
+        String objectId = given().header("Authorization", "Bearer " + token).contentType("application/json")
+                .body("{\"displayName\": \"bound\", \"owners@odata.bind\": [\"" + DIRECTORY_OBJECTS + EntraStore.DEV_SP_OBJECT_ID
+                    + "\", \"" + DIRECTORY_OBJECTS + EntraStore.DEV_USER_OBJECT_ID.toUpperCase() + "\"]}")
+                .when().post("/v1.0/applications").then().statusCode(201)
+                .body("displayName", equalTo("bound"))
+                .body("$", not(hasKey("owners@odata.bind")))
+                .extract().path("id");
+        given().when().get("/v1.0/applications/" + objectId)
+                .then().statusCode(200).body("$", not(hasKey("owners@odata.bind")));
+        given().when().get("/v1.0/applications/" + objectId + "/owners")
+                .then().statusCode(200)
+                .body("value", hasSize(2))
+                .body("value[0].id", equalTo(EntraStore.DEV_SP_OBJECT_ID))
+                .body("value[1].'@odata.type'", equalTo("#microsoft.graph.user"))
+                .body("value[1].id", equalTo(EntraStore.DEV_USER_OBJECT_ID));
+
+        // Then it drops the caller it did not configure, which leaves the bound owner.
+        given().when().delete("/v1.0/applications/" + objectId + "/owners/" + EntraStore.DEV_SP_OBJECT_ID + "/$ref")
+                .then().statusCode(204);
+        given().when().get("/v1.0/applications/" + objectId + "/owners")
+                .then().statusCode(200)
+                .body("value", hasSize(1))
+                .body("value[0].id", equalTo(EntraStore.DEV_USER_OBJECT_ID));
+
+        // Without a token the bound references are the only owners.
+        String anonymous = given().contentType("application/json")
+                .body("{\"displayName\": \"bound-only\", \"owners@odata.bind\": [\"" + DIRECTORY_OBJECTS + EntraStore.DEV_USER_OBJECT_ID + "\"]}")
+                .when().post("/v1.0/applications").then().statusCode(201).extract().path("id");
+        given().when().get("/v1.0/applications/" + anonymous + "/owners")
+                .then().statusCode(200).body("value", hasSize(1)).body("value[0].id", equalTo(EntraStore.DEV_USER_OBJECT_ID));
+
+        // A reference to no principal, or a binding that is not a list of references, registers nothing.
+        given().contentType("application/json")
+                .body("{\"displayName\": \"refused\", \"owners@odata.bind\": [\"" + DIRECTORY_OBJECTS + "00000000-0000-0000-0000-00000000dead\"]}")
+                .when().post("/v1.0/applications").then().statusCode(404)
+                .body("error.code", equalTo("Request_ResourceNotFound"));
+        given().contentType("application/json")
+                .body("{\"displayName\": \"refused\", \"owners@odata.bind\": \"" + DIRECTORY_OBJECTS + EntraStore.DEV_USER_OBJECT_ID + "\"}")
+                .when().post("/v1.0/applications").then().statusCode(400)
+                .body("error.code", equalTo("Request_BadRequest"));
+        given().queryParam("$filter", "displayName eq 'refused'").when().get("/v1.0/applications")
+                .then().statusCode(200).body("value", hasSize(0));
+
+        // An update keeps the annotation out of the stored object too.
+        given().contentType("application/json")
+                .body("{\"notes\": \"kept\", \"owners@odata.bind\": [\"" + DIRECTORY_OBJECTS + EntraStore.DEV_SP_OBJECT_ID + "\"]}")
+                .when().patch("/v1.0/applications/" + anonymous).then().statusCode(204);
+        given().when().get("/v1.0/applications/" + anonymous)
+                .then().statusCode(200).body("notes", equalTo("kept")).body("$", not(hasKey("owners@odata.bind")));
     }
 }
