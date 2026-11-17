@@ -20,25 +20,31 @@ public sealed class ServiceBusDrainCompatibilityTests
             $"Endpoint=sb://{new Uri(endpoint).Authority};SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=devkey;UseDevelopmentEmulator=true;");
         string queue = $"dotnet-drain-{Guid.NewGuid():N}";
         await admin.CreateQueueAsync(queue, cancellationToken);
-        AmqpConnection connection = await new AmqpConnectionFactory().OpenConnectionAsync(
-            new Uri($"amqp://{host}:{port}"), TimeSpan.FromSeconds(10));
         try
         {
-            AmqpSession session = connection.CreateSession(new AmqpSessionSettings());
-            await session.OpenAsync(cancellationToken);
-            var link = new ReceivingAmqpLink(session, new AmqpLinkSettings
+            AmqpConnection connection = await new AmqpConnectionFactory().OpenConnectionAsync(
+                new Uri($"amqp://{host}:{port}"), TimeSpan.FromSeconds(10));
+            try
             {
-                Role = true, LinkName = queue, Source = new Source { Address = queue }, Target = new Target(),
-                TotalLinkCredit = 0, AutoSendFlow = false, OperationTimeout = TimeSpan.FromSeconds(5)
-            });
-            await link.OpenAsync(cancellationToken);
+                AmqpSession session = connection.CreateSession(new AmqpSessionSettings());
+                await session.OpenAsync(cancellationToken);
+                var link = new ReceivingAmqpLink(session, new AmqpLinkSettings
+                {
+                    Role = true, LinkName = queue, Source = new Source { Address = queue }, Target = new Target(),
+                    TotalLinkCredit = 0, AutoSendFlow = false, OperationTimeout = TimeSpan.FromSeconds(5)
+                });
+                await link.OpenAsync(cancellationToken);
 
-            // Throws TimeoutException after OperationTimeout when the broker stays silent.
-            await link.DrainAsyc(cancellationToken);
+                // Throws TimeoutException after OperationTimeout when the broker stays silent.
+                await link.DrainAsyc(cancellationToken);
+            }
+            finally
+            {
+                await connection.CloseAsync(CancellationToken.None);
+            }
         }
         finally
         {
-            await connection.CloseAsync(CancellationToken.None);
             await admin.DeleteQueueAsync(queue, CancellationToken.None);
         }
     }
