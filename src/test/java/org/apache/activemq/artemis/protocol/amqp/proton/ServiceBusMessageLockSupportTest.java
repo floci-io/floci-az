@@ -1,8 +1,11 @@
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
 import org.apache.activemq.artemis.api.core.SimpleString;
+import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.MessageReference;
+import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.impl.AckReason;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.qpid.proton.amqp.messaging.Accepted;
 import org.apache.qpid.proton.amqp.messaging.Received;
@@ -11,9 +14,13 @@ import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Delivery;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.net.URLClassLoader;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -102,13 +109,136 @@ class ServiceBusMessageLockSupportTest {
     }
 
     @Test
-    void closingReceiverCancelsExpiry() throws Exception {
+    void closingWithoutParkingCancelsExpiry() throws Exception {
+        // close() alone is the queue-delete and session-expiry path, close(ErrorCondition), which stays stock.
         try (Fixture fixture = new Fixture()) {
             fixture.track(false);
             fixture.type.getMethod("close").invoke(fixture.support);
             fixture.expiry.get().run();
             verify(fixture.timer).cancel(false);
             verifyNoInteractions(fixture.session);
+        }
+    }
+
+    @Test
+    void closingReceiverParksLockedReferenceUntilDeadline() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Runnable lockTimer = fixture.expiry.get();
+            Queue queue = fixture.parkable();
+
+            fixture.park();
+
+            verify(fixture.timer).cancel(false);
+            verify(fixture.consumer).removeReferenceByID(fixture.reference.getMessageID());
+            verify(fixture.reference, never()).decrementDeliveryCount();
+            verifyNoInteractions(fixture.session);
+            Runnable release = fixture.expiry.get();
+            assertNotSame(lockTimer, release);
+            assertTrue(fixture.lastDelay.get() > 0 && fixture.lastDelay.get() <= 60_000, "delay " + fixture.lastDelay);
+            verify(queue, never()).cancel(any(MessageReference.class), anyLong());
+
+            release.run();
+            verify(queue).cancel(eq(fixture.reference), anyLong());
+            verify(queue).deliverAsync();
+            verify(fixture.connection, never()).runLater(any(Runnable.class));
+        }
+    }
+
+    @Test
+    void parkSkipsAReferenceTheConsumerNoLongerHolds() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Runnable lockTimer = fixture.expiry.get();
+            when(fixture.consumer.removeReferenceByID(anyLong())).thenReturn(null);
+
+            fixture.park();
+
+            assertSame(lockTimer, fixture.expiry.get());
+            verifyNoInteractions(fixture.session);
+        }
+    }
+
+    @Test
+    void parkReleasesAtOnceWhenTheSchedulerRefusesTheJob() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            fixture.rejectNextSchedule.set(true);
+
+            fixture.park();
+
+            verify(queue).cancel(eq(fixture.reference), anyLong());
+        }
+    }
+
+    @Test
+    void aFailedReleaseIsRetriedUntilTheReferenceIsBackOnItsQueue() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            doThrow(new IllegalStateException("journal unavailable")).doNothing()
+                    .when(queue).cancel(any(MessageReference.class), anyLong());
+
+            fixture.park();
+            Runnable release = fixture.expiry.get();
+            release.run();
+
+            Runnable retry = fixture.expiry.get();
+            assertNotSame(release, retry, "a failed release schedules a retry");
+            verify(queue, never()).deliverAsync();
+            retry.run();
+            verify(queue, times(2)).cancel(eq(fixture.reference), anyLong());
+            verify(queue).deliverAsync();
+        }
+    }
+
+    @Test
+    void releaseRetriesStopAfterTheLastAttempt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            doThrow(new IllegalStateException("journal unavailable"))
+                    .when(queue).cancel(any(MessageReference.class), anyLong());
+            Field attemptsField = fixture.type.getDeclaredField("RELEASE_ATTEMPTS");
+            attemptsField.setAccessible(true);
+            int attempts = attemptsField.getInt(null);
+
+            fixture.park();
+            for (int i = 0; i < attempts; i++) {
+                fixture.expiry.getAndSet(null).run();
+            }
+
+            verify(queue, times(attempts)).cancel(eq(fixture.reference), anyLong());
+            assertNull(fixture.expiry.get(), "no retry after the last attempt");
+        }
+    }
+
+    @Test
+    void aParkedReferenceOfADeletedQueueIsDropped() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            when(fixture.server().locateQueue(nullable(SimpleString.class))).thenReturn(null);
+
+            fixture.park();
+            fixture.expiry.get().run();
+
+            verify(queue).acknowledge(isNull(), eq(fixture.reference), eq(AckReason.KILLED), isNull(), eq(true));
+            verify(queue, never()).cancel(any(MessageReference.class), anyLong());
+        }
+    }
+
+    @Test
+    void aParkedLockCannotBeRenewed() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            fixture.parkable();
+
+            fixture.park();
+
+            assertEquals(0L, fixture.type.getMethod("renew", Delivery.class)
+                    .invoke(fixture.support, fixture.delivery));
         }
     }
 
@@ -134,6 +264,8 @@ class ServiceBusMessageLockSupportTest {
         final Delivery delivery = mock(Delivery.class);
         final ScheduledFuture<?> timer = mock(ScheduledFuture.class);
         final AtomicReference<Runnable> expiry = new AtomicReference<>();
+        final AtomicLong lastDelay = new AtomicLong();
+        final AtomicBoolean rejectNextSchedule = new AtomicBoolean();
         final Object support;
 
         Fixture() throws Exception {
@@ -142,7 +274,11 @@ class ServiceBusMessageLockSupportTest {
             when(consumer.getQueue().getUser()).thenReturn(SimpleString.of("floci-az:servicebus-peeklock:60"));
             var scheduler = connection.getProtocolManager().getServer().getScheduledPool();
             doAnswer(call -> {
+                if (rejectNextSchedule.getAndSet(false)) {
+                    throw new RejectedExecutionException("scheduler stopped");
+                }
                 expiry.set(call.getArgument(0));
+                lastDelay.set(call.getArgument(1));
                 return timer;
             }).when(scheduler)
                     .schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS));
@@ -157,6 +293,22 @@ class ServiceBusMessageLockSupportTest {
         void track(boolean preSettled) throws Exception {
             type.getMethod("track", Delivery.class, MessageReference.class, ServerConsumer.class, boolean.class)
                     .invoke(support, delivery, reference, consumer, preSettled);
+        }
+
+        ActiveMQServer server() {
+            return connection.getProtocolManager().getServer();
+        }
+
+        /** The consumer hands the reference over, and its queue is still the one the server knows by name. */
+        Queue parkable() throws Exception {
+            when(consumer.removeReferenceByID(anyLong())).thenReturn(reference);
+            Queue queue = reference.getQueue();
+            when(server().locateQueue(nullable(SimpleString.class))).thenReturn(queue);
+            return queue;
+        }
+
+        void park() throws Exception {
+            type.getMethod("park").invoke(support);
         }
 
         boolean settle() throws Exception {

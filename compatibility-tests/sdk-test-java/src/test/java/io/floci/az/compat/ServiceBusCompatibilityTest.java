@@ -68,6 +68,37 @@ class ServiceBusCompatibilityTest {
         }
     }
 
+    @Test
+    @Timeout(40)
+    @DisplayName("closing a receiver keeps its unsettled message locked until the lock expires")
+    void closedReceiverKeepsMessageLockedUntilDeadline() throws Exception {
+        String queue = uniqueName("close-lock");
+        EmulatorConfig.ensureServiceBusQueue(queue, "<LockDuration>PT6S</LockDuration>");
+        send(queue, "lock-me");
+
+        ServiceBusReceivedMessage first;
+        // No automatic lock renewal, so the deadline the message carries is the one the broker keeps.
+        try (ServiceBusReceiverClient owner = EmulatorConfig.serviceBusClientBuilder()
+                .receiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .maxAutoLockRenewDuration(Duration.ZERO)
+                .buildClient()) {
+            first = owner.receiveMessages(1, RECV_TIMEOUT).stream().findFirst().orElseThrow();
+        }
+
+        try (ServiceBusReceiverClient competitor = peekLockReceiver(queue)) {
+            assertEquals(0, competitor.receiveMessages(1, Duration.ofSeconds(2)).stream().count(),
+                    "the closed receiver's message must stay locked until its deadline");
+            Thread.sleep(Math.max(0, Duration.between(OffsetDateTime.now(), first.getLockedUntil()).toMillis() + 1000));
+            ServiceBusReceivedMessage again = competitor.receiveMessages(1, RECV_TIMEOUT).stream().findFirst()
+                    .orElseThrow(() -> new AssertionError("the message must return once its lock expires"));
+            assertEquals(first.getSequenceNumber(), again.getSequenceNumber());
+            assertEquals(first.getDeliveryCount() + 1, again.getDeliveryCount());
+            competitor.complete(again);
+        }
+    }
+
     @BeforeAll
     void ensureNamespace() throws Exception {
         EmulatorConfig.ensureServiceBusNamespace();
