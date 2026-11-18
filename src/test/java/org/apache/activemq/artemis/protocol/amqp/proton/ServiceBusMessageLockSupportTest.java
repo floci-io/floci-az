@@ -14,6 +14,7 @@ import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Delivery;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.net.URLClassLoader;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -168,6 +169,48 @@ class ServiceBusMessageLockSupportTest {
             fixture.park();
 
             verify(queue).cancel(eq(fixture.reference), anyLong());
+        }
+    }
+
+    @Test
+    void aFailedReleaseIsRetriedUntilTheReferenceIsBackOnItsQueue() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            doThrow(new IllegalStateException("journal unavailable")).doNothing()
+                    .when(queue).cancel(any(MessageReference.class), anyLong());
+
+            fixture.park();
+            Runnable release = fixture.expiry.get();
+            release.run();
+
+            Runnable retry = fixture.expiry.get();
+            assertNotSame(release, retry, "a failed release schedules a retry");
+            verify(queue, never()).deliverAsync();
+            retry.run();
+            verify(queue, times(2)).cancel(eq(fixture.reference), anyLong());
+            verify(queue).deliverAsync();
+        }
+    }
+
+    @Test
+    void releaseRetriesStopAfterTheLastAttempt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.track(false);
+            Queue queue = fixture.parkable();
+            doThrow(new IllegalStateException("journal unavailable"))
+                    .when(queue).cancel(any(MessageReference.class), anyLong());
+            Field attemptsField = fixture.type.getDeclaredField("RELEASE_ATTEMPTS");
+            attemptsField.setAccessible(true);
+            int attempts = attemptsField.getInt(null);
+
+            fixture.park();
+            for (int i = 0; i < attempts; i++) {
+                fixture.expiry.getAndSet(null).run();
+            }
+
+            verify(queue, times(attempts)).cancel(eq(fixture.reference), anyLong());
+            assertNull(fixture.expiry.get(), "no retry after the last attempt");
         }
     }
 

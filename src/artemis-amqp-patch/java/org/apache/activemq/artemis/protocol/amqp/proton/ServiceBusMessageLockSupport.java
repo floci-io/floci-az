@@ -38,6 +38,8 @@ public final class ServiceBusMessageLockSupport {
    private static final Symbol LOCK_LOST = Symbol.valueOf("com.microsoft:message-lock-lost");
    private static final Object EXPIRED = new Object();
    private static final Set<ServiceBusMessageLockSupport> ACTIVE = ConcurrentHashMap.newKeySet();
+   static final int RELEASE_ATTEMPTS = 5;
+   static final long RELEASE_RETRY_MILLIS = 1_000;
 
    private final AMQPConnectionContext connection;
    private final AMQPSessionCallback session;
@@ -231,6 +233,16 @@ public final class ServiceBusMessageLockSupport {
    }
 
    static void releaseParked(ActiveMQServer server, MessageReference reference) {
+      releaseParked(server, reference, 1);
+   }
+
+   /**
+    * One attempt to hand a parked reference back. Nothing else owns it once its consumer is gone, so a failed attempt
+    * is retried on the scheduled pool with a growing delay rather than dropped. A retry repeats the whole cancel safely:
+    * the in-memory delivery count is not changed by {@code cancel}, which only persists it (the same value again) and
+    * then routes or requeues the reference; a failure surfaces before the reference is back on the queue.
+    */
+   static void releaseParked(ActiveMQServer server, MessageReference reference, int attempt) {
       Queue queue = reference.getQueue();
       try {
          if (server.locateQueue(queue.getName()) != queue) {
@@ -241,7 +253,19 @@ public final class ServiceBusMessageLockSupport {
          queue.cancel(reference, System.currentTimeMillis());
          queue.deliverAsync();
       } catch (Exception e) {
-         LOGGER.error("Could not release a closed receiver's Service Bus message lock", e);
+         if (attempt >= RELEASE_ATTEMPTS) {
+            LOGGER.error("Could not release a closed receiver's Service Bus message lock after {} attempts; the message "
+                  + "stays unavailable until the broker restarts", attempt, e);
+            return;
+         }
+         LOGGER.warn("Could not release a closed receiver's Service Bus message lock (attempt {} of {}), retrying",
+               attempt, RELEASE_ATTEMPTS, e);
+         try {
+            server.getScheduledPool().schedule(() -> releaseParked(server, reference, attempt + 1),
+                  RELEASE_RETRY_MILLIS * attempt, TimeUnit.MILLISECONDS);
+         } catch (RejectedExecutionException stopping) {
+            LOGGER.error("Could not retry releasing a Service Bus message lock: the broker is stopping", stopping);
+         }
       }
    }
 
