@@ -269,6 +269,7 @@ public class BannerLogger {
         overrides.put("strict-names", config.strictNames());
         overrides.put("strict-tokens", config.strictTokens());
         overrides.put("tenant-scoping", config.tenantScoping());
+        overrides.put("strict-search-keys", config.strictSearchKeys());
         Map<String, Boolean> levelDefaults = Map.ofEntries(
                 Map.entry("subscription-listing", level.includes(ParityLevel.AZURE)),
                 Map.entry("strict-subscriptions", level.includes(ParityLevel.STRICT)),
@@ -280,7 +281,8 @@ public class BannerLogger {
                 Map.entry("strict-locations", level.includes(ParityLevel.STRICT)),
                 Map.entry("strict-names", level.includes(ParityLevel.STRICT)),
                 Map.entry("strict-tokens", level.includes(ParityLevel.STRICT)),
-                Map.entry("tenant-scoping", level.includes(ParityLevel.AZURE)));
+                Map.entry("tenant-scoping", level.includes(ParityLevel.AZURE)),
+                Map.entry("strict-search-keys", level.includes(ParityLevel.STRICT)));
         StringBuilder line = new StringBuilder("parity: ").append(level.name().toLowerCase(Locale.ROOT));
         overrides.forEach((name, value) -> {
             if (!value.equals(levelDefaults.get(name))) {

@@ -263,13 +263,16 @@ class SearchArmServiceTest {
                 "{\"identity\": {\"type\": \"UserAssigned\", \"userAssignedIdentities\": [\"id\"]}}",
                 "{\"properties\": {\"disableLocalAuth\": \"true\"}}",
                 "{\"properties\": {\"authOptions\": \"apiKeyOnly\"}}",
+                "{\"properties\": {\"authOptions\": {\"aadOrApiKey\": \"http403\"}}}",
                 "{\"properties\": {\"networkRuleSet\": \"open\"}}",
                 "{\"properties\": {\"networkRuleSet\": {\"ipRules\": \"invalid\"}}}",
                 "{\"properties\": {\"encryptionWithCmk\": \"Enabled\"}}",
-                "{\"properties\": {\"dataExfiltrationProtections\": \"BlockAll\"}}")) {
+                "{\"properties\": {\"dataExfiltrationProtections\": \"BlockAll\"}}",
+                "null")) {
             given().contentType("application/json").body(patch).when().patch(service + API)
                 .then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
         }
+        put("rg", "null-body", "null").then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
 
         given().when().get(service + API).then().statusCode(200)
             .body("properties.disableLocalAuth", equalTo(false))
@@ -493,12 +496,18 @@ class SearchArmServiceTest {
                 "{\"properties\": {\"computeType\": \"bogus\"}}",
                 "{\"properties\": {\"dataExfiltrationProtections\": [\"bogus\"]}}",
                 "{\"properties\": {\"networkRuleSet\": {\"bypass\": \"bogus\"}}}",
+                "{\"properties\": {\"authOptions\": {\"aadOrApiKey\": {\"aadAuthFailureMode\": \"invalid\"}}}}",
                 "{\"properties\": {\"networkRuleSet\": {\"ipRules\": [{\"value\": \"not-an-ip\"}]}}}",
                 "{\"properties\": {\"networkRuleSet\": {\"ipRules\": [{\"value\": \"10.0.0.256\"}]}}}",
                 "{\"properties\": {\"networkRuleSet\": {\"ipRules\": [{\"value\": \"10.0.0.0/33\"}]}}}")) {
             given().contentType("application/json").body(patch).when().patch(service + API)
                 .then().statusCode(400).body("error.code", equalTo("InvalidRequestContent"));
         }
+        given().contentType("application/json")
+            .body("{\"properties\": {\"authOptions\": {\"aadOrApiKey\": {\"aadAuthFailureMode\":"
+                + " \"http401WithBearerChallenge\"}}}}")
+            .when().patch(service + API).then().statusCode(200)
+            .body("properties.authOptions.aadOrApiKey.aadAuthFailureMode", equalTo("http401WithBearerChallenge"));
         put("rg", "enums-put", """
                 {"location": "westus", "sku": {"name": "basic"}, "properties": {"semanticSearch": "bogus"}}""")
             .then().statusCode(400).body("error.message", containsString("semanticSearch"));

@@ -126,6 +126,9 @@ floci-az:
     #                               # A Bearer token's tid is read (unverified) as the caller's tenant: /subscriptions
     #                               # lists that tenant's (the default one when it owns none), and first-use
     #                               # subscriptions are registered under it
+    # strict-search-keys: true      # FLOCI_AZ_PARITY_OVERRIDES_STRICT_SEARCH_KEYS; default on from strict.
+    #                               # The Azure AI Search data plane serves declared services only, and an
+    #                               # api-key must be one of the service's admin keys
     # strict-locations: true        # FLOCI_AZ_PARITY_OVERRIDES_STRICT_LOCATIONS; default on from strict.
     #                               # A resource PUT naming a location the cloud does not offer is
     #                               # 400 NoRegisteredProviderFound
