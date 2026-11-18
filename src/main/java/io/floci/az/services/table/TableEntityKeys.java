@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -26,6 +27,12 @@ import java.util.TreeMap;
 final class TableEntityKeys {
 
     private static final Logger LOGGER = Logger.getLogger(TableEntityKeys.class);
+
+    /**
+     * Metadata on the namespace record of a table that lost a case collision. A marked table is never migrated again,
+     * so deleting the winner cannot bring the loser back at the lowercase key on a later start.
+     */
+    static final String CASE_COLLISION_LOSER = "caseCollisionLoser";
 
     private TableEntityKeys() {}
 
@@ -82,11 +89,20 @@ final class TableEntityKeys {
     }
 
     /**
+     * Whether a namespace record stored under {@code segment} is a live table. After the startup migration every live
+     * table sits at its lowercase segment; one under another spelling lost a case collision and is unreachable.
+     */
+    static boolean isLiveTableSegment(String segment) {
+        return segment.equals(tableSegment(segment));
+    }
+
+    /**
      * Moves every table whose stored segment is not lowercase to the lowercase one: its namespace record, which keeps
      * the spelling it was stored under as its key (the name Query Tables lists), and its entities. Two tables that
      * differ only in case could both be created before names matched case-insensitively. Of those, the one already at
      * the lowercase segment wins, or else the lexicographically first spelling; the others stay where they are,
-     * unreachable but not deleted, with a warning naming them. Idempotent.
+     * unreachable but not deleted, with a warning naming them, and are marked {@link #CASE_COLLISION_LOSER} so no
+     * later start migrates them. Idempotent.
      *
      * @return the number of tables moved
      */
@@ -103,6 +119,9 @@ final class TableEntityKeys {
                 continue;
             }
             String table = rest.substring(slash + 1);
+            if (isCaseCollisionLoser(store.get(storeKey))) {
+                continue;
+            }
             spellings.computeIfAbsent(rest.substring(0, slash), a -> new TreeMap<>())
                     .computeIfAbsent(tableSegment(table), t -> new ArrayList<>())
                     .add(table);
@@ -117,6 +136,10 @@ final class TableEntityKeys {
             if (names.size() > 1) {
                 LOGGER.warnv("Tables {0} of account {1} differ only in case; {2} is kept, the others stay stored "
                         + "but unreachable", names, account, winner);
+                names.stream().filter(name -> !name.equals(winner)).forEach(loser -> {
+                    String loserKey = namespacePrefix + account + "/" + loser;
+                    store.get(loserKey).ifPresent(record -> puts.put(loserKey, markedLoser(record)));
+                });
             }
             if (winner.equals(segment)) {
                 return;
@@ -131,6 +154,9 @@ final class TableEntityKeys {
             });
         }));
         if (moves.isEmpty()) {
+            if (!puts.isEmpty()) {
+                store.applyBatch(puts, deletes);
+            }
             return 0;
         }
         for (String storeKey : store.keys()) {
@@ -153,6 +179,17 @@ final class TableEntityKeys {
         store.applyBatch(puts, deletes);
         LOGGER.infov("Moved {0} tables to case-insensitive storage keys", moves.size());
         return moves.size();
+    }
+
+    static boolean isCaseCollisionLoser(Optional<StoredObject> record) {
+        return record.map(r -> r.metadata() != null && "true".equals(r.metadata().get(CASE_COLLISION_LOSER)))
+                .orElse(false);
+    }
+
+    private static StoredObject markedLoser(StoredObject record) {
+        Map<String, String> metadata = record.metadata() == null ? new HashMap<>() : new HashMap<>(record.metadata());
+        metadata.put(CASE_COLLISION_LOSER, "true");
+        return new StoredObject(record.key(), record.data(), metadata, record.lastModified(), record.etag());
     }
 
     private static String canonicalEntityKey(String storeKey, StoredObject stored, ObjectMapper objectMapper) {

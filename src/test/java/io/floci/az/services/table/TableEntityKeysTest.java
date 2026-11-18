@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -120,6 +121,31 @@ class TableEntityKeysTest {
         assertTrue(store.get(NS_PREFIX + "acct/MyTable").isPresent());
         assertTrue(store.get("acct/MyTable/" + TableEntityKeys.entityKey("p", "a")).isPresent());
         assertTrue(store.get("acct/mytable/" + TableEntityKeys.entityKey("p", "a")).isEmpty());
+    }
+
+    @Test
+    void deletingTheWinnerOfACaseCollisionDoesNotBringTheLoserBackOnTheNextStart() {
+        InMemoryStorage<String, StoredObject> store = new InMemoryStorage<>();
+        store.put(NS_PREFIX + "acct/MyTable", namespaceRecord(""));
+        store.put("acct/MyTable/" + TableEntityKeys.entityKey("p", "a"), entity("p", "a", "etag-a"));
+        store.put(NS_PREFIX + "acct/MYTABLE", namespaceRecord(""));
+        TableEntityKeys.migrateTableNameCase(store, NS_PREFIX);
+        assertTrue(TableEntityKeys.isCaseCollisionLoser(store.get(NS_PREFIX + "acct/MyTable")));
+
+        // The winner is deleted, then the emulator restarts.
+        store.delete(NS_PREFIX + "acct/mytable");
+        assertEquals(0, TableEntityKeys.migrateTableNameCase(store, NS_PREFIX));
+
+        assertTrue(store.get(NS_PREFIX + "acct/mytable").isEmpty());
+        assertTrue(store.get("acct/mytable/" + TableEntityKeys.entityKey("p", "a")).isEmpty());
+        assertTrue(store.get(NS_PREFIX + "acct/MyTable").isPresent());
+    }
+
+    @Test
+    void onlyATableAtItsLowercaseSegmentIsLive() {
+        assertTrue(TableEntityKeys.isLiveTableSegment("mytable"));
+        assertTrue(TableEntityKeys.isLiveTableSegment("orders2024"));
+        assertFalse(TableEntityKeys.isLiveTableSegment("MyTable"));
     }
 
     @Test

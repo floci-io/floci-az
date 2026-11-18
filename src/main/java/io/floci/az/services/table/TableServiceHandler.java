@@ -286,7 +286,7 @@ public class TableServiceHandler implements AzureServiceHandler, Resettable {
         String nsFilter = NS_PREFIX + request.accountName() + "/";
         List<TableModel.TableItem> tables = new ArrayList<>();
         for (String key : store.keys()) {
-            if (key.startsWith(nsFilter)) {
+            if (key.startsWith(nsFilter) && TableEntityKeys.isLiveTableSegment(key.substring(nsFilter.length()))) {
                 store.get(key).ifPresent(record -> tables.add(new TableModel.TableItem(
                         record.key() == null || record.key().isEmpty() ? key.substring(nsFilter.length()) : record.key())));
             }
