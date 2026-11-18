@@ -236,7 +236,7 @@ public class ContainerAppRuntimeManager {
                 continue;
             }
             String name = secret.path("name").asText();
-            if (secret.has("value")) {
+            if (secret.hasNonNull("value")) {
                 result.put(name, secret.path("value").asText());
             } else if (secret.hasNonNull("keyVaultUrl")) {
                 String url = secret.path("keyVaultUrl").asText();

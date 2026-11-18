@@ -458,13 +458,17 @@ public class KeyVaultHandler implements AzureServiceHandler, Resettable {
 
     /**
      * The value of a secret another service references by its vault URL (a Container App secret's
-     * {@code keyVaultUrl}), or empty when the secret, or that version, does not exist or is disabled. Read under the
-     * store lock, as a request is.
+     * {@code keyVaultUrl}), or empty when the secret, or that version, does not exist, is deleted or is disabled.
+     * Read under the store lock, as a request is.
      *
      * @param version the secret's version, or null for the current one
      */
     public Optional<String> secretValue(String vault, String name, String version) {
         synchronized (store) {
+            // A deleted secret keeps its version entries until purged, but none of them resolves.
+            if (store.get(secretLatestKey(vault, name)).isEmpty()) {
+                return Optional.empty();
+            }
             Optional<StoredObject> stored = store.get(version == null
                     ? secretLatestKey(vault, name) : secretVersionKey(vault, name, version));
             if (stored.isEmpty() || "false".equals(stored.get().metadata().get("enabled"))) {

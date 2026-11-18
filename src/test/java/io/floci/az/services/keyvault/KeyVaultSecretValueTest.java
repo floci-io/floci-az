@@ -38,6 +38,20 @@ class KeyVaultSecretValueTest {
         assertEquals(Optional.empty(), keyVault.secretValue(vaultName, "token", first));
     }
 
+    @Test
+    void noVersionOfADeletedSecretReadsBack() {
+        String vaultName = "kv" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String vault = "/" + vaultName + "-keyvault/";
+        String version = putSecret(vault, "doomed");
+
+        given().header("Authorization", "Bearer test-token")
+                .when().delete(vault + "secrets/token?api-version=7.4")
+                .then().statusCode(200);
+
+        assertEquals(Optional.empty(), keyVault.secretValue(vaultName, "token", null));
+        assertEquals(Optional.empty(), keyVault.secretValue(vaultName, "token", version));
+    }
+
     /** Writes a new version of {@code token} and returns its version id. */
     private static String putSecret(String vault, String value) {
         String id = given().header("Authorization", "Bearer test-token")

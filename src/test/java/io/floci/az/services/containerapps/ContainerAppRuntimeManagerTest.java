@@ -70,17 +70,21 @@ class ContainerAppRuntimeManagerTest {
         when(keyVault.secretValue("kv-repro", "token", null)).thenReturn(Optional.of("hello"));
         when(keyVault.secretValue("kv-repro", "token", "0123abcd")).thenReturn(Optional.of("pinned"));
         when(keyVault.secretValue("localvault", "db", null)).thenReturn(Optional.of("local"));
+        when(keyVault.secretValue("govvault", "token", null)).thenReturn(Optional.of("gov"));
 
         Map<String, String> secrets = runtimeManager.secrets(MAPPER.readTree("""
                 {"secrets": [
                   {"name": "plain", "value": "inline"},
                   {"name": "token", "keyVaultUrl": "https://KV-Repro.vault.azure.net/secrets/token", "identity": "System"},
                   {"name": "pinned", "keyVaultUrl": "https://kv-repro.vault.azure.net:4577/secrets/token/0123abcd"},
-                  {"name": "db", "keyVaultUrl": "http://localhost:4577/localvault-keyvault/secrets/db"}
+                  {"name": "db", "keyVaultUrl": "http://localhost:4577/localvault-keyvault/secrets/db"},
+                  {"name": "gov", "keyVaultUrl": "https://govvault.vault.usgovcloudapi.net/secrets/token"},
+                  {"name": "nullvalue", "value": null, "keyVaultUrl": "https://kv-repro.vault.azure.net/secrets/token"}
                 ]}
                 """));
 
-        assertEquals(Map.of("plain", "inline", "token", "hello", "pinned", "pinned", "db", "local"), secrets);
+        assertEquals(Map.of("plain", "inline", "token", "hello", "pinned", "pinned", "db", "local", "gov", "gov",
+                "nullvalue", "hello"), secrets);
     }
 
     @Test
@@ -91,7 +95,8 @@ class ContainerAppRuntimeManagerTest {
                 {"secrets": [
                   {"name": "missing", "keyVaultUrl": "https://kv.vault.azure.net/secrets/absent"},
                   {"name": "notavault", "keyVaultUrl": "https://example.com/secrets/absent"},
-                  {"name": "notasecret", "keyVaultUrl": "https://kv.vault.azure.net/keys/absent"}
+                  {"name": "notasecret", "keyVaultUrl": "https://kv.vault.azure.net/keys/absent"},
+                  {"name": "nestedhost", "keyVaultUrl": "https://a.kv.vault.azure.net/secrets/absent"}
                 ]}
                 """));
 
