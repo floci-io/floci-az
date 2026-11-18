@@ -348,18 +348,32 @@ floci-az:
   for free services.
 - **A `PUT` always answers the definition.** The spec requires `Prefer: return=representation`, which
   every SDK sends, so a `PUT` without it is answered the same way.
-- **Limits are reported, not enforced.** `servicestats` reports the index quota of the service's SKU
-  (`standard` for a service ARM does not hold; a `standard3` service in `HighDensity` mode holds 1000
-  per partition, up to 3000) and the field limits Azure documents. A `free` service also reports the
-  quotas a real one does: 3 indexers, data sources, synonym maps and skillsets, and 52428800 bytes of
-  storage, which is also its `maxStoragePerIndex`. The other tiers report those as `null`, as they are
-  not recorded. Nothing stops an index beyond them. The counters are those of the request's
-  api-version: `aliasesCount` in the previews from `2021-04-30-Preview` and the stable versions from
-  `2026-04-01`, and the two knowledge counters from `2026-05-01-preview` and in a stable version newer
-  than `2026-04-01`. A real `2025-09-01` service answers without them. The `@odata.context` of
-  `search.stats` and `servicestats` names the api-version's model
-  (`$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics`); a preview's is written
-  `V2025_11_01_Preview`, which is not recorded.
+- **Limits are reported, not enforced.** `servicestats` reports the quotas of the service's SKU from
+  Microsoft's [service limits](https://learn.microsoft.com/azure/search/search-limits-quotas-capacity)
+  page (`standard` with one partition for a service ARM does not hold), and the field limits Azure
+  documents. Nothing stops a service or an index beyond them.
+  - indexes, indexers, data sources and skillsets: 3 on `free`, 15 on `basic`, 50 on `standard`, 200
+    on `standard2` and `standard3`, 10 on the storage-optimized tiers. A `standard3` service in
+    `HighDensity` mode holds 1000 of each per partition, up to 3000
+  - synonym maps: 3 on `free` and `basic`, 5, 10 and 20 on `standard` to `standard3`, 10 on the
+    storage-optimized tiers
+  - storage and vector index size are per partition, so they grow with `partitionCount`: 15 and 5 GB
+    on `basic`, 160 and 35 GB on `standard`, 512 and 150 GB on `standard2`, 1024 and 300 GB on
+    `standard3`, 2048 and 150 GB on `storage_optimized_l1`, 4096 and 300 GB on `storage_optimized_l2`.
+    A `free` service has 50 MB of storage and no vector quota (`null`), as the recorded one reported
+  - `maxStoragePerIndex` is the service's storage, capped at 1.88 TB on `standard2`, 2.34 TB on
+    `standard3` and 100 GB in `HighDensity` mode
+  - the figures are those of a service created after February 2025 in a region with the higher
+    capacity. Older services and some regions (such as Israel Central and South India) have smaller
+    partitions on Azure. The page writes GB; the recorded `free` service reports its 50 MB as 52428800
+    bytes, so floci-az counts every size in binary units
+
+  The counters are those of the request's api-version: `aliasesCount` in the previews from
+  `2021-04-30-Preview` and the stable versions from `2026-04-01`, and the two knowledge counters from
+  `2026-05-01-preview` and in a stable version newer than `2026-04-01`. A real `2025-09-01` service
+  answers without them. The `@odata.context` of `search.stats` and `servicestats` names the
+  api-version's model (`$metadata#Microsoft.Azure.Search.V2025_09_01.ServiceStatistics`); a preview's
+  is written `V2025_11_01_Preview`, which is not recorded.
 - **Deleting a service deletes its indexes.** A resource-group delete does too when it cascades
   (`resource-group-delete`, on from `parity: azure`). Indexes belong to the cloud the request
   addressed, so a service of the same name in another cloud keeps its own.

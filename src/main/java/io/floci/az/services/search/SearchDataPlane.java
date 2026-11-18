@@ -36,21 +36,41 @@ public class SearchDataPlane {
     private static final int MAX_FIELD_NESTING_DEPTH = 10;
     private static final int MAX_COMPLEX_COLLECTION_FIELDS = 40;
     private static final int MAX_COMPLEX_OBJECTS_IN_COLLECTIONS = 3000;
-    /** How many indexes each SKU holds, from Microsoft's service limits page. */
-    private static final Map<String, Integer> INDEX_QUOTA = Map.of(
-            "free", 3, "basic", 15, "standard", 50, "standard2", 200, "standard3", 200,
-            "storage_optimized_l1", 10, "storage_optimized_l2", 10);
-    /** A {@code standard3} service in {@code HighDensity} mode: "1000 per partition or 3000 per service". */
-    private static final int HIGH_DENSITY_INDEXES_PER_PARTITION = 1000;
-    private static final int HIGH_DENSITY_INDEXES_PER_SERVICE = 3000;
+    private static final long MIB = 1024L * 1024;
+    private static final long GIB = 1024 * MIB;
+    private static final long TIB = 1024 * GIB;
+
+    /**
+     * The quotas of a tier, from Microsoft's service limits page, for a service created after February 2025 in a
+     * region with the higher capacity. The page writes GB; the recorded Free service reports its "50 MB" as
+     * 52428800 bytes, so the sizes here are binary too.
+     *
+     * @param objects           the indexes, and also the indexers, data sources and skillsets, a service holds
+     * @param synonymMaps       the synonym maps a service holds
+     * @param storagePerUnit    the storage of one partition in bytes, or of the whole service on Free
+     * @param vectorPerUnit     the vector index size of one partition in bytes, or null where the page gives none
+     * @param maxIndexBytes     the largest index, or null where it is the whole service's storage
+     */
+    private record Tier(int objects, int synonymMaps, long storagePerUnit, Long vectorPerUnit, Long maxIndexBytes) {
+    }
+
+    private static final Map<String, Tier> TIERS = Map.of(
+            "free", new Tier(3, 3, 50 * MIB, null, null),
+            "basic", new Tier(15, 3, 15 * GIB, 5 * GIB, null),
+            "standard", new Tier(50, 5, 160 * GIB, 35 * GIB, null),
+            "standard2", new Tier(200, 10, 512 * GIB, 150 * GIB, Math.round(1.88 * TIB)),
+            "standard3", new Tier(200, 20, 1024 * GIB, 300 * GIB, Math.round(2.34 * TIB)),
+            "storage_optimized_l1", new Tier(10, 10, 2048 * GIB, 150 * GIB, null),
+            "storage_optimized_l2", new Tier(10, 10, 4096 * GIB, 300 * GIB, null));
+    /**
+     * A {@code standard3} service in {@code HighDensity} mode: indexes, indexers, data sources and skillsets are
+     * "1,000 per partition or 3,000 per service", and an index holds at most 100 GB.
+     */
+    private static final int HIGH_DENSITY_OBJECTS_PER_PARTITION = 1000;
+    private static final int HIGH_DENSITY_OBJECTS_PER_SERVICE = 3000;
+    private static final long HIGH_DENSITY_MAX_INDEX_BYTES = 100 * GIB;
     private static final String DEFAULT_SKU = "standard";
     private static final String FREE_SKU = "free";
-    /**
-     * A free service's quotas, as a real one reports them: 3 indexers, data sources, synonym maps and skillsets,
-     * and 50 MB of storage, which is also its per-index limit. The other tiers' are not recorded and stay null.
-     */
-    private static final int FREE_RESOURCE_QUOTA = 3;
-    private static final long FREE_STORAGE_BYTES = 50L * 1024 * 1024;
 
     private final EmulatorConfig config;
     private final SearchArmService arm;
@@ -120,27 +140,26 @@ public class SearchDataPlane {
     private Response serviceStatistics(AzureRequest req, String cloud, String service,
                                        Optional<SearchServiceResource> declared) {
         String apiVersion = req.queryParams().get("api-version");
-        boolean free = FREE_SKU.equals(declared.map(SearchServiceResource::sku).orElse(DEFAULT_SKU));
-        Integer freeQuota = free ? Integer.valueOf(FREE_RESOURCE_QUOTA) : null;
+        Quotas quotas = quotas(declared);
         Map<String, Object> counters = new LinkedHashMap<>();
         if (hasAliasesCounter(apiVersion)) {
             counters.put("aliasesCount", counter(0, null));
         }
         counters.put("documentCount", counter(0, null));
-        counters.put("indexesCount", counter(indexes.count(cloud, service), indexQuota(declared)));
-        counters.put("indexersCount", counter(0, freeQuota));
-        counters.put("dataSourcesCount", counter(0, freeQuota));
-        counters.put("storageSize", counter(0, free ? Long.valueOf(FREE_STORAGE_BYTES) : null));
-        counters.put("synonymMaps", counter(0, freeQuota));
-        counters.put("skillsetCount", counter(0, freeQuota));
-        counters.put("vectorIndexSize", counter(0, null));
+        counters.put("indexesCount", counter(indexes.count(cloud, service), quotas.objects()));
+        counters.put("indexersCount", counter(0, quotas.objects()));
+        counters.put("dataSourcesCount", counter(0, quotas.objects()));
+        counters.put("storageSize", counter(0, quotas.storage()));
+        counters.put("synonymMaps", counter(0, quotas.synonymMaps()));
+        counters.put("skillsetCount", counter(0, quotas.objects()));
+        counters.put("vectorIndexSize", counter(0, quotas.vectorStorage()));
         if (hasKnowledgeCounters(apiVersion)) {
             counters.put("knowledgeBasesCount", counter(0, null));
             counters.put("knowledgeSourcesCount", counter(0, null));
         }
 
         Map<String, Object> limits = new LinkedHashMap<>();
-        limits.put("maxStoragePerIndex", free ? Long.valueOf(FREE_STORAGE_BYTES) : null);
+        limits.put("maxStoragePerIndex", quotas.maxStoragePerIndex());
         limits.put("maxFieldsPerIndex", MAX_FIELDS_PER_INDEX);
         limits.put("maxFieldNestingDepthPerIndex", MAX_FIELD_NESTING_DEPTH);
         limits.put("maxComplexCollectionFieldsPerIndex", MAX_COMPLEX_COLLECTION_FIELDS);
@@ -184,18 +203,39 @@ public class SearchDataPlane {
         }
     }
 
+    /** What servicestats reports a service may hold, its partitions counted. */
+    private record Quotas(Integer objects, Integer synonymMaps, Long storage, Long vectorStorage,
+                          Long maxStoragePerIndex) {
+    }
+
     /**
-     * The index quota of the service's SKU, {@code standard} for a service ARM does not hold. A high-density
-     * {@code standard3} service holds 1000 indexes per partition, up to 3000.
+     * The quotas of the service's SKU, {@code standard} with one partition for a service ARM does not hold. Storage
+     * and vector storage are per partition, so they grow with {@code partitionCount}; an index may take the whole
+     * service's storage, up to the cap of {@code standard2} and {@code standard3}. A high-density {@code standard3}
+     * service holds 1000 objects per partition, up to 3000, and indexes of at most 100 GB.
      */
-    private static Integer indexQuota(Optional<SearchServiceResource> declared) {
+    private static Quotas quotas(Optional<SearchServiceResource> declared) {
         String sku = declared.map(SearchServiceResource::sku).orElse(DEFAULT_SKU);
-        Map<String, Object> properties = declared.map(SearchServiceResource::properties).orElse(Map.of());
-        if (SearchArmService.HIGH_DENSITY_SKU.equals(sku) && "highdensity".equalsIgnoreCase(String.valueOf(properties.get("hostingMode")))) {
-            int partitions = properties.get("partitionCount") instanceof Number count ? count.intValue() : 1;
-            return Math.min(partitions * HIGH_DENSITY_INDEXES_PER_PARTITION, HIGH_DENSITY_INDEXES_PER_SERVICE);
+        Tier tier = TIERS.get(sku);
+        if (tier == null) {
+            return new Quotas(null, null, null, null, null);
         }
-        return INDEX_QUOTA.get(sku);
+        Map<String, Object> properties = declared.map(SearchServiceResource::properties).orElse(Map.of());
+        // Free has no partitions: its storage is the service's.
+        int partitions = !FREE_SKU.equals(sku) && properties.get("partitionCount") instanceof Number count
+                ? count.intValue() : 1;
+        long storage = tier.storagePerUnit() * partitions;
+        Long vectors = tier.vectorPerUnit() == null ? null : tier.vectorPerUnit() * partitions;
+        int objects = tier.objects();
+        Long maxIndex = tier.maxIndexBytes();
+        boolean highDensity = SearchArmService.HIGH_DENSITY_SKU.equals(sku)
+                && "highdensity".equalsIgnoreCase(String.valueOf(properties.get("hostingMode")));
+        if (highDensity) {
+            objects = Math.min(partitions * HIGH_DENSITY_OBJECTS_PER_PARTITION, HIGH_DENSITY_OBJECTS_PER_SERVICE);
+            maxIndex = HIGH_DENSITY_MAX_INDEX_BYTES;
+        }
+        long perIndex = maxIndex == null ? storage : Math.min(storage, maxIndex);
+        return new Quotas(objects, tier.synonymMaps(), storage, vectors, perIndex);
     }
 
     private static Map<String, Object> counter(int usage, Number quota) {

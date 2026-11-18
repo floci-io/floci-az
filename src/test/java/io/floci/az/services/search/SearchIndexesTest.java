@@ -792,6 +792,39 @@ class SearchIndexesTest {
     }
 
     @Test
+    void thePartitionsOfAServiceMultiplyItsStorageQuotas() {
+        // Three S1 partitions: 3 x 160 GB of storage and 3 x 35 GB of vectors, each index able to take it all.
+        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"standard\"},"
+                + " \"properties\": {\"partitionCount\": 3}}")
+            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
+        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
+            .body("counters.storageSize.quota", equalTo(3 * 160L * 1024 * 1024 * 1024))
+            .body("counters.vectorIndexSize.quota", equalTo(3 * 35L * 1024 * 1024 * 1024))
+            .body("counters.indexersCount.quota", equalTo(50))
+            .body("counters.synonymMaps.quota", equalTo(5))
+            .body("limits.maxStoragePerIndex", equalTo(3 * 160L * 1024 * 1024 * 1024));
+
+        // S2 caps an index at 1.88 TB, under the 12 x 512 GB of the service.
+        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
+        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": \"standard2\"},"
+                + " \"properties\": {\"partitionCount\": 12}}")
+            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
+        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
+            .body("counters.storageSize.quota", equalTo(12 * 512L * 1024 * 1024 * 1024))
+            .body("limits.maxStoragePerIndex", equalTo(Math.round(1.88 * 1024L * 1024 * 1024 * 1024)));
+
+        // A high-density S3 service: 1000 of each object per partition, and indexes of at most 100 GB.
+        given().when().delete(ARM_SERVICE + ARM_API).then().statusCode(200);
+        given().contentType("application/json").body("{\"location\": \"westus\", \"sku\": {\"name\": "
+                + "\"standard3\"}, \"properties\": {\"hostingMode\": \"highDensity\", \"partitionCount\": 2}}")
+            .when().put(ARM_SERVICE + ARM_API).then().statusCode(201);
+        given().when().get(BASE + "/servicestats" + API).then().statusCode(200)
+            .body("counters.indexersCount.quota", equalTo(2000))
+            .body("counters.synonymMaps.quota", equalTo(20))
+            .body("limits.maxStoragePerIndex", equalTo(100L * 1024 * 1024 * 1024));
+    }
+
+    @Test
     void aRequestWithoutAnApiVersionIsRefused() {
         given().when().get(BASE + "/indexes").then().statusCode(400)
             .body("error.code", equalTo("MissingRequiredParameter"))
