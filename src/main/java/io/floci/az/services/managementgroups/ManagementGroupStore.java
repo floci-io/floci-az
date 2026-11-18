@@ -75,23 +75,12 @@ public class ManagementGroupStore implements Resettable {
 
         /** The group a subscription belongs to: where it was placed, else the tenant root group. */
         public Group parentOf(String subscriptionId) {
-            String parent = subscriptionParents.get(key(subscriptionId));
-            return parent == null ? root() : groups.getOrDefault(key(parent), root());
+            return parentIn(groups, subscriptionParents, root(), subscriptionId);
         }
 
         /** The ancestors of a group from its parent up to the root. */
         public List<Group> ancestors(String name) {
-            List<Group> out = new ArrayList<>();
-            Group current = groups.get(key(name));
-            while (current != null && current.parent() != null && out.size() <= groups.size()) {
-                Group parent = groups.get(key(current.parent()));
-                if (parent == null) {
-                    break;
-                }
-                out.add(parent);
-                current = parent;
-            }
-            return out;
+            return ancestorsIn(groups, name);
         }
     }
 
@@ -219,8 +208,7 @@ public class ManagementGroupStore implements Resettable {
     /** The group a subscription belongs to: where it was placed, else the tenant root group. */
     public synchronized Group parentOf(String tenantId, String subscriptionId) {
         Hierarchy hierarchy = hierarchy(tenantId);
-        String parent = hierarchy.subscriptionParents.get(key(subscriptionId));
-        return parent == null ? root(tenantId) : hierarchy.groups.getOrDefault(key(parent), root(tenantId));
+        return parentIn(hierarchy.groups, hierarchy.subscriptionParents, root(tenantId), subscriptionId);
     }
 
     public synchronized boolean isPlaced(String tenantId, String subscriptionId) {
@@ -274,14 +262,18 @@ public class ManagementGroupStore implements Resettable {
 
     /** The ancestors of a group from its parent up to the root. */
     public synchronized List<Group> ancestors(String tenantId, String name) {
-        return ancestors(hierarchy(tenantId), name);
+        return ancestorsIn(hierarchy(tenantId).groups, name);
     }
 
-    private static List<Group> ancestors(Hierarchy hierarchy, String name) {
+    /**
+     * The one walk from a group to the root, shared by the store and its snapshots: it ends at a group without
+     * a parent or with one that is not in {@code groups}, and a parent cycle cannot carry it past the map's size.
+     */
+    private static List<Group> ancestorsIn(Map<String, Group> groups, String name) {
         List<Group> out = new ArrayList<>();
-        Group current = hierarchy.groups.get(key(name));
-        while (current != null && current.parent() != null && out.size() <= hierarchy.groups.size()) {
-            Group parent = hierarchy.groups.get(key(current.parent()));
+        Group current = groups.get(key(name));
+        while (current != null && current.parent() != null && out.size() <= groups.size()) {
+            Group parent = groups.get(key(current.parent()));
             if (parent == null) {
                 break;
             }
@@ -289,6 +281,13 @@ public class ManagementGroupStore implements Resettable {
             current = parent;
         }
         return out;
+    }
+
+    /** The one lookup of a subscription's group, shared the same way: where it was placed, else {@code root}. */
+    private static Group parentIn(Map<String, Group> groups, Map<String, String> subscriptionParents, Group root,
+                                  String subscriptionId) {
+        String parent = subscriptionParents.get(key(subscriptionId));
+        return parent == null ? root : groups.getOrDefault(key(parent), root);
     }
 
     /** True when {@code candidate} is {@code name} itself or sits below it. */
@@ -300,7 +299,7 @@ public class ManagementGroupStore implements Resettable {
         if (candidate.equalsIgnoreCase(name)) {
             return true;
         }
-        for (Group ancestor : ancestors(hierarchy, candidate)) {
+        for (Group ancestor : ancestorsIn(hierarchy.groups, candidate)) {
             if (ancestor.name().equalsIgnoreCase(name)) {
                 return true;
             }
