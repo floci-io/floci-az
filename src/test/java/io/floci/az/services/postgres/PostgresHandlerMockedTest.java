@@ -59,6 +59,56 @@ class PostgresHandlerMockedTest {
     }
 
     @Test
+    @DisplayName("network reads back what the PUT set, PATCH merges it, and a server created without one is public")
+    void networkReadsBackWhatWasSet() {
+        createServer("pgpublic");
+        given().when().get(BASE + "/flexibleServers/pgpublic" + API)
+            .then().statusCode(200)
+            .body("properties.network.publicNetworkAccess", equalTo("Enabled"))
+            .body("properties.network", not(hasKey("delegatedSubnetResourceId")));
+
+        String subnet = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+            + "/providers/Microsoft.Network/virtualNetworks/vnet/subnets/pg";
+        String zone = "/subscriptions/" + SUB + "/resourceGroups/" + RG
+            + "/providers/Microsoft.Network/privateDnsZones/pg.private.postgres.database.azure.com";
+        String vnetBody = SERVER_BODY.replace("\"version\":\"16\",", "\"version\":\"16\",\"network\":{"
+            + "\"delegatedSubnetResourceId\":\"" + subnet + "\",\"privateDnsZoneArmResourceId\":\"" + zone + "\","
+            + "\"publicNetworkAccess\":\"Disabled\"},");
+        given().contentType("application/json").body(vnetBody)
+            .when().put(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(202);
+        given().when().get(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(200)
+            .body("properties.network.delegatedSubnetResourceId", equalTo(subnet))
+            .body("properties.network.privateDnsZoneArmResourceId", equalTo(zone))
+            .body("properties.network.publicNetworkAccess", equalTo("Disabled"));
+
+        given().contentType("application/json").body("{\"properties\":{\"network\":{\"publicNetworkAccess\":\"Enabled\"}}}")
+            .when().patch(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(202);
+        given().contentType("application/json").body("{\"tags\":{\"env\":\"dev\"}}")
+            .when().patch(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(202);
+        given().when().get(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(200)
+            .body("properties.network.delegatedSubnetResourceId", equalTo(subnet))
+            .body("properties.network.privateDnsZoneArmResourceId", equalTo(zone))
+            .body("properties.network.publicNetworkAccess", equalTo("Enabled"));
+
+        // A PUT replaces the network: the ids it leaves out are gone, unlike a PATCH.
+        given().contentType("application/json")
+            .body(SERVER_BODY.replace("\"version\":\"16\",",
+                "\"version\":\"16\",\"network\":{\"publicNetworkAccess\":\"Disabled\"},"))
+            .when().put(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(202);
+        given().when().get(BASE + "/flexibleServers/pgvnet" + API)
+            .then().statusCode(200)
+            .body("properties.network.publicNetworkAccess", equalTo("Disabled"))
+            .body("properties.network", not(hasKey("delegatedSubnetResourceId")))
+            .body("properties.network", not(hasKey("privateDnsZoneArmResourceId")));
+    }
+
+    @Test
     @DisplayName("PUT server returns 202 with state=Ready, provisioningState=Succeeded and no localPort")
     void putServerReady() {
         // 202 is the only create status both azurerm 3.x and 4.x accept (see PostgresHandler javadoc).

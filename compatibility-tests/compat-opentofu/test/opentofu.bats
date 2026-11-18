@@ -254,6 +254,17 @@ setup() {
     assert_output --partial "loginServer"
 }
 
+@test "OpenTofu: postgresql flexible server network reads back, so a second plan leaves the server unchanged" {
+    run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_NAME}"
+    assert_success
+    assert_output --partial '"publicNetworkAccess":"Disabled"'
+
+    cd "$TOFU_DIR"
+    run tofu plan -input=false -no-color -detailed-exitcode -target=azurerm_postgresql_flexible_server.pg
+    assert_success
+    assert_output --partial "No changes"
+}
+
 @test "OpenTofu: postgresql flexible server created with Succeeded state" {
     run arm_get "subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.DBforPostgreSQL/flexibleServers/${PG_NAME}"
     assert_success

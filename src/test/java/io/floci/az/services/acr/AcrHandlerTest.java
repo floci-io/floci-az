@@ -84,6 +84,33 @@ public class AcrHandlerTest {
     }
 
     @Test
+    void roleAssignmentModeReadsBackWhatWasSetAndDefaultsToLegacy() {
+        createRegistry("acrlegacy");
+        given().when().get(registry("acrlegacy") + API)
+                .then().statusCode(200)
+                .body("properties.roleAssignmentMode", is("LegacyRegistryPermissions"));
+
+        given().contentType("application/json")
+                .body("{\"location\":\"eastus\",\"sku\":{\"name\":\"Standard\"},"
+                        + "\"properties\":{\"roleAssignmentMode\":\"AbacRepositoryPermissions\"}}")
+                .when().put(registry("acrabac") + API)
+                .then().statusCode(201)
+                .body("properties.roleAssignmentMode", is("AbacRepositoryPermissions"));
+        given().when().get(registry("acrabac") + API)
+                .then().statusCode(200)
+                .body("properties.roleAssignmentMode", is("AbacRepositoryPermissions"));
+
+        given().contentType("application/json")
+                .body("{\"properties\":{\"roleAssignmentMode\":\"LegacyRegistryPermissions\"}}")
+                .when().patch(registry("acrabac") + API)
+                .then().statusCode(200);
+        given().contentType("application/json").body("{\"tags\":{\"env\":\"dev\"}}")
+                .when().patch(registry("acrabac") + API)
+                .then().statusCode(200)
+                .body("properties.roleAssignmentMode", is("LegacyRegistryPermissions"));
+    }
+
+    @Test
     void getAndListReturnTheRegistry() {
         createRegistry("acrget");
 
