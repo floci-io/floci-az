@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 
@@ -85,6 +86,14 @@ class ContainerAppsAzdDeployTest {
         given().contentType("application/json").body(MAPPER.writeValueAsString(body))
                 .patch(APP_URL).then().statusCode(200);
 
+        // The traffic rule azd sent is the one kept: the weights below would read the same if it were dropped,
+        // since the latest revision takes all traffic by default.
+        given().get(APP_URL).then()
+                .statusCode(200)
+                .body("properties.configuration.ingress.traffic", hasSize(1))
+                .body("properties.configuration.ingress.traffic[0].revisionName", equalTo(APP + "--" + SUFFIX))
+                .body("properties.configuration.ingress.traffic[0].weight", equalTo(100))
+                .body("properties.configuration.ingress.traffic[0]", not(hasKey("latestRevision")));
         given().get(PROVIDER + "/containerApps/" + APP + "/revisions/" + APP + "--" + SUFFIX + API).then()
                 .statusCode(200)
                 .body("properties.active", equalTo(true))
