@@ -165,6 +165,48 @@ class ContainerLifecycleManagerEndpointModeTest {
         assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, CONTAINER_PORT), resolve());
     }
 
+    // A socket path other than the default, so a DOCKER_HOST set where the tests run cannot replace it.
+
+    /** The Testcontainers shape: floci-az in a container, the host's socket mounted, published mode. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({"unix:///run/podman/podman.sock", "npipe:////./pipe/podman_engine"})
+    @DisplayName("published, in a container with a local socket: floci-az connects over the container network")
+    void publishedInContainerWithLocalSocketConnectsOverTheContainerNetwork(String dockerHost) {
+        mode(DockerEndpointMode.PUBLISHED, dockerHost);
+        lenient().when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ContainerLifecycleManager manager = manager();
+
+        assertTrue(manager.publishedEndpoints(), "clients are still given the published ports");
+        assertFalse(manager.connectsAtPublishedPorts());
+        assertEquals("localhost", manager.daemonHost());
+        assertEquals(new ContainerLifecycleManager.EndpointInfo(CONTAINER_IP, CONTAINER_PORT),
+                manager.resolveEndpoint(CONTAINER_ID, CONTAINER_PORT));
+    }
+
+    @Test
+    @DisplayName("published, on the host with a local socket: localhost and the published port")
+    void publishedOnHostWithLocalSocket() {
+        mode(DockerEndpointMode.PUBLISHED, "unix:///run/podman/podman.sock");
+        lenient().when(containerDetector.isRunningInContainer()).thenReturn(false);
+        assertTrue(manager().connectsAtPublishedPorts());
+        assertEquals(new ContainerLifecycleManager.EndpointInfo("localhost", HOST_PORT), resolve());
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(value = {
+        "unix:///var/run/docker.sock, true",
+        "npipe:////./pipe/docker_engine, true",
+        "'', true",
+        "tcp://docker:2375, false",
+        "tcp://localhost:2475, false",
+        "http://127.0.0.1:2375, false",
+        "https://build-host.internal:2376, false"
+    })
+    @DisplayName("a Docker host is a local socket unless it names a host over tcp, http or https")
+    void localSocketDetection(String dockerHost, boolean localSocket) {
+        assertEquals(localSocket, ContainerLifecycleManager.isLocalSocket(dockerHost));
+    }
+
     // ------------------------------------------------------------------- daemon hostname
 
     @ParameterizedTest(name = "{0} -> {1}")

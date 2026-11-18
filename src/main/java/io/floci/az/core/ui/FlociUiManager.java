@@ -254,7 +254,7 @@ public class FlociUiManager {
     /** Where floci-az itself reaches the console: as {@code AcrRegistryManager} reaches its registry. */
     private String probeAddress(ContainerSpec spec, ContainerLifecycleManager.ContainerInfo info) {
         int internalPort = config.ui().internalPort();
-        if (containerDetector.isRunningInContainer() && !lifecycleManager.publishedEndpoints()) {
+        if (containerDetector.isRunningInContainer() && !lifecycleManager.connectsAtPublishedPorts()) {
             return ContainerLifecycleManager.containerNetworkEndpoint(spec, info, internalPort).toString();
         }
         String host = lifecycleManager.publishedEndpoints() ? lifecycleManager.daemonHost() : "localhost";

@@ -130,7 +130,12 @@ public class AksClusterManager {
 
         if (lifecycleManager.publishedEndpoints()) {
             cluster.setEndpoint("https://" + lifecycleManager.daemonHost() + ":" + hostPort);
-            cluster.setInternalEndpoint(cluster.getEndpoint());
+            // floci-az reaches the API server where getEndpoint says: the published address, or the container network
+            // when floci-az runs in a container against a local Docker socket.
+            ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(K3S_API_SERVER_PORT);
+            cluster.setInternalEndpoint(lifecycleManager.connectsAtPublishedPorts() || ep == null
+                    ? cluster.getEndpoint()
+                    : "https://" + ep.host() + ":" + ep.port());
         } else if (containerDetector.isRunningInContainer()) {
             cluster.setEndpoint("https://" + containerName + ":" + K3S_API_SERVER_PORT);
             ContainerLifecycleManager.EndpointInfo ep = info.getEndpoint(K3S_API_SERVER_PORT);

@@ -101,6 +101,30 @@ class SidecarDefaultBridgeAddressingTest {
         assertEquals("floci-az-acr-registry:5000", startAcr("app-net").dataPlaneEndpoint());
     }
 
+    /** Published mode with a local socket: clients get the published port, floci-az dials the container network. */
+    @Test
+    void redisInPublishedModeWithALocalSocketReportsThePublishedPortAndIsProbedByContainerIp() {
+        publishedWithLocalSocket();
+        RedisCache cache = startRedis("bridge");
+
+        assertEquals(SIDECAR_IP + ":6379", cache.getInternalEndpoint());
+        assertEquals("localhost", cache.getHostName());
+        assertEquals(HOST_PORT, cache.getPort());
+    }
+
+    @Test
+    void acrInPublishedModeWithALocalSocketIsProxiedByContainerIp() {
+        publishedWithLocalSocket();
+        assertEquals(SIDECAR_IP + ":5000", startAcr("bridge").dataPlaneEndpoint());
+    }
+
+    private void publishedWithLocalSocket() {
+        when(lifecycleManager.publishedEndpoints()).thenReturn(true);
+        when(lifecycleManager.connectsAtPublishedPorts()).thenReturn(false);
+        when(lifecycleManager.daemonHost()).thenReturn("localhost");
+        when(lifecycleManager.daemonAddress()).thenReturn("localhost");
+    }
+
     private RedisCache startRedis(String network) {
         when(builder.build()).thenReturn(spec("floci-az-redis-abc123", network));
         when(lifecycleManager.createAndStart(any())).thenReturn(startedAt(6379));

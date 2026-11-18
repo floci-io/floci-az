@@ -69,6 +69,7 @@ public class ContainerLifecycleManager {
 
     /** The Docker daemon's hostname for published-mode endpoints; resolved once, on first use. */
     private volatile String daemonHost;
+    private volatile Boolean connectsAtPublishedPorts;
 
     @Inject
     public ContainerLifecycleManager(DockerClient dockerClient,
@@ -1090,7 +1091,7 @@ public class ContainerLifecycleManager {
 
     private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort,
                                          String preferredNetwork) {
-        if (publishedEndpoints()) {
+        if (connectsAtPublishedPorts()) {
             OptionalInt hostPort = readPublishedHostPort(inspect, containerPort);
             if (hostPort.isPresent()) {
                 return new EndpointInfo(daemonHost(), hostPort.getAsInt());
@@ -1180,12 +1181,51 @@ public class ContainerLifecycleManager {
     }
 
     /**
-     * True when sidecars are addressed at the Docker daemon's host and their published ports
-     * ({@code floci-az.docker.endpoint-mode=published}): for floci-az's own connections and for
-     * the host and port reported to clients.
+     * True when sidecars are reported to clients at the Docker daemon's host and their published
+     * ports ({@code floci-az.docker.endpoint-mode=published}). floci-az's own connections use them
+     * too unless {@link #connectsAtPublishedPorts()} says otherwise.
      */
     public boolean publishedEndpoints() {
         return config.docker().endpointMode() == EmulatorConfig.DockerEndpointMode.PUBLISHED;
+    }
+
+    /**
+     * True when floci-az itself connects to sidecars at the daemon's host and published ports, which
+     * {@link ContainerInfo#getEndpoint} then returns. That is published mode, except when floci-az
+     * runs in a container and talks to a local Docker socket: the daemon host is then
+     * {@code localhost}, which inside floci-az's container is floci-az itself, so floci-az reaches its
+     * sidecars over the container network, as in auto mode, while clients are still given the
+     * published ports. A {@code tcp://} daemon, kubedock's {@code tcp://localhost} in a shared pod
+     * included, keeps the published address for both.
+     */
+    public boolean connectsAtPublishedPorts() {
+        Boolean connects = connectsAtPublishedPorts;
+        if (connects == null) {
+            connects = publishedEndpoints() && !(containerDetector.isRunningInContainer()
+                    && isLocalSocket(DockerClientProducer.resolveEffectiveDockerHost(
+                            config.docker().dockerHost(), System.getenv("DOCKER_HOST"))));
+            connectsAtPublishedPorts = connects;
+        }
+        return connects;
+    }
+
+    /**
+     * Whether a Docker host names a socket on this machine ({@code unix://}, {@code npipe://}, or
+     * nothing, which the client resolves to the default socket) rather than a daemon reached over
+     * the network. The complement of the hosts {@link #daemonHostname} takes a hostname from.
+     */
+    static boolean isLocalSocket(String dockerHost) {
+        if (dockerHost == null || dockerHost.isBlank()) {
+            return true;
+        }
+        try {
+            URI uri = URI.create(dockerHost);
+            String scheme = uri.getScheme();
+            return scheme == null || !(scheme.equalsIgnoreCase("tcp") || scheme.equalsIgnoreCase("http")
+                    || scheme.equalsIgnoreCase("https")) || uri.getHost() == null || uri.getHost().isBlank();
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
     }
 
     /**

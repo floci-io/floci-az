@@ -1,7 +1,7 @@
 .PHONY: build run run-docker stop stop-docker require-emulator \
         compat-network compat-build compat-run compat-stop compat-python-image compat-java-image compat-dotnet-image compat-node-image compat-cpp-image compat-terraform-image compat-opentofu-image compat-azcli-image \
         run-cosmos-mongo run-cosmos-postgresql run-cosmos-cassandra run-cosmos-gremlin run-cosmos-table run-cosmos-nosql run-sql \
-        test test-python-compat test-python-compat-local test-java-compat test-java-compat-local test-dotnet-compat test-node-compat test-node-compat-local test-cpp-compat test-servicebus-compat \
+        test test-python-compat test-python-compat-local test-java-compat test-java-published-compat test-java-compat-local test-dotnet-compat test-node-compat test-node-compat-local test-cpp-compat test-servicebus-compat \
         test-blob test-blob-local test-blob-python test-blob-python-local test-blob-java test-blob-java-local test-blob-node test-blob-node-local \
         test-entra-node test-entra-node-local \
         test-apim-java \
@@ -59,6 +59,9 @@ SUITE_ENV_JAVA   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQPS_PORT=5671 \
 	-e SERVICEBUS_NAMESPACE=default
+# The messaging tests only (Maven 3.9 appends MAVEN_ARGS to the image's mvn test).
+SUITE_ENV_JAVA_PUBLISHED = $(SUITE_ENV_JAVA) \
+	-e MAVEN_ARGS=-Dtest=ServiceBusCompatibilityTest,ServiceBusLazyStartTest,ServiceBusRuleCompatibilityTest,ServiceBusSessionExpiryCompatibilityTest,EventHubCompatibilityTest,EventHubNamespaceManagementTest,EventHubSdkCompatibilityTest,EventHubStreamCompatibilityTest
 SUITE_ENV_NODE   = $(POD_IDENTITY_ENV) \
 	-e SERVICEBUS_HOST=floci-az-servicebus-default \
 	-e SERVICEBUS_AMQP_PORT=5672 \
@@ -71,6 +74,10 @@ JAVA_SERVICEBUS_EMULATOR_ENV = $(SERVICEBUS_EMULATOR_ENV) \
 # AksCompatibilityTest drives the mocked AKS control plane; real mode would start a k3s container.
 JAVA_EMULATOR_ENV = $(JAVA_SERVICEBUS_EMULATOR_ENV) \
 	-e FLOCI_AZ_SERVICES_AKS_MOCKED=true
+# The Testcontainers shape: floci-az in a container with the host's Docker socket and published endpoint mode, where
+# it must still reach its own brokers over the container network. Only the messaging tests run against it.
+JAVA_PUBLISHED_EMULATOR_ENV = $(JAVA_EMULATOR_ENV) \
+	-e FLOCI_AZ_DOCKER_ENDPOINT_MODE=published
 # azd cannot be pointed at a custom cloud, so its emulator answers for Azure's own hosts.
 AZD_EMULATOR_ENV = -e FLOCI_AZ_TLS_PUBLIC_HOSTS=true
 # test_redis.py checks the cache's SSL port against floci-az's CA, so the python emulator serves Redis TLS.
@@ -271,6 +278,10 @@ test-python-compat:
 test-java-compat:
 	@echo "==> Java SDK compatibility tests (Docker)"
 	$(call COMPAT_SESSION,java,java,$(SUITE_ENV_JAVA) -v /var/run/docker.sock:/var/run/docker.sock,,,$(JAVA_EMULATOR_ENV))
+
+test-java-published-compat:
+	@echo "==> Java SDK messaging compatibility tests, emulator in published endpoint mode (Docker)"
+	$(call COMPAT_SESSION,java,java-published,$(SUITE_ENV_JAVA_PUBLISHED) -v /var/run/docker.sock:/var/run/docker.sock,,,$(JAVA_PUBLISHED_EMULATOR_ENV))
 
 test-node-compat:
 	@echo "==> Node.js SDK compatibility tests (Docker)"
