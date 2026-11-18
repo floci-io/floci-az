@@ -57,6 +57,7 @@ class AksCompatibilityTest {
     private static final String SUFFIX = UUID.randomUUID().toString().substring(0, 8);
     private static final String RESOURCE_GROUP = "aks-rg-" + SUFFIX;
     private static final String CLUSTER = "aks-" + SUFFIX;
+    private static final String USER_POOL = "userpool";
 
     private static ContainerServiceManager manager;
     private static ManagedClustersClient clusters;
@@ -84,12 +85,18 @@ class AksCompatibilityTest {
                 .withVmSize("Standard_DS2_v2")
                 .withOsType(OSType.LINUX)
                 .withMode(AgentPoolMode.SYSTEM);
+        ManagedClusterAgentPoolProfile userPool = new ManagedClusterAgentPoolProfile()
+                .withName(USER_POOL)
+                .withCount(1)
+                .withVmSize("Standard_DS2_v2")
+                .withOsType(OSType.LINUX)
+                .withMode(AgentPoolMode.USER);
         ManagedClusterInner request = new ManagedClusterInner()
                 .withLocation("eastus")
                 .withTags(Map.of("suite", "java-sdk"))
                 .withIdentity(new ManagedClusterIdentity().withType(ResourceIdentityType.SYSTEM_ASSIGNED))
                 .withDnsPrefix(CLUSTER + "-dns")
-                .withAgentPoolProfiles(List.of(pool));
+                .withAgentPoolProfiles(List.of(pool, userPool));
 
         ManagedClusterInner created = clusters.createOrUpdate(RESOURCE_GROUP, CLUSTER, request);
 
@@ -100,7 +107,7 @@ class AksCompatibilityTest {
                 + "/providers/Microsoft.ContainerService/managedClusters/" + CLUSTER, created.id());
         assertEquals(CLUSTER + "-dns", created.dnsPrefix());
         assertFalse(created.fqdn() == null || created.fqdn().isBlank(), "fqdn must be set");
-        assertEquals(1, created.agentPoolProfiles().size());
+        assertEquals(2, created.agentPoolProfiles().size());
         assertEquals("nodepool1", created.agentPoolProfiles().getFirst().name());
     }
 
@@ -143,6 +150,17 @@ class AksCompatibilityTest {
 
     @Test
     @Order(5)
+    void deleteAgentPoolThroughTheSdkPoller() {
+        // AgentPools_Delete is a long-running operation: the poller fails on a 202 without monitor headers.
+        manager.serviceClient().getAgentPools().delete(RESOURCE_GROUP, CLUSTER, USER_POOL);
+
+        KubernetesCluster cluster = manager.kubernetesClusters().getByResourceGroup(RESOURCE_GROUP, CLUSTER);
+        assertFalse(cluster.agentPools().containsKey(USER_POOL), "agent pools: " + cluster.agentPools().keySet());
+        assertTrue(cluster.agentPools().containsKey("nodepool1"), "agent pools: " + cluster.agentPools().keySet());
+    }
+
+    @Test
+    @Order(6)
     void deleteClusterThroughTheSdkPoller() {
         clusters.delete(RESOURCE_GROUP, CLUSTER);
 
@@ -150,7 +168,7 @@ class AksCompatibilityTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     void deletingAnAlreadyDeletedClusterIsNoContent() throws Exception {
         // ManagedClusters_Delete declares 204 "Resource does not exist"; the SDK poller above removed it.
         // java.net.http.HttpClient is qualified: the imported HttpClient is azure-core's, used for the SDK pipeline.

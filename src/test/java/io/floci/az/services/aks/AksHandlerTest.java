@@ -178,6 +178,48 @@ class AksHandlerTest {
             .header("Azure-AsyncOperation", nullValue());
     }
 
+    @Test
+    @DisplayName("DELETE agentPool hands out LRO monitors, and a missing pool returns 204")
+    void deletingAnAgentPoolReturnsPollableAsyncOperationHeaders() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                  "location": "westus2",
+                  "properties": {
+                    "agentPoolProfiles": [
+                      {"name": "sys", "count": 1, "vmSize": "Standard_D2s_v3", "osType": "Linux", "mode": "System"},
+                      {"name": "user", "count": 1, "vmSize": "Standard_D2s_v3", "osType": "Linux", "mode": "User"}
+                    ]
+                  }
+                }
+                """)
+            .put(BASE + "/managedClusters/pool-lro?api-version=2025-10-01")
+            .then().statusCode(201);
+
+        Response deleted = given()
+            .when().delete(BASE + "/managedClusters/pool-lro/agentPools/user?api-version=2025-10-01");
+        deleted.then()
+            .statusCode(202)
+            .header("Retry-After", "1")
+            .header("Azure-AsyncOperation", allOf(
+                containsString("/subscriptions/" + SUB
+                        + "/providers/Microsoft.ContainerService/locations/westus2/operations/"),
+                endsWith("?api-version=2025-10-01")))
+            .header("Location", containsString("/locations/westus2/operationresults/"));
+
+        given()
+            .when().get(pathOf(deleted.header("Azure-AsyncOperation")))
+            .then().statusCode(200).body("status", equalTo("Succeeded"));
+        given()
+            .when().get(BASE + "/managedClusters/pool-lro/agentPools/user?api-version=2025-10-01")
+            .then().statusCode(404);
+
+        given()
+            .when().delete(BASE + "/managedClusters/pool-lro/agentPools/user?api-version=2025-10-01")
+            .then().statusCode(204).header("Azure-AsyncOperation", nullValue());
+    }
+
     private static String pathOf(String url) {
         URI uri = URI.create(url);
         return uri.getRawPath() + "?" + uri.getRawQuery();
