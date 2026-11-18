@@ -34,6 +34,27 @@ class PolicyEvaluationRuleIdentityTest {
     }
 
     @Test
+    void idtypFollowsTheTokenWhenItCarriesNone() {
+        // A delegated token carries the user's scopes: scp alone reads as a user, with no upn at all.
+        Map<String, Object> delegated = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
+            "{\"oid\": \"u1\", \"appid\": \"cli\", \"scp\": \"user_impersonation\"}")));
+        assertEquals("user", delegated.get("idtyp"));
+        // An app-only token carries roles instead, and names no user.
+        Map<String, Object> appOnly = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
+            "{\"oid\": \"s1\", \"appid\": \"daemon\", \"roles\": [\"Reader\"]}")));
+        assertEquals("app", appOnly.get("idtyp"));
+        // An explicit idtyp always wins over what the other claims imply.
+        Map<String, Object> explicit = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
+            "{\"oid\": \"s1\", \"scp\": \"x\", \"idtyp\": \"app\"}")));
+        assertEquals("app", explicit.get("idtyp"));
+        // A token that names no principal (none of oid, appid, azp or a user name) implies no caller type.
+        Map<String, Object> anonymous = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
+            "{\"tid\": \"t1\", \"scp\": \"x\"}")));
+        assertFalse(anonymous.containsKey("idtyp"));
+        assertEquals("t1", anonymous.get("tid"));
+    }
+
+    @Test
     void aUserTokenNamesTheUserAndNoTokenNamesNothing() {
         Map<String, Object> user = PolicyEvaluationRule.identity(BearerClaims.parse(bearer(
             "{\"oid\": \"u1\", \"upn\": \"me@contoso.example\"}")));
