@@ -140,12 +140,7 @@ class ApiManagementResourceStoreTest {
             given().contentType("application/json").body(request).when().post(check).then().statusCode(200)
                 .body("nameAvailable", equalTo(false)).body("reason", equalTo("AlreadyExists"));
         }
-        // A deleted service keeps its name until it is purged.
         given().when().delete(service("sub-check-a", "rg", "CheckApim") + API).then().statusCode(200);
-        given().contentType("application/json").body(request).when().post(inOther).then().statusCode(200)
-            .body("nameAvailable", equalTo(false));
-        given().when().delete("/subscriptions/sub-check-a/providers/Microsoft.ApiManagement/locations/eastus"
-            + "/deletedservices/CheckApim" + API).then().statusCode(200);
         given().contentType("application/json").body(request).when().post(inOther).then().statusCode(200)
             .body("nameAvailable", equalTo(true));
     }

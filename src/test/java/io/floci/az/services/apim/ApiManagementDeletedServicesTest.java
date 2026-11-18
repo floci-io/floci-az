@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -138,28 +139,44 @@ class ApiManagementDeletedServicesTest {
     }
 
     @Test
-    void aDeletedServiceKeepsItsNameFromEveryOtherScopeUntilItIsPurged() {
+    void aNewServiceOfADeletedNameInAnotherSubscriptionDoesNotServeTheDeletedServicesApis() {
+        createService();
+        createApi();
+        given().when().delete(SERVICE_ID + API).then().statusCode(200);
+
+        String otherSubscription = "/subscriptions/another-sub/resourceGroups/test-rg-apim-deleted"
+                + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
+        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
+                .then().statusCode(200);
+
+        // The deleted service still keeps its API for a restore, but the gateway reaches only the live service's own.
+        given().when().get(otherSubscription + "/apis" + API).then().statusCode(200).body("value", empty());
+        given().when().get("/devstoreaccount1-apim/" + SERVICE + "/orders")
+                .then().statusCode(404)
+                .body("error.message", containsString("No API route matched"));
+        given().when().get(DELETED + API).then().statusCode(200);
+    }
+
+    @Test
+    void aRestoreInAnotherResourceGroupDoesNotBringBackTheDeletedService() {
         createService();
         createApi();
         given().when().delete(SERVICE_ID + API).then().statusCode(200);
 
         String otherGroup = "/subscriptions/" + SUB + "/resourceGroups/test-rg-other"
                 + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
-        String otherSubscription = "/subscriptions/another-sub/resourceGroups/test-rg-apim-deleted"
-                + "/providers/Microsoft.ApiManagement/service/" + SERVICE;
-        // A restore aimed at another group would bring the service back where it was, under the name the request
-        // did not ask for, so the name gate refuses it like any other create of a taken name.
-        given().contentType("application/json").body("{\"location\":\"westus\",\"properties\":{\"restore\":true}}")
+        // The record is the other group's service: with nothing of its own to restore, the request is a plain create.
+        given().contentType("application/json")
+                .body("{\"location\":\"westus\",\"sku\":{\"name\":\"Developer\",\"capacity\":1},"
+                        + "\"properties\":{\"restore\":true,\"publisherEmail\":\"other@contoso.com\","
+                        + "\"publisherName\":\"Other\"}}")
                 .when().put(otherGroup + API)
-                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
-        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
-                .then().statusCode(409).body("error.code", equalTo("ServiceAlreadyExists"));
-        given().when().get(DELETED + API).then().statusCode(200);
-
-        given().when().delete(DELETED + API).then().statusCode(200);
-        given().contentType("application/json").body(SERVICE_BODY).when().put(otherSubscription + API)
-                .then().statusCode(200);
-        given().when().get(otherSubscription + "/apis" + API).then().statusCode(200).body("value", empty());
+                .then().statusCode(200)
+                .body("id", equalTo(otherGroup))
+                .body("properties.publisherName", equalTo("Other"));
+        given().when().get(otherGroup + "/apis" + API).then().statusCode(200).body("value", empty());
+        given().when().get(SERVICE_ID + API).then().statusCode(404);
+        given().when().get(DELETED + API).then().statusCode(200).body("properties.serviceId", equalTo(SERVICE_ID));
     }
 
     private static void createService() {
