@@ -151,6 +151,14 @@ public final class ServiceBusSessionSupport {
       }
    }
 
+   /** True while the given connection, and link when named, holds the session's lock. */
+   static boolean owns(AMQPConnectionContext connection, String entity, String linkName, String sessionId) {
+      SessionOwner owner = SESSION_OWNERS.get(new SessionKey(SimpleString.of(entity), sessionId));
+      return owner != null && owner.senderContext().connection == connection
+         && (linkName == null || linkName.equals(owner.sender().getName()))
+         && System.currentTimeMillis() < owner.lockedUntilMillis();
+   }
+
    /**
     * Broker-name prefix of every Service Bus namespace broker. Must match the {@code <name>}
     * that {@code ServiceBusConfigGenerator} writes; {@code ServiceBusConfigGeneratorTest} pins

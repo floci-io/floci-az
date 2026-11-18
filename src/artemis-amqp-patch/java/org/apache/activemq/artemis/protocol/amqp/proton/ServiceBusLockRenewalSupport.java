@@ -70,6 +70,9 @@ public final class ServiceBusLockRenewalSupport {
             for (Object token : values) {
                long until = ServiceBusMessageLockSupport.renew(connection, entity, link, (UUID) token);
                if (until == 0) {
+                  until = ServiceBusDeferralSupport.renew(connection, entity, link, (UUID) token);
+               }
+               if (until == 0) {
                   expirations.clear();
                   break;
                }
@@ -86,15 +89,24 @@ public final class ServiceBusLockRenewalSupport {
          condition = "amqp:invalid-field";
          response = Map.of();
       }
-      Properties replyProperties = new Properties();
-      replyProperties.setCorrelationId(request.getProperties().getMessageId());
       Map<String, Object> applicationProperties = status == 200
          ? Map.of("statusCode", status, "statusDescription", "OK")
          : Map.of("statusCode", status, "statusDescription", "Lock renewal failed",
             "errorCondition", Symbol.valueOf(condition));
+      reply(receiver, address, request, delivery, applicationProperties, response);
+      return true;
+   }
+
+   /** Answers a management request handled on the connection's event loop and settles it. */
+   static void reply(ProtonServerReceiverContext receiver, SimpleString address, AMQPMessage request,
+                     Delivery delivery, Map<String, Object> applicationProperties,
+                     Map<String, Object> body) throws Exception {
+      AMQPConnectionContext connection = receiver.connection;
+      Properties replyProperties = new Properties();
+      replyProperties.setCorrelationId(request.getProperties().getMessageId());
       ActiveMQServer server = connection.getProtocolManager().getServer();
       AMQPStandardMessage reply = AMQPStandardMessage.createMessage(server.getStorageManager().generateID(), 0,
-         null, null, replyProperties, null, null, applicationProperties, null, new AmqpValue(response));
+         null, null, replyProperties, null, null, applicationProperties, null, new AmqpValue(body));
       // The reply goes to every receiver on the management address; the stamp keeps it to the
       // connection that asked.
       AmqpReplyRouting.copyStamp(request, reply);
@@ -103,6 +115,5 @@ public final class ServiceBusLockRenewalSupport {
       delivery.disposition(Accepted.getInstance());
       receiver.settle(delivery);
       connection.flush();
-      return true;
    }
 }

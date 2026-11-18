@@ -37,7 +37,7 @@ public final class ServiceBusDeadLetterSupport {
       applyProperties(message, modified.getMessageAnnotations(), !(message instanceof AMQPMessage));
    }
 
-   private static void applyProperties(Message message, Map<?, ?> properties, boolean convert)
+   static void applyProperties(Message message, Map<?, ?> properties, boolean convert)
       throws ActiveMQPropertyConversionException {
       if (properties == null) {
          return;

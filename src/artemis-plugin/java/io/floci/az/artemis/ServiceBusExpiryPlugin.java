@@ -28,6 +28,11 @@ import java.util.concurrent.TimeUnit;
  * <p>Artemis address settings cannot model subscription-specific TTL because every
  * subscription queue shares its topic address. Scheduling expiration per routed queue
  * preserves that distinction while using Artemis's queue expiry and move operations.
+ *
+ * <p>A deferred message does not expire on its schedule. Azure checks its expiry only when a client
+ * receives it by sequence number, so deferral (ServiceBusDeferralSupport, in the AMQP patch) hands
+ * its deadline over through {@link #defer} and asks for it to be applied through
+ * {@link #expireIfDue}. It calls them reflectively, as it is built apart from this plugin.
  */
 public final class ServiceBusExpiryPlugin
         implements ActiveMQServerPlugin, ServiceBusExpiryPluginMBean {
@@ -41,6 +46,8 @@ public final class ServiceBusExpiryPlugin
     private final ConcurrentHashMap<ExpiryKey, ExpiryDeadline> expiryDeadlines =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ExpiryKey, ScheduledFuture<?>> scheduledExpirations =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ExpiryKey, ExpiryDeadline> deferredDeadlines =
             new ConcurrentHashMap<>();
     private volatile ActiveMQServer server;
     private volatile ObjectName objectName;
@@ -80,6 +87,7 @@ public final class ServiceBusExpiryPlugin
             scheduledExpirations.values().forEach(task -> task.cancel(false));
             scheduledExpirations.clear();
             expiryDeadlines.clear();
+            deferredDeadlines.clear();
             settingsByQueue.clear();
             server = null;
         }
@@ -109,6 +117,39 @@ public final class ServiceBusExpiryPlugin
             }
         });
         expiryDeadlines.keySet().removeIf(key -> key.queueName().equals(queueName));
+        deferredDeadlines.keySet().removeIf(key -> key.queueName().equals(queueName));
+    }
+
+    /** Holds a deferred message's expiry until it is received by sequence number. */
+    public void defer(String queueName, long messageId) {
+        ExpiryKey key = new ExpiryKey(queueName, messageId);
+        synchronized (scheduledExpirations) {
+            ScheduledFuture<?> task = scheduledExpirations.remove(key);
+            if (task != null) {
+                task.cancel(false);
+            }
+            ExpiryDeadline deadline = expiryDeadlines.remove(key);
+            if (deadline != null) {
+                deferredDeadlines.put(key, deadline);
+            }
+        }
+    }
+
+    /** Expires a deferred message whose time to live has passed, returning whether it did. */
+    public boolean expireIfDue(String queueName, long messageId) {
+        ExpiryKey key = new ExpiryKey(queueName, messageId);
+        ExpiryDeadline deadline = deferredDeadlines.get(key);
+        ActiveMQServer activeServer = server;
+        if (deadline == null || deadline.expiresAtMillis() > System.currentTimeMillis()
+                || activeServer == null) {
+            return false;
+        }
+        Queue queue = activeServer.locateQueue(SimpleString.of(queueName));
+        if (queue == null || !expire(queue, messageId, deadline.deadLetterAddress())) {
+            return false;
+        }
+        deferredDeadlines.remove(key);
+        return true;
     }
 
     @Override
@@ -193,13 +234,18 @@ public final class ServiceBusExpiryPlugin
             long now,
             long delayMillis) {
         ExpiryKey key = new ExpiryKey(queue.getName().toString(), messageId);
+        ExpiryDeadline deadline = new ExpiryDeadline(
+                saturatingAdd(now, delayMillis), settings.deadLetterAddress());
         synchronized (scheduledExpirations) {
-            if (expiryDeadlines.putIfAbsent(key, new ExpiryDeadline(
-                    saturatingAdd(now, delayMillis), settings.deadLetterAddress())) != null) {
+            if (expiryDeadlines.putIfAbsent(key, deadline) != null) {
                 return;
             }
             ScheduledFuture<?> task = activeServer.getScheduledPool().schedule(() -> {
                 synchronized (scheduledExpirations) {
+                    // defer() or clearExpiry() may have run while this task waited for the monitor.
+                    if (expiryDeadlines.get(key) != deadline) {
+                        return;
+                    }
                     scheduledExpirations.remove(key);
                     if (isDelivering(queue, messageId)) {
                         return;
@@ -223,6 +269,7 @@ public final class ServiceBusExpiryPlugin
 
     private void clearExpiry(ExpiryKey key) {
         expiryDeadlines.remove(key);
+        deferredDeadlines.remove(key);
         ScheduledFuture<?> task = scheduledExpirations.remove(key);
         if (task != null) {
             task.cancel(false);

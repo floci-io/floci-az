@@ -219,6 +219,154 @@ class ServiceBusCompatibilityTest {
         }
     }
 
+    @Test
+    @DisplayName("a deferred message is received by sequence number and completed")
+    void deferredMessageIsReceivedBySequenceNumberAndCompleted() throws Exception {
+        String queue = uniqueQueue();
+        String payload = "deferred-" + UUID.randomUUID();
+        send(queue, payload);
+
+        long sequenceNumber;
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            sequenceNumber = msg.getSequenceNumber();
+            receiver.defer(msg);
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            assertEquals(0, receiver.receiveMessages(1, Duration.ofSeconds(3)).stream().count(),
+                    "A deferred message must not be delivered to receivers again");
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(sequenceNumber);
+            assertNotNull(deferred, "Expected the deferred message");
+            assertEquals(payload, deferred.getBody().toString());
+            assertEquals(sequenceNumber, deferred.getSequenceNumber());
+            assertNotNull(deferred.getLockToken());
+            assertTrue(deferred.getLockedUntil().isAfter(OffsetDateTime.now()));
+            receiver.complete(deferred);
+
+            assertDeferredMessageNotFound(receiver, sequenceNumber, "A completed deferred message is gone");
+        }
+    }
+
+    @Test
+    @DisplayName("a deferred message outlives its time to live until it is received, and is then dead-lettered")
+    void deferredMessageExpiresOnlyWhenReceived() throws Exception {
+        String queue = uniqueName("q");
+        EmulatorConfig.ensureServiceBusQueue(queue,
+                "<DeadLetteringOnMessageExpiration>true</DeadLetteringOnMessageExpiration>");
+        String payload = "deferred-ttl-" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            sender.sendMessage(new ServiceBusMessage(payload).setTimeToLive(Duration.ofSeconds(2)));
+        }
+
+        long sequenceNumber;
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            sequenceNumber = msg.getSequenceNumber();
+            receiver.defer(msg);
+        }
+
+        Thread.sleep(4_000);
+        try (ServiceBusReceiverClient deadLetters = deadLetterReceiver(queue)) {
+            assertEquals(0, deadLetters.receiveMessages(1, Duration.ofSeconds(2)).stream().count(),
+                    "A deferred message must not expire while it is deferred");
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            assertDeferredMessageNotFound(receiver, sequenceNumber,
+                    "A deferred message past its time to live expires when it is received");
+        }
+
+        try (ServiceBusReceiverClient deadLetters = deadLetterReceiver(queue)) {
+            ServiceBusReceivedMessage expired = deadLetters.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(expired, "The expired deferred message is dead-lettered");
+            assertEquals(payload, expired.getBody().toString());
+            deadLetters.complete(expired);
+        }
+    }
+
+    @Test
+    @DisplayName("a deferred message lock can be renewed and the message is not received twice while locked")
+    void deferredMessageLockIsRenewedAndExclusive() throws Exception {
+        String queue = uniqueQueue();
+        send(queue, "deferred-lock-" + UUID.randomUUID());
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue);
+             ServiceBusReceiverClient other = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message");
+            receiver.defer(msg);
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(msg.getSequenceNumber());
+            assertDeferredMessageNotFound(other, msg.getSequenceNumber(),
+                    "A locked deferred message must not be handed out again");
+
+            OffsetDateTime firstDeadline = deferred.getLockedUntil();
+            Thread.sleep(1_000);
+            OffsetDateTime renewed = receiver.renewMessageLock(deferred);
+            assertTrue(renewed.isAfter(firstDeadline), "Renewal should extend the lock");
+            receiver.complete(deferred);
+        }
+    }
+
+    @Test
+    @DisplayName("a session receiver receives and completes a deferred session message")
+    void sessionReceiverReceivesDeferredMessage() throws Exception {
+        String queue = uniqueSessionQueue();
+        String sessionId = "session-" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            ServiceBusMessage message = new ServiceBusMessage("deferred-session");
+            message.setSessionId(sessionId);
+            sender.sendMessage(message);
+        }
+
+        try (ServiceBusSessionReceiverClient sessionReceiver = EmulatorConfig.serviceBusClientBuilder()
+                .sessionReceiver()
+                .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+             ServiceBusReceiverClient receiver = sessionReceiver.acceptSession(sessionId)) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Session message should be received");
+            receiver.defer(msg);
+
+            ServiceBusReceivedMessage deferred = receiver.receiveDeferredMessage(msg.getSequenceNumber());
+            assertEquals("deferred-session", deferred.getBody().toString());
+            assertEquals(sessionId, deferred.getSessionId());
+            receiver.complete(deferred);
+        }
+    }
+
+    @Test
+    @DisplayName("receiving a message that was not deferred by sequence number fails")
+    void receivingAMessageThatWasNotDeferredFails() throws Exception {
+        String queue = uniqueQueue();
+        send(queue, "not-deferred-" + UUID.randomUUID());
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            ServiceBusReceivedMessage peeked = receiver.peekMessage();
+            assertNotNull(peeked, "Expected a message to peek");
+
+            assertDeferredMessageNotFound(receiver, peeked.getSequenceNumber(),
+                    "A message that was not deferred is not found");
+
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "The message is still delivered normally");
+            receiver.complete(msg);
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"false,false,false", "false,false,true", "false,true,false", "false,true,true",
             "true,false,false", "true,false,true", "true,true,false", "true,true,true"})
@@ -775,6 +923,15 @@ class ServiceBusCompatibilityTest {
         return prefix + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 
+    /**
+     * The SDK turns a 404 message-not-found reply into an empty result, so the batch call returns
+     * nothing. Any other failure, such as a 501, throws instead.
+     */
+    private static void assertDeferredMessageNotFound(
+            ServiceBusReceiverClient receiver, long sequenceNumber, String message) {
+        assertEquals(0, receiver.receiveDeferredMessageBatch(List.of(sequenceNumber)).stream().count(), message);
+    }
+
     private static void assertReceiverRejected(Executable operation, String expectedMessage) {
         RuntimeException error = assertThrows(RuntimeException.class, operation);
         Throwable root = error;
@@ -796,6 +953,15 @@ class ServiceBusCompatibilityTest {
         return EmulatorConfig.serviceBusClientBuilder()
                 .receiver()
                 .queueName(queue)
+                .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .buildClient();
+    }
+
+    private ServiceBusReceiverClient deadLetterReceiver(String queue) {
+        return EmulatorConfig.serviceBusClientBuilder()
+                .receiver()
+                .queueName(queue)
+                .subQueue(SubQueue.DEAD_LETTER_QUEUE)
                 .receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                 .buildClient();
     }
