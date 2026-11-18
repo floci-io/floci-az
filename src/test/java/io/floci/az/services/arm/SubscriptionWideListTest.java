@@ -74,6 +74,12 @@ class SubscriptionWideListTest {
     }
 
     @Test
+    void searchServicesAreListedAcrossTheSubscription() {
+        assertListedAcrossGroups("Microsoft.Search/searchServices", "2025-05-01",
+            "{\"location\":\"eastus\",\"sku\":{\"name\":\"basic\"}}", "wide-search");
+    }
+
+    @Test
     void logAnalyticsWorkspacesAreListedAcrossTheSubscription() {
         assertListedAcrossGroups("Microsoft.OperationalInsights/workspaces", "2022-10-01",
             "{\"location\":\"eastus\"}", "wide-ws");

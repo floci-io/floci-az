@@ -100,4 +100,24 @@ class ResourceGroupDeleteOverrideTest {
         given().when().get(workspace + MONITOR_API).then().statusCode(404);
         given().when().get(email + EMAIL_API).then().statusCode(404);
     }
+
+    /** A search service is listed with its group, deleted with it, and its global name is free again. */
+    @Test
+    void theCascadeDeletesASearchServiceAndFreesItsName() {
+        String searchApi = "?api-version=2025-05-01";
+        String body = "{\"location\":\"eastus\",\"sku\":{\"name\":\"basic\"}}";
+        json("{\"location\":\"eastus\"}").when().put(group("rg-search") + API).then().statusCode(201);
+        String search = group("rg-search") + "/providers/Microsoft.Search/searchServices/idx-search";
+        json(body).when().put(search + searchApi).then().statusCode(201);
+
+        given().when().get(group("rg-search") + "/resources" + API)
+            .then().statusCode(200)
+            .body("value.id", hasItem(search));
+
+        given().when().delete(group("rg-search") + API).then().statusCode(202);
+
+        given().when().get(search + searchApi).then().statusCode(404);
+        json(body).when().put(group("rg-other") + "/providers/Microsoft.Search/searchServices/idx-search" + searchApi)
+            .then().statusCode(201);
+    }
 }

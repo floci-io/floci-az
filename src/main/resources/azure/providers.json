@@ -3030,6 +3030,27 @@
       ]
     },
     {
+      "namespace": "Microsoft.Search",
+      "resourceTypes": [
+        {
+          "resourceType": "searchServices",
+          "apiVersions": ["2026-09-01-preview", "2026-03-01-preview", "2025-05-01", "2025-02-01-preview", "2024-06-01-preview", "2024-03-01-preview", "2023-11-01", "2022-09-01", "2021-04-01-preview", "2020-08-01", "2020-08-01-preview", "2020-03-13", "2019-10-01-preview", "2015-08-19", "2015-02-28"]
+        },
+        {
+          "resourceType": "searchServices/networkSecurityPerimeterConfigurations",
+          "apiVersions": ["2026-09-01-preview", "2026-03-01-preview", "2025-05-01", "2025-02-01-preview", "2024-06-01-preview", "2024-03-01-preview"]
+        },
+        {
+          "resourceType": "searchServices/privateEndpointConnections",
+          "apiVersions": ["2026-09-01-preview", "2026-03-01-preview", "2025-05-01", "2025-02-01-preview", "2024-06-01-preview", "2024-03-01-preview", "2023-11-01", "2022-09-01", "2021-04-01-preview", "2020-08-01", "2020-08-01-preview", "2020-03-13", "2019-10-01-preview"]
+        },
+        {
+          "resourceType": "searchServices/sharedPrivateLinkResources",
+          "apiVersions": ["2026-09-01-preview", "2026-03-01-preview", "2025-05-01", "2025-02-01-preview", "2024-06-01-preview", "2024-03-01-preview", "2023-11-01", "2022-09-01", "2021-04-01-preview", "2020-08-01", "2020-08-01-preview"]
+        }
+      ]
+    },
+    {
       "namespace": "Microsoft.Sql",
       "resourceTypes": [
         {

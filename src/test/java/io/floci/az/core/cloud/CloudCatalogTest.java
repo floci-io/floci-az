@@ -37,7 +37,7 @@ class CloudCatalogTest {
     private static final Set<String> ROUTED_PUBLIC_HOST_SUFFIXES = Set.of(
             ".vault.azure.net", ".managedhsm.azure.net", ".communication.azure.com", ".blob.core.windows.net",
             ".dfs.core.windows.net", ".queue.core.windows.net", ".table.core.windows.net", ".servicebus.windows.net",
-            ".service.signalr.net", ".azurecontainerapps.io", ".azurecr.io");
+            ".service.signalr.net", ".azurecontainerapps.io", ".azurecr.io", ".search.windows.net");
 
     @Test
     void theThreeCloudsLoadPublicFirst() {
@@ -96,6 +96,8 @@ class CloudCatalogTest {
         assertEquals(Optional.empty(), china.suffix(CloudSuffix.REDIS));
         assertEquals(Optional.of("azure-api.us"), gov.suffix(CloudSuffix.APIM));
         assertEquals(Optional.of("azure-api.cn"), china.suffix(CloudSuffix.APIM));
+        assertEquals(Optional.of("search.azure.us"), gov.suffix(CloudSuffix.SEARCH));
+        assertEquals(Optional.of("search.azure.cn"), china.suffix(CloudSuffix.SEARCH));
     }
 
     @Test

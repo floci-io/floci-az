@@ -110,4 +110,19 @@ class AdminResetTest {
         given().when().get("/devstoreaccount1-appconfig/kv/reset-key?api-version=1.0")
                 .then().statusCode(404);
     }
+
+    @Test
+    void resetClearsSearchServicesAndFreesTheirNames() {
+        String service = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-reset"
+                + "/providers/Microsoft.Search/searchServices/reset-search?api-version=2025-05-01";
+        String body = "{\"location\": \"eastus\", \"sku\": {\"name\": \"basic\"}}";
+        given().contentType("application/json").body(body).when().put(service).then().statusCode(201);
+
+        given().when().post("/_admin/reset")
+                .then().statusCode(204);
+
+        given().when().get(service).then().statusCode(404);
+        // 201, not 200: the service is new again, and its global name was released with it.
+        given().contentType("application/json").body(body).when().put(service).then().statusCode(201);
+    }
 }

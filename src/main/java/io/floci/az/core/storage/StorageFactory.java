@@ -145,6 +145,7 @@ public class StorageFactory {
             case "sql"        -> Optional.of(config.storage().services().sql());
             case "monitor"    -> Optional.of(config.storage().services().monitor());
             case "email"      -> Optional.of(config.storage().services().email());
+            case "search"     -> Optional.of(config.storage().services().search());
             case "containerapps" -> Optional.of(config.storage().services().containerApps());
             case "directory"  -> Optional.of(config.storage().services().directory());
             default           -> Optional.empty();

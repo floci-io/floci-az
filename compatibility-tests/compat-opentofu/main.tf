@@ -655,3 +655,19 @@ resource "azurerm_resource_group_template_deployment" "tpl" {
 output "template_blob_endpoint" {
   value = jsondecode(azurerm_resource_group_template_deployment.tpl.output_content).blobEndpoint.value
 }
+
+resource "azurerm_search_service" "search" {
+  name                = "floci-test-search"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "basic"
+}
+
+output "search_service_id" {
+  value = azurerm_search_service.search.id
+}
+
+output "search_primary_key" {
+  value     = azurerm_search_service.search.primary_key
+  sensitive = true
+}
