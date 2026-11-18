@@ -341,6 +341,48 @@ class ServiceBusCompatibilityTest {
     }
 
     @Test
+    @DisplayName("To and ReplyTo arrive as the sender set them, on a queue and a subscription")
+    void toAndReplyToRoundTrip() throws Exception {
+        String queue = uniqueQueue();
+        String topic = uniqueName("topic");
+        EmulatorConfig.ensureServiceBusTopic(topic);
+        EmulatorConfig.ensureServiceBusSubscription(topic, "sub");
+
+        ServiceBusMessage addressed = new ServiceBusMessage("addressed");
+        addressed.setTo("billing");
+        addressed.setReplyTo("replies");
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().queueName(queue).buildClient()) {
+            sender.sendMessage(addressed);
+            sender.sendMessage(new ServiceBusMessage("unaddressed"));
+        }
+        try (ServiceBusSenderClient sender = EmulatorConfig.serviceBusClientBuilder()
+                .sender().topicName(topic).buildClient()) {
+            sender.sendMessage(addressed);
+        }
+
+        try (ServiceBusReceiverClient receiver = peekLockReceiver(queue)) {
+            List<ServiceBusReceivedMessage> received = new ArrayList<>();
+            receiver.receiveMessages(2, RECV_TIMEOUT).forEach(received::add);
+            assertEquals(2, received.size(), "Expected both messages");
+            ServiceBusReceivedMessage first = received.get(0);
+            assertEquals("billing", first.getTo());
+            assertEquals("replies", first.getReplyTo());
+            assertNull(received.get(1).getTo(), "the broker must not fill in a To the sender left out");
+            received.forEach(receiver::complete);
+        }
+
+        try (ServiceBusReceiverClient receiver = subscriptionReceiver(topic, "sub")) {
+            ServiceBusReceivedMessage msg = receiver.receiveMessages(1, RECV_TIMEOUT)
+                    .stream().findFirst().orElse(null);
+            assertNotNull(msg, "Expected a message on the subscription");
+            assertEquals("billing", msg.getTo());
+            assertEquals("replies", msg.getReplyTo());
+            receiver.complete(msg);
+        }
+    }
+
+    @Test
     @DisplayName("batch send and receive multiple messages")
     void batchSendAndReceive() throws Exception {
         String queue = uniqueQueue();

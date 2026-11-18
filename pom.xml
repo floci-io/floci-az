@@ -248,6 +248,7 @@
                                     <includes>
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPMessage.java,
                                         org/apache/activemq/artemis/protocol/amqp/broker/AMQPLargeMessage.java,
+                                        org/apache/activemq/artemis/protocol/amqp/broker/AMQPStandardMessage.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/DefaultSenderController.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerReceiverContext.java,
                                         org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java,
@@ -277,6 +278,15 @@
                                     file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/proton/ProtonServerSenderContext.java"
                                     token="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  sessionSPI.closeSender(brokerConsumer);"
                                     value="controller.close(condition);&#10;            try {&#10;               if (brokerConsumer != null) {&#10;                  ServiceBusSessionSupport.closeSender(sessionSPI, brokerConsumer, condition);"
+                                    failOnNoReplacements="true" />
+                                <!-- Artemis re-encodes a message whenever the broker changes it (ingress
+                                     timestamp, expiry, diverts, dead-lettering) and writes its routing
+                                     address into properties.to each time. In Azure, To belongs to the
+                                     sender and the broker never writes it. -->
+                                <replace
+                                    file="${project.build.directory}/artemis-amqp-patch-sources/org/apache/activemq/artemis/protocol/amqp/broker/AMQPStandardMessage.java"
+                                    token="if (properties != null &amp;&amp; address != null) {&#10;         properties.setTo(address.toString());&#10;      }"
+                                    value=""
                                     failOnNoReplacements="true" />
                                 <!-- Azure SDKs require an explicit header on the first delivery.
                                      Keep Artemis's zero-based conversion (deliveryCount - 1). -->
