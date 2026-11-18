@@ -329,6 +329,56 @@ class KqlEngineTest {
     }
 
     @Test
+    void aJoinSideWithNoRowsStillNamesItsColumns() {
+        // An empty left side: the right side's clashing columns keep their suffix, as with rows on both sides.
+        List<Map<String, Object>> emptyLeft = run("""
+                resources | where name == "nothing" | project id, name
+                | join kind=fullouter (resources | where name == "sa1" | project id, name, location) on id
+                """);
+        assertEquals(1, emptyLeft.size());
+        assertEquals(List.of("id", "name", "id1", "name1", "location"), new ArrayList<>(emptyLeft.getFirst().keySet()));
+        assertNull(emptyLeft.getFirst().get("id"));
+        assertEquals("sa1", emptyLeft.getFirst().get("name1"));
+
+        // An empty right side: an unmatched left row still carries the right side's columns, as nulls.
+        List<Map<String, Object>> emptyRight = run("""
+                resources | where name == "sa1" | project id, name
+                | join kind=leftouter (resources | where name == "nothing" | project id, kind = type | extend seen = 1) on id
+                """);
+        assertEquals(1, emptyRight.size());
+        assertEquals(List.of("id", "name", "id1", "kind", "seen"), new ArrayList<>(emptyRight.getFirst().keySet()));
+        assertNull(emptyRight.getFirst().get("kind"));
+
+        // The schema follows the operators in between, and a summary names its keys and aggregates.
+        List<Map<String, Object>> summarized = run("""
+                resources | where name == "nothing" | summarize n = count() by location | project-away n | extend id = location
+                | join kind=fullouter (resources | where name == "sa1" | project id, location) on id
+                """);
+        assertEquals(List.of("location", "id", "id1", "location1"), new ArrayList<>(summarized.getFirst().keySet()));
+    }
+
+    @Test
+    void aPublishedTableSchemaNamesAnEmptySide() {
+        KqlEngine.Tables published = new KqlEngine.Tables() {
+            @Override
+            public List<Map<String, Object>> rows(String table) {
+                return table.equals("resources") ? List.of(row("id", "/a", "name", "a")) : table.equals("empty") ? List.of() : null;
+            }
+
+            @Override
+            public List<String> columns(String table) {
+                return List.of("id", "name");
+            }
+        };
+        List<Map<String, Object>> rows = KqlEngine.run(Kql.parse("empty | join kind=fullouter (resources) on id"), published);
+        assertEquals(1, rows.size());
+        assertEquals(List.of("id", "name", "id1", "name1"), new ArrayList<>(rows.getFirst().keySet()));
+        assertEquals("/a", rows.getFirst().get("id1"));
+        // Without a published schema and without rows nothing is known, and the side contributes no columns.
+        assertNull(KqlEngine.schemaOf(new Kql.TableSource("resources"), List.of(), tables()));
+    }
+
+    @Test
     void selectorAggregatesExpandTheChosenRow() {
         List<Map<String, Object>> rows = run("""
                 resources | extend created = todatetime(properties.creationTime)

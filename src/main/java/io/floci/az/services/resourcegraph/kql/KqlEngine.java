@@ -22,6 +22,7 @@ import io.floci.az.services.resourcegraph.kql.Kql.Project;
 import io.floci.az.services.resourcegraph.kql.Kql.ProjectAway;
 import io.floci.az.services.resourcegraph.kql.Kql.Query;
 import io.floci.az.services.resourcegraph.kql.Kql.SortKey;
+import io.floci.az.services.resourcegraph.kql.Kql.Source;
 import io.floci.az.services.resourcegraph.kql.Kql.SubquerySource;
 import io.floci.az.services.resourcegraph.kql.Kql.Summarize;
 import io.floci.az.services.resourcegraph.kql.Kql.TableSource;
@@ -39,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -84,9 +86,12 @@ public final class KqlEngine {
                 schema = rows.isEmpty() ? null : lowerCased(columns(rows));
             }
         }
-        for (Op op : query.ops()) {
+        List<Op> ops = query.ops();
+        for (int i = 0; i < ops.size(); i++) {
+            Op op = ops.get(i);
+            int before = i;
             schema = checkNames(op, schema);
-            rows = apply(op, rows, tables);
+            rows = apply(op, rows, tables, () -> schemaOf(query.source(), ops.subList(0, before), tables));
         }
         return rows;
     }
@@ -237,7 +242,9 @@ public final class KqlEngine {
         return out;
     }
 
-    private static List<Map<String, Object>> apply(Op op, List<Map<String, Object>> rows, Tables tables) {
+    /** {@code inputSchema} names the columns {@code rows} carry even when there are none, or answers null when unknown. */
+    private static List<Map<String, Object>> apply(Op op, List<Map<String, Object>> rows, Tables tables,
+                                                   Supplier<List<String>> inputSchema) {
         return switch (op) {
             case Where where -> {
                 List<Map<String, Object>> out = new ArrayList<>();
@@ -355,7 +362,8 @@ public final class KqlEngine {
                 }
                 yield projected;
             }
-            case Join join -> join(join, rows, run(join.right(), tables));
+            case Join join -> join(join, rows, run(join.right(), tables), inputSchema,
+                () -> schemaOf(join.right().source(), join.right().ops(), tables));
             case Count ignored -> {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("Count", (long) rows.size());
@@ -628,7 +636,8 @@ public final class KqlEngine {
 
     // ── Join ────────────────────────────────────────────────────────────────────
 
-    private static List<Map<String, Object>> join(Join join, List<Map<String, Object>> left, List<Map<String, Object>> right) {
+    private static List<Map<String, Object>> join(Join join, List<Map<String, Object>> left, List<Map<String, Object>> right,
+                                                  Supplier<List<String>> leftSchema, Supplier<List<String>> rightSchema) {
         String kind = join.kind();
         Map<String, List<Map<String, Object>>> rightByKey = new LinkedHashMap<>();
         for (Map<String, Object> row : right) {
@@ -637,8 +646,8 @@ public final class KqlEngine {
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> matchedRightKeys = new HashSet<>();
         Set<String> seenLeftKeys = new HashSet<>();
-        List<String> leftColumns = columns(left);
-        List<String> rightColumns = columns(right);
+        List<String> leftColumns = sideColumns(left, leftSchema);
+        List<String> rightColumns = sideColumns(right, rightSchema);
         for (Map<String, Object> leftRow : left) {
             String key = joinKey(leftRow, join.keys(), true);
             List<Map<String, Object>> matches = key == null ? List.of() : rightByKey.getOrDefault(key, List.of());
@@ -696,6 +705,110 @@ public final class KqlEngine {
             }
         }
         return out;
+    }
+
+    /**
+     * The columns one side of a join contributes: its rows' when it has any, else the ones its query is known
+     * to produce, so a side with no rows still names its columns and the other side's clashes get their suffix.
+     */
+    private static List<String> sideColumns(List<Map<String, Object>> rows, Supplier<List<String>> schema) {
+        if (!rows.isEmpty()) {
+            return columns(rows);
+        }
+        List<String> known = schema.get();
+        return known == null ? List.of() : known;
+    }
+
+    /**
+     * The columns a pipeline produces, in order, known from the query text and the tables' published schemas
+     * alone; null when they depend on the data (an unpublished table, a union, an aggregate that selects columns).
+     */
+    static List<String> schemaOf(Source source, List<Op> ops, Tables tables) {
+        List<String> columns = switch (source) {
+            case TableSource table -> tables.columns(table.name());
+            case SubquerySource sub -> schemaOf(sub.query().source(), sub.query().ops(), tables);
+        };
+        for (Op op : ops) {
+            columns = schemaAfter(op, columns, tables);
+        }
+        return columns;
+    }
+
+    private static List<String> schemaAfter(Op op, List<String> columns, Tables tables) {
+        switch (op) {
+            case Where ignored -> {
+                return columns;
+            }
+            case OrderBy ignored -> {
+                return columns;
+            }
+            case Take ignored -> {
+                return columns;
+            }
+            case Extend extend -> {
+                if (columns == null) {
+                    return null;
+                }
+                Set<String> out = new LinkedHashSet<>(columns);
+                int position = 0;
+                for (Named column : extend.columns()) {
+                    out.add(columnName(column, position++));
+                }
+                return new ArrayList<>(out);
+            }
+            case Project project -> {
+                Set<String> out = new LinkedHashSet<>();
+                int position = 0;
+                for (Named column : project.columns()) {
+                    out.add(columnName(column, position++));
+                }
+                return new ArrayList<>(out);
+            }
+            case ProjectAway away -> {
+                if (columns == null) {
+                    return null;
+                }
+                List<String> out = new ArrayList<>(columns);
+                for (String column : away.columns()) {
+                    out.removeIf(name -> name.equalsIgnoreCase(column));
+                }
+                return out;
+            }
+            case Summarize summarize -> {
+                Set<String> out = new LinkedHashSet<>();
+                int position = 0;
+                for (Named by : summarize.by()) {
+                    out.add(columnName(by, position++));
+                }
+                for (Named aggregate : summarize.aggregates()) {
+                    if (aggregate.name() == null && aggregate.expr() instanceof Call call && selectsColumns(call)) {
+                        return null; // arg_max(x, *) and the like return the chosen row's own columns
+                    }
+                    out.add(aggregate.name() != null ? aggregate.name()
+                        : aggregate.expr() instanceof Call call ? aggregateName(call) : "Column" + (position + 1));
+                    position++;
+                }
+                return new ArrayList<>(out);
+            }
+            case Distinct distinct -> {
+                return distinct.columns().isEmpty() || distinct.columns().contains("*")
+                    ? columns : new ArrayList<>(new LinkedHashSet<>(distinct.columns()));
+            }
+            case Count ignored -> {
+                return List.of("Count");
+            }
+            case Union ignored -> {
+                return null;
+            }
+            case Join join -> {
+                if (Set.of("leftsemi", "leftanti", "leftantisemi", "anti").contains(join.kind())) {
+                    return columns;
+                }
+                List<String> right = schemaOf(join.right().source(), join.right().ops(), tables);
+                return columns == null || right == null ? null
+                    : new ArrayList<>(merge(Map.of(), Map.of(), columns, right).keySet());
+            }
+        }
     }
 
     private static String joinKey(Map<String, Object> row, List<JoinKey> keys, boolean leftSide) {
